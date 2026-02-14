@@ -1,0 +1,57 @@
+"""Tests for DurationEstimator."""
+
+from ollama_queue.estimator import DurationEstimator
+from ollama_queue.db import Database
+
+import pytest
+
+
+@pytest.fixture
+def db(tmp_path):
+    database = Database(str(tmp_path / "test.db"))
+    database.initialize()
+    return database
+
+
+@pytest.fixture
+def estimator(db):
+    return DurationEstimator(db)
+
+
+def test_estimate_with_history(estimator, db):
+    for d in [100, 110, 120, 130, 140]:
+        db.record_duration("aria-full", "deepseek-r1:8b", d, 0)
+    est = estimator.estimate("aria-full")
+    assert est == 120.0
+
+
+def test_estimate_unknown_source_default_by_model(estimator):
+    """Unknown source with known model returns model-based default."""
+    est = estimator.estimate("unknown", model="deepseek-r1:8b")
+    assert est == 1800  # 30 min default for 8b+ models
+
+
+def test_estimate_unknown_source_default_small_model(estimator):
+    est = estimator.estimate("unknown", model="qwen2.5:7b")
+    assert est == 600  # 10 min default for 7b models
+
+
+def test_estimate_unknown_everything(estimator):
+    est = estimator.estimate("unknown")
+    assert est == 600  # generic default
+
+
+def test_queue_eta(estimator, db):
+    for d in [60, 60, 60, 60, 60]:
+        db.record_duration("a", "m", d, 0)
+    for d in [120, 120, 120, 120, 120]:
+        db.record_duration("b", "m", d, 0)
+
+    queue = [
+        {"source": "a", "model": "m"},
+        {"source": "b", "model": "m"},
+    ]
+    etas = estimator.queue_etas(queue)
+    assert len(etas) == 2
+    assert etas[0]["estimated_start_offset"] == 0  # first job starts now
+    assert etas[1]["estimated_start_offset"] == 60  # after first job
