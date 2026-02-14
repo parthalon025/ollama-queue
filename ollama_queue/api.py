@@ -32,7 +32,11 @@ def create_app(db: Database) -> FastAPI:
         daemon = db.get_daemon_state()
         queue = db.get_pending_jobs()
         kpis = _compute_kpis(db)
-        return {"daemon": daemon, "queue": queue, "kpis": kpis}
+        # Include current running job details for the dashboard
+        current_job = None
+        if daemon and daemon.get("current_job_id"):
+            current_job = db.get_job(daemon["current_job_id"])
+        return {"daemon": daemon, "queue": queue, "kpis": kpis, "current_job": current_job}
 
     # --- Queue ---
 

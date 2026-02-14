@@ -1,6 +1,7 @@
 import { h } from 'preact';
 import { useEffect } from 'preact/hooks';
 import { currentTab, startPolling, stopPolling } from './store';
+import Dashboard from './pages/Dashboard.jsx';
 
 export function App() {
     useEffect(() => {
@@ -17,7 +18,7 @@ export function App() {
             </nav>
 
             <main class="p-4 pb-20 md:pb-4 max-w-5xl mx-auto">
-                {currentTab.value === 'dashboard' ? <DashboardPlaceholder /> : <SettingsPlaceholder />}
+                {currentTab.value === 'dashboard' ? <Dashboard /> : <SettingsPlaceholder />}
             </main>
 
             {/* Mobile: bottom tab bar */}
@@ -47,10 +48,6 @@ function TabButton({ tab, label, mobile }) {
             {label}
         </button>
     );
-}
-
-function DashboardPlaceholder() {
-    return <div class="t-frame" data-label="Dashboard"><p>Dashboard content coming in Task 10</p></div>;
 }
 
 function SettingsPlaceholder() {
