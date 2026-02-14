@@ -1,36 +1,29 @@
 # ollama-queue
 
-Ollama job queue scheduler with priority, health monitoring, and web dashboard.
+Ollama job queue scheduler with priority, health monitoring, and web dashboard. Serializes all Ollama-using systemd tasks to prevent model loading contention.
 
 ## Structure
 
 ```
 ollama_queue/
   __init__.py
-  cli.py              # Click CLI entry point
-  config.py            # Configuration and defaults
-  db.py                # SQLite schema and access (aiosqlite)
-  scheduler.py         # Polling daemon: dequeue, dispatch, retry
-  models.py            # Job, ScheduleEntry, HealthStatus dataclasses
-  health.py            # Ollama health checks and model inventory
-  api/
-    __init__.py
-    app.py             # FastAPI application factory
-    routes.py          # REST endpoints (jobs, schedule, health)
-    ws.py              # WebSocket for live dashboard updates
+  cli.py              # Click CLI: submit, status, queue, history, pause, resume, cancel, serve
+  db.py                # SQLite schema and CRUD (synchronous sqlite3)
+  daemon.py            # Polling loop: health check → dequeue → subprocess → record
+  health.py            # System metrics: RAM/VRAM/load/swap/ollama-ps with hysteresis
+  estimator.py         # Duration prediction: rolling avg + model-based defaults
+  api.py               # FastAPI REST API (12 endpoints) + static SPA serving
   dashboard/
-    __init__.py
     spa/               # Preact SPA (built separately, served as static)
+      src/             # Source: JSX components, signals store, CSS tokens
       dist/            # Production build output (gitignored)
 tests/
-  __init__.py
-  test_db.py
-  test_scheduler.py
-  test_api.py
-  test_health.py
-  conftest.py
-docs/
-  plans/
+  test_db.py           # 22 tests
+  test_health.py       # 12 tests
+  test_daemon.py       # 7 tests
+  test_estimator.py    # 5 tests
+  test_cli.py          # 13 tests
+  test_api.py          # 12 tests
 ```
 
 ## How to Run
@@ -40,33 +33,57 @@ docs/
 cd ~/Documents/projects/ollama-queue
 source .venv/bin/activate
 
-# Run tests
+# Run tests (71 total)
 pytest
 
-# Start the server (API + scheduler + dashboard)
-ollama-queue serve
+# Start the server (daemon + API + dashboard)
+ollama-queue serve --port 7683
 
 # Submit a job
-ollama-queue submit --model qwen2.5:7b --prompt "Summarize this" --priority 5
+ollama-queue submit --source test --model qwen2.5:7b --priority 3 --timeout 120 -- echo hello
 
-# Check queue status
+# Check queue
 ollama-queue status
+ollama-queue queue
+ollama-queue history
 ```
+
+## Deployment
+
+- **Service:** `ollama-queue.service` (user systemd, MemoryMax=512M)
+- **Symlink:** `~/.local/bin/ollama-queue` → `.venv/bin/ollama-queue`
+- **DB:** `~/.local/share/ollama-queue/queue.db`
+- **Tailscale:** `https://justin-linux.tail828051.ts.net/queue/` → `http://127.0.0.1:7683`
+- **Dashboard:** `/queue/ui/` (Preact SPA served by FastAPI)
 
 ## Key Decisions
 
-- **SQLite** for job queue and schedule state (aiosqlite, single-file, no external DB)
-- **FastAPI** for the REST API and WebSocket layer
-- **Preact SPA** for the web dashboard (lightweight, built separately into `spa/dist/`)
-- **Polling daemon** pattern: scheduler loop dequeues jobs by priority, dispatches to Ollama, handles retries
-- **Click** for the CLI interface
+- **Synchronous SQLite** (not aiosqlite) — daemon is single-threaded, FastAPI uses `check_same_thread=False` with WAL mode
+- **FastAPI** for REST API, serves static SPA from `dashboard/spa/dist/`
+- **Preact 10** + @preact/signals + Tailwind v4 + uPlot — ARIA design language
+- **Polling daemon** (5s): health check → evaluate → dequeue by priority → subprocess.Popen → record result
+- **Health hysteresis**: pause at high threshold, resume only below lower threshold (prevents flapping)
+- **Click CLI** with `--db` option for testability
+
+## Dashboard SPA
+
+```bash
+cd ollama_queue/dashboard/spa
+npm install
+npm run build        # Production
+npm run dev          # Watch mode
+```
+
+2 tabs: Dashboard (status, queue, KPIs, resource trends, duration trends, heatmap, history) + Settings (thresholds, defaults, retention, daemon controls).
 
 ## Gotchas
 
-- **Use python3.12 for venv** (not `python3` which is 3.14 on this system and breaks some deps). Always: `/usr/bin/python3.12 -m venv .venv`
-- Entry point `ollama_queue.cli:main` won't work until `cli.py` is created (Task 6)
-- Dashboard SPA build output (`spa/dist/`) is gitignored -- build separately with npm
+- **Use python3.12 for venv** — `python3` is 3.14 on this system and breaks deps
+- **SPA dist/ is gitignored** — must `npm run build` after cloning
+- **check_same_thread=False** on SQLite — required for FastAPI worker threads, safe with WAL mode
+- **httpx** must be installed for API tests — `pip install httpx`
 
 ## Design Doc
 
 Full design: `~/Documents/docs/plans/2026-02-14-ollama-queue-scheduler-design.md`
+Implementation plan: `~/Documents/docs/plans/2026-02-14-ollama-queue-implementation.md`
