@@ -1,6 +1,6 @@
 import { h } from 'preact';
 import { useCallback } from 'preact/hooks';
-import { settings, status } from '../store';
+import { settings, status, API } from '../store';
 import SettingsForm from '../components/SettingsForm.jsx';
 
 /**
@@ -14,7 +14,7 @@ export default function Settings() {
   /** Save a single setting key via PUT /api/settings. Returns true on success. */
   const handleSave = useCallback(async (key, value) => {
     try {
-      const resp = await fetch('/api/settings', {
+      const resp = await fetch(`${API}/settings`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ [key]: value }),
@@ -34,7 +34,7 @@ export default function Settings() {
 
   const handlePause = useCallback(async () => {
     try {
-      await fetch('/api/daemon/pause', { method: 'POST' });
+      await fetch(`${API}/daemon/pause`, { method: 'POST' });
     } catch (e) {
       console.error('Pause failed:', e);
     }
@@ -42,7 +42,7 @@ export default function Settings() {
 
   const handleResume = useCallback(async () => {
     try {
-      await fetch('/api/daemon/resume', { method: 'POST' });
+      await fetch(`${API}/daemon/resume`, { method: 'POST' });
     } catch (e) {
       console.error('Resume failed:', e);
     }
