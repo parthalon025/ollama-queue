@@ -126,8 +126,10 @@ class Daemon:
             stdout_tail = proc.stdout.read()[-500:].decode("utf-8", errors="replace")
             stderr_tail = proc.stderr.read()[-500:].decode("utf-8", errors="replace")
             self.db.kill_job(job["id"], reason=f"timeout after {job['timeout']}s")
+            failed_count = (state.get("jobs_failed_today") or 0) + 1
             self.db.update_daemon_state(
-                state="idle", current_job_id=None, last_poll_at=time.time()
+                state="idle", current_job_id=None, last_poll_at=time.time(),
+                jobs_failed_today=failed_count,
             )
             return
 
@@ -158,9 +160,12 @@ class Daemon:
                 exit_code=exit_code,
             )
 
-        # 12. Update daemon state back to idle
+        # 12. Update daemon state back to idle + increment daily counters
+        counter_field = "jobs_completed_today" if exit_code == 0 else "jobs_failed_today"
+        current_count = (state.get(counter_field) or 0) + 1
         self.db.update_daemon_state(
-            state="idle", current_job_id=None, last_poll_at=time.time()
+            state="idle", current_job_id=None, last_poll_at=time.time(),
+            **{counter_field: current_count},
         )
 
     def run(self, poll_interval: int | None = None) -> None:
@@ -173,10 +178,11 @@ class Daemon:
         while True:
             self.poll_once()
 
-            # Prune once per day
+            # Prune once per day + reset daily counters
             now = time.time()
             if now - self._last_prune > 86400:
                 self.db.prune_old_data()
+                self.db.update_daemon_state(jobs_completed_today=0, jobs_failed_today=0)
                 self._last_prune = now
 
             time.sleep(poll_interval)
