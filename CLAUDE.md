@@ -76,6 +76,28 @@ npm run dev          # Watch mode
 
 2 tabs: Dashboard (status, queue, KPIs, resource trends, duration trends, heatmap, history) + Settings (thresholds, defaults, retention, daemon controls).
 
+## Pipeline Verification
+
+After deployment or feature changes, run dual-axis tests (this project is where the pattern was validated):
+
+**Horizontal:** Hit all 12 API endpoints (GET status/queue/history/health/durations/heatmap/settings, PUT settings, POST submit/cancel/pause/resume) + static files (/ui/, bundle.js, bundle.css). Confirm status codes and response shapes.
+
+**Vertical:** Submit one job via CLI, trace through full stack:
+```
+ollama-queue submit --source e2e-test --model none --priority 1 --timeout 10 -- echo test →
+  DB: job row created →
+    Daemon: dequeues within 5s poll →
+      subprocess: executes, captures stdout →
+        DB: status=completed, duration recorded →
+          API /history: job visible →
+            API /durations: record present →
+              API /heatmap: aggregated →
+                API /status: KPIs + daily counters updated →
+                  Dashboard: renders all sections
+```
+
+Full method: `~/Documents/docs/lessons/2026-02-15-horizontal-vertical-pipeline-testing.md`
+
 ## Gotchas
 
 - **Use python3.12 for venv** — `python3` is 3.14 on this system and breaks deps
