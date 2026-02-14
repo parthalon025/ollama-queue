@@ -110,11 +110,38 @@ def test_cancel_pending_job(runner, tmp_path):
     assert "cancelled" in result.output.lower()
 
 
-def test_serve_placeholder(runner, tmp_path):
-    """Serve command prints placeholder message."""
+def test_serve_starts_daemon_and_api(runner, tmp_path, monkeypatch):
+    """Serve command starts daemon thread and uvicorn."""
+    import threading
+
+    started_threads = []
+    uvicorn_calls = []
+
+    original_thread_init = threading.Thread.__init__
+
+    def fake_thread_init(self, *args, **kwargs):
+        original_thread_init(self, *args, **kwargs)
+        started_threads.append(kwargs.get("target"))
+
+    def fake_thread_start(self):
+        pass  # Don't actually start the thread
+
+    def fake_uvicorn_run(app, **kwargs):
+        uvicorn_calls.append(kwargs)
+
+    monkeypatch.setattr(threading.Thread, "__init__", fake_thread_init)
+    monkeypatch.setattr(threading.Thread, "start", fake_thread_start)
+
+    import uvicorn
+    monkeypatch.setattr(uvicorn, "run", fake_uvicorn_run)
+
     db_path = str(tmp_path / "test.db")
-    result = runner.invoke(main, ["--db", db_path, "serve"])
+    result = runner.invoke(main, ["--db", db_path, "serve", "--port", "9999"])
     assert result.exit_code == 0
+    assert len(uvicorn_calls) == 1
+    assert uvicorn_calls[0]["port"] == 9999
+    assert uvicorn_calls[0]["host"] == "0.0.0.0"
+    assert len(started_threads) >= 1
 
 
 def test_queue_shows_pending_jobs(runner, tmp_path):

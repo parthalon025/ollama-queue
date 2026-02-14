@@ -172,4 +172,21 @@ def cancel(ctx, job_id):
 @click.pass_context
 def serve(ctx, port):
     """Start the daemon and FastAPI server."""
-    click.echo(f"ollama-queue serve on port {port} (not yet implemented -- see Task 7)")
+    import threading
+
+    import uvicorn
+
+    from ollama_queue.api import create_app
+    from ollama_queue.daemon import Daemon
+
+    db = ctx.obj["db"]
+    daemon = Daemon(db)
+
+    # Start daemon polling in background thread
+    daemon_thread = threading.Thread(target=daemon.run, daemon=True)
+    daemon_thread.start()
+
+    # Start FastAPI (blocks until shutdown)
+    app = create_app(db)
+    click.echo(f"Starting ollama-queue on port {port}...")
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="warning")
