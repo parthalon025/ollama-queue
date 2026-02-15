@@ -106,6 +106,7 @@ Full method: `~/Documents/docs/lessons/2026-02-15-horizontal-vertical-pipeline-t
 - **SPA dist/ is gitignored** — must `npm run build` after cloning
 - **check_same_thread=False** on SQLite — required for FastAPI worker threads, safe with WAL mode
 - **httpx** must be installed for API tests — `pip install httpx`
+- **Never use `h` or `Fragment` as callback parameter names in JSX files.** esbuild injects `h` as the JSX factory via `preact-shim.js`. Arrow function parameters like `.map(h => (<div>...))` shadow it, causing silent render crashes that cascade through the entire component tree. Use descriptive names (`hr`, `item`, `row`). See `~/Documents/docs/lessons/2026-02-15-esbuild-jsx-factory-shadowing.md`.
 
 ## Design Doc
 
