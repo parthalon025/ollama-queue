@@ -335,6 +335,27 @@ class Database:
         row = conn.execute("SELECT * FROM daemon_state WHERE id = 1").fetchone()
         return dict(row) if row else None
 
+    # --- Proxy ---
+
+    def try_claim_for_proxy(self) -> bool:
+        """Atomically claim daemon state for proxy request. Returns True if claimed."""
+        conn = self._connect()
+        cur = conn.execute(
+            "UPDATE daemon_state SET state = 'running', current_job_id = -1 "
+            "WHERE id = 1 AND state = 'idle'"
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+    def release_proxy_claim(self) -> None:
+        """Release proxy claim back to idle."""
+        conn = self._connect()
+        conn.execute(
+            "UPDATE daemon_state SET state = 'idle', current_job_id = NULL "
+            "WHERE id = 1 AND current_job_id = -1"
+        )
+        conn.commit()
+
     # --- Maintenance ---
 
     def prune_old_data(self) -> None:

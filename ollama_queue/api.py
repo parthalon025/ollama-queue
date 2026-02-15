@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI
+import httpx
+from fastapi import Body, FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from ollama_queue.db import Database, DEFAULTS
+
+OLLAMA_URL = "http://127.0.0.1:11434"
+PROXY_WAIT_TIMEOUT = 300
+PROXY_POLL_INTERVAL = 0.5
 
 
 class SubmitJobRequest(BaseModel):
@@ -132,6 +138,72 @@ def create_app(db: Database) -> FastAPI:
     def daemon_resume():
         db.update_daemon_state(state="idle", paused_reason=None, paused_since=None)
         return {"ok": True}
+
+    # --- Proxy ---
+
+    @app.post("/api/generate")
+    async def proxy_generate(body: dict = Body(...)):
+        """Forward a generate request to Ollama, serializing through the queue."""
+        state = db.get_daemon_state()
+        if state and state.get("state") == "paused_manual":
+            raise HTTPException(status_code=503, detail="Queue is manually paused")
+
+        body["stream"] = False  # MVP: no streaming
+
+        model = body.get("model", "")
+
+        waited = 0.0
+        claimed = False
+        while waited < PROXY_WAIT_TIMEOUT:
+            claimed = db.try_claim_for_proxy()
+            if claimed:
+                break
+            await asyncio.sleep(PROXY_POLL_INTERVAL)
+            waited += PROXY_POLL_INTERVAL
+
+        if not claimed:
+            raise HTTPException(status_code=504, detail="Timed out waiting for queue turn")
+
+        # Log proxy request in the jobs table
+        job_id = db.submit_job(
+            command=f"proxy:/api/generate",
+            model=model,
+            priority=0,
+            timeout=120,
+            source="proxy",
+        )
+        db._connect().execute(
+            "UPDATE jobs SET status = 'running', started_at = ? WHERE id = ?",
+            (time.time(), job_id),
+        )
+        db._connect().commit()
+
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as client:
+                resp = await client.post(f"{OLLAMA_URL}/api/generate", json=body)
+                result = resp.json()
+
+            # Mark job completed
+            db.complete_job(
+                job_id=job_id,
+                exit_code=0,
+                stdout_tail=str(result.get("response", ""))[:500],
+                stderr_tail="",
+                outcome_reason=None,
+            )
+            return result
+        except Exception as e:
+            # Mark job failed
+            db.complete_job(
+                job_id=job_id,
+                exit_code=1,
+                stdout_tail="",
+                stderr_tail=str(e)[:500],
+                outcome_reason=f"proxy error: {e}",
+            )
+            raise HTTPException(status_code=502, detail=f"Ollama request failed: {e}")
+        finally:
+            db.release_proxy_claim()
 
     # --- Static files for SPA ---
     spa_dir = Path(__file__).parent / "dashboard" / "spa" / "dist"

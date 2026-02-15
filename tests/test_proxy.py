@@ -1,0 +1,166 @@
+"""Tests for the /api/generate proxy endpoint."""
+
+import pytest
+from unittest.mock import patch, AsyncMock, MagicMock
+from fastapi.testclient import TestClient
+
+from ollama_queue.api import create_app
+from ollama_queue.db import Database
+
+
+@pytest.fixture
+def db(tmp_path):
+    d = Database(str(tmp_path / "test.db"))
+    d.initialize()
+    return d
+
+
+@pytest.fixture
+def client(db):
+    app = create_app(db)
+    return TestClient(app)
+
+
+def test_generate_proxy_returns_ollama_response(client):
+    """POST /api/generate forwards to Ollama and returns response."""
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"response": "Hello!", "done": True}
+    mock_response.raise_for_status = MagicMock()
+
+    with patch("ollama_queue.api.httpx.AsyncClient") as mock_client_cls:
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.post = AsyncMock(return_value=mock_response)
+        mock_client_cls.return_value = mock_client
+
+        resp = client.post("/api/generate", json={
+            "model": "llama3.2:3b",
+            "prompt": "hello",
+        })
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["response"] == "Hello!"
+
+
+def test_generate_proxy_rejects_when_paused(client):
+    """Returns 503 when daemon is manually paused."""
+    client.post("/api/daemon/pause")
+    resp = client.post("/api/generate", json={
+        "model": "llama3.2:3b",
+        "prompt": "hello",
+    })
+    assert resp.status_code == 503
+
+
+def test_generate_proxy_forces_stream_false(client):
+    """Proxy forces stream=false even if caller sets stream=true."""
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"response": "ok", "done": True}
+    mock_response.raise_for_status = MagicMock()
+
+    with patch("ollama_queue.api.httpx.AsyncClient") as mock_client_cls:
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.post = AsyncMock(return_value=mock_response)
+        mock_client_cls.return_value = mock_client
+
+        resp = client.post("/api/generate", json={
+            "model": "test",
+            "prompt": "hello",
+            "stream": True,  # Should be overridden
+        })
+
+    # Verify stream was forced to False in the forwarded body
+    called_kwargs = mock_client.post.call_args[1]
+    called_json = called_kwargs.get("json")
+    assert called_json["stream"] is False
+
+
+def test_generate_proxy_releases_on_error(client, db):
+    """State released back to idle even if Ollama errors."""
+    with patch("ollama_queue.api.httpx.AsyncClient") as mock_client_cls:
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.post = AsyncMock(side_effect=Exception("connection refused"))
+        mock_client_cls.return_value = mock_client
+
+        resp = client.post("/api/generate", json={
+            "model": "test",
+            "prompt": "hello",
+        })
+
+    assert resp.status_code == 502
+    state = db.get_daemon_state()
+    assert state["state"] == "idle"
+    assert state["current_job_id"] is None
+
+
+def test_generate_proxy_logs_job(client, db):
+    """Proxy request is logged in the jobs table with source='proxy'."""
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"response": "ok", "done": True}
+    mock_response.raise_for_status = MagicMock()
+
+    with patch("ollama_queue.api.httpx.AsyncClient") as mock_client_cls:
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.post = AsyncMock(return_value=mock_response)
+        mock_client_cls.return_value = mock_client
+
+        resp = client.post("/api/generate", json={
+            "model": "llama3.2:3b",
+            "prompt": "hello",
+        })
+
+    assert resp.status_code == 200
+    # Check job was logged
+    conn = db._connect()
+    row = conn.execute(
+        "SELECT * FROM jobs WHERE source = 'proxy' ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    assert row is not None
+    assert row["source"] == "proxy"
+    assert row["model"] == "llama3.2:3b"
+    assert row["status"] == "completed"
+
+
+def test_generate_proxy_timeout_when_busy(client, db):
+    """Returns 504 if daemon never goes idle within timeout."""
+    # Set daemon to running state (simulating busy queue)
+    db.update_daemon_state(state="running", current_job_id=123)
+
+    with patch("ollama_queue.api.PROXY_WAIT_TIMEOUT", 1), \
+         patch("ollama_queue.api.PROXY_POLL_INTERVAL", 0.1):
+        resp = client.post("/api/generate", json={
+            "model": "test",
+            "prompt": "hello",
+        })
+
+    assert resp.status_code == 504
+
+
+def test_try_claim_for_proxy(db):
+    """try_claim_for_proxy succeeds when idle, fails when running."""
+    assert db.try_claim_for_proxy() is True
+    state = db.get_daemon_state()
+    assert state["state"] == "running"
+    assert state["current_job_id"] == -1
+    # Second claim should fail (already running)
+    assert db.try_claim_for_proxy() is False
+
+
+def test_release_proxy_claim(db):
+    """release_proxy_claim resets state to idle."""
+    db.try_claim_for_proxy()
+    db.release_proxy_claim()
+    state = db.get_daemon_state()
+    assert state["state"] == "idle"
+    assert state["current_job_id"] is None
