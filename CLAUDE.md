@@ -14,7 +14,7 @@ ollama_queue/
   daemon.py            # Polling loop: health check → dequeue → subprocess → record
   health.py            # System metrics: RAM/VRAM/load/swap/ollama-ps with hysteresis
   estimator.py         # Duration prediction: rolling avg + model-based defaults
-  api.py               # FastAPI REST API (12 endpoints) + static SPA serving
+  api.py               # FastAPI REST API (13 endpoints including /api/generate proxy) + static SPA serving
   dashboard/
     spa/               # Preact SPA (built separately, served as static)
       src/             # Source: JSX components, signals store, CSS tokens
@@ -82,7 +82,7 @@ npm run dev          # Watch mode
 
 After deployment or feature changes, run dual-axis tests (this project is where the pattern was validated):
 
-**Horizontal:** Hit all 12 API endpoints (GET status/queue/history/health/durations/heatmap/settings, PUT settings, POST submit/cancel/pause/resume) + static files (/ui/, bundle.js, bundle.css). Confirm status codes and response shapes.
+**Horizontal:** Hit all 13 API endpoints (GET status/queue/history/health/durations/heatmap/settings, PUT settings, POST submit/cancel/pause/resume) + static files (/ui/, bundle.js, bundle.css). Confirm status codes and response shapes.
 
 **Vertical:** Submit one job via CLI, trace through full stack:
 ```
@@ -106,6 +106,8 @@ Full method: `~/Documents/docs/lessons/2026-02-15-horizontal-vertical-pipeline-t
 - **SPA dist/ is gitignored** — must `npm run build` after cloning
 - **check_same_thread=False** on SQLite — required for FastAPI worker threads, safe with WAL mode
 - **httpx** must be installed for API tests — `pip install httpx`
+- **Proxy endpoint uses sentinel job_id=-1** — `try_claim_for_proxy()` sets `current_job_id=-1` to distinguish proxy claims from real job execution. `release_proxy_claim()` only releases claims with `current_job_id=-1` to avoid accidentally releasing real jobs.
+- **Deploy proxy before ARIA restart** — ARIA routes Ollama calls through port 7683. If ollama-queue is down, ARIA's activity predictions and organic naming fail with connection refused.
 - **Never use `h` or `Fragment` as callback parameter names in JSX files.** esbuild injects `h` as the JSX factory via `preact-shim.js`. Arrow function parameters like `.map(h => (<div>...))` shadow it, causing silent render crashes that cascade through the entire component tree. Use descriptive names (`hr`, `item`, `row`). See `~/Documents/docs/lessons/2026-02-15-esbuild-jsx-factory-shadowing.md`.
 
 ## Design Doc
