@@ -140,7 +140,7 @@ def test_serve_starts_daemon_and_api(runner, tmp_path, monkeypatch):
     assert result.exit_code == 0
     assert len(uvicorn_calls) == 1
     assert uvicorn_calls[0]["port"] == 9999
-    assert uvicorn_calls[0]["host"] == "0.0.0.0"
+    assert uvicorn_calls[0]["host"] == "127.0.0.1"
     assert len(started_threads) >= 1
 
 
