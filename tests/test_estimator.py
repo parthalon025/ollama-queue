@@ -1,16 +1,8 @@
 """Tests for DurationEstimator."""
 
 from ollama_queue.estimator import DurationEstimator
-from ollama_queue.db import Database
 
 import pytest
-
-
-@pytest.fixture
-def db(tmp_path):
-    database = Database(str(tmp_path / "test.db"))
-    database.initialize()
-    return database
 
 
 @pytest.fixture

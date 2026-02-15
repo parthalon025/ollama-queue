@@ -141,3 +141,47 @@ def test_no_yield_when_same_model_queued():
     }
     decision = m.evaluate(snap, settings, currently_paused=False, queued_model="qwen2.5:7b")
     assert decision["should_yield"] is False
+
+
+def test_no_yield_when_model_is_recent_job():
+    """Don't yield if the loaded model was recently used by a queue job."""
+    m = HealthMonitor()
+    settings = {
+        "ram_pause_pct": 85, "ram_resume_pct": 75,
+        "vram_pause_pct": 90, "vram_resume_pct": 80,
+        "load_pause_multiplier": 2.0, "load_resume_multiplier": 1.5,
+        "swap_pause_pct": 50, "swap_resume_pct": 40,
+        "yield_to_interactive": True,
+    }
+    snap = {
+        "ram_pct": 50.0, "swap_pct": 10.0, "load_avg": 1.0,
+        "cpu_count": 4, "vram_pct": 50.0, "ollama_model": "nomic-embed-text",
+    }
+    # nomic-embed-text is in recent_job_models, so it shouldn't trigger yield
+    decision = m.evaluate(
+        snap, settings, currently_paused=False, queued_model="deepseek-r1:8b",
+        recent_job_models={"nomic-embed-text"},
+    )
+    assert decision["should_yield"] is False
+
+
+def test_yield_when_model_is_truly_interactive():
+    """Yield if the loaded model is NOT in recent job models."""
+    m = HealthMonitor()
+    settings = {
+        "ram_pause_pct": 85, "ram_resume_pct": 75,
+        "vram_pause_pct": 90, "vram_resume_pct": 80,
+        "load_pause_multiplier": 2.0, "load_resume_multiplier": 1.5,
+        "swap_pause_pct": 50, "swap_resume_pct": 40,
+        "yield_to_interactive": True,
+    }
+    snap = {
+        "ram_pct": 50.0, "swap_pct": 10.0, "load_avg": 1.0,
+        "cpu_count": 4, "vram_pct": 50.0, "ollama_model": "llama3:70b",
+    }
+    # llama3:70b is NOT a recent job model — should yield
+    decision = m.evaluate(
+        snap, settings, currently_paused=False, queued_model="qwen2.5:7b",
+        recent_job_models={"nomic-embed-text"},
+    )
+    assert decision["should_yield"] is True

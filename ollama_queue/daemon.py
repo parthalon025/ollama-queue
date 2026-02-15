@@ -13,11 +13,16 @@ from ollama_queue.health import HealthMonitor
 class Daemon:
     """Main daemon that polls for jobs and executes them."""
 
+    # Models loaded by queue jobs stay resident in Ollama after completion.
+    # Track them so the interactive-yield check doesn't self-block.
+    RECENT_MODEL_WINDOW = 600  # 10 minutes
+
     def __init__(self, db: Database, health_monitor: HealthMonitor | None = None):
         self.db = db
         self.health = health_monitor or HealthMonitor()
         self.estimator = DurationEstimator(db)
         self._last_prune: float = 0.0
+        self._recent_job_models: dict[str, float] = {}  # model -> last_completed_at
 
     def poll_once(self) -> None:
         """Single poll cycle.
@@ -74,8 +79,14 @@ class Daemon:
         # 6. Evaluate health -> if pause needed, update state, return
         settings = self.db.get_all_settings()
         currently_paused = current_state.startswith("paused")
+        # Prune expired entries from recent job models
+        self._recent_job_models = {
+            m: t for m, t in self._recent_job_models.items()
+            if now - t < self.RECENT_MODEL_WINDOW
+        }
         evaluation = self.health.evaluate(
-            snap, settings, currently_paused=currently_paused, queued_model=job["model"]
+            snap, settings, currently_paused=currently_paused, queued_model=job["model"],
+            recent_job_models=set(self._recent_job_models.keys()),
         )
 
         if evaluation["should_pause"]:
@@ -150,6 +161,10 @@ class Daemon:
             stderr_tail=stderr_tail,
             outcome_reason=outcome_reason,
         )
+
+        # Track model so interactive-yield check doesn't self-block
+        if job.get("model"):
+            self._recent_job_models[job["model"]] = time.time()
 
         # 11. Record duration if successful
         if exit_code == 0:

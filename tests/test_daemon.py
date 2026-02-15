@@ -3,14 +3,6 @@
 import pytest
 from unittest.mock import patch, MagicMock
 from ollama_queue.daemon import Daemon
-from ollama_queue.db import Database
-
-
-@pytest.fixture
-def db(tmp_path):
-    database = Database(str(tmp_path / "test.db"))
-    database.initialize()
-    return database
 
 
 @pytest.fixture
@@ -129,3 +121,44 @@ def test_records_duration_on_success(daemon):
 
     history = daemon.db.get_duration_history("test-src")
     assert len(history) == 1
+
+
+def test_no_self_block_after_queue_job(daemon):
+    """After a queue job completes, its model shouldn't trigger interactive yield."""
+    # Run first job with nomic-embed-text
+    daemon.db.submit_job("echo embed", "nomic-embed-text", 5, 60, "notion-vector-sync")
+    with patch.object(daemon.health, "check", return_value={
+        "ram_pct": 50.0, "swap_pct": 10.0, "load_avg": 1.0,
+        "cpu_count": 4, "vram_pct": 50.0, "ollama_model": None,
+    }):
+        with patch("ollama_queue.daemon.subprocess") as mock_sub:
+            proc = MagicMock()
+            proc.wait.return_value = 0
+            proc.stdout.read.return_value = b"ok"
+            proc.stderr.read.return_value = b""
+            proc.returncode = 0
+            mock_sub.Popen.return_value = proc
+            daemon.poll_once()
+
+    job1 = daemon.db.get_job(1)
+    assert job1["status"] == "completed"
+
+    # Now submit a second job — ollama ps still shows nomic-embed-text from job 1
+    daemon.db.submit_job("echo predict", "deepseek-r1:8b", 5, 60, "aria-predict")
+    with patch.object(daemon.health, "check", return_value={
+        "ram_pct": 50.0, "swap_pct": 10.0, "load_avg": 1.0,
+        "cpu_count": 4, "vram_pct": 50.0, "ollama_model": "nomic-embed-text",
+    }):
+        with patch("ollama_queue.daemon.subprocess") as mock_sub:
+            proc = MagicMock()
+            proc.wait.return_value = 0
+            proc.stdout.read.return_value = b"ok"
+            proc.stderr.read.return_value = b""
+            proc.returncode = 0
+            mock_sub.Popen.return_value = proc
+            daemon.poll_once()
+
+    job2 = daemon.db.get_job(2)
+    assert job2["status"] == "completed"  # should NOT be blocked
+    state = daemon.db.get_daemon_state()
+    assert state["state"] != "paused_interactive"

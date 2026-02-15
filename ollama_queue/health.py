@@ -101,6 +101,7 @@ class HealthMonitor:
         settings: dict,
         currently_paused: bool,
         queued_model: str | None = None,
+        recent_job_models: set[str] | None = None,
     ) -> dict:
         """Evaluate a health snapshot against threshold settings.
 
@@ -117,7 +118,8 @@ class HealthMonitor:
 
         Yield logic:
         - If an ollama model is loaded, yield_to_interactive is on,
-          and the loaded model differs from queued_model, yield.
+          and the loaded model differs from queued_model and is not a
+          recently-completed queue job model, yield.
         """
         reasons: list[str] = []
 
@@ -159,10 +161,12 @@ class HealthMonitor:
 
         # --- Yield to interactive ollama user ---
         should_yield = False
+        _recent = recent_job_models or set()
         if (
             settings.get("yield_to_interactive")
             and snap.get("ollama_model")
             and snap["ollama_model"] != queued_model
+            and snap["ollama_model"] not in _recent
         ):
             should_yield = True
             reasons.append(
