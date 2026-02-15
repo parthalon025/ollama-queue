@@ -121,7 +121,7 @@ class TestJobs:
     def test_get_history(self, db):
         j1 = db.submit_job("cmd1", "m1", 5, 600, "test")
         j2 = db.submit_job("cmd2", "m1", 5, 600, "test")
-        j3 = db.submit_job("cmd3", "m1", 5, 600, "test")  # stays pending
+        db.submit_job("cmd3", "m1", 5, 600, "test")  # stays pending
         db.start_job(j1)
         db.complete_job(j1, 0, "", "", None)
         db.start_job(j2)
