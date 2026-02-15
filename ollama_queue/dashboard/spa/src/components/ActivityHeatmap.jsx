@@ -38,9 +38,9 @@ export default function ActivityHeatmap({ data }) {
       {/* Hour labels */}
       <div style="display: grid; grid-template-columns: 32px repeat(24, 1fr); gap: 1px; margin-bottom: 2px;">
         <div />
-        {HOURS.map((h) => (
-          <div key={h} class="data-mono" style="font-size: var(--type-micro); color: var(--text-tertiary); text-align: center;">
-            {h % 6 === 0 ? h : ''}
+        {HOURS.map((hr) => (
+          <div key={hr} class="data-mono" style="font-size: var(--type-micro); color: var(--text-tertiary); text-align: center;">
+            {hr % 6 === 0 ? hr : ''}
           </div>
         ))}
       </div>
