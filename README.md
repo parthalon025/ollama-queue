@@ -2,6 +2,8 @@
 
 Ollama job queue scheduler with priority, health monitoring, and web dashboard.
 
+**Repository:** https://github.com/parthalon025/ollama-queue (private)
+
 ## In Plain English
 
 When multiple background tasks all need the same AI model on the same machine, they fight over memory and slow each other down. This tool makes them take turns, running jobs one at a time in order of importance, and gives you a dashboard to see what's running and what's waiting.
