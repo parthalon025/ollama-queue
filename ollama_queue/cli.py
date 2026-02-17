@@ -27,12 +27,22 @@ def main(ctx, db):
 @click.option("--model", default=None, help="Ollama model name")
 @click.option("--priority", default=None, type=int, help="Priority (1=highest)")
 @click.option("--timeout", default=None, type=int, help="Timeout in seconds")
+@click.option("--dedup/--no-dedup", default=True, help="Skip if pending job from same source exists")
 @click.argument("command", nargs=-1, required=True)
 @click.pass_context
-def submit(ctx, source, model, priority, timeout, command):
+def submit(ctx, source, model, priority, timeout, dedup, command):
     """Submit a job to the queue."""
     db = ctx.obj["db"]
     cmd_str = " ".join(command)
+
+    # Dedup: skip if a pending job from the same source already exists
+    if dedup:
+        pending = db.get_pending_jobs()
+        existing = [j for j in pending if j.get("source") == source]
+        if existing:
+            click.echo(f"Skipped: pending job #{existing[0]['id']} from source={source} already queued")
+            return
+
     settings = db.get_all_settings()
     p = priority if priority is not None else settings.get("default_priority", 5)
     t = timeout if timeout is not None else settings.get("default_timeout_seconds", 600)

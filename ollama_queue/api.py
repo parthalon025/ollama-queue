@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from pathlib import Path
 from typing import Optional
@@ -215,6 +216,12 @@ def create_app(db: Database) -> FastAPI:
 
 def _compute_kpis(db: Database) -> dict:
     """Compute dashboard KPIs from the database."""
+    with db._lock:
+        return _compute_kpis_locked(db)
+
+
+def _compute_kpis_locked(db: Database) -> dict:
+    """Compute dashboard KPIs (must be called with db._lock held)."""
     conn = db._connect()
     now = time.time()
 
@@ -237,7 +244,12 @@ def _compute_kpis(db: Database) -> dict:
     # pause_minutes_24h: total minutes in paused states in last 24h
     # Each health_log entry represents one poll interval where daemon was in that state.
     # We approximate by counting paused entries × poll_interval.
-    poll_interval = db.get_setting("poll_interval_seconds") or 5
+    # NOTE: Use raw conn query (not db.get_setting) to avoid thread-safety issues
+    # when _compute_kpis is called from FastAPI worker threads.
+    setting_row = conn.execute(
+        "SELECT value FROM settings WHERE key = ?", ("poll_interval_seconds",)
+    ).fetchone()
+    poll_interval = json.loads(setting_row["value"]) if setting_row else 5
     row = conn.execute(
         """SELECT COUNT(*) as cnt FROM health_log
            WHERE daemon_state LIKE '%paused%' AND timestamp >= ?""",

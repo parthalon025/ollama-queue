@@ -149,15 +149,54 @@ def test_queue_shows_pending_jobs(runner, tmp_path):
     db_path = str(tmp_path / "test.db")
     runner.invoke(main, [
         "--db", db_path,
-        "submit", "--source", "test", "--model", "m", "--priority", "1",
+        "submit", "--source", "test-a", "--model", "m", "--priority", "1",
         "--", "echo", "first",
     ])
     runner.invoke(main, [
         "--db", db_path,
-        "submit", "--source", "test", "--model", "m", "--priority", "2",
+        "submit", "--source", "test-b", "--model", "m", "--priority", "2",
         "--", "echo", "second",
     ])
     result = runner.invoke(main, ["--db", db_path, "queue"])
     assert result.exit_code == 0
     assert "first" in result.output
     assert "second" in result.output
+
+
+def test_submit_dedup_skips_duplicate_source(runner, tmp_path):
+    """Submit with dedup skips if pending job from same source exists."""
+    db_path = str(tmp_path / "test.db")
+    r1 = runner.invoke(main, [
+        "--db", db_path,
+        "submit", "--source", "alerts", "--model", "m",
+        "--", "echo", "first",
+    ])
+    assert "queued" in r1.output
+
+    r2 = runner.invoke(main, [
+        "--db", db_path,
+        "submit", "--source", "alerts", "--model", "m",
+        "--", "echo", "second",
+    ])
+    assert "Skipped" in r2.output
+
+    # Only one job in queue
+    result = runner.invoke(main, ["--db", db_path, "queue"])
+    assert "first" in result.output
+    assert "second" not in result.output
+
+
+def test_submit_no_dedup_allows_duplicates(runner, tmp_path):
+    """Submit with --no-dedup allows duplicate sources."""
+    db_path = str(tmp_path / "test.db")
+    runner.invoke(main, [
+        "--db", db_path,
+        "submit", "--source", "alerts", "--model", "m",
+        "--", "echo", "first",
+    ])
+    r2 = runner.invoke(main, [
+        "--db", db_path,
+        "submit", "--source", "alerts", "--model", "m", "--no-dedup",
+        "--", "echo", "second",
+    ])
+    assert "queued" in r2.output

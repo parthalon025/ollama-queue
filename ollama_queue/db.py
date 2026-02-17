@@ -2,6 +2,7 @@
 
 import json
 import sqlite3
+import threading
 import time
 
 DEFAULTS = {
@@ -29,6 +30,7 @@ class Database:
     def __init__(self, db_path: str):
         self.db_path = db_path
         self._conn = None
+        self._lock = threading.Lock()
 
     def _connect(self) -> sqlite3.Connection:
         if self._conn is None:
