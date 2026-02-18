@@ -55,7 +55,7 @@ ollama-queue history
 - **Service:** `ollama-queue.service` (user systemd, MemoryMax=512M)
 - **Symlink:** `~/.local/bin/ollama-queue` → `.venv/bin/ollama-queue`
 - **DB:** `~/.local/share/ollama-queue/queue.db`
-- **Tailscale:** `https://justin-linux.tail828051.ts.net/queue/` → `http://127.0.0.1:7683`
+- **Tailscale:** `https://<your-machine>.<your-tailnet>.ts.net/queue/` → `http://127.0.0.1:7683`
 - **Dashboard:** `/queue/ui/` (Preact SPA served by FastAPI)
 
 ## Key Decisions
@@ -80,37 +80,25 @@ npm run dev          # Watch mode
 
 ## Pipeline Verification
 
-After deployment or feature changes, run dual-axis tests (this project is where the pattern was validated):
-
-**Horizontal:** Hit all 13 API endpoints (GET status/queue/history/health/durations/heatmap/settings, PUT settings, POST submit/cancel/pause/resume) + static files (/ui/, bundle.js, bundle.css). Confirm status codes and response shapes.
-
-**Vertical:** Submit one job via CLI, trace through full stack:
-```
-ollama-queue submit --source e2e-test --model none --priority 1 --timeout 10 -- echo test →
-  DB: job row created →
-    Daemon: dequeues within 5s poll →
-      subprocess: executes, captures stdout →
-        DB: status=completed, duration recorded →
-          API /history: job visible →
-            API /durations: record present →
-              API /heatmap: aggregated →
-                API /status: KPIs + daily counters updated →
-                  Dashboard: renders all sections
-```
-
-Full method: `~/Documents/docs/lessons/2026-02-15-horizontal-vertical-pipeline-testing.md`
+**Horizontal:** All 13 API endpoints + static files. **Vertical:** `ollama-queue submit` → DB row → daemon dequeue → subprocess → DB completed → API endpoints reflect → dashboard renders. Full method: `projects/CLAUDE.md` § Pipeline Verification.
 
 ## Gotchas
 
-- **Use python3.12 for venv** — `python3` is 3.14 on this system and breaks deps
 - **SPA dist/ is gitignored** — must `npm run build` after cloning
 - **check_same_thread=False** on SQLite — required for FastAPI worker threads, safe with WAL mode
 - **httpx** must be installed for API tests — `pip install httpx`
 - **Proxy endpoint uses sentinel job_id=-1** — `try_claim_for_proxy()` sets `current_job_id=-1` to distinguish proxy claims from real job execution. `release_proxy_claim()` only releases claims with `current_job_id=-1` to avoid accidentally releasing real jobs.
 - **Deploy proxy before ARIA restart** — ARIA routes Ollama calls through port 7683. If ollama-queue is down, ARIA's activity predictions and organic naming fail with connection refused.
-- **Never use `h` or `Fragment` as callback parameter names in JSX files.** esbuild injects `h` as the JSX factory via `preact-shim.js`. Arrow function parameters like `.map(h => (<div>...))` shadow it, causing silent render crashes that cascade through the entire component tree. Use descriptive names (`hr`, `item`, `row`). See `~/Documents/docs/lessons/2026-02-15-esbuild-jsx-factory-shadowing.md`.
+- esbuild JSX `h` shadowing — see `projects/CLAUDE.md` § Shared Gotchas.
 
 ## Design Doc
 
 Full design: `~/Documents/docs/plans/2026-02-14-ollama-queue-scheduler-design.md`
 Implementation plan: `~/Documents/docs/plans/2026-02-14-ollama-queue-implementation.md`
+
+## Code Factory
+
+Quality gates for agent-driven development (auto-triggered via superpowers integration in `~/Documents/CLAUDE.md`):
+- **Quality checks**: `python3 -m pytest --timeout=120 -x -q; npm run build`
+- **PRD artifacts**: `tasks/prd.json`, `tasks/prd-<feature>.md`
+- **Progress log**: `progress.txt` (append-only during execution)
