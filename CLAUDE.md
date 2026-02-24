@@ -98,6 +98,9 @@ Implementation plan: `~/Documents/docs/plans/2026-02-14-ollama-queue-implementat
 
 ## Code Factory
 
+## Scope Tags
+language:python, framework:preact, domain:ollama
+
 Quality gates for agent-driven development (auto-triggered via superpowers integration in `~/Documents/CLAUDE.md`):
 - **Quality checks**: `python3 -m pytest --timeout=120 -x -q; npm run build`
 - **PRD artifacts**: `tasks/prd.json`, `tasks/prd-<feature>.md`
