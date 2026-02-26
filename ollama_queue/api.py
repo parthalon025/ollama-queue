@@ -173,11 +173,7 @@ def create_app(db: Database) -> FastAPI:
             timeout=120,
             source="proxy",
         )
-        db._connect().execute(
-            "UPDATE jobs SET status = 'running', started_at = ? WHERE id = ?",
-            (time.time(), job_id),
-        )
-        db._connect().commit()
+        db.start_job(job_id)
 
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as client:

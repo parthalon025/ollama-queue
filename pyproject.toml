@@ -18,8 +18,12 @@ dependencies = [
     "uvicorn[standard]>=0.27.0",
 ]
 
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0", "pytest-xdist>=3.5.0"]
+
 [project.scripts]
 ollama-queue = "ollama_queue.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-n auto --dist load"

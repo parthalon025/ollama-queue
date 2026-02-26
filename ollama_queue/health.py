@@ -12,8 +12,8 @@ class HealthMonitor:
     def get_ram_pct(self) -> float:
         """Parse /proc/meminfo for RAM usage percentage."""
         info = self._parse_meminfo()
-        total = info["MemTotal"]
-        available = info["MemAvailable"]
+        total = info.get("MemTotal", 0)
+        available = info.get("MemAvailable", 0)
         if total == 0:
             return 0.0
         used = total - available
@@ -31,8 +31,11 @@ class HealthMonitor:
 
     def get_load_avg(self) -> float:
         """Read /proc/loadavg, return 1-minute average."""
-        with open("/proc/loadavg") as f:
-            return float(f.read().split()[0])
+        try:
+            with open("/proc/loadavg") as f:
+                return float(f.read().split()[0])
+        except (OSError, ValueError, IndexError):
+            return 0.0
 
     def get_cpu_count(self) -> int:
         """Return number of CPUs."""
@@ -59,7 +62,7 @@ class HealthMonitor:
             if total == 0:
                 return 0.0
             return round(used / total * 100, 1)
-        except (FileNotFoundError, subprocess.TimeoutExpired, ValueError, IndexError):
+        except (OSError, subprocess.TimeoutExpired, ValueError, IndexError, UnicodeDecodeError):
             return None
 
     def get_ollama_active_model(self) -> str | None:
@@ -81,7 +84,7 @@ class HealthMonitor:
             # Model name is the first whitespace-delimited field
             model = lines[1].split()[0]
             return model if model else None
-        except (FileNotFoundError, subprocess.TimeoutExpired, ValueError, IndexError):
+        except (OSError, subprocess.TimeoutExpired, ValueError, IndexError, UnicodeDecodeError):
             return None
 
     def check(self) -> dict:
@@ -185,10 +188,16 @@ class HealthMonitor:
     def _parse_meminfo() -> dict[str, int]:
         """Parse /proc/meminfo into a dict of field -> kB values."""
         info: dict[str, int] = {}
-        with open("/proc/meminfo") as f:
-            for line in f:
-                parts = line.split()
-                if len(parts) >= 2:
-                    key = parts[0].rstrip(":")
-                    info[key] = int(parts[1])
+        try:
+            with open("/proc/meminfo") as f:
+                for line in f:
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        key = parts[0].rstrip(":")
+                        try:
+                            info[key] = int(parts[1])
+                        except ValueError:
+                            pass
+        except OSError:
+            pass
         return info

@@ -28,3 +28,10 @@ ollama_queue/dashboard/spa/dist/
 
 # OS
 .DS_Store
+
+# Autonomous Coding Toolkit (runtime state)
+tasks/
+logs/
+progress.txt
+.run-plan-state.json
+.worktrees/

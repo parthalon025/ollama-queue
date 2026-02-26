@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import subprocess
 import time
 
 from ollama_queue.db import Database
 from ollama_queue.estimator import DurationEstimator
 from ollama_queue.health import HealthMonitor
+
+_log = logging.getLogger(__name__)
 
 
 class Daemon:
@@ -132,10 +135,14 @@ class Daemon:
         try:
             proc.wait(timeout=job["timeout"])
         except subprocess.TimeoutExpired:
-            # 10a. Timeout -> kill
+            # 10a. Timeout -> kill, then drain pipes with a safety timeout
             proc.kill()
-            stdout_tail = proc.stdout.read()[-500:].decode("utf-8", errors="replace")
-            stderr_tail = proc.stderr.read()[-500:].decode("utf-8", errors="replace")
+            try:
+                out, err = proc.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                out, err = b"", b""
+            stdout_tail = out[-500:].decode("utf-8", errors="replace")
+            stderr_tail = err[-500:].decode("utf-8", errors="replace")
             self.db.kill_job(
                 job["id"],
                 reason=f"timeout after {job['timeout']}s",
@@ -196,13 +203,25 @@ class Daemon:
         self.db.update_daemon_state(state="idle", uptime_since=time.time())
 
         while True:
-            self.poll_once()
+            try:
+                self.poll_once()
+            except Exception:
+                _log.exception("Unexpected error in poll_once(); attempting state recovery")
+                try:
+                    self.db.update_daemon_state(
+                        state="idle", current_job_id=None, last_poll_at=time.time()
+                    )
+                except Exception:
+                    _log.exception("State recovery also failed; daemon loop continues")
 
             # Prune once per day + reset daily counters
             now = time.time()
             if now - self._last_prune > 86400:
-                self.db.prune_old_data()
-                self.db.update_daemon_state(jobs_completed_today=0, jobs_failed_today=0)
+                try:
+                    self.db.prune_old_data()
+                    self.db.update_daemon_state(jobs_completed_today=0, jobs_failed_today=0)
+                except Exception:
+                    _log.exception("Daily prune failed; will retry next cycle")
                 self._last_prune = now
 
             time.sleep(poll_interval)

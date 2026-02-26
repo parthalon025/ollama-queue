@@ -81,8 +81,7 @@ def test_timeout_kills_job(daemon):
                 __import__("subprocess").TimeoutExpired("cmd", 1)
             )
             proc.kill.return_value = None
-            proc.stdout.read.return_value = b""
-            proc.stderr.read.return_value = b""
+            proc.communicate.return_value = (b"", b"")
             proc.returncode = -9
             mock_sub.Popen.return_value = proc
             mock_sub.TimeoutExpired = __import__("subprocess").TimeoutExpired
