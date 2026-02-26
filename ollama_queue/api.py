@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 from pathlib import Path
 from typing import Optional
+
+_log = logging.getLogger(__name__)
 
 import httpx
 from fastapi import Body, FastAPI, HTTPException
@@ -67,6 +70,16 @@ def create_app(db: Database) -> FastAPI:
     @app.post("/api/queue/cancel/{job_id}")
     def cancel_job(job_id: int):
         db.cancel_job(job_id)
+        return {"ok": True}
+
+    @app.put("/api/queue/{job_id}/priority")
+    def set_priority(job_id: int, body: dict = Body(...)):
+        priority = body.get("priority")
+        if not isinstance(priority, int):
+            raise HTTPException(status_code=400, detail="priority must be an integer")
+        updated = db.set_job_priority(job_id, priority)
+        if not updated:
+            raise HTTPException(status_code=404, detail="Job not found or not pending")
         return {"ok": True}
 
     # --- History ---
@@ -190,6 +203,7 @@ def create_app(db: Database) -> FastAPI:
             )
             return result
         except Exception as e:
+            _log.error("proxy_generate failed for job %d: %s", job_id, e, exc_info=True)
             # Mark job failed
             db.complete_job(
                 job_id=job_id,

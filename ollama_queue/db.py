@@ -194,6 +194,16 @@ class Database:
         )
         conn.commit()
 
+    def set_job_priority(self, job_id: int, priority: int) -> bool:
+        """Update priority of a pending job. Returns True if updated."""
+        conn = self._connect()
+        cur = conn.execute(
+            "UPDATE jobs SET priority = ? WHERE id = ? AND status = 'pending'",
+            (priority, job_id),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
     def get_pending_jobs(self) -> list[dict]:
         conn = self._connect()
         rows = conn.execute(
@@ -324,9 +334,17 @@ class Database:
 
     # --- Daemon State ---
 
+    _DAEMON_STATE_FIELDS = frozenset({
+        "state", "current_job_id", "paused_reason", "paused_since",
+        "last_poll_at", "jobs_completed_today", "jobs_failed_today", "uptime_since",
+    })
+
     def update_daemon_state(self, **kwargs) -> None:
         if not kwargs:
             return
+        unknown = set(kwargs) - self._DAEMON_STATE_FIELDS
+        if unknown:
+            raise ValueError(f"Unknown daemon_state fields: {unknown}")
         conn = self._connect()
         sets = ", ".join(f"{k} = ?" for k in kwargs)
         vals = list(kwargs.values())

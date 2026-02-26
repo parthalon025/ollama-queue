@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import subprocess
 import time
@@ -136,7 +137,8 @@ class Daemon:
             proc.wait(timeout=job["timeout"])
         except subprocess.TimeoutExpired:
             # 10a. Timeout -> kill, then drain pipes with a safety timeout
-            proc.kill()
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
             try:
                 out, err = proc.communicate(timeout=5)
             except subprocess.TimeoutExpired:
