@@ -10,10 +10,11 @@ class DurationEstimator:
     """Estimate job durations for queue ETA calculations."""
 
     MODEL_DEFAULTS = {
-        "deepseek-r1:8b": 1800,        # 30 min
+        "deepseek-r1:8b": 1800,          # 30 min
         "deepseek-coder-v2:lite": 1200,  # 20 min
-        "qwen2.5:7b": 600,              # 10 min
-        "nomic-embed-text": 900,         # 15 min
+        "qwen2.5-coder:14b": 900,        # 15 min
+        "qwen2.5:7b": 600,               # 10 min
+        "nomic-embed-text": 900,          # 15 min
     }
     GENERIC_DEFAULT = 600  # 10 min
 

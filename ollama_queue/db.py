@@ -173,13 +173,14 @@ class Database:
         )
         conn.commit()
 
-    def kill_job(self, job_id: int, reason: str) -> None:
+    def kill_job(self, job_id: int, reason: str, stdout_tail: str = "", stderr_tail: str = "") -> None:
         conn = self._connect()
         conn.execute(
             """UPDATE jobs
-               SET status = 'killed', outcome_reason = ?, completed_at = ?
+               SET status = 'killed', outcome_reason = ?, completed_at = ?,
+                   stdout_tail = ?, stderr_tail = ?
                WHERE id = ?""",
-            (reason, time.time(), job_id),
+            (reason, time.time(), stdout_tail, stderr_tail, job_id),
         )
         conn.commit()
 
@@ -341,22 +342,24 @@ class Database:
 
     def try_claim_for_proxy(self) -> bool:
         """Atomically claim daemon state for proxy request. Returns True if claimed."""
-        conn = self._connect()
-        cur = conn.execute(
-            "UPDATE daemon_state SET state = 'running', current_job_id = -1 "
-            "WHERE id = 1 AND state = 'idle'"
-        )
-        conn.commit()
-        return cur.rowcount > 0
+        with self._lock:
+            conn = self._connect()
+            cur = conn.execute(
+                "UPDATE daemon_state SET state = 'running', current_job_id = -1 "
+                "WHERE id = 1 AND state = 'idle'"
+            )
+            conn.commit()
+            return cur.rowcount > 0
 
     def release_proxy_claim(self) -> None:
         """Release proxy claim back to idle."""
-        conn = self._connect()
-        conn.execute(
-            "UPDATE daemon_state SET state = 'idle', current_job_id = NULL "
-            "WHERE id = 1 AND current_job_id = -1"
-        )
-        conn.commit()
+        with self._lock:
+            conn = self._connect()
+            conn.execute(
+                "UPDATE daemon_state SET state = 'idle', current_job_id = NULL "
+                "WHERE id = 1 AND current_job_id = -1"
+            )
+            conn.commit()
 
     # --- Maintenance ---
 

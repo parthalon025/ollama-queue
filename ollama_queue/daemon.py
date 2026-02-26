@@ -136,7 +136,12 @@ class Daemon:
             proc.kill()
             stdout_tail = proc.stdout.read()[-500:].decode("utf-8", errors="replace")
             stderr_tail = proc.stderr.read()[-500:].decode("utf-8", errors="replace")
-            self.db.kill_job(job["id"], reason=f"timeout after {job['timeout']}s")
+            self.db.kill_job(
+                job["id"],
+                reason=f"timeout after {job['timeout']}s",
+                stdout_tail=stdout_tail,
+                stderr_tail=stderr_tail,
+            )
             failed_count = (state.get("jobs_failed_today") or 0) + 1
             self.db.update_daemon_state(
                 state="idle", current_job_id=None, last_poll_at=time.time(),
