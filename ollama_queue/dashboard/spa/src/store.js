@@ -7,7 +7,11 @@ export const healthData = signal([]);     // /api/health response
 export const durationData = signal([]);   // /api/durations response
 export const heatmapData = signal([]);    // /api/heatmap response
 export const settings = signal({});       // /api/settings response
-export const currentTab = signal('dashboard'); // 'dashboard' | 'settings'
+export const currentTab = signal('dashboard'); // 'dashboard' | 'schedule' | 'dlq' | 'settings'
+export const scheduleJobs = signal([]);
+export const scheduleEvents = signal([]);
+export const dlqEntries = signal([]);
+export const dlqCount = signal(0);
 
 // Derive API base from current URL so it works behind Tailscale Serve path prefix.
 // /ui/ → /api, /queue/ui/ → /queue/api
@@ -33,6 +37,71 @@ async function fetchStatus() {
     } catch (e) {
         console.error('Poll failed:', e);
     }
+}
+
+export async function fetchSchedule() {
+    try {
+        const [jobs, events] = await Promise.all([
+            fetch(`${API}/schedule`).then(r => r.json()),
+            fetch(`${API}/schedule/events?limit=50`).then(r => r.json()),
+        ]);
+        scheduleJobs.value = jobs;
+        scheduleEvents.value = events;
+    } catch (e) {
+        console.error('fetchSchedule failed:', e);
+    }
+}
+
+export async function toggleScheduleJob(id, enabled) {
+    try {
+        await fetch(`${API}/schedule/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled }),
+        });
+        await fetchSchedule();
+    } catch (e) {
+        console.error('toggleScheduleJob failed:', e);
+    }
+}
+
+export async function triggerRebalance() {
+    try {
+        await fetch(`${API}/schedule/rebalance`, { method: 'POST' });
+        await fetchSchedule();
+    } catch (e) {
+        console.error('triggerRebalance failed:', e);
+    }
+}
+
+export async function fetchDLQ() {
+    try {
+        const entries = await fetch(`${API}/dlq`).then(r => r.json());
+        dlqEntries.value = entries;
+        dlqCount.value = entries.length;
+    } catch (e) {
+        console.error('fetchDLQ failed:', e);
+    }
+}
+
+export async function retryDLQEntry(id) {
+    await fetch(`${API}/dlq/${id}/retry`, { method: 'POST' });
+    await fetchDLQ();
+}
+
+export async function retryAllDLQ() {
+    await fetch(`${API}/dlq/retry-all`, { method: 'POST' });
+    await fetchDLQ();
+}
+
+export async function dismissDLQEntry(id) {
+    await fetch(`${API}/dlq/${id}/dismiss`, { method: 'POST' });
+    await fetchDLQ();
+}
+
+export async function clearDLQ() {
+    await fetch(`${API}/dlq`, { method: 'DELETE' });
+    await fetchDLQ();
 }
 
 async function fetchAll() {

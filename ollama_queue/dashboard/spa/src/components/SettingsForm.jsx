@@ -106,7 +106,23 @@ export default function SettingsForm({ settings, daemonState, onSave, onPause, o
         </div>
       </div>
 
-      {/* 4. Daemon Controls */}
+      {/* 4. Retry Defaults */}
+      <div class="t-frame" data-label="Retry Defaults">
+        <div class="flex flex-col gap-3">
+          <NumberRow label="Max Retries (default)" settingKey="default_max_retries" min={0} max={10} settings={settings} flashKey={flashKey} onBlur={handleBlur} />
+          <NumberRow label="Backoff Base" settingKey="retry_backoff_base_seconds" min={1} unit="sec" settings={settings} flashKey={flashKey} onBlur={handleBlur} />
+          <NumberRow label="Backoff Multiplier" settingKey="retry_backoff_multiplier" min={1} step="0.1" unit="×" settings={settings} flashKey={flashKey} onBlur={handleBlur} />
+        </div>
+      </div>
+
+      {/* 5. Stall Detection */}
+      <div class="t-frame" data-label="Stall Detection">
+        <div class="flex flex-col gap-3">
+          <NumberRow label="Stall Multiplier" settingKey="stall_multiplier" min={1} step="0.1" unit="× est." settings={settings} flashKey={flashKey} onBlur={handleBlur} />
+        </div>
+      </div>
+
+      {/* 6. Daemon Controls */}
       <div class="t-frame" data-label="Daemon Controls">
         <div class="flex items-center gap-3">
           {isPaused ? (

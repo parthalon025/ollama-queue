@@ -24,8 +24,18 @@ export default function Dashboard() {
   // Latest health entry for resource gauges (health rows are DESC, first = newest)
   const latestHealth = health && health.length > 0 ? health[0] : null;
 
+  const stalledJobs = (q || []).filter(j => j.stall_detected_at && j.status === 'running');
+
   return (
     <div class="flex flex-col gap-4 animate-page-enter">
+      {/* Stall alert banner */}
+      {stalledJobs.length > 0 && (
+        <div style={{ background: '#7c2d12', color: '#fff', padding: '0.5rem 1rem',
+                      borderRadius: 4 }}>
+          ⚠ {stalledJobs.length} job{stalledJobs.length > 1 ? 's' : ''} may be stalled. Check Queue tab.
+        </div>
+      )}
+
       {/* 1. Current Job — always visible */}
       <CurrentJob daemon={daemon} currentJob={currentJob} latestHealth={latestHealth} settings={sett} />
 

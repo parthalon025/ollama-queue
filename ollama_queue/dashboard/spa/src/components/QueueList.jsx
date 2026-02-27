@@ -10,12 +10,29 @@ import { queue, API } from '../store';
  *
  * @param {{ jobs: Array<object> }} props
  */
+const PRIORITY_COLORS = {
+  critical: '#ef4444', high: '#f97316',
+  normal: '#3b82f6', low: '#6b7280', background: '#374151',
+};
+
+function priorityColor(p) {
+  if (p <= 2) return PRIORITY_COLORS.critical;
+  if (p <= 4) return PRIORITY_COLORS.high;
+  if (p <= 6) return PRIORITY_COLORS.normal;
+  if (p <= 8) return PRIORITY_COLORS.low;
+  return PRIORITY_COLORS.background;
+}
+
 export default function QueueList({ jobs }) {
-  const items = jobs || [];
+  const allItems = jobs || [];
+  const [tagFilter, setTagFilter] = useState(null);
   const [dragIdx, setDragIdx] = useState(null);
   const [dropIdx, setDropIdx] = useState(null);
 
-  if (items.length === 0) {
+  const tags = [...new Set(allItems.map(j => j.tag).filter(Boolean))];
+  const items = tagFilter ? allItems.filter(j => j.tag === tagFilter) : allItems;
+
+  if (allItems.length === 0) {
     return (
       <div class="t-frame" data-label="Queue">
         <p style="color: var(--text-tertiary); font-size: var(--type-body); text-align: center;">
@@ -80,6 +97,23 @@ export default function QueueList({ jobs }) {
 
   return (
     <div class="t-frame" data-label="Queue" data-footer={`Est. total wait: ${formatWait(totalWait)}`}>
+      {/* Tag filter chips */}
+      {tags.length > 0 && (
+        <div style="display: flex; gap: 0.4rem; margin-bottom: 0.5rem; flex-wrap: wrap;">
+          <span
+            style={`padding: 0.2rem 0.6rem; border-radius: 12px; cursor: pointer; font-size: var(--type-label);
+                    background: ${tagFilter === null ? 'var(--accent)' : 'var(--bg-inset)'}; color: #fff;`}
+            onClick={() => setTagFilter(null)}
+          >All</span>
+          {tags.map(tag => (
+            <span key={tag}
+                  style={`padding: 0.2rem 0.6rem; border-radius: 12px; cursor: pointer; font-size: var(--type-label);
+                          background: ${tagFilter === tag ? 'var(--accent)' : 'var(--bg-inset)'}; color: #fff;`}
+                  onClick={() => setTagFilter(tag)}>{tag}</span>
+          ))}
+        </div>
+      )}
+
       <div class="flex flex-col gap-1">
         {items.map((job, idx) => (
           <div
@@ -91,7 +125,9 @@ export default function QueueList({ jobs }) {
             onDrop={(e) => handleDrop(e, idx)}
             class="flex items-center gap-2 py-1"
             style={[
-              'border-bottom: 1px solid var(--border-subtle);',
+              `border-bottom: 1px solid var(--border-subtle);`,
+              `border-left: 3px solid ${priorityColor(job.priority)};`,
+              `padding-left: 6px;`,
               'cursor: grab;',
               'transition: opacity 0.1s, background 0.1s;',
               dragIdx === idx ? 'opacity: 0.35;' : 'opacity: 1;',
@@ -115,12 +151,18 @@ export default function QueueList({ jobs }) {
               {'★'.repeat(Math.max(1, Math.min(5, Math.ceil((10 - (job.priority || 5)) / 2))))}
             </span>
 
-            {/* Source */}
+            {/* Source + retry badge */}
             <span
               class="data-mono"
               style="font-size: var(--type-body); color: var(--text-primary); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
             >
               {job.source || 'unknown'}
+              {job.retry_count > 0 && (
+                <span style="font-size: 10px; background: #f97316; color: #fff;
+                             padding: 0.1rem 0.3rem; border-radius: 3px; margin-left: 4px;">
+                  retry {job.retry_count}
+                </span>
+              )}
             </span>
 
             {/* Model */}
