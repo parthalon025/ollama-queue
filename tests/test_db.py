@@ -260,3 +260,56 @@ class TestRecurringJobs:
         events = db.get_schedule_events(limit=10)
         assert len(events) == 1
         assert events[0]["event_type"] == "promoted"
+
+
+class TestDLQ:
+    def test_move_to_dlq(self, db):
+        job_id = db.submit_job("cmd", "m", 5, 60, "src")
+        db.start_job(job_id)
+        db.complete_job(job_id, exit_code=1, stdout_tail="", stderr_tail="err",
+                        outcome_reason="exit code 1")
+        dlq_id = db.move_to_dlq(job_id, failure_reason="exit code 1")
+        assert dlq_id is not None
+        entry = db.get_dlq_entry(dlq_id)
+        assert entry["original_job_id"] == job_id
+        assert entry["failure_reason"] == "exit code 1"
+        assert entry["resolution"] is None
+
+    def test_list_dlq(self, db):
+        job_id = db.submit_job("cmd", "m", 5, 60, "src")
+        db.start_job(job_id)
+        db.complete_job(job_id, exit_code=1, stdout_tail="", stderr_tail="")
+        db.move_to_dlq(job_id, failure_reason="failed")
+        entries = db.list_dlq()
+        assert len(entries) == 1
+
+    def test_dismiss_dlq_entry(self, db):
+        job_id = db.submit_job("cmd", "m", 5, 60, "src")
+        db.start_job(job_id)
+        db.complete_job(job_id, exit_code=1, stdout_tail="", stderr_tail="")
+        dlq_id = db.move_to_dlq(job_id, failure_reason="failed")
+        db.dismiss_dlq_entry(dlq_id)
+        entry = db.get_dlq_entry(dlq_id)
+        assert entry["resolution"] == "dismissed"
+
+    def test_retry_from_dlq_creates_new_job(self, db):
+        job_id = db.submit_job("echo hello", "m", 5, 60, "src", tag="t")
+        db.start_job(job_id)
+        db.complete_job(job_id, exit_code=1, stdout_tail="", stderr_tail="")
+        dlq_id = db.move_to_dlq(job_id, failure_reason="failed")
+        new_job_id = db.retry_dlq_entry(dlq_id)
+        assert new_job_id is not None
+        new_job = db.get_job(new_job_id)
+        assert new_job["command"] == "echo hello"
+        assert new_job["status"] == "pending"
+        entry = db.get_dlq_entry(dlq_id)
+        assert entry["resolution"] == "retried"
+
+    def test_clear_dlq_removes_resolved(self, db):
+        job_id = db.submit_job("cmd", "m", 5, 60, "src")
+        db.start_job(job_id)
+        db.complete_job(job_id, exit_code=1, stdout_tail="", stderr_tail="")
+        dlq_id = db.move_to_dlq(job_id, failure_reason="failed")
+        db.dismiss_dlq_entry(dlq_id)
+        db.clear_dlq()
+        assert db.list_dlq() == []

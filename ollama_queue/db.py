@@ -232,7 +232,7 @@ class Database:
         exit_code: int,
         stdout_tail: str,
         stderr_tail: str,
-        outcome_reason: str | None,
+        outcome_reason: str | None = None,
     ) -> None:
         status = "completed" if exit_code == 0 else "failed"
         conn = self._connect()
@@ -600,6 +600,82 @@ class Database:
             (recurring_job_id,),
         ).fetchone()
         return row is not None
+
+    # --- DLQ ---
+
+    def move_to_dlq(self, job_id: int, failure_reason: str) -> int | None:
+        conn = self._connect()
+        job = self.get_job(job_id)
+        if not job:
+            return None
+        cur = conn.execute(
+            """INSERT INTO dlq
+               (original_job_id, command, model, source, tag, priority,
+                resource_profile, failure_reason, stdout_tail, stderr_tail,
+                retry_count, moved_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (job_id, job["command"], job["model"], job["source"], job.get("tag"),
+             job["priority"], job.get("resource_profile", "ollama"), failure_reason,
+             job.get("stdout_tail", ""), job.get("stderr_tail", ""),
+             job.get("retry_count", 0), time.time()),
+        )
+        conn.execute("UPDATE jobs SET status = 'dead' WHERE id = ?", (job_id,))
+        conn.commit()
+        return cur.lastrowid
+
+    def get_dlq_entry(self, dlq_id: int) -> dict | None:
+        conn = self._connect()
+        row = conn.execute("SELECT * FROM dlq WHERE id = ?", (dlq_id,)).fetchone()
+        return dict(row) if row else None
+
+    def list_dlq(self, include_resolved: bool = False) -> list[dict]:
+        conn = self._connect()
+        if include_resolved:
+            rows = conn.execute(
+                "SELECT * FROM dlq ORDER BY moved_at DESC"
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM dlq WHERE resolution IS NULL ORDER BY moved_at DESC"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def dismiss_dlq_entry(self, dlq_id: int) -> bool:
+        conn = self._connect()
+        cur = conn.execute(
+            "UPDATE dlq SET resolution = 'dismissed', resolved_at = ? WHERE id = ?",
+            (time.time(), dlq_id),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+    def retry_dlq_entry(self, dlq_id: int) -> int | None:
+        entry = self.get_dlq_entry(dlq_id)
+        if not entry:
+            return None
+        new_job_id = self.submit_job(
+            command=entry["command"],
+            model=entry["model"],
+            priority=entry["priority"] or 5,
+            timeout=600,
+            source=entry["source"] or "dlq-retry",
+            tag=entry.get("tag"),
+            resource_profile=entry.get("resource_profile", "ollama"),
+        )
+        conn = self._connect()
+        conn.execute(
+            """UPDATE dlq SET resolution = 'retried', resolved_at = ?,
+               retry_count = retry_count + 1 WHERE id = ?""",
+            (time.time(), dlq_id),
+        )
+        conn.commit()
+        return new_job_id
+
+    def clear_dlq(self) -> int:
+        conn = self._connect()
+        cur = conn.execute("DELETE FROM dlq WHERE resolution IS NOT NULL")
+        conn.commit()
+        return cur.rowcount
 
     # --- Utility ---
 
