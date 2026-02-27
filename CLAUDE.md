@@ -9,23 +9,29 @@ Ollama job queue scheduler with priority, health monitoring, and web dashboard. 
 ```
 ollama_queue/
   __init__.py
-  cli.py              # Click CLI: submit, status, queue, history, pause, resume, cancel, serve
-  db.py                # SQLite schema and CRUD (synchronous sqlite3)
-  daemon.py            # Polling loop: health check → dequeue → subprocess → record
-  health.py            # System metrics: RAM/VRAM/load/swap/ollama-ps with hysteresis
-  estimator.py         # Duration prediction: rolling avg + model-based defaults
-  api.py               # FastAPI REST API (13 endpoints including /api/generate proxy) + static SPA serving
+  cli.py              # Click CLI: submit, status, queue, history, pause, resume, cancel, serve, schedule, dlq, settings
+  db.py               # SQLite schema and CRUD (synchronous sqlite3, threading.RLock)
+  daemon.py           # Polling loop: health check → scheduler → dequeue → subprocess → DLQ routing
+  health.py           # System metrics: RAM/VRAM/load/swap/ollama-ps with hysteresis
+  estimator.py        # Duration prediction: rolling avg + model-based defaults
+  scheduler.py        # Recurring job promotion: promote_due_jobs, update_next_run, rebalance
+  dlq.py              # DLQManager: handle_failure routes to retry (backoff) or DLQ
+  api.py              # FastAPI REST API (23 endpoints including /api/generate proxy) + static SPA serving
   dashboard/
-    spa/               # Preact SPA (built separately, served as static)
-      src/             # Source: JSX components, signals store, CSS tokens
-      dist/            # Production build output (gitignored)
+    spa/              # Preact SPA (built separately, served as static)
+      src/            # Source: JSX components, signals store, CSS tokens
+      dist/           # Production build output (gitignored)
+scripts/
+  migrate_timers.py   # Migrate 8 of 10 systemd timers to recurring jobs (--dry-run / --execute)
 tests/
-  test_db.py           # 22 tests
-  test_health.py       # 12 tests
-  test_daemon.py       # 7 tests
-  test_estimator.py    # 5 tests
-  test_cli.py          # 13 tests
-  test_api.py          # 12 tests
+  test_db.py          # 22 tests
+  test_health.py      # 12 tests
+  test_daemon.py      # 9 tests (incl. scheduler + stall integration)
+  test_estimator.py   # 5 tests
+  test_cli.py         # 13 tests
+  test_api.py         # 12 tests
+  test_scheduler.py   # scheduler unit tests
+  test_dlq.py         # DLQ unit tests
 ```
 
 ## How to Run
@@ -35,7 +41,7 @@ tests/
 cd ~/Documents/projects/ollama-queue
 source .venv/bin/activate
 
-# Run tests (71 total)
+# Run tests (127 total)
 pytest
 
 # Start the server (daemon + API + dashboard)
@@ -48,6 +54,16 @@ ollama-queue submit --source test --model qwen2.5:7b --priority 3 --timeout 120 
 ollama-queue status
 ollama-queue queue
 ollama-queue history
+
+# Recurring jobs (v2)
+ollama-queue schedule add --name daily-aria --interval 3600 -- aria run
+ollama-queue schedule list
+ollama-queue schedule remove daily-aria
+
+# DLQ
+ollama-queue dlq list
+ollama-queue dlq retry <id>
+ollama-queue dlq clear
 ```
 
 ## Deployment
@@ -76,11 +92,11 @@ npm run build        # Production
 npm run dev          # Watch mode
 ```
 
-2 tabs: Dashboard (status, queue, KPIs, resource trends, duration trends, heatmap, history) + Settings (thresholds, defaults, retention, daemon controls).
+4 tabs: Dashboard (status, queue, KPIs, resource trends, duration trends, heatmap, history) + Schedule (24h timeline, recurring job list) + DLQ (dead letter queue with retry/dismiss) + Settings (thresholds, defaults, retention, daemon controls).
 
 ## Pipeline Verification
 
-**Horizontal:** All 13 API endpoints + static files. **Vertical:** `ollama-queue submit` → DB row → daemon dequeue → subprocess → DB completed → API endpoints reflect → dashboard renders. Full method: `projects/CLAUDE.md` § Pipeline Verification.
+**Horizontal:** All 23 API endpoints + static files. **Vertical:** `ollama-queue submit` → DB row → daemon dequeue → subprocess → DB completed → API endpoints reflect → dashboard renders. Recurring: `schedule add` → `promote_due_jobs` → queue → run → `update_next_run`. DLQ: job fails max_retries → `move_to_dlq` → `dlq list` reflects. Full method: `projects/CLAUDE.md` § Pipeline Verification.
 
 ## Gotchas
 
@@ -90,6 +106,10 @@ npm run dev          # Watch mode
 - **Proxy endpoint uses sentinel job_id=-1** — `try_claim_for_proxy()` sets `current_job_id=-1` to distinguish proxy claims from real job execution. `release_proxy_claim()` only releases claims with `current_job_id=-1` to avoid accidentally releasing real jobs.
 - **Deploy proxy before ARIA restart** — ARIA routes Ollama calls through port 7683. If ollama-queue is down, ARIA's activity predictions and organic naming fail with connection refused.
 - esbuild JSX `h` shadowing — see `projects/CLAUDE.md` § Shared Gotchas.
+- **`db._lock` is `threading.RLock`** (not `Lock`) — existing callers hold the lock while calling `_connect()`. Do NOT change to `Lock` or nested acquisition will deadlock.
+- **DLQ `timeout` column** — added in v2. If restoring from a pre-v2 backup, run `ALTER TABLE dlq ADD COLUMN timeout INTEGER NOT NULL DEFAULT 600` before restarting.
+- **migrate_timers.py** skips `telegram-brief-midday` (weekday-only) and `lessons-review` (monthly 14th) — these need manual recurring job entries with approximate intervals.
+- **Deployment sequence:** `cp queue.db queue.db.pre-v2` → stop service → `python3 scripts/migrate_timers.py --execute` → start service → verify `schedule list`
 
 ## Design Doc
 
