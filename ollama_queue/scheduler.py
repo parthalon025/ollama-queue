@@ -147,3 +147,78 @@ class Scheduler:
                 )
 
         return changes
+
+    _SLOT_COUNT = 48  # 30-min slots across 24h
+    _SLOT_SECONDS = 1800  # 30 minutes per slot
+    _DAY_SECONDS = 86400
+    _PIN_SCORE = 999
+
+    def _time_to_slot(self, unix_ts: float) -> int:
+        """Convert a Unix timestamp to a 30-min slot index (0–47) based on local time."""
+        import datetime
+
+        dt = datetime.datetime.fromtimestamp(unix_ts)
+        seconds_in_day = dt.hour * 3600 + dt.minute * 60 + dt.second
+        return (seconds_in_day % self._DAY_SECONDS) // self._SLOT_SECONDS
+
+    def _score_cron_job(self, scores: list[float], rj: dict, job_score: float, now: float) -> None:
+        """Apply cron job scores to the load map in-place."""
+        import datetime
+
+        from croniter import croniter
+
+        cron_expr = rj["cron_expression"]
+        pinned = bool(rj.get("pinned"))
+        start_dt = datetime.datetime.fromtimestamp(now)
+        c = croniter(cron_expr, start_dt)
+        fire_times: list[float] = []
+        for _ in range(48):  # max 48 firings in 24h (every 30 min)
+            nxt = c.get_next(datetime.datetime)
+            if nxt.timestamp() > now + self._DAY_SECONDS:
+                break
+            fire_times.append(nxt.timestamp())
+        if not fire_times:
+            next_run = rj.get("next_run")
+            if next_run:
+                fire_times = [next_run]
+
+        for ft in fire_times:
+            slot = self._time_to_slot(ft)
+            if pinned:
+                for adj in [slot - 1, slot, slot + 1]:
+                    scores[adj % self._SLOT_COUNT] = self._PIN_SCORE
+            else:
+                scores[slot] = min(self._PIN_SCORE - 1, scores[slot] + job_score)
+
+    def _score_interval_job(self, scores: list[float], rj: dict, job_score: float) -> None:
+        """Apply interval job scores to the load map in-place."""
+        interval = rj["interval_seconds"]
+        firings_per_day = max(1, self._DAY_SECONDS // interval)
+        for i in range(firings_per_day):
+            offset = (i * interval) % self._DAY_SECONDS
+            slot = int(offset // self._SLOT_SECONDS) % self._SLOT_COUNT
+            if scores[slot] < self._PIN_SCORE:
+                scores[slot] = min(self._PIN_SCORE - 1, scores[slot] + job_score)
+
+    def load_map(self, now: float | None = None) -> list[float]:
+        """Build a 48-slot priority-weighted load map for the next 24 hours.
+
+        Slots are 30-minute windows starting at 00:00.
+        Pinned cron jobs write 999 to their slot and adjacent slots (±15 min buffer).
+        Non-pinned cron jobs write (11 - priority) to their slot.
+        Interval jobs distribute fire times across 24h and score each hit slot.
+        """
+        if now is None:
+            now = time.time()
+
+        scores: list[float] = [0.0] * self._SLOT_COUNT
+        for rj in self.db.list_recurring_jobs():
+            if not rj["enabled"]:
+                continue
+            priority = rj.get("priority") or 5
+            job_score = 11 - priority  # priority 1 → 10, priority 10 → 1
+            if rj.get("cron_expression"):
+                self._score_cron_job(scores, rj, job_score, now)
+            elif rj.get("interval_seconds"):
+                self._score_interval_job(scores, rj, job_score)
+        return scores

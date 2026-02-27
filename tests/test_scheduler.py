@@ -167,3 +167,51 @@ class TestRebalance:
         events = scheduler.rebalance(now)
         db_events = db.get_schedule_events()
         assert any(e["event_type"] == "rebalanced" for e in db_events)
+
+
+class TestLoadMap:
+    def test_returns_48_slots(self, db, scheduler):
+        lm = scheduler.load_map()
+        assert len(lm) == 48
+        assert all(isinstance(s, int | float) for s in lm)
+
+    def test_empty_schedule_all_zero(self, db, scheduler):
+        lm = scheduler.load_map()
+        assert all(s == 0 for s in lm)
+
+    def test_pinned_cron_job_blocks_slot_and_neighbors(self, db, scheduler):
+        import datetime
+
+        # Add a pinned cron job at 06:00 (slot 12)
+        db.add_recurring_job(
+            "pinned",
+            "echo hi",
+            cron_expression="0 6 * * *",
+            pinned=True,
+            next_run=datetime.datetime(2025, 1, 1, 6, 0, 0).timestamp(),
+        )
+        lm = scheduler.load_map()
+        # Slot 12 (06:00) and adjacent slot 11 (05:30) or 13 (06:30) should be 999
+        assert lm[12] == 999 or lm[11] == 999 or lm[13] == 999
+
+    def test_unpinned_cron_job_scores_by_priority(self, db, scheduler):
+        import datetime
+
+        db.add_recurring_job(
+            "cron1",
+            "echo hi",
+            cron_expression="0 6 * * *",
+            priority=3,
+            pinned=False,
+            next_run=datetime.datetime(2025, 1, 1, 6, 0, 0).timestamp(),
+        )
+        lm = scheduler.load_map()
+        # Score for priority 3 = 11 - 3 = 8
+        assert lm[12] == 8  # slot 12 = 06:00
+
+    def test_interval_job_distributes_across_24h(self, db, scheduler):
+        # 6h interval job should contribute to ~4 slots across 24h
+        db.add_recurring_job("interval1", "echo hi", interval_seconds=6 * 3600, priority=5)
+        lm = scheduler.load_map()
+        nonzero = [s for s in lm if s > 0]
+        assert len(nonzero) >= 3  # at least 3 slots hit
