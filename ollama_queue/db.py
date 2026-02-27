@@ -128,7 +128,7 @@ class Database:
                 interval_seconds INTEGER NOT NULL,
                 next_run REAL,
                 last_run REAL,
-                last_job_id INTEGER REFERENCES jobs(id),
+                last_job_id INTEGER,
                 max_retries INTEGER DEFAULT 0,
                 enabled INTEGER DEFAULT 1,
                 created_at REAL NOT NULL
@@ -139,7 +139,7 @@ class Database:
                 timestamp REAL NOT NULL,
                 event_type TEXT NOT NULL,
                 recurring_job_id INTEGER REFERENCES recurring_jobs(id),
-                job_id INTEGER REFERENCES jobs(id),
+                job_id INTEGER,
                 details TEXT
             );
 
@@ -152,7 +152,7 @@ class Database:
                 tag TEXT,
                 priority INTEGER,
                 resource_profile TEXT DEFAULT 'ollama',
-                failure_reason TEXT,
+                failure_reason TEXT NOT NULL,
                 stdout_tail TEXT,
                 stderr_tail TEXT,
                 retry_count INTEGER DEFAULT 0,
@@ -160,6 +160,9 @@ class Database:
                 resolved_at REAL,
                 resolution TEXT
             );
+
+            CREATE INDEX IF NOT EXISTS idx_jobs_recurring_job_id
+                ON jobs (recurring_job_id) WHERE recurring_job_id IS NOT NULL;
         """)
 
         # Seed settings defaults
@@ -541,19 +544,13 @@ class Database:
         conn = self._connect()
         rj = self.get_recurring_job(rj_id)
         next_run = completed_at + rj["interval_seconds"]
-        # last_job_id is a soft historical reference; job may not exist in tests
-        # or after retention pruning — disable FK for this update only.
-        conn.execute("PRAGMA foreign_keys=OFF")
-        try:
-            conn.execute(
-                """UPDATE recurring_jobs
-                   SET next_run = ?, last_run = ?, last_job_id = ?
-                   WHERE id = ?""",
-                (next_run, completed_at, job_id, rj_id),
-            )
-            conn.commit()
-        finally:
-            conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute(
+            """UPDATE recurring_jobs
+               SET next_run = ?, last_run = ?, last_job_id = ?
+               WHERE id = ?""",
+            (next_run, completed_at, job_id, rj_id),
+        )
+        conn.commit()
 
     def set_recurring_job_enabled(self, name: str, enabled: bool) -> bool:
         conn = self._connect()
@@ -580,20 +577,14 @@ class Database:
         details: dict | None = None,
     ) -> None:
         conn = self._connect()
-        # job_id is a soft audit reference; may reference completed/pruned jobs
-        # or synthetic IDs in tests — disable FK for this insert only.
-        conn.execute("PRAGMA foreign_keys=OFF")
-        try:
-            conn.execute(
-                """INSERT INTO schedule_events
-                   (timestamp, event_type, recurring_job_id, job_id, details)
-                   VALUES (?, ?, ?, ?, ?)""",
-                (time.time(), event_type, recurring_job_id, job_id,
-                 json.dumps(details) if details else None),
-            )
-            conn.commit()
-        finally:
-            conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute(
+            """INSERT INTO schedule_events
+               (timestamp, event_type, recurring_job_id, job_id, details)
+               VALUES (?, ?, ?, ?, ?)""",
+            (time.time(), event_type, recurring_job_id, job_id,
+             json.dumps(details) if details else None),
+        )
+        conn.commit()
 
     def get_schedule_events(self, limit: int = 100) -> list[dict]:
         conn = self._connect()
@@ -662,6 +653,7 @@ class Database:
         return cur.rowcount > 0
 
     def retry_dlq_entry(self, dlq_id: int) -> int | None:
+        conn = self._connect()
         entry = self.get_dlq_entry(dlq_id)
         if not entry:
             return None
@@ -674,7 +666,6 @@ class Database:
             tag=entry.get("tag"),
             resource_profile=entry.get("resource_profile", "ollama"),
         )
-        conn = self._connect()
         conn.execute(
             """UPDATE dlq SET resolution = 'retried', resolved_at = ?,
                retry_count = retry_count + 1 WHERE id = ?""",
