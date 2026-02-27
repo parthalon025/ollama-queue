@@ -1,7 +1,9 @@
 """Tests for the Scheduler class."""
 
 import time
+
 import pytest
+
 from ollama_queue.db import Database
 from ollama_queue.scheduler import Scheduler
 
@@ -74,13 +76,13 @@ class TestRebalance:
     def test_rebalance_spreads_evenly(self, db, scheduler):
         now = time.time()
         interval = 3600
-        for i, name in enumerate(["a", "b", "c", "d"]):
+        for _i, name in enumerate(["a", "b", "c", "d"]):
             db.add_recurring_job(name, f"cmd_{name}", interval, priority=5, next_run=now)
         events = scheduler.rebalance(now)
         rjs = db.list_recurring_jobs()
         offsets = sorted(rj["next_run"] - now for rj in rjs)
         # Each offset should differ by ~interval/N = 900s
-        gaps = [offsets[i+1] - offsets[i] for i in range(len(offsets)-1)]
+        gaps = [offsets[i + 1] - offsets[i] for i in range(len(offsets) - 1)]
         for gap in gaps:
             assert abs(gap - 900) < 1.0  # within 1 second
 

@@ -118,9 +118,7 @@ def history(ctx, show_all, source):
                 (source,),
             ).fetchall()
         else:
-            rows = conn.execute(
-                "SELECT * FROM jobs ORDER BY submitted_at DESC LIMIT 50"
-            ).fetchall()
+            rows = conn.execute("SELECT * FROM jobs ORDER BY submitted_at DESC LIMIT 50").fetchall()
         jobs = [dict(r) for r in rows]
     else:
         jobs = db.get_history(limit=50, source=source)
@@ -134,8 +132,7 @@ def history(ctx, show_all, source):
     for job in jobs:
         exit_str = str(job.get("exit_code", "")) if job.get("exit_code") is not None else "-"
         click.echo(
-            f"{job['id']:>5}  {job['status']:<10}  {(job['source'] or ''):<15}  "
-            f"{exit_str:>4}  {job['command']}"
+            f"{job['id']:>5}  {job['status']:<10}  {(job['source'] or ''):<15}  " f"{exit_str:>4}  {job['command']}"
         )
 
 
@@ -233,11 +230,19 @@ def schedule():
 def schedule_add(ctx, name, interval, model, priority, timeout, tag, source, max_retries, profile, command):
     db = ctx.obj["db"]
     from ollama_queue.scheduler import Scheduler
+
     interval_seconds = _parse_interval(interval)
     rj_id = db.add_recurring_job(
-        name=name, command=" ".join(command), interval_seconds=interval_seconds,
-        model=model, priority=priority, timeout=timeout, source=source or name,
-        tag=tag, resource_profile=profile, max_retries=max_retries,
+        name=name,
+        command=" ".join(command),
+        interval_seconds=interval_seconds,
+        model=model,
+        priority=priority,
+        timeout=timeout,
+        source=source or name,
+        tag=tag,
+        resource_profile=profile,
+        max_retries=max_retries,
     )
     Scheduler(db).rebalance()
     click.echo(f"Added recurring job '{name}' (id={rj_id}) — interval={interval}, rebalanced.")
@@ -248,6 +253,7 @@ def schedule_add(ctx, name, interval, model, priority, timeout, tag, source, max
 def schedule_list(ctx):
     db = ctx.obj["db"]
     import datetime
+
     jobs = db.list_recurring_jobs()
     if not jobs:
         click.echo("No recurring jobs.")
@@ -266,7 +272,8 @@ def schedule_list(ctx):
         else:
             interval_str = f"{secs}s"
         enabled = "yes" if rj["enabled"] else "no"
-        click.echo(f"{rj['name']:<20} {interval_str:>10} {rj['priority']:>8} {rj.get('tag') or '—':<12} {enabled:>7}  {next_run}")
+        tag = rj.get("tag") or "—"
+        click.echo(f"{rj['name']:<20} {interval_str:>10} {rj['priority']:>8} {tag:<12} {enabled:>7}  {next_run}")
 
 
 @schedule.command("enable")
@@ -276,6 +283,7 @@ def schedule_enable(ctx, name):
     db = ctx.obj["db"]
     if db.set_recurring_job_enabled(name, True):
         from ollama_queue.scheduler import Scheduler
+
         Scheduler(db).rebalance()
         click.echo(f"Enabled '{name}' and rebalanced.")
     else:
@@ -309,6 +317,7 @@ def schedule_remove(ctx, name):
 def schedule_rebalance(ctx):
     db = ctx.obj["db"]
     from ollama_queue.scheduler import Scheduler
+
     changes = Scheduler(db).rebalance()
     click.echo(f"Rebalanced {len(changes)} jobs.")
     for c in changes:

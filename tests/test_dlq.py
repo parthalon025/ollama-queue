@@ -1,7 +1,9 @@
 """Tests for DLQ routing logic."""
 
 import time
+
 import pytest
+
 from ollama_queue.db import Database
 from ollama_queue.dlq import DLQManager
 
@@ -22,14 +24,11 @@ class TestDLQRouting:
     def _make_failed_job(self, db, max_retries=0, retry_count=0):
         job_id = db.submit_job("echo fail", "m", 5, 60, "src", max_retries=max_retries)
         db.start_job(job_id)
-        db.complete_job(job_id, exit_code=1, stdout_tail="out", stderr_tail="err",
-                        outcome_reason="exit code 1")
+        db.complete_job(job_id, exit_code=1, stdout_tail="out", stderr_tail="err", outcome_reason="exit code 1")
         # Manually set retry_count for testing
         if retry_count:
             conn = db._connect()
-            conn.execute(
-                "UPDATE jobs SET retry_count = ? WHERE id = ?", (retry_count, job_id)
-            )
+            conn.execute("UPDATE jobs SET retry_count = ? WHERE id = ?", (retry_count, job_id))
             conn.commit()
         return job_id
 
@@ -52,7 +51,7 @@ class TestDLQRouting:
         dlq.handle_failure(job_id, "exit code 1")
         job = db.get_job(job_id)
         # retry 2 → backoff = 60 * 2^2 = 240s
-        expected_delay = 60 * (2.0 ** 2)
+        expected_delay = 60 * (2.0**2)
         actual_delay = job["retry_after"] - time.time()
         assert abs(actual_delay - expected_delay) < 2.0
 
