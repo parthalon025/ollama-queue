@@ -41,12 +41,12 @@ async function fetchStatus() {
 
 export async function fetchSchedule() {
     try {
-        const [jobs, events] = await Promise.all([
-            fetch(`${API}/schedule`).then(r => r.json()),
-            fetch(`${API}/schedule/events?limit=50`).then(r => r.json()),
+        const [jobsResp, eventsResp] = await Promise.all([
+            fetch(`${API}/schedule`),
+            fetch(`${API}/schedule/events?limit=50`),
         ]);
-        scheduleJobs.value = jobs;
-        scheduleEvents.value = events;
+        if (jobsResp.ok) scheduleJobs.value = await jobsResp.json();
+        if (eventsResp.ok) scheduleEvents.value = await eventsResp.json();
     } catch (e) {
         console.error('fetchSchedule failed:', e);
     }
@@ -76,36 +76,56 @@ export async function triggerRebalance() {
 
 export async function fetchDLQ() {
     try {
-        const entries = await fetch(`${API}/dlq`).then(r => r.json());
-        dlqEntries.value = entries;
-        dlqCount.value = entries.length;
+        const resp = await fetch(`${API}/dlq`);
+        if (resp.ok) {
+            const entries = await resp.json();
+            dlqEntries.value = entries;
+            dlqCount.value = entries.length;
+        }
     } catch (e) {
         console.error('fetchDLQ failed:', e);
     }
 }
 
 export async function retryDLQEntry(id) {
-    await fetch(`${API}/dlq/${id}/retry`, { method: 'POST' });
-    await fetchDLQ();
+    try {
+        await fetch(`${API}/dlq/${id}/retry`, { method: 'POST' });
+        await fetchDLQ();
+    } catch (e) {
+        console.error('retryDLQEntry failed:', e);
+    }
 }
 
 export async function retryAllDLQ() {
-    await fetch(`${API}/dlq/retry-all`, { method: 'POST' });
-    await fetchDLQ();
+    try {
+        await fetch(`${API}/dlq/retry-all`, { method: 'POST' });
+        await fetchDLQ();
+    } catch (e) {
+        console.error('retryAllDLQ failed:', e);
+    }
 }
 
 export async function dismissDLQEntry(id) {
-    await fetch(`${API}/dlq/${id}/dismiss`, { method: 'POST' });
-    await fetchDLQ();
+    try {
+        await fetch(`${API}/dlq/${id}/dismiss`, { method: 'POST' });
+        await fetchDLQ();
+    } catch (e) {
+        console.error('dismissDLQEntry failed:', e);
+    }
 }
 
 export async function clearDLQ() {
-    await fetch(`${API}/dlq`, { method: 'DELETE' });
-    await fetchDLQ();
+    try {
+        await fetch(`${API}/dlq`, { method: 'DELETE' });
+        await fetchDLQ();
+    } catch (e) {
+        console.error('clearDLQ failed:', e);
+    }
 }
 
 async function fetchAll() {
     fetchStatus();
+    fetchDLQ(); // populate DLQ badge on first load
     // Fetch non-realtime data (charts, history) once on load
     try {
         const [qResp, hResp, healthResp, durResp, heatResp, setResp] = await Promise.all([

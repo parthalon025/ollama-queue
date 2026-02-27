@@ -221,7 +221,7 @@ function SettingInput({ label, settingKey, unit, step, settings, flashKey, onBlu
 /**
  * Simple number row: label + input + optional unit.
  */
-function NumberRow({ label, settingKey, min, max, unit, settings, flashKey, onBlur }) {
+function NumberRow({ label, settingKey, min, max, step, unit, settings, flashKey, onBlur }) {
   const val = settings[settingKey];
   const isFlash = flashKey === settingKey;
 
@@ -235,6 +235,7 @@ function NumberRow({ label, settingKey, min, max, unit, settings, flashKey, onBl
           type="number"
           min={min}
           max={max}
+          step={step || 1}
           class="t-input data-mono"
           style={{
             width: '90px',

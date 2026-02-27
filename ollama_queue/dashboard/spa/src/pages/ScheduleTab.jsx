@@ -41,13 +41,13 @@ function TimelineBar({ jobs }) {
         <div style={{ position: 'relative', height: 48, background: '#1e293b',
                       borderRadius: 4, overflow: 'hidden', margin: '1rem 0' }}>
             {jobs.map(rj => {
-                const pct = ((rj.next_run - now) % daySeconds) / daySeconds * 100;
+                const pct = Math.min(100, Math.max(0, ((rj.next_run - now) % daySeconds) / daySeconds * 100));
                 const color = CATEGORY_COLORS[priorityCategory(rj.priority)];
                 return (
                     <div key={rj.id}
                          title={`${rj.name} — ${formatCountdown(rj.next_run)}`}
                          style={{
-                             position: 'absolute', left: `${Math.max(0, pct)}%`,
+                             position: 'absolute', left: `${pct}%`,
                              width: 3, top: 0, bottom: 0, background: color, opacity: 0.8,
                          }} />
                 );

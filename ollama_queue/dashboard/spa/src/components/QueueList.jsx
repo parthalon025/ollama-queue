@@ -1,5 +1,5 @@
 import { h } from 'preact';
-import { useState } from 'preact/hooks';
+import { useState, useMemo } from 'preact/hooks';
 import { queue, API } from '../store';
 
 /**
@@ -29,7 +29,7 @@ export default function QueueList({ jobs }) {
   const [dragIdx, setDragIdx] = useState(null);
   const [dropIdx, setDropIdx] = useState(null);
 
-  const tags = [...new Set(allItems.map(j => j.tag).filter(Boolean))];
+  const tags = useMemo(() => [...new Set(allItems.map(j => j.tag).filter(Boolean))], [allItems]);
   const items = tagFilter ? allItems.filter(j => j.tag === tagFilter) : allItems;
 
   if (allItems.length === 0) {
