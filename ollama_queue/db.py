@@ -21,6 +21,13 @@ DEFAULTS = {
     "duration_stats_retention_days": 90,
     "default_timeout_seconds": 600,
     "default_priority": 5,
+    "default_max_retries": 0,
+    "retry_backoff_base_seconds": 60,
+    "retry_backoff_multiplier": 2.0,
+    "stall_multiplier": 2.0,
+    "priority_categories": '{"critical":[1,2],"high":[3,4],"normal":[5,6],"low":[7,8],"background":[9,10]}',
+    "priority_category_colors": '{"critical":"#ef4444","high":"#f97316","normal":"#3b82f6","low":"#6b7280","background":"#374151"}',
+    "resource_profiles": '{"ollama":{"check_vram":true,"check_ram":true,"check_load":true},"any":{"check_vram":false,"check_ram":false,"check_load":false}}',
 }
 
 
@@ -59,7 +66,14 @@ class Database:
                 outcome_reason TEXT,
                 stdout_tail TEXT,
                 stderr_tail TEXT,
-                estimated_duration REAL
+                estimated_duration REAL,
+                tag TEXT,
+                max_retries INTEGER DEFAULT 0,
+                retry_count INTEGER DEFAULT 0,
+                retry_after REAL,
+                stall_detected_at REAL,
+                recurring_job_id INTEGER REFERENCES recurring_jobs(id),
+                resource_profile TEXT DEFAULT 'ollama'
             );
 
             CREATE TABLE IF NOT EXISTS duration_history (
@@ -100,6 +114,52 @@ class Database:
                 value TEXT NOT NULL,
                 updated_at REAL
             );
+
+            CREATE TABLE IF NOT EXISTS recurring_jobs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                command TEXT NOT NULL,
+                model TEXT,
+                priority INTEGER DEFAULT 5,
+                timeout INTEGER DEFAULT 600,
+                source TEXT,
+                tag TEXT,
+                resource_profile TEXT DEFAULT 'ollama',
+                interval_seconds INTEGER NOT NULL,
+                next_run REAL,
+                last_run REAL,
+                last_job_id INTEGER REFERENCES jobs(id),
+                max_retries INTEGER DEFAULT 0,
+                enabled INTEGER DEFAULT 1,
+                created_at REAL NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS schedule_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp REAL NOT NULL,
+                event_type TEXT NOT NULL,
+                recurring_job_id INTEGER REFERENCES recurring_jobs(id),
+                job_id INTEGER REFERENCES jobs(id),
+                details TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS dlq (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                original_job_id INTEGER NOT NULL,
+                command TEXT NOT NULL,
+                model TEXT,
+                source TEXT,
+                tag TEXT,
+                priority INTEGER,
+                resource_profile TEXT DEFAULT 'ollama',
+                failure_reason TEXT,
+                stdout_tail TEXT,
+                stderr_tail TEXT,
+                retry_count INTEGER DEFAULT 0,
+                moved_at REAL NOT NULL,
+                resolved_at REAL,
+                resolution TEXT
+            );
         """)
 
         # Seed settings defaults
@@ -120,13 +180,25 @@ class Database:
     # --- Jobs ---
 
     def submit_job(
-        self, command: str, model: str, priority: int, timeout: int, source: str
+        self,
+        command: str,
+        model: str,
+        priority: int,
+        timeout: int,
+        source: str,
+        tag: str | None = None,
+        max_retries: int = 0,
+        resource_profile: str = "ollama",
+        recurring_job_id: int | None = None,
     ) -> int:
         conn = self._connect()
         cur = conn.execute(
-            """INSERT INTO jobs (command, model, priority, timeout, source, submitted_at)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (command, model, priority, timeout, source, time.time()),
+            """INSERT INTO jobs
+               (command, model, priority, timeout, source, submitted_at,
+                tag, max_retries, resource_profile, recurring_job_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (command, model, priority, timeout, source, time.time(),
+             tag, max_retries, resource_profile, recurring_job_id),
         )
         conn.commit()
         return cur.lastrowid

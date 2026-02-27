@@ -9,7 +9,28 @@ class TestInitialize:
     def test_initialize_creates_tables(self, db):
         tables = db.list_tables()
         expected = {"jobs", "duration_history", "health_log", "daemon_state", "settings"}
+        assert expected.issubset(set(tables))
+
+    def test_initialize_creates_v2_tables(self, db):
+        tables = db.list_tables()
+        expected = {
+            "jobs", "duration_history", "health_log",
+            "daemon_state", "settings",
+            "recurring_jobs", "schedule_events", "dlq",
+        }
         assert expected == set(tables)
+
+    def test_jobs_has_v2_columns(self, db):
+        db.submit_job("cmd", "m", 5, 60, "src",
+                      tag="aria", max_retries=2, resource_profile="ollama")
+        job = db.get_job(1)
+        assert job["tag"] == "aria"
+        assert job["max_retries"] == 2
+        assert job["retry_count"] == 0
+        assert job["retry_after"] is None
+        assert job["stall_detected_at"] is None
+        assert job["recurring_job_id"] is None
+        assert job["resource_profile"] == "ollama"
 
     def test_daemon_state_singleton_exists(self, db):
         state = db.get_daemon_state()
