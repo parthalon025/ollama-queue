@@ -3,6 +3,7 @@ import { useEffect, useState } from 'preact/hooks';
 import {
     scheduleJobs, scheduleEvents,
     fetchSchedule, toggleScheduleJob, triggerRebalance, runScheduleJobNow,
+    updateScheduleJob,
 } from '../store';
 
 // Note: local vars named 'hrs'/'mins' to avoid shadowing the injected 'h' JSX factory.
@@ -22,6 +23,18 @@ function formatInterval(seconds) {
     if (seconds % 3600 === 0) return `${seconds / 3600}h`;
     if (seconds % 60 === 0) return `${seconds / 60}m`;
     return `${seconds}s`;
+}
+
+// Parse shorthand like "4h", "30m", "1d", "7d", "90s", or plain seconds
+function parseInterval(str) {
+    const trimmed = str.trim().toLowerCase();
+    const match = trimmed.match(/^(\d+(?:\.\d+)?)\s*(d|h|m|s)?$/);
+    if (!match) return null;
+    const val = parseFloat(match[1]);
+    if (val <= 0 || !isFinite(val)) return null;
+    const unit = match[2] || 's';
+    const multipliers = { d: 86400, h: 3600, m: 60, s: 1 };
+    return Math.round(val * multipliers[unit]);
 }
 
 // Priority → design token colors (theme-aware)
@@ -75,7 +88,10 @@ function TimelineBar({ jobs, tick }) {
 export default function ScheduleTab() {
     // tick increments every second to force live countdown re-renders
     const [tick, setTick] = useState(0);
-    const [runningId, setRunningId] = useState(null);
+    const [runningIds, setRunningIds] = useState(new Set());
+    const [runError, setRunError] = useState(null);
+    const [editingInterval, setEditingInterval] = useState(null); // { id, value }
+
 
     useEffect(() => {
         fetchSchedule();
@@ -86,10 +102,37 @@ export default function ScheduleTab() {
     const jobs = scheduleJobs.value;
     const events = scheduleEvents.value;
 
+    async function handleIntervalSave(rjId) {
+        if (!editingInterval || editingInterval.id !== rjId) return;
+        const seconds = parseInterval(editingInterval.value);
+        if (!seconds) {
+            setEditingInterval(null);
+            return;
+        }
+        try {
+            await updateScheduleJob(rjId, { interval_seconds: seconds });
+        } catch (e) {
+            console.error('Interval update failed:', e);
+            setRunError('Failed to update interval');
+        }
+        setEditingInterval(null);
+    }
+
     async function handleRunNow(rj) {
-        setRunningId(rj.id);
-        await runScheduleJobNow(rj.id);
-        setRunningId(null);
+        setRunningIds(prev => new Set([...prev, rj.id]));
+        setRunError(null);
+        try {
+            await runScheduleJobNow(rj.id);
+        } catch (e) {
+            console.error('Run Now failed:', e);
+            setRunError(`Failed to run "${rj.name}"`);
+        } finally {
+            setRunningIds(prev => {
+                const next = new Set(prev);
+                next.delete(rj.id);
+                return next;
+            });
+        }
     }
 
     return (
@@ -103,6 +146,14 @@ export default function ScheduleTab() {
                     Rebalance Now
                 </button>
             </div>
+
+            {runError && (
+                <div style={{ padding: '0.5rem 0.75rem', background: 'var(--status-error)',
+                              color: 'var(--accent-text)', borderRadius: 'var(--radius)',
+                              fontSize: 'var(--type-body)', fontFamily: 'var(--font-mono)' }}>
+                    {runError}
+                </div>
+            )}
 
             <TimelineBar jobs={jobs} tick={tick} />
 
@@ -139,7 +190,7 @@ export default function ScheduleTab() {
                                 const cat = priorityCategory(rj.priority);
                                 const color = CATEGORY_COLORS[cat];
                                 const overdue = rj.next_run < Date.now() / 1000;
-                                const isRunning = runningId === rj.id;
+                                const isRunning = runningIds.has(rj.id);
                                 // Read tick to subscribe this row to per-second updates
                                 void tick;
                                 return (
@@ -162,7 +213,37 @@ export default function ScheduleTab() {
                                         <td style={{ textAlign: 'center',
                                                      fontFamily: 'var(--font-mono)',
                                                      color: 'var(--text-primary)' }}>
-                                            {formatInterval(rj.interval_seconds)}
+                                            {editingInterval && editingInterval.id === rj.id ? (
+                                                <input
+                                                    type="text"
+                                                    value={editingInterval.value}
+                                                    onInput={ev => setEditingInterval({ id: rj.id, value: ev.target.value })}
+                                                    onBlur={() => handleIntervalSave(rj.id)}
+                                                    onKeyDown={ev => {
+                                                        if (ev.key === 'Enter') handleIntervalSave(rj.id);
+                                                        if (ev.key === 'Escape') setEditingInterval(null);
+                                                    }}
+                                                    ref={el => el && el.focus()}
+                                                    style={{
+                                                        width: '4.5rem', textAlign: 'center',
+                                                        fontFamily: 'var(--font-mono)',
+                                                        fontSize: 'var(--type-body)',
+                                                        background: 'var(--bg-inset)',
+                                                        color: 'var(--text-primary)',
+                                                        border: '1px solid var(--accent)',
+                                                        borderRadius: 'var(--radius)',
+                                                        padding: '0.1rem 0.3rem',
+                                                        outline: 'none',
+                                                    }}
+                                                />
+                                            ) : (
+                                                <span
+                                                    style={{ cursor: 'pointer', borderBottom: '1px dashed var(--text-tertiary)' }}
+                                                    title="Click to edit interval (e.g. 4h, 30m, 7d)"
+                                                    onClick={() => setEditingInterval({ id: rj.id, value: formatInterval(rj.interval_seconds) })}>
+                                                    {formatInterval(rj.interval_seconds)}
+                                                </span>
+                                            )}
                                         </td>
                                         <td style={{ textAlign: 'center' }}>
                                             <span style={{

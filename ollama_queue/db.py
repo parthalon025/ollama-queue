@@ -592,7 +592,7 @@ class Database:
                 return False
             rj_id = rj["id"]
             conn.execute(
-                "UPDATE jobs SET recurring_job_id = NULL WHERE recurring_job_id = ? AND status = 'pending'",
+                "UPDATE jobs SET recurring_job_id = NULL WHERE recurring_job_id = ?",
                 (rj_id,),
             )
             conn.execute("DELETE FROM schedule_events WHERE recurring_job_id = ?", (rj_id,))
@@ -605,12 +605,12 @@ class Database:
         allowed = {
             "name",
             "command",
-            "cron_expr",
             "interval_seconds",
             "model",
             "priority",
             "timeout",
             "source",
+            "tag",
             "enabled",
             "next_run",
         }
@@ -633,7 +633,7 @@ class Database:
         conn = self._connect()
         with self._lock:
             conn.execute(
-                "UPDATE jobs SET recurring_job_id = NULL WHERE recurring_job_id = ? AND status = 'pending'",
+                "UPDATE jobs SET recurring_job_id = NULL WHERE recurring_job_id = ?",
                 (rj_id,),
             )
             conn.execute("DELETE FROM schedule_events WHERE recurring_job_id = ?", (rj_id,))

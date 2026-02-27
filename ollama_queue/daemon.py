@@ -223,16 +223,18 @@ class Daemon:
                 duration=duration,
                 exit_code=exit_code,
             )
-            # Update recurring schedule if this was a recurring job
-            if job.get("recurring_job_id"):
-                try:
-                    self.scheduler.update_next_run(
-                        job["recurring_job_id"],
-                        completed_at=time.time(),
-                        job_id=job["id"],
-                    )
-                except Exception:
-                    _log.exception("Scheduler next_run update failed for job #%d", job["id"])
+
+        # Update recurring schedule regardless of success/failure to prevent
+        # infinite re-promotion of failed jobs every poll cycle.
+        if job.get("recurring_job_id"):
+            try:
+                self.scheduler.update_next_run(
+                    job["recurring_job_id"],
+                    completed_at=time.time(),
+                    job_id=job["id"],
+                )
+            except Exception:
+                _log.exception("Scheduler next_run update failed for job #%d", job["id"])
 
         # 12. Update daemon state back to idle + increment daily counters
         counter_field = "jobs_completed_today" if exit_code == 0 else "jobs_failed_today"

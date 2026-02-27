@@ -49,6 +49,10 @@ class RecurringJobUpdate(BaseModel):
     priority: int | None = None
     interval_seconds: int | None = None
     tag: str | None = None
+    command: str | None = None
+    name: str | None = None
+    model: str | None = None
+    timeout: int | None = None
 
 
 def create_app(db: Database) -> FastAPI:  # noqa: C901 PLR0915
@@ -296,6 +300,8 @@ def create_app(db: Database) -> FastAPI:  # noqa: C901 PLR0915
             source=rj["name"],
             tag=rj.get("tag"),
             recurring_job_id=rj["id"],
+            max_retries=rj.get("max_retries", 0),
+            resource_profile=rj.get("resource_profile", "ollama"),
         )
         return {"job_id": job_id}
 

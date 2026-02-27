@@ -71,6 +71,9 @@ class Scheduler:
         """Update next_run after job completion. Anchors to completed_at."""
         self.db.update_recurring_next_run(recurring_job_id, completed_at, job_id)
         rj = self.db.get_recurring_job(recurring_job_id)
+        if rj is None:
+            _log.warning("update_next_run: recurring job %d no longer exists (deleted?)", recurring_job_id)
+            return
         self.db.log_schedule_event(
             "next_run_updated",
             recurring_job_id=recurring_job_id,
@@ -81,7 +84,9 @@ class Scheduler:
     def rebalance(self, now: float | None = None) -> list[dict]:
         """Rebalance all enabled recurring jobs to spread load evenly.
 
-        Higher priority jobs get earlier slots. Returns list of change dicts.
+        Groups jobs by interval, then staggers each group across its interval
+        window so jobs with the same cadence don't all fire simultaneously.
+        Higher priority jobs get earlier slots within each group.
         """
         if now is None:
             now = time.time()
@@ -89,39 +94,42 @@ class Scheduler:
         if not rjs:
             return []
 
-        # Sort by priority ascending (1 = highest = earliest slot)
-        rjs.sort(key=lambda r: (r["priority"], r["name"]))
+        # Group by interval_seconds, sort within each group by priority
+        groups: dict[int, list[dict]] = {}
+        for rj in rjs:
+            groups.setdefault(rj["interval_seconds"], []).append(rj)
+        for group in groups.values():
+            group.sort(key=lambda r: (r["priority"], r["name"]))
 
-        # Window = shortest interval
-        window = min(r["interval_seconds"] for r in rjs)
-        n = len(rjs)
         changes = []
-
-        for i, rj in enumerate(rjs):
-            old_next_run = rj["next_run"]
-            new_next_run = now + (window * i / n)
-            with self.db._lock:
-                conn = self.db._connect()
-                conn.execute(
-                    "UPDATE recurring_jobs SET next_run = ? WHERE id = ?",
-                    (new_next_run, rj["id"]),
+        for interval, group in sorted(groups.items()):
+            n = len(group)
+            for i, rj in enumerate(group):
+                old_next_run = rj["next_run"]
+                # Spread evenly across the interval window
+                new_next_run = now + (interval * i / n)
+                with self.db._lock:
+                    conn = self.db._connect()
+                    conn.execute(
+                        "UPDATE recurring_jobs SET next_run = ? WHERE id = ?",
+                        (new_next_run, rj["id"]),
+                    )
+                    conn.commit()
+                change = {
+                    "name": rj["name"],
+                    "old_next_run": old_next_run,
+                    "new_next_run": new_next_run,
+                }
+                changes.append(change)
+                self.db.log_schedule_event(
+                    "rebalanced",
+                    recurring_job_id=rj["id"],
+                    details=change,
                 )
-                conn.commit()
-            change = {
-                "name": rj["name"],
-                "old_next_run": old_next_run,
-                "new_next_run": new_next_run,
-            }
-            changes.append(change)
-            self.db.log_schedule_event(
-                "rebalanced",
-                recurring_job_id=rj["id"],
-                details=change,
-            )
-            _log.info(
-                "Rebalanced %r: next_run shifted by %.0fs",
-                rj["name"],
-                new_next_run - (old_next_run or now),
-            )
+                _log.info(
+                    "Rebalanced %r: next_run shifted by %.0fs",
+                    rj["name"],
+                    new_next_run - (old_next_run or now),
+                )
 
         return changes

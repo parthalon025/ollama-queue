@@ -52,14 +52,19 @@ export async function fetchSchedule() {
     }
 }
 
+export async function updateScheduleJob(id, fields) {
+    const resp = await fetch(`${API}/schedule/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(fields),
+    });
+    if (!resp.ok) throw new Error(`updateScheduleJob failed: ${resp.status}`);
+    await fetchSchedule();
+}
+
 export async function toggleScheduleJob(id, enabled) {
     try {
-        await fetch(`${API}/schedule/${id}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ enabled }),
-        });
-        await fetchSchedule();
+        await updateScheduleJob(id, { enabled });
     } catch (e) {
         console.error('toggleScheduleJob failed:', e);
     }
@@ -75,12 +80,9 @@ export async function triggerRebalance() {
 }
 
 export async function runScheduleJobNow(id) {
-    try {
-        await fetch(`${API}/schedule/${id}/run-now`, { method: 'POST' });
-        await fetchSchedule();
-    } catch (e) {
-        console.error('runScheduleJobNow failed:', e);
-    }
+    const resp = await fetch(`${API}/schedule/${id}/run-now`, { method: 'POST' });
+    if (!resp.ok) throw new Error(`run-now failed: ${resp.status}`);
+    await fetchSchedule();
 }
 
 export async function fetchDLQ() {
