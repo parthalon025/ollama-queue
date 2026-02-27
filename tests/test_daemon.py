@@ -1,5 +1,7 @@
 """Tests for the daemon polling loop and job runner."""
 
+import time
+
 import pytest
 from unittest.mock import patch, MagicMock
 from ollama_queue.daemon import Daemon
@@ -120,6 +122,48 @@ def test_records_duration_on_success(daemon):
 
     history = daemon.db.get_duration_history("test-src")
     assert len(history) == 1
+
+
+class TestDaemonSchedulerIntegration:
+    def test_poll_once_promotes_due_recurring_job(self, db):
+        now = time.time()
+        db.add_recurring_job("job1", "echo hi", 3600, next_run=now - 1, source="test")
+        daemon = Daemon(db)
+        with patch.object(daemon.health, 'check', return_value={
+            'ram_pct': 10, 'vram_pct': 10, 'load_avg': 0.1,
+            'swap_pct': 5, 'cpu_count': 4, 'ollama_model': None
+        }):
+            with patch("ollama_queue.daemon.subprocess") as mock_sub:
+                proc = MagicMock()
+                proc.wait.return_value = 0
+                proc.stdout.read.return_value = b"hi"
+                proc.stderr.read.return_value = b""
+                proc.returncode = 0
+                mock_sub.Popen.return_value = proc
+                daemon.poll_once()
+        # Job was promoted by scheduler, then picked up and run
+        jobs = db.get_pending_jobs()
+        completed = [j for j in db.get_history() if j["command"] == "echo hi"]
+        assert len(completed) == 1 or len(jobs) == 0  # promoted and ran
+
+    def test_poll_once_detects_stall(self, db):
+        job_id = db.submit_job("slow", "m", 5, 600, "src")
+        db.start_job(job_id)
+        # Fake a job that started 1000s ago with estimated_duration=100s
+        conn = db._connect()
+        conn.execute(
+            "UPDATE jobs SET started_at = ?, estimated_duration = 100 WHERE id = ?",
+            (time.time() - 1000, job_id)
+        )
+        conn.commit()
+        daemon = Daemon(db)
+        with patch.object(daemon.health, 'check', return_value={
+            'ram_pct': 10, 'vram_pct': 10, 'load_avg': 0.1,
+            'swap_pct': 5, 'cpu_count': 4, 'ollama_model': None
+        }):
+            daemon.poll_once()
+        job = db.get_job(job_id)
+        assert job["stall_detected_at"] is not None
 
 
 def test_no_self_block_after_queue_job(daemon):

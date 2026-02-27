@@ -8,8 +8,10 @@ import subprocess
 import time
 
 from ollama_queue.db import Database
+from ollama_queue.dlq import DLQManager
 from ollama_queue.estimator import DurationEstimator
 from ollama_queue.health import HealthMonitor
+from ollama_queue.scheduler import Scheduler
 
 _log = logging.getLogger(__name__)
 
@@ -25,6 +27,8 @@ class Daemon:
         self.db = db
         self.health = health_monitor or HealthMonitor()
         self.estimator = DurationEstimator(db)
+        self.scheduler = Scheduler(db)
+        self.dlq = DLQManager(db)
         self._last_prune: float = 0.0
         self._recent_job_models: dict[str, float] = {}  # model -> last_completed_at
 
@@ -45,6 +49,25 @@ class Daemon:
         12. Update daemon state back to idle
         """
         now = time.time()
+
+        # 0. Promote due recurring jobs (runs even while a job is running)
+        try:
+            self.scheduler.promote_due_jobs(now)
+        except Exception:
+            _log.exception("Scheduler promotion failed; continuing")
+
+        # 0b. Detect stalled running jobs
+        try:
+            self._check_stalled_jobs(now)
+        except Exception:
+            _log.exception("Stall detection failed; continuing")
+
+        # 0c. Re-queue retryable jobs whose backoff has elapsed
+        try:
+            self._check_retryable_jobs(now)
+        except Exception:
+            _log.exception("Retry check failed; continuing")
+
         state = self.db.get_daemon_state()
 
         # 1. Check if manually paused
@@ -176,6 +199,14 @@ class Daemon:
             outcome_reason=outcome_reason,
         )
 
+        # Route failed jobs through DLQ (retry or dead-letter)
+        if exit_code != 0:
+            try:
+                failure_reason = f"exit code {exit_code}"
+                self.dlq.handle_failure(job["id"], failure_reason)
+            except Exception:
+                _log.exception("DLQ routing failed for job #%d", job["id"])
+
         # Track model so interactive-yield check doesn't self-block
         if job.get("model"):
             self._recent_job_models[job["model"]] = time.time()
@@ -188,6 +219,16 @@ class Daemon:
                 duration=duration,
                 exit_code=exit_code,
             )
+            # Update recurring schedule if this was a recurring job
+            if job.get("recurring_job_id"):
+                try:
+                    self.scheduler.update_next_run(
+                        job["recurring_job_id"],
+                        completed_at=time.time(),
+                        job_id=job["id"],
+                    )
+                except Exception:
+                    _log.exception("Scheduler next_run update failed for job #%d", job["id"])
 
         # 12. Update daemon state back to idle + increment daily counters
         counter_field = "jobs_completed_today" if exit_code == 0 else "jobs_failed_today"
@@ -196,6 +237,46 @@ class Daemon:
             state="idle", current_job_id=None, last_poll_at=time.time(),
             **{counter_field: current_count},
         )
+
+    def _check_stalled_jobs(self, now: float) -> None:
+        """Flag running jobs whose elapsed time exceeds stall_multiplier × estimated_duration."""
+        settings = self.db.get_all_settings()
+        multiplier = settings.get("stall_multiplier", 2.0)
+        conn = self.db._connect()
+        running = conn.execute(
+            "SELECT * FROM jobs WHERE status = 'running' AND stall_detected_at IS NULL"
+        ).fetchall()
+        for row in running:
+            job = dict(row)
+            estimated = job.get("estimated_duration")
+            started = job.get("started_at")
+            if estimated and started:
+                elapsed = now - started
+                if elapsed > multiplier * estimated:
+                    conn.execute(
+                        "UPDATE jobs SET stall_detected_at = ? WHERE id = ?",
+                        (now, job["id"]),
+                    )
+                    conn.commit()
+                    self.db.log_schedule_event(
+                        "stall_detected",
+                        job_id=job["id"],
+                        details={"elapsed": elapsed, "estimated": estimated, "multiplier": multiplier},
+                    )
+                    _log.warning(
+                        "Job #%d stalled: elapsed=%.0fs, estimated=%.0fs",
+                        job["id"], elapsed, estimated,
+                    )
+
+    def _check_retryable_jobs(self, now: float) -> None:
+        """Clear retry_after for pending jobs whose backoff window has elapsed."""
+        conn = self.db._connect()
+        conn.execute(
+            """UPDATE jobs SET retry_after = NULL
+               WHERE status = 'pending' AND retry_after IS NOT NULL AND retry_after <= ?""",
+            (now,),
+        )
+        conn.commit()
 
     def run(self, poll_interval: int | None = None) -> None:
         """Main loop: poll_once() every N seconds. Prunes old data daily."""
