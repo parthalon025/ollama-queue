@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from pathlib import Path
 
@@ -17,7 +18,7 @@ from pydantic import BaseModel
 
 from ollama_queue.db import DEFAULTS, Database
 
-OLLAMA_URL = "http://127.0.0.1:11434"
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
 PROXY_WAIT_TIMEOUT = 300
 PROXY_POLL_INTERVAL = 0.5
 
@@ -30,7 +31,27 @@ class SubmitJobRequest(BaseModel):
     timeout: int | None = None
 
 
-def create_app(db: Database) -> FastAPI:
+class RecurringJobCreate(BaseModel):
+    name: str
+    command: str
+    interval_seconds: int
+    model: str | None = None
+    priority: int = 5
+    timeout: int = 600
+    source: str | None = None
+    tag: str | None = None
+    max_retries: int = 0
+    resource_profile: str = "ollama"
+
+
+class RecurringJobUpdate(BaseModel):
+    enabled: bool | None = None
+    priority: int | None = None
+    interval_seconds: int | None = None
+    tag: str | None = None
+
+
+def create_app(db: Database) -> FastAPI:  # noqa: C901 PLR0915
     """Application factory. Takes a Database instance for test injection."""
     app = FastAPI(title="Ollama Queue")
 
@@ -72,7 +93,7 @@ def create_app(db: Database) -> FastAPI:
         return {"ok": True}
 
     @app.put("/api/queue/{job_id}/priority")
-    def set_priority(job_id: int, body: dict = Body(...)):
+    def set_priority(job_id: int, body: dict = Body(...)):  # noqa: B008
         priority = body.get("priority")
         if not isinstance(priority, int):
             raise HTTPException(status_code=400, detail="priority must be an integer")
@@ -136,6 +157,10 @@ def create_app(db: Database) -> FastAPI:
 
     @app.put("/api/settings")
     def put_settings(body: dict):
+        known = set(db.get_all_settings().keys())
+        unknown = [k for k in body if k not in known]
+        if unknown:
+            raise HTTPException(status_code=422, detail=f"Unknown setting keys: {unknown}")
         for key, value in body.items():
             db.set_setting(key, value)
         return {"ok": True}
@@ -155,7 +180,7 @@ def create_app(db: Database) -> FastAPI:
     # --- Proxy ---
 
     @app.post("/api/generate")
-    async def proxy_generate(body: dict = Body(...)):
+    async def proxy_generate(body: dict = Body(...)):  # noqa: B008
         """Forward a generate request to Ollama, serializing through the queue."""
         state = db.get_daemon_state()
         if state and state.get("state") == "paused_manual":
@@ -211,9 +236,87 @@ def create_app(db: Database) -> FastAPI:
                 stderr_tail=str(e)[:500],
                 outcome_reason=f"proxy error: {e}",
             )
-            raise HTTPException(status_code=502, detail=f"Ollama request failed: {e}")
+            raise HTTPException(status_code=502, detail=f"Ollama request failed: {e}") from e
         finally:
-            db.release_proxy_claim()
+            try:
+                db.release_proxy_claim()
+            except Exception:
+                _log.exception("release_proxy_claim failed — daemon may be stuck at sentinel job_id")
+
+    # --- Schedule (recurring jobs) ---
+    # NOTE: fixed routes (/rebalance, /events) must come before parameterized /{rj_id}
+
+    @app.get("/api/schedule")
+    def list_schedule():
+        return db.list_recurring_jobs()
+
+    @app.post("/api/schedule/rebalance")
+    def trigger_rebalance():
+        from ollama_queue.scheduler import Scheduler
+
+        changes = Scheduler(db).rebalance()
+        return {"rebalanced": len(changes), "changes": changes}
+
+    @app.get("/api/schedule/events")
+    def get_schedule_events(limit: int = 100):
+        return db.get_schedule_events(limit=limit)
+
+    @app.post("/api/schedule")
+    def add_schedule(body: RecurringJobCreate):
+        from ollama_queue.scheduler import Scheduler
+
+        rj_id = db.add_recurring_job(**body.model_dump())
+        Scheduler(db).rebalance()
+        return db.get_recurring_job(rj_id)
+
+    @app.put("/api/schedule/{rj_id}")
+    def update_schedule(rj_id: int, body: RecurringJobUpdate):
+        updated = db.update_recurring_job(rj_id, **body.model_dump(exclude_none=True))
+        if not updated:
+            raise HTTPException(status_code=404, detail="Recurring job not found")
+        # Rebalance next_run after edit
+        try:
+            from ollama_queue.scheduler import Scheduler
+
+            Scheduler(db).rebalance()
+        except Exception:
+            _log.exception("rebalance after update_schedule failed")
+        return {"ok": True}
+
+    @app.delete("/api/schedule/{rj_id}")
+    def delete_schedule(rj_id: int):
+        deleted = db.delete_recurring_job_by_id(rj_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Recurring job not found")
+        return {"ok": True}
+
+    # --- DLQ ---
+    # NOTE: /retry-all must come before /{dlq_id}/retry
+
+    @app.get("/api/dlq")
+    def list_dlq(include_resolved: bool = False):
+        return db.list_dlq(include_resolved=include_resolved)
+
+    @app.post("/api/dlq/retry-all")
+    def retry_all_dlq():
+        entries = db.list_dlq()
+        new_ids = [db.retry_dlq_entry(e["id"]) for e in entries]
+        return {"retried": len([x for x in new_ids if x])}
+
+    @app.post("/api/dlq/{dlq_id}/retry")
+    def retry_dlq(dlq_id: int):
+        new_id = db.retry_dlq_entry(dlq_id)
+        return {"new_job_id": new_id}
+
+    @app.post("/api/dlq/{dlq_id}/dismiss")
+    def dismiss_dlq(dlq_id: int):
+        db.dismiss_dlq_entry(dlq_id)
+        return {"dismissed": dlq_id}
+
+    @app.delete("/api/dlq")
+    def clear_dlq():
+        n = db.clear_dlq()
+        return {"cleared": n}
 
     # --- Static files for SPA ---
     spa_dir = Path(__file__).parent / "dashboard" / "spa" / "dist"

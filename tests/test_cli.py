@@ -321,3 +321,75 @@ def test_submit_no_dedup_allows_duplicates(runner, tmp_path):
         ],
     )
     assert "queued" in r2.output
+
+
+@pytest.fixture
+def db_path(tmp_path):
+    return str(tmp_path / "test.db")
+
+
+class TestScheduleCLI:
+    def test_schedule_add(self, runner, db_path):
+        result = runner.invoke(
+            main,
+            [
+                "--db",
+                db_path,
+                "schedule",
+                "add",
+                "--name",
+                "test-job",
+                "--interval",
+                "6h",
+                "--model",
+                "qwen2.5:14b",
+                "--priority",
+                "3",
+                "--tag",
+                "aria",
+                "--",
+                "echo hello",
+            ],
+        )
+        assert result.exit_code == 0
+        assert "test-job" in result.output
+
+    def test_schedule_list(self, runner, db_path):
+        runner.invoke(main, ["--db", db_path, "schedule", "add", "--name", "j1", "--interval", "1h", "--", "echo a"])
+        result = runner.invoke(main, ["--db", db_path, "schedule", "list"])
+        assert result.exit_code == 0
+        assert "j1" in result.output
+
+    def test_schedule_disable_enable(self, runner, db_path):
+        runner.invoke(main, ["--db", db_path, "schedule", "add", "--name", "j1", "--interval", "1h", "--", "echo a"])
+        result = runner.invoke(main, ["--db", db_path, "schedule", "disable", "j1"])
+        assert result.exit_code == 0
+        result = runner.invoke(main, ["--db", db_path, "schedule", "enable", "j1"])
+        assert result.exit_code == 0
+
+    def test_dlq_list(self, runner, db_path):
+        result = runner.invoke(main, ["--db", db_path, "dlq", "list"])
+        assert result.exit_code == 0
+
+
+class TestSubmitWithNewFlags:
+    def test_submit_with_tag_and_retries(self, runner, db_path):
+        result = runner.invoke(
+            main,
+            [
+                "--db",
+                db_path,
+                "submit",
+                "--source",
+                "test",
+                "--model",
+                "qwen2.5:7b",
+                "--tag",
+                "aria",
+                "--max-retries",
+                "2",
+                "--",
+                "echo hello",
+            ],
+        )
+        assert result.exit_code == 0

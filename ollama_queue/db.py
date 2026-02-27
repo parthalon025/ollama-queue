@@ -1,9 +1,12 @@
 """SQLite database layer for ollama-queue."""
 
 import json
+import logging
 import sqlite3
 import threading
 import time
+
+_log = logging.getLogger(__name__)
 
 DEFAULTS = {
     "poll_interval_seconds": 5,
@@ -21,6 +24,13 @@ DEFAULTS = {
     "duration_stats_retention_days": 90,
     "default_timeout_seconds": 600,
     "default_priority": 5,
+    "default_max_retries": 0,
+    "retry_backoff_base_seconds": 60,
+    "retry_backoff_multiplier": 2.0,
+    "stall_multiplier": 2.0,
+    "priority_categories": '{"critical":[1,2],"high":[3,4],"normal":[5,6],"low":[7,8],"background":[9,10]}',
+    "priority_category_colors": '{"critical":"#ef4444","high":"#f97316","normal":"#3b82f6","low":"#6b7280","background":"#374151"}',  # noqa: E501
+    "resource_profiles": '{"ollama":{"check_vram":true,"check_ram":true,"check_load":true},"any":{"check_vram":false,"check_ram":false,"check_load":false}}',  # noqa: E501
 }
 
 
@@ -30,14 +40,15 @@ class Database:
     def __init__(self, db_path: str):
         self.db_path = db_path
         self._conn = None
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
     def _connect(self) -> sqlite3.Connection:
-        if self._conn is None:
-            self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
-            self._conn.row_factory = sqlite3.Row
-            self._conn.execute("PRAGMA journal_mode=WAL")
-            self._conn.execute("PRAGMA foreign_keys=ON")
+        with self._lock:
+            if self._conn is None:
+                self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
+                self._conn.row_factory = sqlite3.Row
+                self._conn.execute("PRAGMA journal_mode=WAL")
+                self._conn.execute("PRAGMA foreign_keys=ON")
         return self._conn
 
     def initialize(self) -> None:
@@ -59,7 +70,14 @@ class Database:
                 outcome_reason TEXT,
                 stdout_tail TEXT,
                 stderr_tail TEXT,
-                estimated_duration REAL
+                estimated_duration REAL,
+                tag TEXT,
+                max_retries INTEGER DEFAULT 0,
+                retry_count INTEGER DEFAULT 0,
+                retry_after REAL,
+                stall_detected_at REAL,
+                recurring_job_id INTEGER REFERENCES recurring_jobs(id),
+                resource_profile TEXT DEFAULT 'ollama'
             );
 
             CREATE TABLE IF NOT EXISTS duration_history (
@@ -100,6 +118,56 @@ class Database:
                 value TEXT NOT NULL,
                 updated_at REAL
             );
+
+            CREATE TABLE IF NOT EXISTS recurring_jobs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                command TEXT NOT NULL,
+                model TEXT,
+                priority INTEGER DEFAULT 5,
+                timeout INTEGER DEFAULT 600,
+                source TEXT,
+                tag TEXT,
+                resource_profile TEXT DEFAULT 'ollama',
+                interval_seconds INTEGER NOT NULL,
+                next_run REAL,
+                last_run REAL,
+                last_job_id INTEGER,
+                max_retries INTEGER DEFAULT 0,
+                enabled INTEGER DEFAULT 1,
+                created_at REAL NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS schedule_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp REAL NOT NULL,
+                event_type TEXT NOT NULL,
+                recurring_job_id INTEGER REFERENCES recurring_jobs(id),
+                job_id INTEGER,
+                details TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS dlq (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                original_job_id INTEGER NOT NULL,
+                command TEXT NOT NULL,
+                model TEXT,
+                source TEXT,
+                tag TEXT,
+                priority INTEGER,
+                timeout INTEGER NOT NULL DEFAULT 600,
+                resource_profile TEXT DEFAULT 'ollama',
+                failure_reason TEXT NOT NULL,
+                stdout_tail TEXT,
+                stderr_tail TEXT,
+                retry_count INTEGER DEFAULT 0,
+                moved_at REAL NOT NULL,
+                resolved_at REAL,
+                resolution TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_jobs_recurring_job_id
+                ON jobs (recurring_job_id) WHERE recurring_job_id IS NOT NULL;
         """)
 
         # Seed settings defaults
@@ -111,22 +179,42 @@ class Database:
             )
 
         # Seed daemon_state singleton
-        conn.execute(
-            "INSERT OR IGNORE INTO daemon_state (id, state) VALUES (1, 'idle')"
-        )
+        conn.execute("INSERT OR IGNORE INTO daemon_state (id, state) VALUES (1, 'idle')")
 
         conn.commit()
 
     # --- Jobs ---
 
     def submit_job(
-        self, command: str, model: str, priority: int, timeout: int, source: str
+        self,
+        command: str,
+        model: str,
+        priority: int,
+        timeout: int,
+        source: str,
+        tag: str | None = None,
+        max_retries: int = 0,
+        resource_profile: str = "ollama",
+        recurring_job_id: int | None = None,
     ) -> int:
         conn = self._connect()
         cur = conn.execute(
-            """INSERT INTO jobs (command, model, priority, timeout, source, submitted_at)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (command, model, priority, timeout, source, time.time()),
+            """INSERT INTO jobs
+               (command, model, priority, timeout, source, submitted_at,
+                tag, max_retries, resource_profile, recurring_job_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                command,
+                model,
+                priority,
+                timeout,
+                source,
+                time.time(),
+                tag,
+                max_retries,
+                resource_profile,
+                recurring_job_id,
+            ),
         )
         conn.commit()
         return cur.lastrowid
@@ -141,6 +229,7 @@ class Database:
         row = conn.execute(
             """SELECT * FROM jobs
                WHERE status = 'pending'
+               AND (retry_after IS NULL OR retry_after <= unixepoch('now'))
                ORDER BY priority ASC, submitted_at ASC
                LIMIT 1"""
         ).fetchone()
@@ -160,7 +249,7 @@ class Database:
         exit_code: int,
         stdout_tail: str,
         stderr_tail: str,
-        outcome_reason: str | None,
+        outcome_reason: str | None = None,
     ) -> None:
         status = "completed" if exit_code == 0 else "failed"
         conn = self._connect()
@@ -213,9 +302,7 @@ class Database:
         ).fetchall()
         return [dict(r) for r in rows]
 
-    def get_history(
-        self, limit: int = 20, offset: int = 0, source: str | None = None
-    ) -> list[dict]:
+    def get_history(self, limit: int = 20, offset: int = 0, source: str | None = None) -> list[dict]:
         conn = self._connect()
         if source is not None:
             rows = conn.execute(
@@ -240,9 +327,7 @@ class Database:
 
     def get_setting(self, key: str):
         conn = self._connect()
-        row = conn.execute(
-            "SELECT value FROM settings WHERE key = ?", (key,)
-        ).fetchone()
+        row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
         if row is None:
             return None
         return json.loads(row["value"])
@@ -262,9 +347,7 @@ class Database:
 
     # --- Duration History ---
 
-    def record_duration(
-        self, source: str, model: str, duration: float, exit_code: int
-    ) -> None:
+    def record_duration(self, source: str, model: str, duration: float, exit_code: int) -> None:
         conn = self._connect()
         conn.execute(
             """INSERT INTO duration_history (source, model, duration, exit_code, recorded_at)
@@ -334,10 +417,18 @@ class Database:
 
     # --- Daemon State ---
 
-    _DAEMON_STATE_FIELDS = frozenset({
-        "state", "current_job_id", "paused_reason", "paused_since",
-        "last_poll_at", "jobs_completed_today", "jobs_failed_today", "uptime_since",
-    })
+    _DAEMON_STATE_FIELDS = frozenset(
+        {
+            "state",
+            "current_job_id",
+            "paused_reason",
+            "paused_since",
+            "last_poll_at",
+            "jobs_completed_today",
+            "jobs_failed_today",
+            "uptime_since",
+        }
+    )
 
     def update_daemon_state(self, **kwargs) -> None:
         if not kwargs:
@@ -351,10 +442,12 @@ class Database:
         conn.execute(f"UPDATE daemon_state SET {sets} WHERE id = 1", vals)
         conn.commit()
 
-    def get_daemon_state(self) -> dict | None:
+    def get_daemon_state(self) -> dict:
         conn = self._connect()
         row = conn.execute("SELECT * FROM daemon_state WHERE id = 1").fetchone()
-        return dict(row) if row else None
+        if row is None:
+            return {"state": "idle", "current_job_id": None, "paused_at": None, "paused_reason": None}
+        return dict(row)
 
     # --- Proxy ---
 
@@ -363,8 +456,7 @@ class Database:
         with self._lock:
             conn = self._connect()
             cur = conn.execute(
-                "UPDATE daemon_state SET state = 'running', current_job_id = -1 "
-                "WHERE id = 1 AND state = 'idle'"
+                "UPDATE daemon_state SET state = 'running', current_job_id = -1 " "WHERE id = 1 AND state = 'idle'"
             )
             conn.commit()
             return cur.rowcount > 0
@@ -374,8 +466,7 @@ class Database:
         with self._lock:
             conn = self._connect()
             conn.execute(
-                "UPDATE daemon_state SET state = 'idle', current_job_id = NULL "
-                "WHERE id = 1 AND current_job_id = -1"
+                "UPDATE daemon_state SET state = 'idle', current_job_id = NULL " "WHERE id = 1 AND current_job_id = -1"
             )
             conn.commit()
 
@@ -402,6 +493,270 @@ class Database:
             (now - duration_retention * 86400,),
         )
         conn.commit()
+
+    # --- Recurring Jobs ---
+
+    def add_recurring_job(
+        self,
+        name: str,
+        command: str,
+        interval_seconds: int,
+        model: str | None = None,
+        priority: int = 5,
+        timeout: int = 600,
+        source: str | None = None,
+        tag: str | None = None,
+        resource_profile: str = "ollama",
+        max_retries: int = 0,
+        next_run: float | None = None,
+    ) -> int:
+        conn = self._connect()
+        now = time.time()
+        cur = conn.execute(
+            """INSERT INTO recurring_jobs
+               (name, command, model, priority, timeout, source, tag,
+                resource_profile, interval_seconds, next_run, max_retries, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                name,
+                command,
+                model,
+                priority,
+                timeout,
+                source,
+                tag,
+                resource_profile,
+                interval_seconds,
+                next_run or now,
+                max_retries,
+                now,
+            ),
+        )
+        conn.commit()
+        return cur.lastrowid
+
+    def get_recurring_job(self, rj_id: int) -> dict | None:
+        conn = self._connect()
+        row = conn.execute("SELECT * FROM recurring_jobs WHERE id = ?", (rj_id,)).fetchone()
+        return dict(row) if row else None
+
+    def get_recurring_job_by_name(self, name: str) -> dict | None:
+        conn = self._connect()
+        row = conn.execute("SELECT * FROM recurring_jobs WHERE name = ?", (name,)).fetchone()
+        return dict(row) if row else None
+
+    def list_recurring_jobs(self) -> list[dict]:
+        conn = self._connect()
+        rows = conn.execute("SELECT * FROM recurring_jobs ORDER BY priority ASC, name ASC").fetchall()
+        return [dict(r) for r in rows]
+
+    def get_due_recurring_jobs(self, now: float) -> list[dict]:
+        conn = self._connect()
+        rows = conn.execute(
+            """SELECT * FROM recurring_jobs
+               WHERE enabled = 1 AND next_run <= ?
+               ORDER BY priority ASC, next_run ASC""",
+            (now,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def update_recurring_next_run(self, rj_id: int, completed_at: float, job_id: int | None = None) -> None:
+        conn = self._connect()
+        rj = self.get_recurring_job(rj_id)
+        if rj is None:
+            _log.error("update_recurring_next_run: recurring job id=%d not found (deleted?)", rj_id)
+            return
+        next_run = completed_at + rj["interval_seconds"]
+        conn.execute(
+            """UPDATE recurring_jobs
+               SET next_run = ?, last_run = ?, last_job_id = ?
+               WHERE id = ?""",
+            (next_run, completed_at, job_id, rj_id),
+        )
+        conn.commit()
+
+    def set_recurring_job_enabled(self, name: str, enabled: bool) -> bool:
+        conn = self._connect()
+        cur = conn.execute(
+            "UPDATE recurring_jobs SET enabled = ? WHERE name = ?",
+            (1 if enabled else 0, name),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+    def delete_recurring_job(self, name: str) -> bool:
+        conn = self._connect()
+        with self._lock:
+            rj = conn.execute("SELECT id FROM recurring_jobs WHERE name = ?", (name,)).fetchone()
+            if rj is None:
+                return False
+            rj_id = rj["id"]
+            conn.execute(
+                "UPDATE jobs SET recurring_job_id = NULL WHERE recurring_job_id = ? AND status = 'pending'",
+                (rj_id,),
+            )
+            conn.execute("DELETE FROM schedule_events WHERE recurring_job_id = ?", (rj_id,))
+            cur = conn.execute("DELETE FROM recurring_jobs WHERE id = ?", (rj_id,))
+            conn.commit()
+            return cur.rowcount > 0
+
+    def update_recurring_job(self, rj_id: int, **fields: object) -> bool:
+        """Update allowed fields on a recurring job. Returns True if found."""
+        allowed = {
+            "name",
+            "command",
+            "cron_expr",
+            "interval_seconds",
+            "model",
+            "priority",
+            "timeout",
+            "source",
+            "enabled",
+            "next_run",
+        }
+        updates = {k: v for k, v in fields.items() if k in allowed}
+        if not updates:
+            return False
+        conn = self._connect()
+        with self._lock:
+            set_clause = ", ".join(f"{k} = ?" for k in updates)
+            values = list(updates.values()) + [rj_id]
+            cur = conn.execute(
+                f"UPDATE recurring_jobs SET {set_clause} WHERE id = ?",  # noqa: S608
+                values,
+            )
+            conn.commit()
+            return cur.rowcount > 0
+
+    def delete_recurring_job_by_id(self, rj_id: int) -> bool:
+        """Delete a recurring job by ID with full cascade cleanup."""
+        conn = self._connect()
+        with self._lock:
+            conn.execute(
+                "UPDATE jobs SET recurring_job_id = NULL WHERE recurring_job_id = ? AND status = 'pending'",
+                (rj_id,),
+            )
+            conn.execute("DELETE FROM schedule_events WHERE recurring_job_id = ?", (rj_id,))
+            cur = conn.execute("DELETE FROM recurring_jobs WHERE id = ?", (rj_id,))
+            conn.commit()
+            return cur.rowcount > 0
+
+    def log_schedule_event(
+        self,
+        event_type: str,
+        recurring_job_id: int | None = None,
+        job_id: int | None = None,
+        details: dict | None = None,
+    ) -> None:
+        conn = self._connect()
+        conn.execute(
+            """INSERT INTO schedule_events
+               (timestamp, event_type, recurring_job_id, job_id, details)
+               VALUES (?, ?, ?, ?, ?)""",
+            (time.time(), event_type, recurring_job_id, job_id, json.dumps(details) if details else None),
+        )
+        conn.commit()
+
+    def get_schedule_events(self, limit: int = 100) -> list[dict]:
+        conn = self._connect()
+        rows = conn.execute(
+            "SELECT * FROM schedule_events ORDER BY timestamp DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def has_pending_or_running_recurring(self, recurring_job_id: int) -> bool:
+        conn = self._connect()
+        row = conn.execute(
+            """SELECT 1 FROM jobs
+               WHERE recurring_job_id = ? AND status IN ('pending', 'running')
+               LIMIT 1""",
+            (recurring_job_id,),
+        ).fetchone()
+        return row is not None
+
+    # --- DLQ ---
+
+    def move_to_dlq(self, job_id: int, failure_reason: str) -> int | None:
+        conn = self._connect()
+        job = self.get_job(job_id)
+        if not job:
+            return None
+        cur = conn.execute(
+            """INSERT INTO dlq
+               (original_job_id, command, model, source, tag, priority,
+                timeout, resource_profile, failure_reason, stdout_tail, stderr_tail,
+                retry_count, moved_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                job_id,
+                job["command"],
+                job["model"],
+                job["source"],
+                job.get("tag"),
+                job["priority"],
+                job.get("timeout", 600),
+                job.get("resource_profile", "ollama"),
+                failure_reason,
+                job.get("stdout_tail", ""),
+                job.get("stderr_tail", ""),
+                job.get("retry_count", 0),
+                time.time(),
+            ),
+        )
+        conn.execute("UPDATE jobs SET status = 'dead' WHERE id = ?", (job_id,))
+        conn.commit()
+        return cur.lastrowid
+
+    def get_dlq_entry(self, dlq_id: int) -> dict | None:
+        conn = self._connect()
+        row = conn.execute("SELECT * FROM dlq WHERE id = ?", (dlq_id,)).fetchone()
+        return dict(row) if row else None
+
+    def list_dlq(self, include_resolved: bool = False) -> list[dict]:
+        conn = self._connect()
+        if include_resolved:
+            rows = conn.execute("SELECT * FROM dlq ORDER BY moved_at DESC").fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM dlq WHERE resolution IS NULL ORDER BY moved_at DESC").fetchall()
+        return [dict(r) for r in rows]
+
+    def dismiss_dlq_entry(self, dlq_id: int) -> bool:
+        conn = self._connect()
+        cur = conn.execute(
+            "UPDATE dlq SET resolution = 'dismissed', resolved_at = ? WHERE id = ?",
+            (time.time(), dlq_id),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+    def retry_dlq_entry(self, dlq_id: int) -> int | None:
+        conn = self._connect()
+        entry = self.get_dlq_entry(dlq_id)
+        if not entry:
+            return None
+        new_job_id = self.submit_job(
+            command=entry["command"],
+            model=entry["model"],
+            priority=entry["priority"] or 5,
+            timeout=entry.get("timeout") or 600,
+            source=entry["source"] or "dlq-retry",
+            tag=entry.get("tag"),
+            resource_profile=entry.get("resource_profile", "ollama"),
+        )
+        conn.execute(
+            """UPDATE dlq SET resolution = 'retried', resolved_at = ?,
+               retry_count = retry_count + 1 WHERE id = ?""",
+            (time.time(), dlq_id),
+        )
+        conn.commit()
+        return new_job_id
+
+    def clear_dlq(self) -> int:
+        conn = self._connect()
+        cur = conn.execute("DELETE FROM dlq WHERE resolution IS NOT NULL")
+        conn.commit()
+        return cur.rowcount
 
     # --- Utility ---
 

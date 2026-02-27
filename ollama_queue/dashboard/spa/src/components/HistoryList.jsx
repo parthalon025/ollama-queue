@@ -1,5 +1,5 @@
 import { h } from 'preact';
-import { useState } from 'preact/hooks';
+import { useState, useMemo } from 'preact/hooks';
 
 const STATUS_CONFIG = {
   completed: { icon: '\u2713', color: 'var(--status-healthy)' },
@@ -15,9 +15,12 @@ const STATUS_CONFIG = {
  *   Each job: { id, status, source, model, completed_at, started_at, outcome_reason }
  */
 export default function HistoryList({ jobs }) {
-  const items = (jobs || []).slice(0, 20);
+  const allItems = jobs || [];
+  const [tagFilter, setTagFilter] = useState(null);
+  const tags = useMemo(() => [...new Set(allItems.map(j => j.tag).filter(Boolean))], [allItems]);
+  const items = (tagFilter ? allItems.filter(j => j.tag === tagFilter) : allItems).slice(0, 20);
 
-  if (items.length === 0) {
+  if (allItems.length === 0) {
     return (
       <div class="t-frame" data-label="History">
         <p style="color: var(--text-tertiary); font-size: var(--type-body); text-align: center;">
@@ -29,6 +32,21 @@ export default function HistoryList({ jobs }) {
 
   return (
     <div class="t-frame" data-label="History">
+      {tags.length > 0 && (
+        <div style="display: flex; gap: 0.4rem; margin-bottom: 0.5rem; flex-wrap: wrap;">
+          <span
+            style={`padding: 0.2rem 0.6rem; border-radius: 12px; cursor: pointer; font-size: var(--type-label);
+                    background: ${tagFilter === null ? 'var(--accent)' : 'var(--bg-inset)'}; color: #fff;`}
+            onClick={() => setTagFilter(null)}
+          >All</span>
+          {tags.map(tag => (
+            <span key={tag}
+                  style={`padding: 0.2rem 0.6rem; border-radius: 12px; cursor: pointer; font-size: var(--type-label);
+                          background: ${tagFilter === tag ? 'var(--accent)' : 'var(--bg-inset)'}; color: #fff;`}
+                  onClick={() => setTagFilter(tag)}>{tag}</span>
+          ))}
+        </div>
+      )}
       <div class="flex flex-col">
         {items.map((job) => (
           <HistoryRow key={job.id} job={job} />
@@ -59,9 +77,12 @@ function HistoryRow({ job }) {
         <span class="data-mono" style="font-size: var(--type-micro); color: var(--text-tertiary); width: 52px; text-align: right;">
           {relativeTime(job.completed_at)}
         </span>
-        {/* Source */}
+        {/* Source + stall indicator */}
         <span class="data-mono" style="font-size: var(--type-body); color: var(--text-primary); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
           {job.source || 'unknown'}
+          {job.stall_detected_at && (
+            <span title="Stall was detected" style="color: #f97316; margin-left: 4px;">⚠</span>
+          )}
         </span>
         {/* Model */}
         <span class="data-mono" style="font-size: var(--type-label); color: var(--text-secondary); max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">

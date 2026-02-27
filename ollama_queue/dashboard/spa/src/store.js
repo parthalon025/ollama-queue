@@ -7,7 +7,11 @@ export const healthData = signal([]);     // /api/health response
 export const durationData = signal([]);   // /api/durations response
 export const heatmapData = signal([]);    // /api/heatmap response
 export const settings = signal({});       // /api/settings response
-export const currentTab = signal('dashboard'); // 'dashboard' | 'settings'
+export const currentTab = signal('dashboard'); // 'dashboard' | 'schedule' | 'dlq' | 'settings'
+export const scheduleJobs = signal([]);
+export const scheduleEvents = signal([]);
+export const dlqEntries = signal([]);
+export const dlqCount = signal(0);
 
 // Derive API base from current URL so it works behind Tailscale Serve path prefix.
 // /ui/ → /api, /queue/ui/ → /queue/api
@@ -35,8 +39,93 @@ async function fetchStatus() {
     }
 }
 
+export async function fetchSchedule() {
+    try {
+        const [jobsResp, eventsResp] = await Promise.all([
+            fetch(`${API}/schedule`),
+            fetch(`${API}/schedule/events?limit=50`),
+        ]);
+        if (jobsResp.ok) scheduleJobs.value = await jobsResp.json();
+        if (eventsResp.ok) scheduleEvents.value = await eventsResp.json();
+    } catch (e) {
+        console.error('fetchSchedule failed:', e);
+    }
+}
+
+export async function toggleScheduleJob(id, enabled) {
+    try {
+        await fetch(`${API}/schedule/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled }),
+        });
+        await fetchSchedule();
+    } catch (e) {
+        console.error('toggleScheduleJob failed:', e);
+    }
+}
+
+export async function triggerRebalance() {
+    try {
+        await fetch(`${API}/schedule/rebalance`, { method: 'POST' });
+        await fetchSchedule();
+    } catch (e) {
+        console.error('triggerRebalance failed:', e);
+    }
+}
+
+export async function fetchDLQ() {
+    try {
+        const resp = await fetch(`${API}/dlq`);
+        if (resp.ok) {
+            const entries = await resp.json();
+            dlqEntries.value = entries;
+            dlqCount.value = entries.length;
+        }
+    } catch (e) {
+        console.error('fetchDLQ failed:', e);
+    }
+}
+
+export async function retryDLQEntry(id) {
+    try {
+        await fetch(`${API}/dlq/${id}/retry`, { method: 'POST' });
+        await fetchDLQ();
+    } catch (e) {
+        console.error('retryDLQEntry failed:', e);
+    }
+}
+
+export async function retryAllDLQ() {
+    try {
+        await fetch(`${API}/dlq/retry-all`, { method: 'POST' });
+        await fetchDLQ();
+    } catch (e) {
+        console.error('retryAllDLQ failed:', e);
+    }
+}
+
+export async function dismissDLQEntry(id) {
+    try {
+        await fetch(`${API}/dlq/${id}/dismiss`, { method: 'POST' });
+        await fetchDLQ();
+    } catch (e) {
+        console.error('dismissDLQEntry failed:', e);
+    }
+}
+
+export async function clearDLQ() {
+    try {
+        await fetch(`${API}/dlq`, { method: 'DELETE' });
+        await fetchDLQ();
+    } catch (e) {
+        console.error('clearDLQ failed:', e);
+    }
+}
+
 async function fetchAll() {
     fetchStatus();
+    fetchDLQ(); // populate DLQ badge on first load
     // Fetch non-realtime data (charts, history) once on load
     try {
         const [qResp, hResp, healthResp, durResp, heatResp, setResp] = await Promise.all([
