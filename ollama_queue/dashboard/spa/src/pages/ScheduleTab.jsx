@@ -19,6 +19,7 @@ function formatCountdown(next_run) {
 }
 
 function formatInterval(seconds) {
+    if (!seconds) return '—';
     if (seconds % 86400 === 0) return `${seconds / 86400}d`;
     if (seconds % 3600 === 0) return `${seconds / 3600}h`;
     if (seconds % 60 === 0) return `${seconds / 60}m`;
@@ -73,11 +74,15 @@ function TimelineBar({ jobs, tick }) {
                 const color = CATEGORY_COLORS[priorityCategory(rj.priority)];
                 return (
                     <div key={rj.id}
-                         title={`${rj.name} — ${formatCountdown(rj.next_run)}`}
+                         title={`${rj.pinned ? '★ PINNED: ' : ''}${rj.name} — ${formatCountdown(rj.next_run)}`}
                          style={{
                              position: 'absolute', left: `${pct}%`,
-                             width: 3, top: 0, bottom: 0,
-                             background: color, opacity: 0.85,
+                             width: rj.pinned ? 5 : 3,
+                             top: rj.pinned ? 0 : 4,
+                             bottom: rj.pinned ? 0 : 4,
+                             background: color,
+                             opacity: rj.pinned ? 1.0 : 0.75,
+                             borderRadius: rj.pinned ? 0 : 2,
                          }} />
                 );
             })}
@@ -90,8 +95,8 @@ export default function ScheduleTab() {
     const [tick, setTick] = useState(0);
     const [runningIds, setRunningIds] = useState(new Set());
     const [runError, setRunError] = useState(null);
-    const [editingInterval, setEditingInterval] = useState(null); // { id, value }
-
+    const [editingInterval, setEditingInterval] = useState(null);   // { id, value }
+    const [editingPriority, setEditingPriority] = useState(null);   // { id, value }
 
     useEffect(() => {
         fetchSchedule();
@@ -116,6 +121,28 @@ export default function ScheduleTab() {
             setRunError('Failed to update interval');
         }
         setEditingInterval(null);
+    }
+
+    async function handlePrioritySave(rjId) {
+        if (!editingPriority || editingPriority.id !== rjId) return;
+        const val = parseInt(editingPriority.value, 10);
+        if (isNaN(val) || val < 1 || val > 10) { setEditingPriority(null); return; }
+        try {
+            await updateScheduleJob(rjId, { priority: val });
+        } catch (e) {
+            console.error('Priority update failed:', e);
+            setRunError('Failed to update priority');
+        }
+        setEditingPriority(null);
+    }
+
+    async function handlePinToggle(rj) {
+        try {
+            await updateScheduleJob(rj.id, { pinned: !rj.pinned });
+        } catch (e) {
+            console.error('Pin toggle failed:', e);
+            setRunError(`Failed to toggle pin for "${rj.name}"`);
+        }
     }
 
     async function handleRunNow(rj) {
@@ -170,7 +197,7 @@ export default function ScheduleTab() {
                         <thead>
                             <tr style={{ borderBottom: '1px solid var(--border-subtle)',
                                          background: 'var(--bg-surface-raised)' }}>
-                                {['Name', 'Tag', 'Interval', 'Priority', 'Next Run', 'Enabled', ''].map(col => (
+                                {['Name', 'Tag', 'Schedule', 'Priority', 'Next Run', '★', 'Enabled', ''].map(col => (
                                     <th key={col} style={{
                                         textAlign: col === 'Name' ? 'left' : 'center',
                                         padding: '0.5rem 0.75rem',
@@ -236,6 +263,11 @@ export default function ScheduleTab() {
                                                         outline: 'none',
                                                     }}
                                                 />
+                                            ) : rj.cron_expression ? (
+                                                <span style={{ color: 'var(--text-secondary)',
+                                                               fontSize: 'var(--type-label)' }}>
+                                                    {rj.cron_expression}
+                                                </span>
                                             ) : (
                                                 <span
                                                     style={{ cursor: 'pointer', borderBottom: '1px dashed var(--text-tertiary)' }}
@@ -246,17 +278,42 @@ export default function ScheduleTab() {
                                             )}
                                         </td>
                                         <td style={{ textAlign: 'center' }}>
-                                            <span style={{
-                                                background: color,
-                                                color: 'var(--accent-text)',
-                                                padding: '0.1rem 0.5rem',
-                                                borderRadius: 'var(--radius)',
-                                                fontSize: 'var(--type-label)',
-                                                fontFamily: 'var(--font-mono)',
-                                                fontWeight: 600,
-                                            }}>
-                                                {cat} ({rj.priority})
-                                            </span>
+                                            {editingPriority && editingPriority.id === rj.id ? (
+                                                <input
+                                                    type="number" min="1" max="10"
+                                                    value={editingPriority.value}
+                                                    onInput={ev => setEditingPriority({ id: rj.id, value: ev.target.value })}
+                                                    onBlur={() => handlePrioritySave(rj.id)}
+                                                    onKeyDown={ev => {
+                                                        if (ev.key === 'Enter') handlePrioritySave(rj.id);
+                                                        if (ev.key === 'Escape') setEditingPriority(null);
+                                                    }}
+                                                    ref={el => el && el.focus()}
+                                                    style={{
+                                                        width: '3rem', textAlign: 'center',
+                                                        fontFamily: 'var(--font-mono)',
+                                                        background: 'var(--bg-inset)',
+                                                        color: 'var(--text-primary)',
+                                                        border: '1px solid var(--accent)',
+                                                        borderRadius: 'var(--radius)',
+                                                        padding: '0.1rem 0.2rem',
+                                                    }}
+                                                />
+                                            ) : (
+                                                <span
+                                                    style={{ background: color,
+                                                             color: 'var(--accent-text)',
+                                                             padding: '0.1rem 0.5rem',
+                                                             borderRadius: 'var(--radius)',
+                                                             fontSize: 'var(--type-label)',
+                                                             fontFamily: 'var(--font-mono)',
+                                                             fontWeight: 600, cursor: 'pointer',
+                                                             borderBottom: '1px dashed var(--accent-text)' }}
+                                                    title="Click to edit priority (1=highest, 10=lowest)"
+                                                    onClick={() => setEditingPriority({ id: rj.id, value: String(rj.priority) })}>
+                                                    {cat} ({rj.priority})
+                                                </span>
+                                            )}
                                         </td>
                                         <td style={{ textAlign: 'center',
                                                      fontFamily: 'var(--font-mono)',
@@ -266,6 +323,19 @@ export default function ScheduleTab() {
                                                      fontVariantNumeric: 'tabular-nums',
                                                      minWidth: '7rem' }}>
                                             {formatCountdown(rj.next_run)}
+                                        </td>
+                                        <td style={{ textAlign: 'center' }}>
+                                            <button
+                                                title={rj.pinned ? 'Pinned — click to unpin' : 'Click to pin this time slot'}
+                                                onClick={() => handlePinToggle(rj)}
+                                                style={{
+                                                    background: 'none', border: 'none',
+                                                    cursor: 'pointer', fontSize: '1.1rem',
+                                                    color: rj.pinned ? 'var(--status-warning)' : 'var(--text-tertiary)',
+                                                    opacity: rj.pinned ? 1 : 0.4,
+                                                }}>
+                                                ★
+                                            </button>
                                         </td>
                                         <td style={{ textAlign: 'center' }}>
                                             <input type="checkbox" checked={!!rj.enabled}
