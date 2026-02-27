@@ -90,6 +90,18 @@ class Scheduler:
             details={"name": rj["name"], "next_run": rj["next_run"]},
         )
 
+    def _nudge_past_blocked(self, ts: float, blocked_slots: set[int], job_name: str) -> float:
+        """Advance ts by 30-min increments until it clears all blocked slots."""
+        for _ in range(self._SLOT_COUNT):
+            if self._time_to_slot(ts) not in blocked_slots:
+                return ts
+            ts += self._SLOT_SECONDS
+        _log.warning(
+            "Rebalance: all slots blocked for %r — placing at best-effort position",
+            job_name,
+        )
+        return ts
+
     def rebalance(self, now: float | None = None) -> list[dict]:
         """Rebalance all enabled recurring jobs to spread load evenly.
 
@@ -115,13 +127,17 @@ class Scheduler:
         for group in groups.values():
             group.sort(key=lambda r: (r["priority"], r["name"]))
 
+        # Build blocked slot set from pinned cron jobs
+        blocked_slots = {i for i, s in enumerate(self.load_map(now)) if s >= self._PIN_SCORE}
+
         changes = []
         for interval, group in sorted(groups.items()):
             n = len(group)
             for i, rj in enumerate(group):
                 old_next_run = rj["next_run"]
-                # Spread evenly across the interval window
-                new_next_run = now + (interval * i / n)
+                candidate = now + (interval * i / n)
+                new_next_run = self._nudge_past_blocked(candidate, blocked_slots, rj["name"])
+
                 with self.db._lock:
                     conn = self.db._connect()
                     conn.execute(

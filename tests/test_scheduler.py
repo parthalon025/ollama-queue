@@ -270,3 +270,46 @@ class TestSuggestTime:
             )
         suggestions = scheduler.suggest_time(priority=5)
         assert suggestions == []
+
+
+class TestRebalancePinEnforcement:
+    def test_rebalance_avoids_pinned_slots(self, db, scheduler):
+        import datetime
+
+        # Set now = 05:30 local (slot 11) so the naive rebalance would place
+        # the single interval job at now+0 = slot 11 — inside the 06:00 pin buffer.
+        base = datetime.datetime.now().replace(hour=5, minute=30, second=0, microsecond=0)
+        now = base.timestamp()
+        # Pin a cron job at 06:00 (blocks slots 11, 12, 13)
+        db.add_recurring_job(
+            "pinned-aria",
+            "aria run",
+            cron_expression="0 6 * * *",
+            pinned=True,
+            next_run=datetime.datetime.now().replace(hour=6, minute=0, second=0, microsecond=0).timestamp(),
+        )
+        # A 24h interval job — naive rebalance places it at now+0 = slot 11 (blocked)
+        db.add_recurring_job("daily-sync", "sync run", interval_seconds=86400)
+        scheduler.rebalance(now)
+        rj = db.get_recurring_job_by_name("daily-sync")
+        placed_slot = scheduler._time_to_slot(rj["next_run"])
+        # Should not land on slots 11, 12, or 13 (06:00 ± buffer)
+        assert placed_slot not in {11, 12, 13}, f"Interval job landed on blocked slot {placed_slot}"
+
+    def test_rebalance_logs_skipped_conflict(self, db, scheduler):
+        import datetime
+
+        now = datetime.datetime(2025, 1, 1, 0, 0, 0).timestamp()
+        # Pin all 24 hourly slots (covers all 48 slots with ±1 bleed)
+        for h in range(24):
+            db.add_recurring_job(
+                f"pin-{h}",
+                "cmd",
+                cron_expression=f"0 {h} * * *",
+                pinned=True,
+                next_run=datetime.datetime(2025, 1, 1, h, 0, 0).timestamp(),
+            )
+        db.add_recurring_job("interval", "cmd", interval_seconds=3600)
+        # Should not raise — just place as best as possible
+        changes = scheduler.rebalance(now)
+        assert isinstance(changes, list)
