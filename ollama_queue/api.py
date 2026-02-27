@@ -34,7 +34,8 @@ class SubmitJobRequest(BaseModel):
 class RecurringJobCreate(BaseModel):
     name: str
     command: str
-    interval_seconds: int
+    interval_seconds: int | None = None
+    cron_expression: str | None = None
     model: str | None = None
     priority: int = 5
     timeout: int = 600
@@ -48,6 +49,7 @@ class RecurringJobUpdate(BaseModel):
     enabled: bool | None = None
     priority: int | None = None
     interval_seconds: int | None = None
+    cron_expression: str | None = None
     tag: str | None = None
     command: str | None = None
     name: str | None = None

@@ -129,7 +129,8 @@ class Database:
                 source TEXT,
                 tag TEXT,
                 resource_profile TEXT DEFAULT 'ollama',
-                interval_seconds INTEGER NOT NULL,
+                interval_seconds INTEGER,
+                cron_expression TEXT,
                 next_run REAL,
                 last_run REAL,
                 last_job_id INTEGER,
@@ -169,6 +170,13 @@ class Database:
             CREATE INDEX IF NOT EXISTS idx_jobs_recurring_job_id
                 ON jobs (recurring_job_id) WHERE recurring_job_id IS NOT NULL;
         """)
+
+        # Migrate pre-cron DBs that lack the cron_expression column
+        try:
+            conn.execute("ALTER TABLE recurring_jobs ADD COLUMN cron_expression TEXT")
+            conn.commit()
+        except Exception:
+            _log.debug("cron_expression column already exists — skipping migration")  # noqa: S110
 
         # Seed settings defaults
         now = time.time()
@@ -500,7 +508,8 @@ class Database:
         self,
         name: str,
         command: str,
-        interval_seconds: int,
+        interval_seconds: int | None = None,
+        cron_expression: str | None = None,
         model: str | None = None,
         priority: int = 5,
         timeout: int = 600,
@@ -510,13 +519,24 @@ class Database:
         max_retries: int = 0,
         next_run: float | None = None,
     ) -> int:
+        if interval_seconds is None and cron_expression is None:
+            raise ValueError("Either interval_seconds or cron_expression must be provided")
         conn = self._connect()
         now = time.time()
+        if next_run is None and cron_expression:
+            import datetime
+
+            from croniter import croniter
+
+            start_dt = datetime.datetime.fromtimestamp(now)
+            next_run = croniter(cron_expression, start_dt).get_next(datetime.datetime).timestamp()
+        elif next_run is None:
+            next_run = now
         cur = conn.execute(
             """INSERT INTO recurring_jobs
                (name, command, model, priority, timeout, source, tag,
-                resource_profile, interval_seconds, next_run, max_retries, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                resource_profile, interval_seconds, cron_expression, next_run, max_retries, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 name,
                 command,
@@ -527,7 +547,8 @@ class Database:
                 tag,
                 resource_profile,
                 interval_seconds,
-                next_run or now,
+                cron_expression,
+                next_run,
                 max_retries,
                 now,
             ),
@@ -566,7 +587,16 @@ class Database:
         if rj is None:
             _log.error("update_recurring_next_run: recurring job id=%d not found (deleted?)", rj_id)
             return
-        next_run = completed_at + rj["interval_seconds"]
+        cron_expr = rj.get("cron_expression")
+        if cron_expr:
+            import datetime
+
+            from croniter import croniter
+
+            start_dt = datetime.datetime.fromtimestamp(completed_at)
+            next_run = croniter(cron_expr, start_dt).get_next(datetime.datetime).timestamp()
+        else:
+            next_run = completed_at + rj["interval_seconds"]
         conn.execute(
             """UPDATE recurring_jobs
                SET next_run = ?, last_run = ?, last_job_id = ?
@@ -606,6 +636,7 @@ class Database:
             "name",
             "command",
             "interval_seconds",
+            "cron_expression",
             "model",
             "priority",
             "timeout",

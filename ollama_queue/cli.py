@@ -209,6 +209,51 @@ def _parse_interval(interval_str: str) -> int:
     return int(interval_str)  # assume seconds
 
 
+def _parse_schedule_spec(
+    interval: str | None,
+    at: str | None,
+    cron: str | None,
+    days: str | None,
+) -> tuple[int | None, str | None]:
+    """Parse mutually exclusive schedule options into (interval_seconds, cron_expression).
+
+    --interval 6h        → interval_seconds=21600, cron_expression=None
+    --at 07:00           → interval_seconds=None, cron_expression="0 7 * * *"
+    --at 12:00 --days 1-5 → interval_seconds=None, cron_expression="0 12 * * 1-5"
+    --cron "0 7 * * *"  → interval_seconds=None, cron_expression="0 7 * * *"
+    """
+    from croniter import croniter as _croniter
+
+    given = sum(x is not None for x in [interval, at, cron])
+    if given == 0:
+        raise click.UsageError("One of --interval, --at, or --cron is required.")
+    if given > 1:
+        raise click.UsageError("--interval, --at, and --cron are mutually exclusive.")
+    if days is not None and at is None:
+        raise click.UsageError("--days is only valid with --at.")
+
+    if interval is not None:
+        return _parse_interval(interval), None
+
+    if at is not None:
+        try:
+            h, m = (int(p) for p in at.split(":"))
+        except (ValueError, AttributeError) as err:
+            raise click.UsageError(f"--at must be HH:MM, got: {at!r}") from err
+        dow = days if days is not None else "*"
+        cron_expr = f"{m} {h} * * {dow}"
+    else:
+        cron_expr = cron
+
+    # Validate the expression
+    try:
+        _croniter(cron_expr)
+    except Exception as exc:
+        raise click.UsageError(f"Invalid cron expression {cron_expr!r}: {exc}") from exc
+
+    return None, cron_expr
+
+
 @main.group()
 def schedule():
     """Manage recurring scheduled jobs."""
@@ -217,7 +262,10 @@ def schedule():
 
 @schedule.command("add")
 @click.option("--name", required=True, help="Unique job name")
-@click.option("--interval", required=True, help="Interval: 6h, 30m, 90s, 1d")
+@click.option("--interval", default=None, help="Interval: 6h, 30m, 90s, 1d")
+@click.option("--at", default=None, metavar="HH:MM", help="Time of day to fire (e.g. 07:00)")
+@click.option("--days", default=None, metavar="DOW", help="Days of week for --at (e.g. 1-5 or mon-fri)")
+@click.option("--cron", default=None, metavar="EXPR", help="5-field cron expression (e.g. '0 7 * * 1-5')")
 @click.option("--model", default=None)
 @click.option("--priority", default=5, type=int)
 @click.option("--timeout", default=600, type=int)
@@ -227,15 +275,31 @@ def schedule():
 @click.option("--profile", default="ollama", help="Resource profile: ollama|any")
 @click.argument("command", nargs=-1, required=True)
 @click.pass_context
-def schedule_add(ctx, name, interval, model, priority, timeout, tag, source, max_retries, profile, command):
+def schedule_add(  # noqa: PLR0913
+    ctx,
+    name,
+    interval,
+    at,
+    days,
+    cron,
+    model,
+    priority,
+    timeout,
+    tag,
+    source,
+    max_retries,
+    profile,
+    command,
+):
     db = ctx.obj["db"]
     from ollama_queue.scheduler import Scheduler
 
-    interval_seconds = _parse_interval(interval)
+    interval_seconds, cron_expression = _parse_schedule_spec(interval, at, cron, days)
     rj_id = db.add_recurring_job(
         name=name,
         command=" ".join(command),
         interval_seconds=interval_seconds,
+        cron_expression=cron_expression,
         model=model,
         priority=priority,
         timeout=timeout,
@@ -244,8 +308,12 @@ def schedule_add(ctx, name, interval, model, priority, timeout, tag, source, max
         resource_profile=profile,
         max_retries=max_retries,
     )
-    Scheduler(db).rebalance()
-    click.echo(f"Added recurring job '{name}' (id={rj_id}) — interval={interval}, rebalanced.")
+    if interval_seconds is not None:
+        Scheduler(db).rebalance()
+        schedule_str = f"interval={interval}"
+    else:
+        schedule_str = f"cron={cron_expression!r}"
+    click.echo(f"Added recurring job '{name}' (id={rj_id}) — {schedule_str}.")
 
 
 @schedule.command("list")
@@ -258,22 +326,26 @@ def schedule_list(ctx):
     if not jobs:
         click.echo("No recurring jobs.")
         return
-    click.echo(f"{'NAME':<20} {'INTERVAL':>10} {'PRIORITY':>8} {'TAG':<12} {'ENABLED':>7} {'NEXT RUN'}")
-    click.echo("-" * 75)
+    click.echo(f"{'NAME':<20} {'SCHEDULE':<18} {'PRIORITY':>8} {'TAG':<12} {'ENABLED':>7} {'NEXT RUN'}")
+    click.echo("-" * 82)
     for rj in jobs:
         next_run = datetime.datetime.fromtimestamp(rj["next_run"]).strftime("%Y-%m-%d %H:%M") if rj["next_run"] else "—"
-        secs = rj["interval_seconds"]
-        if secs % 86400 == 0:
-            interval_str = f"{secs // 86400}d"
-        elif secs % 3600 == 0:
-            interval_str = f"{secs // 3600}h"
-        elif secs % 60 == 0:
-            interval_str = f"{secs // 60}m"
+        cron_expr = rj.get("cron_expression")
+        if cron_expr:
+            schedule_str = cron_expr
         else:
-            interval_str = f"{secs}s"
+            secs = rj["interval_seconds"] or 0
+            if secs % 86400 == 0:
+                schedule_str = f"every {secs // 86400}d"
+            elif secs % 3600 == 0:
+                schedule_str = f"every {secs // 3600}h"
+            elif secs % 60 == 0:
+                schedule_str = f"every {secs // 60}m"
+            else:
+                schedule_str = f"every {secs}s"
         enabled = "yes" if rj["enabled"] else "no"
         tag = rj.get("tag") or "—"
-        click.echo(f"{rj['name']:<20} {interval_str:>10} {rj['priority']:>8} {tag:<12} {enabled:>7}  {next_run}")
+        click.echo(f"{rj['name']:<20} {schedule_str:<18} {rj['priority']:>8} {tag:<12} {enabled:>7}  {next_run}")
 
 
 @schedule.command("enable")

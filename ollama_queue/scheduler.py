@@ -33,8 +33,17 @@ class Scheduler:
                     details={"name": rj["name"], "reason": "already pending or running"},
                 )
                 # Advance next_run to avoid re-evaluating on every poll
-                interval = rj.get("interval_seconds") or 300  # fallback 5min
-                new_next_run = now + interval
+                cron_expr = rj.get("cron_expression")
+                if cron_expr:
+                    import datetime
+
+                    from croniter import croniter
+
+                    start_dt = datetime.datetime.fromtimestamp(now)
+                    new_next_run = croniter(cron_expr, start_dt).get_next(datetime.datetime).timestamp()
+                else:
+                    interval = rj.get("interval_seconds") or 300  # fallback 5min
+                    new_next_run = now + interval
                 if hasattr(self.db, "update_recurring_job"):
                     self.db.update_recurring_job(rj["id"], next_run=new_next_run)
                 else:
@@ -91,6 +100,11 @@ class Scheduler:
         if now is None:
             now = time.time()
         rjs = [r for r in self.db.list_recurring_jobs() if r["enabled"]]
+        if not rjs:
+            return []
+
+        # Cron jobs have pinned wall-clock times; interval spreading doesn't apply
+        rjs = [r for r in rjs if not r.get("cron_expression") and r.get("interval_seconds")]
         if not rjs:
             return []
 
