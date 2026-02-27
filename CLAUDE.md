@@ -105,3 +105,23 @@ Quality gates for agent-driven development (auto-triggered via superpowers integ
 - **Quality checks**: `python3 -m pytest --timeout=120 -x -q; npm run build`
 - **PRD artifacts**: `tasks/prd.json`, `tasks/prd-<feature>.md`
 - **Progress log**: `progress.txt` (append-only during execution)
+
+## Code Quality
+- Lint: `make lint`
+- Format: `make format`
+
+## Quality Gates
+- Before committing: `/verify`
+- Before PRs: `lessons-db scan --target . --baseline HEAD`
+
+## Lessons
+- Check before planning: `/check-lessons`
+- Capture after bugs: `/capture-lesson`
+- Lessons location: `docs/lessons/`
+
+## Local AI Review
+- Code review: `ollama-code-review .`
+
+## Semantic Search
+- Generate: `bash scripts/generate-embeddings.sh`
+- Storage: `.embeddings/` (gitignored)

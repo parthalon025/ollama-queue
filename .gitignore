@@ -29,6 +29,18 @@ ollama_queue/dashboard/spa/dist/
 # OS
 .DS_Store
 
+# Secrets
+.env
+.env.*
+!.env.example
+client_secret*.json
+
+# Claude local
+.claude/*.local.md
+
+# Embeddings
+.embeddings/
+
 # Autonomous Coding Toolkit (runtime state)
 tasks/
 logs/
