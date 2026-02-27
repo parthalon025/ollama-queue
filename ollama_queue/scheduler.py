@@ -222,3 +222,31 @@ class Scheduler:
             elif rj.get("interval_seconds"):
                 self._score_interval_job(scores, rj, job_score)
         return scores
+
+    def suggest_time(
+        self,
+        priority: int = 5,
+        top_n: int = 3,
+        now: float | None = None,
+    ) -> list[tuple[str, float]]:
+        """Return top_n suggested cron expressions for a new job at the given priority.
+
+        Returns list of (cron_expression, load_score) tuples, lowest score first.
+        Excludes slots with score >= _PIN_SCORE (pinned blocks).
+        """
+        if now is None:
+            now = time.time()
+        scores = self.load_map(now)
+        # Build (score, slot_index) pairs, excluding hard blocks
+        candidates = [(scores[i], i) for i in range(self._SLOT_COUNT) if scores[i] < self._PIN_SCORE]
+        # Sort by score ascending, then slot index (prefer earlier in day on ties)
+        candidates.sort(key=lambda x: (x[0], x[1]))
+        results = []
+        for score, slot in candidates[:top_n]:
+            # Convert slot index to HH:MM cron expression
+            total_minutes = slot * 30
+            hour = total_minutes // 60
+            minute = total_minutes % 60
+            cron_expr = f"{minute} {hour} * * *"
+            results.append((cron_expr, score))
+        return results

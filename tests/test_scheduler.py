@@ -215,3 +215,38 @@ class TestLoadMap:
         lm = scheduler.load_map()
         nonzero = [s for s in lm if s > 0]
         assert len(nonzero) >= 3  # at least 3 slots hit
+
+
+class TestSuggestTime:
+    def test_returns_list_of_suggestions(self, db, scheduler):
+        suggestions = scheduler.suggest_time(priority=5)
+        assert isinstance(suggestions, list)
+        assert len(suggestions) >= 1
+
+    def test_suggestions_avoid_pinned_slots(self, db, scheduler):
+        import datetime
+
+        # Pin every hour except 03:00
+        for h in range(24):
+            if h == 3:
+                continue
+            db.add_recurring_job(
+                f"pinned-{h}",
+                "echo hi",
+                cron_expression=f"0 {h} * * *",
+                pinned=True,
+                next_run=datetime.datetime(2025, 1, 1, h, 0, 0).timestamp(),
+            )
+        suggestions = scheduler.suggest_time(priority=5, top_n=3)
+        # All suggestions should be near 03:00 (slot 6)
+        for _cron_expr, score in suggestions:
+            assert score < 999
+
+    def test_suggestion_format(self, db, scheduler):
+        suggestions = scheduler.suggest_time(priority=5)
+        for cron_expr, score in suggestions:
+            assert isinstance(cron_expr, str)
+            assert isinstance(score, int | float)
+            # Should be a valid 5-field cron expression
+            parts = cron_expr.split()
+            assert len(parts) == 5
