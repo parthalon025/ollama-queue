@@ -190,13 +190,22 @@ class Scheduler:
             else:
                 scores[slot] = min(self._PIN_SCORE - 1, scores[slot] + job_score)
 
-    def _score_interval_job(self, scores: list[float], rj: dict, job_score: float) -> None:
-        """Apply interval job scores to the load map in-place."""
+    def _score_interval_job(self, scores: list[float], rj: dict, job_score: float, now: float) -> None:
+        """Apply interval job scores to the load map in-place.
+
+        Firings are anchored to local midnight so interval and cron slot indices
+        are coherent — both use local wall-clock time.
+        """
+        import datetime
+
         interval = rj["interval_seconds"]
         firings_per_day = max(1, self._DAY_SECONDS // interval)
+        local_midnight = datetime.datetime.combine(
+            datetime.datetime.fromtimestamp(now).date(), datetime.time.min
+        ).timestamp()
         for i in range(firings_per_day):
-            offset = (i * interval) % self._DAY_SECONDS
-            slot = int(offset // self._SLOT_SECONDS) % self._SLOT_COUNT
+            fire_ts = local_midnight + (i * interval) % self._DAY_SECONDS
+            slot = self._time_to_slot(fire_ts)
             if scores[slot] < self._PIN_SCORE:
                 scores[slot] = min(self._PIN_SCORE - 1, scores[slot] + job_score)
 
@@ -220,7 +229,7 @@ class Scheduler:
             if rj.get("cron_expression"):
                 self._score_cron_job(scores, rj, job_score, now)
             elif rj.get("interval_seconds"):
-                self._score_interval_job(scores, rj, job_score)
+                self._score_interval_job(scores, rj, job_score, now)
         return scores
 
     def suggest_time(

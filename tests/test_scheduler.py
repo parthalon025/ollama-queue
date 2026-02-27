@@ -191,8 +191,10 @@ class TestLoadMap:
             next_run=datetime.datetime(2025, 1, 1, 6, 0, 0).timestamp(),
         )
         lm = scheduler.load_map()
-        # Slot 12 (06:00) and adjacent slot 11 (05:30) or 13 (06:30) should be 999
-        assert lm[12] == 999 or lm[11] == 999 or lm[13] == 999
+        # All three slots must be blocked: slot 11 (05:30), 12 (06:00), 13 (06:30)
+        assert lm[11] == 999
+        assert lm[12] == 999
+        assert lm[13] == 999
 
     def test_unpinned_cron_job_scores_by_priority(self, db, scheduler):
         import datetime
@@ -250,3 +252,21 @@ class TestSuggestTime:
             # Should be a valid 5-field cron expression
             parts = cron_expr.split()
             assert len(parts) == 5
+
+    def test_all_slots_blocked_returns_empty(self, db, scheduler):
+        """suggest_time returns [] when all 48 slots are blocked by pinned jobs."""
+        import datetime
+
+        # Pin every 30-min slot: 48 jobs, each adjacent bleed covers 3 slots
+        # Using every-hour pins (slots 0,2,4,...) — each pins slot-1,slot,slot+1
+        # 24 hourly pins × 3 adjacent each covers all 48 slots
+        for h in range(24):
+            db.add_recurring_job(
+                f"pin-{h}",
+                "cmd",
+                cron_expression=f"0 {h} * * *",
+                pinned=True,
+                next_run=datetime.datetime(2025, 1, 1, h, 0, 0).timestamp(),
+            )
+        suggestions = scheduler.suggest_time(priority=5)
+        assert suggestions == []
