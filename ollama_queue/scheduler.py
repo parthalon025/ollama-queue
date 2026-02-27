@@ -170,7 +170,7 @@ class Scheduler:
     _PIN_SCORE = 999
 
     def _time_to_slot(self, unix_ts: float) -> int:
-        """Convert a Unix timestamp to a 30-min slot index (0–47) based on local time."""
+        """Convert a Unix timestamp to a 30-min slot index (0-47) based on local time."""
         import datetime
 
         dt = datetime.datetime.fromtimestamp(unix_ts)

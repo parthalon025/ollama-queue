@@ -291,7 +291,7 @@ def schedule():
 @click.option("--pin", is_flag=True, default=False, help="Pin this job's time slot (cron jobs only)")
 @click.argument("command", nargs=-1, required=True)
 @click.pass_context
-def schedule_add(  # noqa: PLR0913
+def schedule_add(
     ctx,
     name,
     interval,

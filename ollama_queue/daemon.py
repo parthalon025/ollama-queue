@@ -32,7 +32,7 @@ class Daemon:
         self._last_prune: float = 0.0
         self._recent_job_models: dict[str, float] = {}  # model -> last_completed_at
 
-    def poll_once(self) -> None:  # noqa: C901 PLR0912 PLR0915
+    def poll_once(self) -> None:
         """Single poll cycle.
 
         1. Check if manually paused -> skip
@@ -150,7 +150,7 @@ class Daemon:
         )
 
         start_time = time.time()
-        proc = subprocess.Popen(  # noqa: S602
+        proc = subprocess.Popen(
             job["command"],
             shell=True,
             stdout=subprocess.PIPE,
@@ -247,7 +247,7 @@ class Daemon:
         )
 
     def _check_stalled_jobs(self, now: float) -> None:
-        """Flag running jobs whose elapsed time exceeds stall_multiplier × estimated_duration."""
+        """Flag running jobs whose elapsed time exceeds stall_multiplier x estimated_duration."""
         settings = self.db.get_all_settings()
         multiplier = settings.get("stall_multiplier", 2.0)
         conn = self.db._connect()

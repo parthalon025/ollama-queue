@@ -159,7 +159,7 @@ def parse_interval(s: str) -> int:
 
 def _register_job(name: str, cfg: dict, db: str) -> bool:
     """Register one recurring job via CLI. Returns True on success."""
-    cmd = [  # noqa: S603 S607 — internal admin script, inputs from TIMER_MAP constant
+    cmd = [
         "ollama-queue",
         "--db",
         db,
@@ -180,8 +180,9 @@ def _register_job(name: str, cfg: dict, db: str) -> bool:
         "--source",
         cfg["source"],
         "--",
-    ] + shlex.split(cfg["command"])
-    result = subprocess.run(cmd, capture_output=True, text=True)  # noqa: S603 S607
+        *shlex.split(cfg["command"]),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         print(f"    ERROR registering: {result.stderr.strip()}")
         return False
@@ -191,8 +192,8 @@ def _register_job(name: str, cfg: dict, db: str) -> bool:
 
 def _disable_unit(name: str) -> None:
     """Disable and stop the systemd timer, then remove unit files."""
-    disable = subprocess.run(  # noqa: S603
-        ["systemctl", "--user", "disable", "--now", f"{name}.timer"],  # noqa: S607
+    disable = subprocess.run(
+        ["systemctl", "--user", "disable", "--now", f"{name}.timer"],
         capture_output=True,
         text=True,
     )
@@ -216,10 +217,10 @@ def _migrate_one(name: str, cfg: dict, db: str) -> bool:
 def _post_migrate(db: str) -> None:
     """Reload systemd and rebalance the schedule after migration."""
     print("Reloading systemd daemon...")
-    subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)  # noqa: S603 S607
+    subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
     print("Rebalancing schedule...")
-    result = subprocess.run(  # noqa: S603
-        ["ollama-queue", "--db", db, "schedule", "rebalance"],  # noqa: S607
+    result = subprocess.run(
+        ["ollama-queue", "--db", db, "schedule", "rebalance"],
         capture_output=True,
         text=True,
     )

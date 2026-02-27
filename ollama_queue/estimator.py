@@ -3,18 +3,20 @@
 Uses rolling average from DB history, with model-based and generic fallbacks.
 """
 
+from typing import ClassVar
+
 from ollama_queue.db import Database
 
 
 class DurationEstimator:
     """Estimate job durations for queue ETA calculations."""
 
-    MODEL_DEFAULTS = {
-        "deepseek-r1:8b": 1800,          # 30 min
+    MODEL_DEFAULTS: ClassVar[dict[str, int]] = {
+        "deepseek-r1:8b": 1800,  # 30 min
         "deepseek-coder-v2:lite": 1200,  # 20 min
-        "qwen2.5-coder:14b": 900,        # 15 min
-        "qwen2.5:7b": 600,               # 10 min
-        "nomic-embed-text": 900,          # 15 min
+        "qwen2.5-coder:14b": 900,  # 15 min
+        "qwen2.5:7b": 600,  # 10 min
+        "nomic-embed-text": 900,  # 15 min
     }
     GENERIC_DEFAULT = 600  # 10 min
 
@@ -51,10 +53,12 @@ class DurationEstimator:
 
         for job in queue_jobs:
             duration = self.estimate(job["source"], model=job.get("model"))
-            results.append({
-                "estimated_start_offset": cumulative_offset,
-                "estimated_duration": duration,
-            })
+            results.append(
+                {
+                    "estimated_start_offset": cumulative_offset,
+                    "estimated_duration": duration,
+                }
+            )
             cumulative_offset += duration
 
         return results

@@ -177,14 +177,14 @@ class Database:
             conn.execute("ALTER TABLE recurring_jobs ADD COLUMN cron_expression TEXT")
             conn.commit()
         except Exception:
-            _log.debug("cron_expression column already exists — skipping migration")  # noqa: S110
+            _log.debug("cron_expression column already exists — skipping migration")
 
         # Migrate DBs that lack the pinned column
         try:
             conn.execute("ALTER TABLE recurring_jobs ADD COLUMN pinned INTEGER DEFAULT 0")
             conn.commit()
         except Exception:
-            _log.debug("pinned column already exists — skipping migration")  # noqa: S110
+            _log.debug("pinned column already exists — skipping migration")
 
         # Seed settings defaults
         now = time.time()
@@ -662,9 +662,9 @@ class Database:
         conn = self._connect()
         with self._lock:
             set_clause = ", ".join(f"{k} = ?" for k in updates)
-            values = list(updates.values()) + [rj_id]
+            values = [*list(updates.values()), rj_id]
             cur = conn.execute(
-                f"UPDATE recurring_jobs SET {set_clause} WHERE id = ?",  # noqa: S608
+                f"UPDATE recurring_jobs SET {set_clause} WHERE id = ?",
                 values,
             )
             conn.commit()

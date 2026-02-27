@@ -1,4 +1,4 @@
-.PHONY: lint lint-py lint-spa lint-sh lint-audit format
+.PHONY: lint lint-py lint-spa lint-sh lint-audit lint-types format
 
 all: lint
 
@@ -15,6 +15,9 @@ lint-sh:
 
 lint-audit:
 	pip-audit --progress-spinner off -q 2>/dev/null || true
+
+lint-types:
+	.venv/bin/mypy ollama_queue/
 
 format:
 	ruff format .

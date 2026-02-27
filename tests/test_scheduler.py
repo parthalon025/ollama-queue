@@ -259,7 +259,7 @@ class TestSuggestTime:
 
         # Pin every 30-min slot: 48 jobs, each adjacent bleed covers 3 slots
         # Using every-hour pins (slots 0,2,4,...) — each pins slot-1,slot,slot+1
-        # 24 hourly pins × 3 adjacent each covers all 48 slots
+        # 24 hourly pins x 3 adjacent each covers all 48 slots
         for h in range(24):
             db.add_recurring_job(
                 f"pin-{h}",

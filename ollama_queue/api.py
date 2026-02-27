@@ -59,7 +59,7 @@ class RecurringJobUpdate(BaseModel):
     pinned: bool | None = None
 
 
-def create_app(db: Database) -> FastAPI:  # noqa: C901 PLR0915
+def create_app(db: Database) -> FastAPI:
     """Application factory. Takes a Database instance for test injection."""
     app = FastAPI(title="Ollama Queue")
 
@@ -101,7 +101,7 @@ def create_app(db: Database) -> FastAPI:  # noqa: C901 PLR0915
         return {"ok": True}
 
     @app.put("/api/queue/{job_id}/priority")
-    def set_priority(job_id: int, body: dict = Body(...)):  # noqa: B008
+    def set_priority(job_id: int, body: dict = Body(...)):
         priority = body.get("priority")
         if not isinstance(priority, int):
             raise HTTPException(status_code=400, detail="priority must be an integer")
@@ -188,7 +188,7 @@ def create_app(db: Database) -> FastAPI:  # noqa: C901 PLR0915
     # --- Proxy ---
 
     @app.post("/api/generate")
-    async def proxy_generate(body: dict = Body(...)):  # noqa: B008
+    async def proxy_generate(body: dict = Body(...)):
         """Forward a generate request to Ollama, serializing through the queue."""
         state = db.get_daemon_state()
         if state and state.get("state") == "paused_manual":
@@ -388,7 +388,7 @@ def _compute_kpis_locked(db: Database) -> dict:
 
     # pause_minutes_24h: total minutes in paused states in last 24h
     # Each health_log entry represents one poll interval where daemon was in that state.
-    # We approximate by counting paused entries × poll_interval.
+    # We approximate by counting paused entries x poll_interval.
     # NOTE: Use raw conn query (not db.get_setting) to avoid thread-safety issues
     # when _compute_kpis is called from FastAPI worker threads.
     setting_row = conn.execute("SELECT value FROM settings WHERE key = ?", ("poll_interval_seconds",)).fetchone()

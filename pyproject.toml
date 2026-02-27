@@ -28,3 +28,12 @@ ollama-queue = "ollama_queue.cli:main"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-n auto --dist load"
+
+[tool.mypy]
+python_version = "3.12"
+strict = false
+ignore_missing_imports = true
+disallow_untyped_defs = false
+warn_return_any = false
+warn_unused_ignores = true
+no_implicit_optional = true

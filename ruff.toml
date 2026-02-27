@@ -7,14 +7,17 @@ line-length = 120
 [lint]
 select = [
     "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
     "F",    # pyflakes
     "I",    # isort
+    "N",    # pep8-naming
     "UP",   # pyupgrade
     "B",    # flake8-bugbear
     "S",    # flake8-bandit (security)
     "SIM",  # flake8-simplify
     "C901", # mccabe complexity
     "PLR",  # pylint refactor
+    "RUF",  # ruff-specific
 ]
 
 ignore = [
@@ -33,6 +36,8 @@ ignore = [
 "ollama_queue/daemon.py" = ["C901", "PLR0912", "PLR0915", "S602", "S603", "S607"]
 # Health checks run known system binaries (nvidia-smi, ollama) — not user input
 "ollama_queue/health.py" = ["S607", "C901", "SIM105", "S110"]
+# Admin migration script — subprocess calls use known binary paths, not user input
+"scripts/*.py" = ["S603", "S607"]
 
 [lint.mccabe]
 max-complexity = 10
