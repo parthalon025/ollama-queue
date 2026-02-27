@@ -327,3 +327,34 @@ class TestDLQ:
         db.dismiss_dlq_entry(dlq_id)
         db.clear_dlq()
         assert db.list_dlq() == []
+
+
+def test_pinned_column_default_false(tmp_path):
+    from ollama_queue.db import Database
+
+    db = Database(str(tmp_path / "test.db"))
+    db.initialize()
+    rj_id = db.add_recurring_job("j1", "echo hi", interval_seconds=3600)
+    rj = db.get_recurring_job(rj_id)
+    assert rj["pinned"] == 0  # default unpinned
+
+
+def test_add_recurring_job_with_pin(tmp_path):
+    from ollama_queue.db import Database
+
+    db = Database(str(tmp_path / "test.db"))
+    db.initialize()
+    rj_id = db.add_recurring_job("j1", "echo hi", interval_seconds=3600, pinned=True)
+    rj = db.get_recurring_job(rj_id)
+    assert rj["pinned"] == 1
+
+
+def test_update_recurring_job_pinned(tmp_path):
+    from ollama_queue.db import Database
+
+    db = Database(str(tmp_path / "test.db"))
+    db.initialize()
+    rj_id = db.add_recurring_job("j1", "echo hi", interval_seconds=3600)
+    db.update_recurring_job(rj_id, pinned=1)
+    rj = db.get_recurring_job(rj_id)
+    assert rj["pinned"] == 1

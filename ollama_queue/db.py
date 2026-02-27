@@ -136,6 +136,7 @@ class Database:
                 last_job_id INTEGER,
                 max_retries INTEGER DEFAULT 0,
                 enabled INTEGER DEFAULT 1,
+                pinned INTEGER DEFAULT 0,
                 created_at REAL NOT NULL
             );
 
@@ -177,6 +178,13 @@ class Database:
             conn.commit()
         except Exception:
             _log.debug("cron_expression column already exists — skipping migration")  # noqa: S110
+
+        # Migrate DBs that lack the pinned column
+        try:
+            conn.execute("ALTER TABLE recurring_jobs ADD COLUMN pinned INTEGER DEFAULT 0")
+            conn.commit()
+        except Exception:
+            _log.debug("pinned column already exists — skipping migration")  # noqa: S110
 
         # Seed settings defaults
         now = time.time()
@@ -518,6 +526,7 @@ class Database:
         resource_profile: str = "ollama",
         max_retries: int = 0,
         next_run: float | None = None,
+        pinned: bool = False,
     ) -> int:
         if interval_seconds is None and cron_expression is None:
             raise ValueError("Either interval_seconds or cron_expression must be provided")
@@ -535,8 +544,8 @@ class Database:
         cur = conn.execute(
             """INSERT INTO recurring_jobs
                (name, command, model, priority, timeout, source, tag,
-                resource_profile, interval_seconds, cron_expression, next_run, max_retries, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                resource_profile, interval_seconds, cron_expression, next_run, max_retries, pinned, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 name,
                 command,
@@ -550,6 +559,7 @@ class Database:
                 cron_expression,
                 next_run,
                 max_retries,
+                1 if pinned else 0,
                 now,
             ),
         )
@@ -644,6 +654,7 @@ class Database:
             "tag",
             "enabled",
             "next_run",
+            "pinned",
         }
         updates = {k: v for k, v in fields.items() if k in allowed}
         if not updates:
