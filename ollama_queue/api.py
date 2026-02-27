@@ -278,11 +278,16 @@ def create_app(db: Database) -> FastAPI:
         conn.commit()
         from ollama_queue.scheduler import Scheduler
         Scheduler(db).rebalance()
-        return db.get_recurring_job(rj_id)
+        result = db.get_recurring_job(rj_id)
+        if result is None:
+            raise HTTPException(status_code=404, detail="Recurring job not found")
+        return result
 
     @app.delete("/api/schedule/{rj_id}")
     def delete_schedule(rj_id: int):
         conn = db._connect()
+        if conn.execute("SELECT id FROM recurring_jobs WHERE id = ?", (rj_id,)).fetchone() is None:
+            raise HTTPException(status_code=404, detail="Recurring job not found")
         conn.execute("DELETE FROM schedule_events WHERE recurring_job_id = ?", (rj_id,))
         conn.execute("UPDATE jobs SET recurring_job_id = NULL WHERE recurring_job_id = ?", (rj_id,))
         conn.execute("DELETE FROM recurring_jobs WHERE id = ?", (rj_id,))

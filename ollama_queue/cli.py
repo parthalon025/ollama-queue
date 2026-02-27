@@ -256,8 +256,15 @@ def schedule_list(ctx):
     click.echo("-" * 75)
     for rj in jobs:
         next_run = datetime.datetime.fromtimestamp(rj["next_run"]).strftime("%Y-%m-%d %H:%M") if rj["next_run"] else "—"
-        interval_h = rj["interval_seconds"] // 3600
-        interval_str = f"{interval_h}h" if rj["interval_seconds"] % 3600 == 0 else f"{rj['interval_seconds']}s"
+        secs = rj["interval_seconds"]
+        if secs % 86400 == 0:
+            interval_str = f"{secs // 86400}d"
+        elif secs % 3600 == 0:
+            interval_str = f"{secs // 3600}h"
+        elif secs % 60 == 0:
+            interval_str = f"{secs // 60}m"
+        else:
+            interval_str = f"{secs}s"
         enabled = "yes" if rj["enabled"] else "no"
         click.echo(f"{rj['name']:<20} {interval_str:>10} {rj['priority']:>8} {rj.get('tag') or '—':<12} {enabled:>7}  {next_run}")
 

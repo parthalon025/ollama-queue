@@ -62,6 +62,17 @@ class TestJobs:
         assert nxt["command"] == "cmd2"
         assert nxt["priority"] == 2
 
+    def test_next_job_skips_retry_after_in_future(self, db):
+        job_id = db.submit_job("cmd", "m", 5, 60, "src")
+        # Simulate DLQ retry backoff: set retry_after to the future
+        conn = db._connect()
+        conn.execute(
+            "UPDATE jobs SET retry_after = ? WHERE id = ?",
+            (time.time() + 3600, job_id),
+        )
+        conn.commit()
+        assert db.get_next_job() is None
+
     def test_next_job_fifo_within_priority(self, db):
         db.submit_job("first", "m1", priority=5, timeout=600, source="a")
         time.sleep(0.01)  # ensure different submitted_at

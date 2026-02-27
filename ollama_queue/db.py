@@ -216,6 +216,7 @@ class Database:
         row = conn.execute(
             """SELECT * FROM jobs
                WHERE status = 'pending'
+               AND (retry_after IS NULL OR retry_after <= unixepoch('now'))
                ORDER BY priority ASC, submitted_at ASC
                LIMIT 1"""
         ).fetchone()
