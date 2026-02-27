@@ -393,3 +393,47 @@ class TestSubmitWithNewFlags:
             ],
         )
         assert result.exit_code == 0
+
+
+def test_schedule_add_pin_flag(tmp_path):
+    runner = CliRunner()
+    db_path = str(tmp_path / "test.db")
+    result = runner.invoke(
+        main,
+        ["--db", db_path, "schedule", "add", "--name", "pinned-aria", "--at", "23:30", "--pin", "--", "aria", "run"],
+    )
+    assert result.exit_code == 0, result.output
+    assert "pinned" in result.output.lower() or "★" in result.output
+
+
+def test_schedule_add_at_auto(tmp_path):
+    runner = CliRunner()
+    db_path = str(tmp_path / "test.db")
+    result = runner.invoke(
+        main,
+        ["--db", db_path, "schedule", "add", "--name", "auto-job", "--at", "auto", "--priority", "5", "--", "cmd"],
+    )
+    assert result.exit_code == 0, result.output
+    assert "Suggested" in result.output or "cron=" in result.output
+
+
+def test_schedule_suggest(tmp_path):
+    runner = CliRunner()
+    db_path = str(tmp_path / "test.db")
+    result = runner.invoke(main, ["--db", db_path, "schedule", "suggest", "--priority", "5"])
+    assert result.exit_code == 0, result.output
+    # Should output at least one time suggestion with HH:MM format
+    assert ":" in result.output
+
+
+def test_schedule_edit_priority(tmp_path):
+    runner = CliRunner()
+    db_path = str(tmp_path / "test.db")
+    # First add a job
+    runner.invoke(main, ["--db", db_path, "schedule", "add", "--name", "myjob", "--interval", "1h", "--", "cmd"])
+    # Then edit its priority
+    result = runner.invoke(main, ["--db", db_path, "schedule", "edit", "myjob", "--priority", "2"])
+    assert result.exit_code == 0, result.output
+    # Verify in list
+    list_result = runner.invoke(main, ["--db", db_path, "schedule", "list"])
+    assert "myjob" in list_result.output

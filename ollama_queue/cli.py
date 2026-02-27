@@ -209,18 +209,28 @@ def _parse_interval(interval_str: str) -> int:
     return int(interval_str)  # assume seconds
 
 
+def _auto_suggest_slot(db, priority: int) -> tuple[str, float]:
+    """Use Scheduler.suggest_time to pick the best available cron slot."""
+    from ollama_queue.scheduler import Scheduler
+
+    suggestions = Scheduler(db).suggest_time(priority=priority, top_n=1)
+    if not suggestions:
+        raise click.UsageError("No available time slots (all blocked by pinned jobs).")
+    return suggestions[0]
+
+
 def _parse_schedule_spec(
     interval: str | None,
     at: str | None,
     cron: str | None,
     days: str | None,
-) -> tuple[int | None, str | None]:
-    """Parse mutually exclusive schedule options into (interval_seconds, cron_expression).
+    priority: int = 5,
+    db=None,
+) -> tuple[int | None, str | None, float | None]:
+    """Parse mutually exclusive schedule options.
 
-    --interval 6h        → interval_seconds=21600, cron_expression=None
-    --at 07:00           → interval_seconds=None, cron_expression="0 7 * * *"
-    --at 12:00 --days 1-5 → interval_seconds=None, cron_expression="0 12 * * 1-5"
-    --cron "0 7 * * *"  → interval_seconds=None, cron_expression="0 7 * * *"
+    Returns (interval_seconds, cron_expression, auto_score).
+    auto_score is non-None only when --at auto is used.
     """
     from croniter import croniter as _croniter
 
@@ -233,25 +243,30 @@ def _parse_schedule_spec(
         raise click.UsageError("--days is only valid with --at.")
 
     if interval is not None:
-        return _parse_interval(interval), None
+        return _parse_interval(interval), None, None
+
+    if at == "auto":
+        if db is None:
+            raise click.UsageError("--at auto requires a database context.")
+        cron_expr, score = _auto_suggest_slot(db, priority)
+        return None, cron_expr, score
 
     if at is not None:
         try:
             h, m = (int(p) for p in at.split(":"))
         except (ValueError, AttributeError) as err:
-            raise click.UsageError(f"--at must be HH:MM, got: {at!r}") from err
+            raise click.UsageError(f"--at must be HH:MM or 'auto', got: {at!r}") from err
         dow = days if days is not None else "*"
         cron_expr = f"{m} {h} * * {dow}"
     else:
         cron_expr = cron
 
-    # Validate the expression
     try:
         _croniter(cron_expr)
     except Exception as exc:
         raise click.UsageError(f"Invalid cron expression {cron_expr!r}: {exc}") from exc
 
-    return None, cron_expr
+    return None, cron_expr, None
 
 
 @main.group()
@@ -263,7 +278,7 @@ def schedule():
 @schedule.command("add")
 @click.option("--name", required=True, help="Unique job name")
 @click.option("--interval", default=None, help="Interval: 6h, 30m, 90s, 1d")
-@click.option("--at", default=None, metavar="HH:MM", help="Time of day to fire (e.g. 07:00)")
+@click.option("--at", default=None, metavar="HH:MM|auto", help="Time of day (HH:MM) or 'auto' for best slot")
 @click.option("--days", default=None, metavar="DOW", help="Days of week for --at (e.g. 1-5 or mon-fri)")
 @click.option("--cron", default=None, metavar="EXPR", help="5-field cron expression (e.g. '0 7 * * 1-5')")
 @click.option("--model", default=None)
@@ -273,6 +288,7 @@ def schedule():
 @click.option("--source", default=None)
 @click.option("--max-retries", default=0, type=int)
 @click.option("--profile", default="ollama", help="Resource profile: ollama|any")
+@click.option("--pin", is_flag=True, default=False, help="Pin this job's time slot (cron jobs only)")
 @click.argument("command", nargs=-1, required=True)
 @click.pass_context
 def schedule_add(  # noqa: PLR0913
@@ -289,12 +305,15 @@ def schedule_add(  # noqa: PLR0913
     source,
     max_retries,
     profile,
+    pin,
     command,
 ):
     db = ctx.obj["db"]
     from ollama_queue.scheduler import Scheduler
 
-    interval_seconds, cron_expression = _parse_schedule_spec(interval, at, cron, days)
+    interval_seconds, cron_expression, auto_score = _parse_schedule_spec(
+        interval, at, cron, days, priority=priority, db=db
+    )
     rj_id = db.add_recurring_job(
         name=name,
         command=" ".join(command),
@@ -307,13 +326,18 @@ def schedule_add(  # noqa: PLR0913
         tag=tag,
         resource_profile=profile,
         max_retries=max_retries,
+        pinned=pin,
     )
     if interval_seconds is not None:
         Scheduler(db).rebalance()
         schedule_str = f"interval={interval}"
+    elif auto_score is not None:
+        schedule_str = f"cron={cron_expression!r}"
+        click.echo(f"Suggested {cron_expression} (load score={auto_score:.1f}) — placed.")
     else:
         schedule_str = f"cron={cron_expression!r}"
-    click.echo(f"Added recurring job '{name}' (id={rj_id}) — {schedule_str}.")
+    pin_str = " ★ pinned" if pin else ""
+    click.echo(f"Added recurring job '{name}' (id={rj_id}) — {schedule_str}{pin_str}.")
 
 
 @schedule.command("list")
@@ -345,7 +369,66 @@ def schedule_list(ctx):
                 schedule_str = f"every {secs}s"
         enabled = "yes" if rj["enabled"] else "no"
         tag = rj.get("tag") or "—"
-        click.echo(f"{rj['name']:<20} {schedule_str:<18} {rj['priority']:>8} {tag:<12} {enabled:>7}  {next_run}")
+        pin_mark = "★ " if rj.get("pinned") else "  "
+        click.echo(
+            f"{pin_mark}{rj['name']:<20} {schedule_str:<18} {rj['priority']:>8} {tag:<12} {enabled:>7}  {next_run}"
+        )
+
+
+@schedule.command("suggest")
+@click.option("--priority", default=5, type=int, help="Priority for the hypothetical job (1=highest)")
+@click.option("--top", default=3, type=int, help="Number of suggestions to show")
+@click.pass_context
+def schedule_suggest(ctx, priority, top):
+    """Show optimal time slots for a new job at the given priority."""
+    db = ctx.obj["db"]
+    from ollama_queue.scheduler import Scheduler
+
+    suggestions = Scheduler(db).suggest_time(priority=priority, top_n=top)
+    if not suggestions:
+        click.echo("No available slots (all blocked by pinned jobs).")
+        return
+    click.echo(f"Top {len(suggestions)} suggested times for priority {priority}:")
+    click.echo(f"{'TIME':<12} {'CRON':<18} SCORE")
+    click.echo("-" * 40)
+    for cron_expr, score in suggestions:
+        parts = cron_expr.split()
+        minute, hour = int(parts[0]), int(parts[1])
+        time_str = f"{hour:02d}:{minute:02d}"
+        click.echo(f"{time_str:<12} {cron_expr:<18} {score:.1f}")
+
+
+@schedule.command("edit")
+@click.argument("name")
+@click.option("--priority", default=None, type=int, help="New priority (1=highest)")
+@click.option("--interval", default=None, help="New interval: 6h, 30m, etc.")
+@click.option("--command", "new_command", default=None, help="New command string")
+@click.option("--pin/--no-pin", default=None, help="Pin or unpin this job's time slot")
+@click.pass_context
+def schedule_edit(ctx, name, priority, interval, new_command, pin):
+    """Edit a recurring job's fields."""
+    db = ctx.obj["db"]
+    rj = db.get_recurring_job_by_name(name)
+    if rj is None:
+        click.echo(f"Job '{name}' not found.", err=True)
+        return
+    fields: dict = {}
+    if priority is not None:
+        fields["priority"] = priority
+    if interval is not None:
+        fields["interval_seconds"] = _parse_interval(interval)
+    if new_command is not None:
+        fields["command"] = new_command
+    if pin is not None:
+        fields["pinned"] = 1 if pin else 0
+    if not fields:
+        click.echo("Nothing to update — specify at least one option.")
+        return
+    db.update_recurring_job(rj["id"], **fields)
+    from ollama_queue.scheduler import Scheduler
+
+    Scheduler(db).rebalance()
+    click.echo(f"Updated '{name}': {', '.join(f'{k}={v}' for k, v in fields.items())}")
 
 
 @schedule.command("enable")
