@@ -32,7 +32,7 @@ class Daemon:
         self._last_prune: float = 0.0
         self._recent_job_models: dict[str, float] = {}  # model -> last_completed_at
 
-    def poll_once(self) -> None:
+    def poll_once(self) -> None:  # noqa: C901 PLR0912 PLR0915
         """Single poll cycle.
 
         1. Check if manually paused -> skip
@@ -108,11 +108,13 @@ class Daemon:
         currently_paused = current_state.startswith("paused")
         # Prune expired entries from recent job models
         self._recent_job_models = {
-            m: t for m, t in self._recent_job_models.items()
-            if now - t < self.RECENT_MODEL_WINDOW
+            m: t for m, t in self._recent_job_models.items() if now - t < self.RECENT_MODEL_WINDOW
         }
         evaluation = self.health.evaluate(
-            snap, settings, currently_paused=currently_paused, queued_model=job["model"],
+            snap,
+            settings,
+            currently_paused=currently_paused,
+            queued_model=job["model"],
             recent_job_models=set(self._recent_job_models.keys()),
         )
 
@@ -148,7 +150,7 @@ class Daemon:
         )
 
         start_time = time.time()
-        proc = subprocess.Popen(
+        proc = subprocess.Popen(  # noqa: S602
             job["command"],
             shell=True,
             stdout=subprocess.PIPE,
@@ -176,7 +178,9 @@ class Daemon:
             )
             failed_count = (state.get("jobs_failed_today") or 0) + 1
             self.db.update_daemon_state(
-                state="idle", current_job_id=None, last_poll_at=time.time(),
+                state="idle",
+                current_job_id=None,
+                last_poll_at=time.time(),
                 jobs_failed_today=failed_count,
             )
             return
@@ -234,7 +238,9 @@ class Daemon:
         counter_field = "jobs_completed_today" if exit_code == 0 else "jobs_failed_today"
         current_count = (state.get(counter_field) or 0) + 1
         self.db.update_daemon_state(
-            state="idle", current_job_id=None, last_poll_at=time.time(),
+            state="idle",
+            current_job_id=None,
+            last_poll_at=time.time(),
             **{counter_field: current_count},
         )
 
@@ -243,16 +249,16 @@ class Daemon:
         settings = self.db.get_all_settings()
         multiplier = settings.get("stall_multiplier", 2.0)
         conn = self.db._connect()
-        running = conn.execute(
-            "SELECT * FROM jobs WHERE status = 'running' AND stall_detected_at IS NULL"
-        ).fetchall()
+        running = conn.execute("SELECT * FROM jobs WHERE status = 'running' AND stall_detected_at IS NULL").fetchall()
         for row in running:
             job = dict(row)
             estimated = job.get("estimated_duration")
             started = job.get("started_at")
             if estimated and started:
                 elapsed = now - started
-                if elapsed > multiplier * estimated:
+                min_stall_seconds = 60
+                stall_window = max(min_stall_seconds, estimated * multiplier)
+                if elapsed > stall_window:
                     conn.execute(
                         "UPDATE jobs SET stall_detected_at = ? WHERE id = ?",
                         (now, job["id"]),
@@ -265,7 +271,9 @@ class Daemon:
                     )
                     _log.warning(
                         "Job #%d stalled: elapsed=%.0fs, estimated=%.0fs",
-                        job["id"], elapsed, estimated,
+                        job["id"],
+                        elapsed,
+                        estimated,
                     )
 
     def _check_retryable_jobs(self, now: float) -> None:
@@ -291,9 +299,7 @@ class Daemon:
             except Exception:
                 _log.exception("Unexpected error in poll_once(); attempting state recovery")
                 try:
-                    self.db.update_daemon_state(
-                        state="idle", current_job_id=None, last_poll_at=time.time()
-                    )
+                    self.db.update_daemon_state(state="idle", current_job_id=None, last_poll_at=time.time())
                 except Exception:
                     _log.exception("State recovery also failed; daemon loop continues")
 

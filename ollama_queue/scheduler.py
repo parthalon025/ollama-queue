@@ -32,6 +32,19 @@ class Scheduler:
                     recurring_job_id=rj["id"],
                     details={"name": rj["name"], "reason": "already pending or running"},
                 )
+                # Advance next_run to avoid re-evaluating on every poll
+                interval = rj.get("interval_seconds") or 300  # fallback 5min
+                new_next_run = now + interval
+                if hasattr(self.db, "update_recurring_job"):
+                    self.db.update_recurring_job(rj["id"], next_run=new_next_run)
+                else:
+                    with self.db._lock:
+                        conn = self.db._connect()
+                        conn.execute(
+                            "UPDATE recurring_jobs SET next_run = ? WHERE id = ?",
+                            (new_next_run, rj["id"]),
+                        )
+                        conn.commit()
                 continue
             job_id = self.db.submit_job(
                 command=rj["command"],
@@ -54,9 +67,7 @@ class Scheduler:
             _log.info("Promoted recurring job %r → job #%d", rj["name"], job_id)
         return new_ids
 
-    def update_next_run(
-        self, recurring_job_id: int, completed_at: float, job_id: int | None = None
-    ) -> None:
+    def update_next_run(self, recurring_job_id: int, completed_at: float, job_id: int | None = None) -> None:
         """Update next_run after job completion. Anchors to completed_at."""
         self.db.update_recurring_next_run(recurring_job_id, completed_at, job_id)
         rj = self.db.get_recurring_job(recurring_job_id)
@@ -89,12 +100,13 @@ class Scheduler:
         for i, rj in enumerate(rjs):
             old_next_run = rj["next_run"]
             new_next_run = now + (window * i / n)
-            conn = self.db._connect()
-            conn.execute(
-                "UPDATE recurring_jobs SET next_run = ? WHERE id = ?",
-                (new_next_run, rj["id"]),
-            )
-            conn.commit()
+            with self.db._lock:
+                conn = self.db._connect()
+                conn.execute(
+                    "UPDATE recurring_jobs SET next_run = ? WHERE id = ?",
+                    (new_next_run, rj["id"]),
+                )
+                conn.commit()
             change = {
                 "name": rj["name"],
                 "old_next_run": old_next_run,

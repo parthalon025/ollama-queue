@@ -13,6 +13,7 @@ Usage:
 """
 
 import argparse
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -179,7 +180,7 @@ def _register_job(name: str, cfg: dict, db: str) -> bool:
         "--source",
         cfg["source"],
         "--",
-    ] + cfg["command"].split()
+    ] + shlex.split(cfg["command"])
     result = subprocess.run(cmd, capture_output=True, text=True)  # noqa: S603 S607
     if result.returncode != 0:
         print(f"    ERROR registering: {result.stderr.strip()}")
@@ -215,7 +216,7 @@ def _migrate_one(name: str, cfg: dict, db: str) -> bool:
 def _post_migrate(db: str) -> None:
     """Reload systemd and rebalance the schedule after migration."""
     print("Reloading systemd daemon...")
-    subprocess.run(["systemctl", "--user", "daemon-reload"])  # noqa: S603 S607
+    subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)  # noqa: S603 S607
     print("Rebalancing schedule...")
     result = subprocess.run(  # noqa: S603
         ["ollama-queue", "--db", db, "schedule", "rebalance"],  # noqa: S607

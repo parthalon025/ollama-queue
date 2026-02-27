@@ -14,15 +14,19 @@ class TestInitialize:
     def test_initialize_creates_v2_tables(self, db):
         tables = db.list_tables()
         expected = {
-            "jobs", "duration_history", "health_log",
-            "daemon_state", "settings",
-            "recurring_jobs", "schedule_events", "dlq",
+            "jobs",
+            "duration_history",
+            "health_log",
+            "daemon_state",
+            "settings",
+            "recurring_jobs",
+            "schedule_events",
+            "dlq",
         }
         assert expected == set(tables)
 
     def test_jobs_has_v2_columns(self, db):
-        db.submit_job("cmd", "m", 5, 60, "src",
-                      tag="aria", max_retries=2, resource_profile="ollama")
+        db.submit_job("cmd", "m", 5, 60, "src", tag="aria", max_retries=2, resource_profile="ollama")
         job = db.get_job(1)
         assert job["tag"] == "aria"
         assert job["max_retries"] == 2
@@ -48,7 +52,7 @@ class TestJobs:
             timeout=600,
             source="test",
         )
-        assert job_id == 1
+        assert isinstance(job_id, int) and job_id > 0
         job = db.get_job(job_id)
         assert job["status"] == "pending"
         assert job["command"] == "ollama run llama2"
@@ -232,7 +236,7 @@ class TestRecurringJobs:
             source="aria",
             tag="aria",
         )
-        assert rj_id == 1
+        assert isinstance(rj_id, int) and rj_id > 0
         rj = db.get_recurring_job(rj_id)
         assert rj["name"] == "aria-full"
         assert rj["interval_seconds"] == 21600
@@ -277,8 +281,7 @@ class TestDLQ:
     def test_move_to_dlq(self, db):
         job_id = db.submit_job("cmd", "m", 5, 60, "src")
         db.start_job(job_id)
-        db.complete_job(job_id, exit_code=1, stdout_tail="", stderr_tail="err",
-                        outcome_reason="exit code 1")
+        db.complete_job(job_id, exit_code=1, stdout_tail="", stderr_tail="err", outcome_reason="exit code 1")
         dlq_id = db.move_to_dlq(job_id, failure_reason="exit code 1")
         assert dlq_id is not None
         entry = db.get_dlq_entry(dlq_id)

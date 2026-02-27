@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from pathlib import Path
-from typing import Optional
 
 _log = logging.getLogger(__name__)
 
@@ -16,9 +16,9 @@ from fastapi import Body, FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from ollama_queue.db import Database, DEFAULTS
+from ollama_queue.db import DEFAULTS, Database
 
-OLLAMA_URL = "http://127.0.0.1:11434"
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
 PROXY_WAIT_TIMEOUT = 300
 PROXY_POLL_INTERVAL = 0.5
 
@@ -26,32 +26,32 @@ PROXY_POLL_INTERVAL = 0.5
 class SubmitJobRequest(BaseModel):
     command: str
     source: str
-    model: Optional[str] = None
-    priority: Optional[int] = None
-    timeout: Optional[int] = None
+    model: str | None = None
+    priority: int | None = None
+    timeout: int | None = None
 
 
 class RecurringJobCreate(BaseModel):
     name: str
     command: str
     interval_seconds: int
-    model: Optional[str] = None
+    model: str | None = None
     priority: int = 5
     timeout: int = 600
-    source: Optional[str] = None
-    tag: Optional[str] = None
+    source: str | None = None
+    tag: str | None = None
     max_retries: int = 0
     resource_profile: str = "ollama"
 
 
 class RecurringJobUpdate(BaseModel):
-    enabled: Optional[bool] = None
-    priority: Optional[int] = None
-    interval_seconds: Optional[int] = None
-    tag: Optional[str] = None
+    enabled: bool | None = None
+    priority: int | None = None
+    interval_seconds: int | None = None
+    tag: str | None = None
 
 
-def create_app(db: Database) -> FastAPI:
+def create_app(db: Database) -> FastAPI:  # noqa: C901 PLR0915
     """Application factory. Takes a Database instance for test injection."""
     app = FastAPI(title="Ollama Queue")
 
@@ -93,7 +93,7 @@ def create_app(db: Database) -> FastAPI:
         return {"ok": True}
 
     @app.put("/api/queue/{job_id}/priority")
-    def set_priority(job_id: int, body: dict = Body(...)):
+    def set_priority(job_id: int, body: dict = Body(...)):  # noqa: B008
         priority = body.get("priority")
         if not isinstance(priority, int):
             raise HTTPException(status_code=400, detail="priority must be an integer")
@@ -105,7 +105,7 @@ def create_app(db: Database) -> FastAPI:
     # --- History ---
 
     @app.get("/api/history")
-    def get_history(limit: int = 20, offset: int = 0, source: Optional[str] = None):
+    def get_history(limit: int = 20, offset: int = 0, source: str | None = None):
         return db.get_history(limit=limit, offset=offset, source=source)
 
     # --- Health ---
@@ -117,7 +117,7 @@ def create_app(db: Database) -> FastAPI:
     # --- Durations ---
 
     @app.get("/api/durations")
-    def get_durations(days: int = 7, source: Optional[str] = None):
+    def get_durations(days: int = 7, source: str | None = None):
         conn = db._connect()
         cutoff = time.time() - (days * 86400)
         if source:
@@ -157,6 +157,10 @@ def create_app(db: Database) -> FastAPI:
 
     @app.put("/api/settings")
     def put_settings(body: dict):
+        known = set(db.get_all_settings().keys())
+        unknown = [k for k in body if k not in known]
+        if unknown:
+            raise HTTPException(status_code=422, detail=f"Unknown setting keys: {unknown}")
         for key, value in body.items():
             db.set_setting(key, value)
         return {"ok": True}
@@ -176,7 +180,7 @@ def create_app(db: Database) -> FastAPI:
     # --- Proxy ---
 
     @app.post("/api/generate")
-    async def proxy_generate(body: dict = Body(...)):
+    async def proxy_generate(body: dict = Body(...)):  # noqa: B008
         """Forward a generate request to Ollama, serializing through the queue."""
         state = db.get_daemon_state()
         if state and state.get("state") == "paused_manual":
@@ -200,7 +204,7 @@ def create_app(db: Database) -> FastAPI:
 
         # Log proxy request in the jobs table
         job_id = db.submit_job(
-            command=f"proxy:/api/generate",
+            command="proxy:/api/generate",
             model=model,
             priority=0,
             timeout=120,
@@ -232,9 +236,12 @@ def create_app(db: Database) -> FastAPI:
                 stderr_tail=str(e)[:500],
                 outcome_reason=f"proxy error: {e}",
             )
-            raise HTTPException(status_code=502, detail=f"Ollama request failed: {e}")
+            raise HTTPException(status_code=502, detail=f"Ollama request failed: {e}") from e
         finally:
-            db.release_proxy_claim()
+            try:
+                db.release_proxy_claim()
+            except Exception:
+                _log.exception("release_proxy_claim failed — daemon may be stuck at sentinel job_id")
 
     # --- Schedule (recurring jobs) ---
     # NOTE: fixed routes (/rebalance, /events) must come before parameterized /{rj_id}
@@ -246,6 +253,7 @@ def create_app(db: Database) -> FastAPI:
     @app.post("/api/schedule/rebalance")
     def trigger_rebalance():
         from ollama_queue.scheduler import Scheduler
+
         changes = Scheduler(db).rebalance()
         return {"rebalanced": len(changes), "changes": changes}
 
@@ -256,43 +264,31 @@ def create_app(db: Database) -> FastAPI:
     @app.post("/api/schedule")
     def add_schedule(body: RecurringJobCreate):
         from ollama_queue.scheduler import Scheduler
+
         rj_id = db.add_recurring_job(**body.model_dump())
         Scheduler(db).rebalance()
         return db.get_recurring_job(rj_id)
 
     @app.put("/api/schedule/{rj_id}")
     def update_schedule(rj_id: int, body: RecurringJobUpdate):
-        conn = db._connect()
-        if body.enabled is not None:
-            conn.execute("UPDATE recurring_jobs SET enabled = ? WHERE id = ?",
-                         (1 if body.enabled else 0, rj_id))
-        if body.priority is not None:
-            conn.execute("UPDATE recurring_jobs SET priority = ? WHERE id = ?",
-                         (body.priority, rj_id))
-        if body.interval_seconds is not None:
-            conn.execute("UPDATE recurring_jobs SET interval_seconds = ? WHERE id = ?",
-                         (body.interval_seconds, rj_id))
-        if body.tag is not None:
-            conn.execute("UPDATE recurring_jobs SET tag = ? WHERE id = ?",
-                         (body.tag, rj_id))
-        conn.commit()
-        from ollama_queue.scheduler import Scheduler
-        Scheduler(db).rebalance()
-        result = db.get_recurring_job(rj_id)
-        if result is None:
+        updated = db.update_recurring_job(rj_id, **body.model_dump(exclude_none=True))
+        if not updated:
             raise HTTPException(status_code=404, detail="Recurring job not found")
-        return result
+        # Rebalance next_run after edit
+        try:
+            from ollama_queue.scheduler import Scheduler
+
+            Scheduler(db).rebalance()
+        except Exception:
+            _log.exception("rebalance after update_schedule failed")
+        return {"ok": True}
 
     @app.delete("/api/schedule/{rj_id}")
     def delete_schedule(rj_id: int):
-        conn = db._connect()
-        if conn.execute("SELECT id FROM recurring_jobs WHERE id = ?", (rj_id,)).fetchone() is None:
+        deleted = db.delete_recurring_job_by_id(rj_id)
+        if not deleted:
             raise HTTPException(status_code=404, detail="Recurring job not found")
-        conn.execute("DELETE FROM schedule_events WHERE recurring_job_id = ?", (rj_id,))
-        conn.execute("UPDATE jobs SET recurring_job_id = NULL WHERE recurring_job_id = ?", (rj_id,))
-        conn.execute("DELETE FROM recurring_jobs WHERE id = ?", (rj_id,))
-        conn.commit()
-        return {"deleted": rj_id}
+        return {"ok": True}
 
     # --- DLQ ---
     # NOTE: /retry-all must come before /{dlq_id}/retry
@@ -362,9 +358,7 @@ def _compute_kpis_locked(db: Database) -> dict:
     # We approximate by counting paused entries × poll_interval.
     # NOTE: Use raw conn query (not db.get_setting) to avoid thread-safety issues
     # when _compute_kpis is called from FastAPI worker threads.
-    setting_row = conn.execute(
-        "SELECT value FROM settings WHERE key = ?", ("poll_interval_seconds",)
-    ).fetchone()
+    setting_row = conn.execute("SELECT value FROM settings WHERE key = ?", ("poll_interval_seconds",)).fetchone()
     poll_interval = json.loads(setting_row["value"]) if setting_row else 5
     row = conn.execute(
         """SELECT COUNT(*) as cnt FROM health_log
