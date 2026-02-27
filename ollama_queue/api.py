@@ -43,6 +43,7 @@ class RecurringJobCreate(BaseModel):
     tag: str | None = None
     max_retries: int = 0
     resource_profile: str = "ollama"
+    pinned: bool = False
 
 
 class RecurringJobUpdate(BaseModel):
@@ -55,6 +56,7 @@ class RecurringJobUpdate(BaseModel):
     name: str | None = None
     model: str | None = None
     timeout: int | None = None
+    pinned: bool | None = None
 
 
 def create_app(db: Database) -> FastAPI:  # noqa: C901 PLR0915
@@ -266,6 +268,13 @@ def create_app(db: Database) -> FastAPI:  # noqa: C901 PLR0915
     @app.get("/api/schedule/events")
     def get_schedule_events(limit: int = 100):
         return db.get_schedule_events(limit=limit)
+
+    @app.get("/api/schedule/load-map")
+    def get_load_map():
+        from ollama_queue.scheduler import Scheduler
+
+        slots = Scheduler(db).load_map()
+        return {"slots": slots, "slot_minutes": 30, "count": len(slots)}
 
     @app.post("/api/schedule")
     def add_schedule(body: RecurringJobCreate):
