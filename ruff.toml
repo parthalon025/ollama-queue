@@ -21,6 +21,7 @@ ignore = [
     "S101",    # assert used (OK in tests)
     "PLR0913", # too many arguments (sometimes necessary)
     "PLR2004", # magic value comparisons — intentional in assertions
+    "S608",    # SQL injection false positive — f-strings for column names, values are parameterized (?)
     "E402",    # module-level import not at top — intentional after logger setup
 ]
 

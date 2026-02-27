@@ -8,7 +8,7 @@ export default function StatusBadge({ state }) {
   const s = (state || '').toLowerCase();
 
   let statusClass;
-  let label = state;
+  const label = state;
 
   switch (s) {
     // Green — healthy/complete
