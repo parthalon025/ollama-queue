@@ -74,6 +74,15 @@ export async function triggerRebalance() {
     }
 }
 
+export async function runScheduleJobNow(id) {
+    try {
+        await fetch(`${API}/schedule/${id}/run-now`, { method: 'POST' });
+        await fetchSchedule();
+    } catch (e) {
+        console.error('runScheduleJobNow failed:', e);
+    }
+}
+
 export async function fetchDLQ() {
     try {
         const resp = await fetch(`${API}/dlq`);

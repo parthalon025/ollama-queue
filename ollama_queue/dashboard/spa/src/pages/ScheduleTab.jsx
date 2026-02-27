@@ -1,8 +1,8 @@
 import { h } from 'preact';
-import { useEffect } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 import {
     scheduleJobs, scheduleEvents,
-    fetchSchedule, toggleScheduleJob, triggerRebalance,
+    fetchSchedule, toggleScheduleJob, triggerRebalance, runScheduleJobNow,
 } from '../store';
 
 // Note: local vars named 'hrs'/'mins' to avoid shadowing the injected 'h' JSX factory.
@@ -11,7 +11,10 @@ function formatCountdown(next_run) {
     if (diff < 0) return 'overdue';
     const hrs = Math.floor(diff / 3600);
     const mins = Math.floor((diff % 3600) / 60);
-    return hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
+    const secs = Math.floor(diff % 60);
+    if (hrs > 0) return `${hrs}h ${mins}m ${secs}s`;
+    if (mins > 0) return `${mins}m ${secs}s`;
+    return `${secs}s`;
 }
 
 function formatInterval(seconds) {
@@ -38,7 +41,9 @@ function priorityCategory(p) {
     return 'background';
 }
 
-function TimelineBar({ jobs }) {
+function TimelineBar({ jobs, tick }) {
+    // tick dependency forces re-render each second
+    void tick;
     const now = Date.now() / 1000;
     const daySeconds = 86400;
     return (
@@ -49,7 +54,6 @@ function TimelineBar({ jobs }) {
                       overflow: 'hidden', margin: '1rem 0' }}>
             {jobs.map(rj => {
                 const secsFromNow = rj.next_run - now;
-                // Clamp to [0, 100] — shows position in next 24h window
                 const pct = secsFromNow <= 0
                     ? 0
                     : Math.min(100, (secsFromNow / daySeconds) * 100);
@@ -69,9 +73,24 @@ function TimelineBar({ jobs }) {
 }
 
 export default function ScheduleTab() {
-    useEffect(() => { fetchSchedule(); }, []);
+    // tick increments every second to force live countdown re-renders
+    const [tick, setTick] = useState(0);
+    const [runningId, setRunningId] = useState(null);
+
+    useEffect(() => {
+        fetchSchedule();
+        const interval = setInterval(() => setTick(t => t + 1), 1000);
+        return () => clearInterval(interval);
+    }, []);
+
     const jobs = scheduleJobs.value;
     const events = scheduleEvents.value;
+
+    async function handleRunNow(rj) {
+        setRunningId(rj.id);
+        await runScheduleJobNow(rj.id);
+        setRunningId(null);
+    }
 
     return (
         <div class="flex flex-col gap-4 animate-page-enter">
@@ -85,7 +104,7 @@ export default function ScheduleTab() {
                 </button>
             </div>
 
-            <TimelineBar jobs={jobs} />
+            <TimelineBar jobs={jobs} tick={tick} />
 
             {jobs.length === 0 ? (
                 <div class="t-frame" style={{ textAlign: 'center', padding: '2rem',
@@ -100,9 +119,9 @@ export default function ScheduleTab() {
                         <thead>
                             <tr style={{ borderBottom: '1px solid var(--border-subtle)',
                                          background: 'var(--bg-surface-raised)' }}>
-                                {['Name', 'Tag', 'Interval', 'Priority', 'Next Run', 'Enabled'].map(h => (
-                                    <th key={h} style={{
-                                        textAlign: h === 'Name' ? 'left' : 'center',
+                                {['Name', 'Tag', 'Interval', 'Priority', 'Next Run', 'Enabled', ''].map(col => (
+                                    <th key={col} style={{
+                                        textAlign: col === 'Name' ? 'left' : 'center',
                                         padding: '0.5rem 0.75rem',
                                         fontSize: 'var(--type-label)',
                                         color: 'var(--text-secondary)',
@@ -110,7 +129,8 @@ export default function ScheduleTab() {
                                         textTransform: 'uppercase',
                                         letterSpacing: '0.05em',
                                         fontFamily: 'var(--font-mono)',
-                                    }}>{h}</th>
+                                        whiteSpace: 'nowrap',
+                                    }}>{col}</th>
                                 ))}
                             </tr>
                         </thead>
@@ -119,6 +139,9 @@ export default function ScheduleTab() {
                                 const cat = priorityCategory(rj.priority);
                                 const color = CATEGORY_COLORS[cat];
                                 const overdue = rj.next_run < Date.now() / 1000;
+                                const isRunning = runningId === rj.id;
+                                // Read tick to subscribe this row to per-second updates
+                                void tick;
                                 return (
                                     <tr key={rj.id}
                                         style={{ borderBottom: '1px solid var(--border-subtle)' }}>
@@ -158,7 +181,9 @@ export default function ScheduleTab() {
                                                      fontFamily: 'var(--font-mono)',
                                                      color: overdue
                                                          ? 'var(--status-error)'
-                                                         : 'var(--text-primary)' }}>
+                                                         : 'var(--text-primary)',
+                                                     fontVariantNumeric: 'tabular-nums',
+                                                     minWidth: '7rem' }}>
                                             {formatCountdown(rj.next_run)}
                                         </td>
                                         <td style={{ textAlign: 'center' }}>
@@ -166,6 +191,17 @@ export default function ScheduleTab() {
                                                    style={{ accentColor: 'var(--accent)',
                                                             width: 16, height: 16 }}
                                                    onChange={ev => toggleScheduleJob(rj.id, ev.target.checked)} />
+                                        </td>
+                                        <td style={{ textAlign: 'center', padding: '0.25rem 0.5rem' }}>
+                                            <button
+                                                class="t-btn t-btn-secondary"
+                                                style={{ fontSize: 'var(--type-label)',
+                                                         padding: '0.2rem 0.6rem',
+                                                         opacity: isRunning ? 0.5 : 1 }}
+                                                disabled={isRunning}
+                                                onClick={() => handleRunNow(rj)}>
+                                                {isRunning ? '…' : '▶ Run'}
+                                            </button>
                                         </td>
                                     </tr>
                                 );

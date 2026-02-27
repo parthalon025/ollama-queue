@@ -283,6 +283,22 @@ def create_app(db: Database) -> FastAPI:  # noqa: C901 PLR0915
             _log.exception("rebalance after update_schedule failed")
         return {"ok": True}
 
+    @app.post("/api/schedule/{rj_id}/run-now")
+    def run_schedule_now(rj_id: int):
+        rj = db.get_recurring_job(rj_id)
+        if not rj:
+            raise HTTPException(status_code=404, detail="Recurring job not found")
+        job_id = db.submit_job(
+            command=rj["command"],
+            model=rj.get("model") or "",
+            priority=rj.get("priority", 5),
+            timeout=rj.get("timeout", 600),
+            source=rj["name"],
+            tag=rj.get("tag"),
+            recurring_job_id=rj["id"],
+        )
+        return {"job_id": job_id}
+
     @app.delete("/api/schedule/{rj_id}")
     def delete_schedule(rj_id: int):
         deleted = db.delete_recurring_job_by_id(rj_id)
