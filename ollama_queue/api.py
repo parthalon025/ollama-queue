@@ -31,6 +31,26 @@ class SubmitJobRequest(BaseModel):
     timeout: Optional[int] = None
 
 
+class RecurringJobCreate(BaseModel):
+    name: str
+    command: str
+    interval_seconds: int
+    model: Optional[str] = None
+    priority: int = 5
+    timeout: int = 600
+    source: Optional[str] = None
+    tag: Optional[str] = None
+    max_retries: int = 0
+    resource_profile: str = "ollama"
+
+
+class RecurringJobUpdate(BaseModel):
+    enabled: Optional[bool] = None
+    priority: Optional[int] = None
+    interval_seconds: Optional[int] = None
+    tag: Optional[str] = None
+
+
 def create_app(db: Database) -> FastAPI:
     """Application factory. Takes a Database instance for test injection."""
     app = FastAPI(title="Ollama Queue")
@@ -215,6 +235,87 @@ def create_app(db: Database) -> FastAPI:
             raise HTTPException(status_code=502, detail=f"Ollama request failed: {e}")
         finally:
             db.release_proxy_claim()
+
+    # --- Schedule (recurring jobs) ---
+    # NOTE: fixed routes (/rebalance, /events) must come before parameterized /{rj_id}
+
+    @app.get("/api/schedule")
+    def list_schedule():
+        return db.list_recurring_jobs()
+
+    @app.post("/api/schedule/rebalance")
+    def trigger_rebalance():
+        from ollama_queue.scheduler import Scheduler
+        changes = Scheduler(db).rebalance()
+        return {"rebalanced": len(changes), "changes": changes}
+
+    @app.get("/api/schedule/events")
+    def get_schedule_events(limit: int = 100):
+        return db.get_schedule_events(limit=limit)
+
+    @app.post("/api/schedule")
+    def add_schedule(body: RecurringJobCreate):
+        from ollama_queue.scheduler import Scheduler
+        rj_id = db.add_recurring_job(**body.model_dump())
+        Scheduler(db).rebalance()
+        return db.get_recurring_job(rj_id)
+
+    @app.put("/api/schedule/{rj_id}")
+    def update_schedule(rj_id: int, body: RecurringJobUpdate):
+        conn = db._connect()
+        if body.enabled is not None:
+            conn.execute("UPDATE recurring_jobs SET enabled = ? WHERE id = ?",
+                         (1 if body.enabled else 0, rj_id))
+        if body.priority is not None:
+            conn.execute("UPDATE recurring_jobs SET priority = ? WHERE id = ?",
+                         (body.priority, rj_id))
+        if body.interval_seconds is not None:
+            conn.execute("UPDATE recurring_jobs SET interval_seconds = ? WHERE id = ?",
+                         (body.interval_seconds, rj_id))
+        if body.tag is not None:
+            conn.execute("UPDATE recurring_jobs SET tag = ? WHERE id = ?",
+                         (body.tag, rj_id))
+        conn.commit()
+        from ollama_queue.scheduler import Scheduler
+        Scheduler(db).rebalance()
+        return db.get_recurring_job(rj_id)
+
+    @app.delete("/api/schedule/{rj_id}")
+    def delete_schedule(rj_id: int):
+        conn = db._connect()
+        conn.execute("DELETE FROM schedule_events WHERE recurring_job_id = ?", (rj_id,))
+        conn.execute("UPDATE jobs SET recurring_job_id = NULL WHERE recurring_job_id = ?", (rj_id,))
+        conn.execute("DELETE FROM recurring_jobs WHERE id = ?", (rj_id,))
+        conn.commit()
+        return {"deleted": rj_id}
+
+    # --- DLQ ---
+    # NOTE: /retry-all must come before /{dlq_id}/retry
+
+    @app.get("/api/dlq")
+    def list_dlq(include_resolved: bool = False):
+        return db.list_dlq(include_resolved=include_resolved)
+
+    @app.post("/api/dlq/retry-all")
+    def retry_all_dlq():
+        entries = db.list_dlq()
+        new_ids = [db.retry_dlq_entry(e["id"]) for e in entries]
+        return {"retried": len([x for x in new_ids if x])}
+
+    @app.post("/api/dlq/{dlq_id}/retry")
+    def retry_dlq(dlq_id: int):
+        new_id = db.retry_dlq_entry(dlq_id)
+        return {"new_job_id": new_id}
+
+    @app.post("/api/dlq/{dlq_id}/dismiss")
+    def dismiss_dlq(dlq_id: int):
+        db.dismiss_dlq_entry(dlq_id)
+        return {"dismissed": dlq_id}
+
+    @app.delete("/api/dlq")
+    def clear_dlq():
+        n = db.clear_dlq()
+        return {"cleared": n}
 
     # --- Static files for SPA ---
     spa_dir = Path(__file__).parent / "dashboard" / "spa" / "dist"
