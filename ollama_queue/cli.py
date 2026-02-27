@@ -259,7 +259,7 @@ def _parse_schedule_spec(
         dow = days if days is not None else "*"
         cron_expr = f"{m} {h} * * {dow}"
     else:
-        cron_expr = cron
+        cron_expr = cron or ""
 
     try:
         _croniter(cron_expr)

@@ -49,7 +49,7 @@ class DurationEstimator:
         Returns list of dicts with 'estimated_start_offset' and 'estimated_duration'.
         """
         results = []
-        cumulative_offset = 0
+        cumulative_offset: float = 0
 
         for job in queue_jobs:
             duration = self.estimate(job["source"], model=job.get("model"))

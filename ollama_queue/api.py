@@ -8,6 +8,7 @@ import logging
 import os
 import time
 from pathlib import Path
+from typing import cast
 
 _log = logging.getLogger(__name__)
 
@@ -84,8 +85,8 @@ def create_app(db: Database) -> FastAPI:
 
     @app.post("/api/queue/submit")
     def submit_job(req: SubmitJobRequest):
-        priority = req.priority if req.priority is not None else DEFAULTS["default_priority"]
-        timeout = req.timeout if req.timeout is not None else DEFAULTS["default_timeout_seconds"]
+        priority: int = req.priority if req.priority is not None else cast(int, DEFAULTS["default_priority"])
+        timeout: int = req.timeout if req.timeout is not None else cast(int, DEFAULTS["default_timeout_seconds"])
         job_id = db.submit_job(
             command=req.command,
             model=req.model or "",

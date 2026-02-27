@@ -90,7 +90,7 @@ class Daemon:
             vram_pct=snap.get("vram_pct") or 0.0,
             load_avg=snap["load_avg"],
             swap_pct=snap["swap_pct"],
-            ollama_model=snap.get("ollama_model"),
+            ollama_model=snap.get("ollama_model") or "",
             queue_depth=queue_depth,
             daemon_state=current_state,
         )
@@ -188,6 +188,8 @@ class Daemon:
         # 10b. Record result
         duration = time.time() - start_time
         exit_code = proc.returncode
+        assert proc.stdout is not None
+        assert proc.stderr is not None
         stdout_tail = proc.stdout.read()[-500:].decode("utf-8", errors="replace")
         stderr_tail = proc.stderr.read()[-500:].decode("utf-8", errors="replace")
 

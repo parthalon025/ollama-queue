@@ -39,7 +39,7 @@ class Database:
 
     def __init__(self, db_path: str):
         self.db_path = db_path
-        self._conn = None
+        self._conn: sqlite3.Connection | None = None
         self._lock = threading.RLock()
 
     def _connect(self) -> sqlite3.Connection:
@@ -233,6 +233,7 @@ class Database:
             ),
         )
         conn.commit()
+        assert cur.lastrowid is not None
         return cur.lastrowid
 
     def get_job(self, job_id: int) -> dict | None:
@@ -564,6 +565,7 @@ class Database:
             ),
         )
         conn.commit()
+        assert cur.lastrowid is not None
         return cur.lastrowid
 
     def get_recurring_job(self, rj_id: int) -> dict | None:
