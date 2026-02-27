@@ -208,3 +208,55 @@ class TestPrune:
     def test_prune_old_data(self, db):
         # Just verify it doesn't crash
         db.prune_old_data()
+
+
+class TestRecurringJobs:
+    def test_add_recurring_job(self, db):
+        rj_id = db.add_recurring_job(
+            name="aria-full",
+            command="aria predict",
+            interval_seconds=21600,
+            model="qwen2.5:14b",
+            priority=3,
+            source="aria",
+            tag="aria",
+        )
+        assert rj_id == 1
+        rj = db.get_recurring_job(rj_id)
+        assert rj["name"] == "aria-full"
+        assert rj["interval_seconds"] == 21600
+        assert rj["enabled"] == 1
+
+    def test_get_due_recurring_jobs(self, db):
+        now = time.time()
+        db.add_recurring_job("job1", "cmd1", 3600, next_run=now - 1)
+        db.add_recurring_job("job2", "cmd2", 3600, next_run=now + 3600)
+        due = db.get_due_recurring_jobs(now)
+        assert len(due) == 1
+        assert due[0]["name"] == "job1"
+
+    def test_get_due_skips_disabled(self, db):
+        now = time.time()
+        db.add_recurring_job("job1", "cmd1", 3600, next_run=now - 1)
+        db.set_recurring_job_enabled("job1", False)
+        due = db.get_due_recurring_jobs(now)
+        assert len(due) == 0
+
+    def test_update_next_run(self, db):
+        rj_id = db.add_recurring_job("job1", "cmd1", 3600)
+        completed_at = time.time()
+        db.update_recurring_next_run(rj_id, completed_at)
+        rj = db.get_recurring_job(rj_id)
+        assert abs(rj["next_run"] - (completed_at + 3600)) < 0.01
+
+    def test_list_recurring_jobs(self, db):
+        db.add_recurring_job("a", "cmd_a", 3600)
+        db.add_recurring_job("b", "cmd_b", 7200)
+        jobs = db.list_recurring_jobs()
+        assert len(jobs) == 2
+
+    def test_log_schedule_event(self, db):
+        db.log_schedule_event("promoted", details={"job_id": 1})
+        events = db.get_schedule_events(limit=10)
+        assert len(events) == 1
+        assert events[0]["event_type"] == "promoted"

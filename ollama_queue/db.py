@@ -475,6 +475,132 @@ class Database:
         )
         conn.commit()
 
+    # --- Recurring Jobs ---
+
+    def add_recurring_job(
+        self,
+        name: str,
+        command: str,
+        interval_seconds: int,
+        model: str | None = None,
+        priority: int = 5,
+        timeout: int = 600,
+        source: str | None = None,
+        tag: str | None = None,
+        resource_profile: str = "ollama",
+        max_retries: int = 0,
+        next_run: float | None = None,
+    ) -> int:
+        conn = self._connect()
+        now = time.time()
+        cur = conn.execute(
+            """INSERT INTO recurring_jobs
+               (name, command, model, priority, timeout, source, tag,
+                resource_profile, interval_seconds, next_run, max_retries, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (name, command, model, priority, timeout, source, tag,
+             resource_profile, interval_seconds, next_run or now, max_retries, now),
+        )
+        conn.commit()
+        return cur.lastrowid
+
+    def get_recurring_job(self, rj_id: int) -> dict | None:
+        conn = self._connect()
+        row = conn.execute(
+            "SELECT * FROM recurring_jobs WHERE id = ?", (rj_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def get_recurring_job_by_name(self, name: str) -> dict | None:
+        conn = self._connect()
+        row = conn.execute(
+            "SELECT * FROM recurring_jobs WHERE name = ?", (name,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def list_recurring_jobs(self) -> list[dict]:
+        conn = self._connect()
+        rows = conn.execute(
+            "SELECT * FROM recurring_jobs ORDER BY priority ASC, name ASC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_due_recurring_jobs(self, now: float) -> list[dict]:
+        conn = self._connect()
+        rows = conn.execute(
+            """SELECT * FROM recurring_jobs
+               WHERE enabled = 1 AND next_run <= ?
+               ORDER BY priority ASC, next_run ASC""",
+            (now,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def update_recurring_next_run(
+        self, rj_id: int, completed_at: float, job_id: int | None = None
+    ) -> None:
+        conn = self._connect()
+        rj = self.get_recurring_job(rj_id)
+        next_run = completed_at + rj["interval_seconds"]
+        conn.execute(
+            """UPDATE recurring_jobs
+               SET next_run = ?, last_run = ?, last_job_id = ?
+               WHERE id = ?""",
+            (next_run, completed_at, job_id, rj_id),
+        )
+        conn.commit()
+
+    def set_recurring_job_enabled(self, name: str, enabled: bool) -> bool:
+        conn = self._connect()
+        cur = conn.execute(
+            "UPDATE recurring_jobs SET enabled = ? WHERE name = ?",
+            (1 if enabled else 0, name),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+    def delete_recurring_job(self, name: str) -> bool:
+        conn = self._connect()
+        cur = conn.execute(
+            "DELETE FROM recurring_jobs WHERE name = ?", (name,)
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+    def log_schedule_event(
+        self,
+        event_type: str,
+        recurring_job_id: int | None = None,
+        job_id: int | None = None,
+        details: dict | None = None,
+    ) -> None:
+        conn = self._connect()
+        conn.execute(
+            """INSERT INTO schedule_events
+               (timestamp, event_type, recurring_job_id, job_id, details)
+               VALUES (?, ?, ?, ?, ?)""",
+            (time.time(), event_type, recurring_job_id, job_id,
+             json.dumps(details) if details else None),
+        )
+        conn.commit()
+
+    def get_schedule_events(self, limit: int = 100) -> list[dict]:
+        conn = self._connect()
+        rows = conn.execute(
+            "SELECT * FROM schedule_events ORDER BY timestamp DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def has_pending_or_running_recurring(self, recurring_job_id: int) -> bool:
+        conn = self._connect()
+        row = conn.execute(
+            """SELECT 1 FROM jobs
+               WHERE recurring_job_id = ? AND status IN ('pending', 'running')
+               LIMIT 1""",
+            (recurring_job_id,),
+        ).fetchone()
+        return row is not None
+
     # --- Utility ---
 
     def list_tables(self) -> list[str]:
