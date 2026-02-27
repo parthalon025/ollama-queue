@@ -2,6 +2,7 @@
 
 import pytest
 from click.testing import CliRunner
+
 from ollama_queue.cli import main
 
 
@@ -12,11 +13,25 @@ def runner():
 
 def test_submit_command(runner, tmp_path):
     db_path = str(tmp_path / "test.db")
-    result = runner.invoke(main, [
-        "--db", db_path,
-        "submit", "--source", "test", "--model", "m", "--priority", "3", "--timeout", "60",
-        "--", "echo", "hello",
-    ])
+    result = runner.invoke(
+        main,
+        [
+            "--db",
+            db_path,
+            "submit",
+            "--source",
+            "test",
+            "--model",
+            "m",
+            "--priority",
+            "3",
+            "--timeout",
+            "60",
+            "--",
+            "echo",
+            "hello",
+        ],
+    )
     assert result.exit_code == 0
     assert "submitted" in result.output.lower() or "queued" in result.output.lower()
 
@@ -56,11 +71,21 @@ def test_cancel_nonexistent(runner, tmp_path):
 def test_submit_fallback_when_daemon_down(runner, tmp_path):
     """When --daemon-url fails, submit should run command directly."""
     db_path = str(tmp_path / "test.db")
-    result = runner.invoke(main, [
-        "--db", db_path,
-        "submit", "--source", "test", "--model", "m",
-        "--", "echo", "fallback-test",
-    ])
+    result = runner.invoke(
+        main,
+        [
+            "--db",
+            db_path,
+            "submit",
+            "--source",
+            "test",
+            "--model",
+            "m",
+            "--",
+            "echo",
+            "fallback-test",
+        ],
+    )
     # Should succeed either via queue or fallback
     assert result.exit_code == 0
 
@@ -68,11 +93,21 @@ def test_submit_fallback_when_daemon_down(runner, tmp_path):
 def test_submit_uses_defaults(runner, tmp_path):
     """Submit without --priority/--timeout uses DB defaults."""
     db_path = str(tmp_path / "test.db")
-    result = runner.invoke(main, [
-        "--db", db_path,
-        "submit", "--source", "test", "--model", "m",
-        "--", "echo", "defaults",
-    ])
+    result = runner.invoke(
+        main,
+        [
+            "--db",
+            db_path,
+            "submit",
+            "--source",
+            "test",
+            "--model",
+            "m",
+            "--",
+            "echo",
+            "defaults",
+        ],
+    )
     assert result.exit_code == 0
     assert "priority=5" in result.output
 
@@ -81,11 +116,21 @@ def test_history_with_source_filter(runner, tmp_path):
     """History --source filters to a specific source."""
     db_path = str(tmp_path / "test.db")
     # Submit and complete a job so history has data
-    runner.invoke(main, [
-        "--db", db_path,
-        "submit", "--source", "mysrc", "--model", "m",
-        "--", "echo", "hi",
-    ])
+    runner.invoke(
+        main,
+        [
+            "--db",
+            db_path,
+            "submit",
+            "--source",
+            "mysrc",
+            "--model",
+            "m",
+            "--",
+            "echo",
+            "hi",
+        ],
+    )
     result = runner.invoke(main, ["--db", db_path, "history", "--source", "mysrc"])
     assert result.exit_code == 0
 
@@ -100,11 +145,21 @@ def test_history_with_all_flag(runner, tmp_path):
 def test_cancel_pending_job(runner, tmp_path):
     """Cancel a pending job succeeds."""
     db_path = str(tmp_path / "test.db")
-    runner.invoke(main, [
-        "--db", db_path,
-        "submit", "--source", "test", "--model", "m",
-        "--", "echo", "cancel-me",
-    ])
+    runner.invoke(
+        main,
+        [
+            "--db",
+            db_path,
+            "submit",
+            "--source",
+            "test",
+            "--model",
+            "m",
+            "--",
+            "echo",
+            "cancel-me",
+        ],
+    )
     result = runner.invoke(main, ["--db", db_path, "cancel", "1"])
     assert result.exit_code == 0
     assert "cancelled" in result.output.lower()
@@ -133,6 +188,7 @@ def test_serve_starts_daemon_and_api(runner, tmp_path, monkeypatch):
     monkeypatch.setattr(threading.Thread, "start", fake_thread_start)
 
     import uvicorn
+
     monkeypatch.setattr(uvicorn, "run", fake_uvicorn_run)
 
     db_path = str(tmp_path / "test.db")
@@ -147,16 +203,40 @@ def test_serve_starts_daemon_and_api(runner, tmp_path, monkeypatch):
 def test_queue_shows_pending_jobs(runner, tmp_path):
     """Queue command lists pending jobs."""
     db_path = str(tmp_path / "test.db")
-    runner.invoke(main, [
-        "--db", db_path,
-        "submit", "--source", "test-a", "--model", "m", "--priority", "1",
-        "--", "echo", "first",
-    ])
-    runner.invoke(main, [
-        "--db", db_path,
-        "submit", "--source", "test-b", "--model", "m", "--priority", "2",
-        "--", "echo", "second",
-    ])
+    runner.invoke(
+        main,
+        [
+            "--db",
+            db_path,
+            "submit",
+            "--source",
+            "test-a",
+            "--model",
+            "m",
+            "--priority",
+            "1",
+            "--",
+            "echo",
+            "first",
+        ],
+    )
+    runner.invoke(
+        main,
+        [
+            "--db",
+            db_path,
+            "submit",
+            "--source",
+            "test-b",
+            "--model",
+            "m",
+            "--priority",
+            "2",
+            "--",
+            "echo",
+            "second",
+        ],
+    )
     result = runner.invoke(main, ["--db", db_path, "queue"])
     assert result.exit_code == 0
     assert "first" in result.output
@@ -166,18 +246,38 @@ def test_queue_shows_pending_jobs(runner, tmp_path):
 def test_submit_dedup_skips_duplicate_source(runner, tmp_path):
     """Submit with dedup skips if pending job from same source exists."""
     db_path = str(tmp_path / "test.db")
-    r1 = runner.invoke(main, [
-        "--db", db_path,
-        "submit", "--source", "alerts", "--model", "m",
-        "--", "echo", "first",
-    ])
+    r1 = runner.invoke(
+        main,
+        [
+            "--db",
+            db_path,
+            "submit",
+            "--source",
+            "alerts",
+            "--model",
+            "m",
+            "--",
+            "echo",
+            "first",
+        ],
+    )
     assert "queued" in r1.output
 
-    r2 = runner.invoke(main, [
-        "--db", db_path,
-        "submit", "--source", "alerts", "--model", "m",
-        "--", "echo", "second",
-    ])
+    r2 = runner.invoke(
+        main,
+        [
+            "--db",
+            db_path,
+            "submit",
+            "--source",
+            "alerts",
+            "--model",
+            "m",
+            "--",
+            "echo",
+            "second",
+        ],
+    )
     assert "Skipped" in r2.output
 
     # Only one job in queue
@@ -189,14 +289,35 @@ def test_submit_dedup_skips_duplicate_source(runner, tmp_path):
 def test_submit_no_dedup_allows_duplicates(runner, tmp_path):
     """Submit with --no-dedup allows duplicate sources."""
     db_path = str(tmp_path / "test.db")
-    runner.invoke(main, [
-        "--db", db_path,
-        "submit", "--source", "alerts", "--model", "m",
-        "--", "echo", "first",
-    ])
-    r2 = runner.invoke(main, [
-        "--db", db_path,
-        "submit", "--source", "alerts", "--model", "m", "--no-dedup",
-        "--", "echo", "second",
-    ])
+    runner.invoke(
+        main,
+        [
+            "--db",
+            db_path,
+            "submit",
+            "--source",
+            "alerts",
+            "--model",
+            "m",
+            "--",
+            "echo",
+            "first",
+        ],
+    )
+    r2 = runner.invoke(
+        main,
+        [
+            "--db",
+            db_path,
+            "submit",
+            "--source",
+            "alerts",
+            "--model",
+            "m",
+            "--no-dedup",
+            "--",
+            "echo",
+            "second",
+        ],
+    )
     assert "queued" in r2.output

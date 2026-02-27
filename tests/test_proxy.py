@@ -1,7 +1,8 @@
 """Tests for the /api/generate proxy endpoint."""
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import patch, AsyncMock, MagicMock
 from fastapi.testclient import TestClient
 
 from ollama_queue.api import create_app
@@ -35,10 +36,13 @@ def test_generate_proxy_returns_ollama_response(client):
         mock_client.post = AsyncMock(return_value=mock_response)
         mock_client_cls.return_value = mock_client
 
-        resp = client.post("/api/generate", json={
-            "model": "llama3.2:3b",
-            "prompt": "hello",
-        })
+        resp = client.post(
+            "/api/generate",
+            json={
+                "model": "llama3.2:3b",
+                "prompt": "hello",
+            },
+        )
 
     assert resp.status_code == 200
     data = resp.json()
@@ -48,10 +52,13 @@ def test_generate_proxy_returns_ollama_response(client):
 def test_generate_proxy_rejects_when_paused(client):
     """Returns 503 when daemon is manually paused."""
     client.post("/api/daemon/pause")
-    resp = client.post("/api/generate", json={
-        "model": "llama3.2:3b",
-        "prompt": "hello",
-    })
+    resp = client.post(
+        "/api/generate",
+        json={
+            "model": "llama3.2:3b",
+            "prompt": "hello",
+        },
+    )
     assert resp.status_code == 503
 
 
@@ -69,11 +76,14 @@ def test_generate_proxy_forces_stream_false(client):
         mock_client.post = AsyncMock(return_value=mock_response)
         mock_client_cls.return_value = mock_client
 
-        resp = client.post("/api/generate", json={
-            "model": "test",
-            "prompt": "hello",
-            "stream": True,  # Should be overridden
-        })
+        resp = client.post(
+            "/api/generate",
+            json={
+                "model": "test",
+                "prompt": "hello",
+                "stream": True,  # Should be overridden
+            },
+        )
 
     # Verify stream was forced to False in the forwarded body
     called_kwargs = mock_client.post.call_args[1]
@@ -90,10 +100,13 @@ def test_generate_proxy_releases_on_error(client, db):
         mock_client.post = AsyncMock(side_effect=Exception("connection refused"))
         mock_client_cls.return_value = mock_client
 
-        resp = client.post("/api/generate", json={
-            "model": "test",
-            "prompt": "hello",
-        })
+        resp = client.post(
+            "/api/generate",
+            json={
+                "model": "test",
+                "prompt": "hello",
+            },
+        )
 
     assert resp.status_code == 502
     state = db.get_daemon_state()
@@ -115,17 +128,18 @@ def test_generate_proxy_logs_job(client, db):
         mock_client.post = AsyncMock(return_value=mock_response)
         mock_client_cls.return_value = mock_client
 
-        resp = client.post("/api/generate", json={
-            "model": "llama3.2:3b",
-            "prompt": "hello",
-        })
+        resp = client.post(
+            "/api/generate",
+            json={
+                "model": "llama3.2:3b",
+                "prompt": "hello",
+            },
+        )
 
     assert resp.status_code == 200
     # Check job was logged
     conn = db._connect()
-    row = conn.execute(
-        "SELECT * FROM jobs WHERE source = 'proxy' ORDER BY id DESC LIMIT 1"
-    ).fetchone()
+    row = conn.execute("SELECT * FROM jobs WHERE source = 'proxy' ORDER BY id DESC LIMIT 1").fetchone()
     assert row is not None
     assert row["source"] == "proxy"
     assert row["model"] == "llama3.2:3b"
@@ -137,12 +151,14 @@ def test_generate_proxy_timeout_when_busy(client, db):
     # Set daemon to running state (simulating busy queue)
     db.update_daemon_state(state="running", current_job_id=123)
 
-    with patch("ollama_queue.api.PROXY_WAIT_TIMEOUT", 1), \
-         patch("ollama_queue.api.PROXY_POLL_INTERVAL", 0.1):
-        resp = client.post("/api/generate", json={
-            "model": "test",
-            "prompt": "hello",
-        })
+    with patch("ollama_queue.api.PROXY_WAIT_TIMEOUT", 1), patch("ollama_queue.api.PROXY_POLL_INTERVAL", 0.1):
+        resp = client.post(
+            "/api/generate",
+            json={
+                "model": "test",
+                "prompt": "hello",
+            },
+        )
 
     assert resp.status_code == 504
 

@@ -1,8 +1,8 @@
 """Tests for DurationEstimator."""
 
-from ollama_queue.estimator import DurationEstimator
-
 import pytest
+
+from ollama_queue.estimator import DurationEstimator
 
 
 @pytest.fixture

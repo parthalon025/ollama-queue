@@ -7,7 +7,6 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Optional
 
 _log = logging.getLogger(__name__)
 
@@ -16,7 +15,7 @@ from fastapi import Body, FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from ollama_queue.db import Database, DEFAULTS
+from ollama_queue.db import DEFAULTS, Database
 
 OLLAMA_URL = "http://127.0.0.1:11434"
 PROXY_WAIT_TIMEOUT = 300
@@ -26,9 +25,9 @@ PROXY_POLL_INTERVAL = 0.5
 class SubmitJobRequest(BaseModel):
     command: str
     source: str
-    model: Optional[str] = None
-    priority: Optional[int] = None
-    timeout: Optional[int] = None
+    model: str | None = None
+    priority: int | None = None
+    timeout: int | None = None
 
 
 def create_app(db: Database) -> FastAPI:
@@ -85,7 +84,7 @@ def create_app(db: Database) -> FastAPI:
     # --- History ---
 
     @app.get("/api/history")
-    def get_history(limit: int = 20, offset: int = 0, source: Optional[str] = None):
+    def get_history(limit: int = 20, offset: int = 0, source: str | None = None):
         return db.get_history(limit=limit, offset=offset, source=source)
 
     # --- Health ---
@@ -97,7 +96,7 @@ def create_app(db: Database) -> FastAPI:
     # --- Durations ---
 
     @app.get("/api/durations")
-    def get_durations(days: int = 7, source: Optional[str] = None):
+    def get_durations(days: int = 7, source: str | None = None):
         conn = db._connect()
         cutoff = time.time() - (days * 86400)
         if source:
@@ -180,7 +179,7 @@ def create_app(db: Database) -> FastAPI:
 
         # Log proxy request in the jobs table
         job_id = db.submit_job(
-            command=f"proxy:/api/generate",
+            command="proxy:/api/generate",
             model=model,
             priority=0,
             timeout=120,
@@ -256,9 +255,7 @@ def _compute_kpis_locked(db: Database) -> dict:
     # We approximate by counting paused entries × poll_interval.
     # NOTE: Use raw conn query (not db.get_setting) to avoid thread-safety issues
     # when _compute_kpis is called from FastAPI worker threads.
-    setting_row = conn.execute(
-        "SELECT value FROM settings WHERE key = ?", ("poll_interval_seconds",)
-    ).fetchone()
+    setting_row = conn.execute("SELECT value FROM settings WHERE key = ?", ("poll_interval_seconds",)).fetchone()
     poll_interval = json.loads(setting_row["value"]) if setting_row else 5
     row = conn.execute(
         """SELECT COUNT(*) as cnt FROM health_log
