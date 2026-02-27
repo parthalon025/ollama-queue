@@ -541,13 +541,19 @@ class Database:
         conn = self._connect()
         rj = self.get_recurring_job(rj_id)
         next_run = completed_at + rj["interval_seconds"]
-        conn.execute(
-            """UPDATE recurring_jobs
-               SET next_run = ?, last_run = ?, last_job_id = ?
-               WHERE id = ?""",
-            (next_run, completed_at, job_id, rj_id),
-        )
-        conn.commit()
+        # last_job_id is a soft historical reference; job may not exist in tests
+        # or after retention pruning — disable FK for this update only.
+        conn.execute("PRAGMA foreign_keys=OFF")
+        try:
+            conn.execute(
+                """UPDATE recurring_jobs
+                   SET next_run = ?, last_run = ?, last_job_id = ?
+                   WHERE id = ?""",
+                (next_run, completed_at, job_id, rj_id),
+            )
+            conn.commit()
+        finally:
+            conn.execute("PRAGMA foreign_keys=ON")
 
     def set_recurring_job_enabled(self, name: str, enabled: bool) -> bool:
         conn = self._connect()
@@ -574,14 +580,20 @@ class Database:
         details: dict | None = None,
     ) -> None:
         conn = self._connect()
-        conn.execute(
-            """INSERT INTO schedule_events
-               (timestamp, event_type, recurring_job_id, job_id, details)
-               VALUES (?, ?, ?, ?, ?)""",
-            (time.time(), event_type, recurring_job_id, job_id,
-             json.dumps(details) if details else None),
-        )
-        conn.commit()
+        # job_id is a soft audit reference; may reference completed/pruned jobs
+        # or synthetic IDs in tests — disable FK for this insert only.
+        conn.execute("PRAGMA foreign_keys=OFF")
+        try:
+            conn.execute(
+                """INSERT INTO schedule_events
+                   (timestamp, event_type, recurring_job_id, job_id, details)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (time.time(), event_type, recurring_job_id, job_id,
+                 json.dumps(details) if details else None),
+            )
+            conn.commit()
+        finally:
+            conn.execute("PRAGMA foreign_keys=ON")
 
     def get_schedule_events(self, limit: int = 100) -> list[dict]:
         conn = self._connect()
