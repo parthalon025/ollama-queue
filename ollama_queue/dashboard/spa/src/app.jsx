@@ -1,15 +1,17 @@
 import { h } from 'preact';
 import { useEffect } from 'preact/hooks';
-import { currentTab, dlqCount, startPolling, stopPolling } from './store';
+import { currentTab, dlqCount, fetchModels, startPolling, stopPolling } from './store';
 import Dashboard from './pages/Dashboard.jsx';
 import ScheduleTab from './pages/ScheduleTab.jsx';
 import DLQTab from './pages/DLQTab.jsx';
 import Settings from './pages/Settings.jsx';
+import ModelsTab from './pages/ModelsTab.jsx';
 
 const TABS = [
     { id: 'dashboard', label: 'Dashboard' },
     { id: 'schedule',  label: 'Schedule' },
     { id: 'dlq',       label: 'DLQ' },
+    { id: 'models',    label: 'Models' },
     { id: 'settings',  label: 'Settings' },
 ];
 
@@ -23,9 +25,15 @@ export function App() {
         switch (currentTab.value) {
             case 'schedule': return <ScheduleTab />;
             case 'dlq':      return <DLQTab />;
+            case 'models':   return <ModelsTab />;
             case 'settings': return <Settings />;
             default:         return <Dashboard />;
         }
+    }
+
+    function handleTabClick(tabId) {
+        currentTab.value = tabId;
+        if (tabId === 'models') fetchModels();
     }
 
     return (
@@ -33,7 +41,7 @@ export function App() {
             {/* Desktop: top tab bar */}
             <nav class="hidden md:flex border-b" style="border-color: var(--border);">
                 {TABS.map(tab => (
-                    <TabButton key={tab.id} tab={tab.id} label={tabLabel(tab)} />
+                    <TabButton key={tab.id} tab={tab.id} label={tabLabel(tab)} onActivate={handleTabClick} />
                 ))}
             </nav>
 
@@ -45,7 +53,7 @@ export function App() {
             <nav class="md:hidden fixed bottom-0 left-0 right-0 flex border-t"
                  style="background: var(--bg-card); border-color: var(--border);">
                 {TABS.map(tab => (
-                    <TabButton key={tab.id} tab={tab.id} label={tabLabel(tab)} mobile />
+                    <TabButton key={tab.id} tab={tab.id} label={tabLabel(tab)} onActivate={handleTabClick} mobile />
                 ))}
             </nav>
         </div>
@@ -59,7 +67,7 @@ function tabLabel(tab) {
     return tab.label;
 }
 
-function TabButton({ tab, label, mobile }) {
+function TabButton({ tab, label, mobile, onActivate }) {
     const active = currentTab.value === tab;
     const baseClass = mobile
         ? "flex-1 py-3 text-center text-sm"
@@ -71,7 +79,7 @@ function TabButton({ tab, label, mobile }) {
                 color: active ? 'var(--accent)' : 'var(--text-secondary)',
                 borderBottom: !mobile && active ? '2px solid var(--accent)' : 'none',
             }}
-            onClick={() => currentTab.value = tab}
+            onClick={() => onActivate(tab)}
         >
             {label}
         </button>

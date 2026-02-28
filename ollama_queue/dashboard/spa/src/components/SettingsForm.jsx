@@ -122,7 +122,16 @@ export default function SettingsForm({ settings, daemonState, onSave, onPause, o
         </div>
       </div>
 
-      {/* 6. Daemon Controls */}
+      {/* 6. Concurrency */}
+      <div class="t-frame" data-label="Concurrency">
+        <div class="flex flex-col gap-3">
+          <NumberRow label="Max Concurrent Jobs" settingKey="max_concurrent_jobs" min={1} max={8} settings={settings} flashKey={flashKey} onBlur={handleBlur} />
+          <NumberRow label="Concurrent Shadow Hours" settingKey="concurrent_shadow_hours" min={0} max={168} unit="hr" settings={settings} flashKey={flashKey} onBlur={handleBlur} />
+          <NumberRow label="VRAM Safety Factor" settingKey="vram_safety_factor" min={1.0} max={2.0} step="0.1" unit="×" settings={settings} flashKey={flashKey} onBlur={handleBlur} />
+        </div>
+      </div>
+
+      {/* 7. Daemon Controls */}
       <div class="t-frame" data-label="Daemon Controls">
         <div class="flex items-center gap-3">
           {isPaused ? (

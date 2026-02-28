@@ -42,7 +42,7 @@ export default function ModelsTab() {
                             if (data.status === 'completed') fetchModels();
                         }
                     }
-                } catch (_err) {}
+                } catch (pollErr) { console.warn('Pull poll error:', pollErr); }
             }, 2000);
         } catch (err) {
             setPullError(`Pull failed: ${err.message}`);
