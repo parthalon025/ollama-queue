@@ -12,6 +12,10 @@ export const scheduleJobs = signal([]);
 export const scheduleEvents = signal([]);
 export const dlqEntries = signal([]);
 export const dlqCount = signal(0);
+export const models = signal([]);
+export const modelPulls = signal([]);
+export const modelCatalog = signal({ curated: [], search_results: [] });
+export const queueEtas = signal([]);
 
 // Derive API base from current URL so it works behind Tailscale Serve path prefix.
 // /ui/ → /api, /queue/ui/ → /queue/api
@@ -47,6 +51,7 @@ export async function fetchSchedule() {
         ]);
         if (jobsResp.ok) scheduleJobs.value = await jobsResp.json();
         if (eventsResp.ok) scheduleEvents.value = await eventsResp.json();
+        await fetchQueueEtas();
     } catch (e) {
         console.error('fetchSchedule failed:', e);
     }
@@ -132,6 +137,54 @@ export async function clearDLQ() {
     } catch (e) {
         console.error('clearDLQ failed:', e);
     }
+}
+
+export async function fetchModels() {
+    try {
+        const resp = await fetch(`${API}/models`);
+        if (resp.ok) models.value = await resp.json();
+    } catch (e) {
+        console.error('fetchModels failed:', e);
+    }
+}
+
+export async function fetchModelCatalog(query = '') {
+    try {
+        const url = query ? `${API}/models/catalog?q=${encodeURIComponent(query)}`
+                          : `${API}/models/catalog`;
+        const resp = await fetch(url);
+        if (resp.ok) modelCatalog.value = await resp.json();
+    } catch (e) {
+        console.error('fetchModelCatalog failed:', e);
+    }
+}
+
+export async function startModelPull(modelName) {
+    const resp = await fetch(`${API}/models/pull`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: modelName }),
+    });
+    if (!resp.ok) throw new Error(`Pull failed: ${resp.status}`);
+    const { pull_id } = await resp.json();
+    return pull_id;
+}
+
+export async function cancelModelPull(pullId) {
+    await fetch(`${API}/models/pull/${pullId}`, { method: 'DELETE' });
+}
+
+export async function fetchQueueEtas() {
+    try {
+        const resp = await fetch(`${API}/queue/etas`);
+        if (resp.ok) queueEtas.value = await resp.json();
+    } catch (e) {
+        console.error('fetchQueueEtas failed:', e);
+    }
+}
+
+export async function assignModelToJob(rjId, modelName) {
+    return updateScheduleJob(rjId, { model: modelName });
 }
 
 async function fetchAll() {
