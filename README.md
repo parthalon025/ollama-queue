@@ -116,5 +116,5 @@ ollama-queue resume
 ```bash
 cd ~/Documents/projects/ollama-queue
 source .venv/bin/activate
-pytest  # 71 tests
+pytest  # 195 tests
 ```

@@ -22,7 +22,8 @@ ollama_queue/
       src/            # Source: JSX components, signals store, CSS tokens
       dist/           # Production build output (gitignored)
 scripts/
-  migrate_timers.py   # Migrate 8 of 10 systemd timers to recurring jobs (--dry-run / --execute)
+  migrate_timers.py            # Migrate 8 of 10 systemd timers to recurring jobs (--dry-run / --execute)
+  migrate_dlq_max_retries.py   # Add max_retries column to existing dlq table (idempotent)
 tests/
   test_db.py          # 22 tests
   test_health.py      # 12 tests
@@ -41,7 +42,7 @@ tests/
 cd ~/Documents/projects/ollama-queue
 source .venv/bin/activate
 
-# Run tests (127 total)
+# Run tests (195 total)
 pytest
 
 # Start the server (daemon + API + dashboard)
@@ -108,6 +109,7 @@ npm run dev          # Watch mode
 - esbuild JSX `h` shadowing — see `projects/CLAUDE.md` § Shared Gotchas.
 - **`db._lock` is `threading.RLock`** (not `Lock`) — existing callers hold the lock while calling `_connect()`. Do NOT change to `Lock` or nested acquisition will deadlock.
 - **DLQ `timeout` column** — added in v2. If restoring from a pre-v2 backup, run `ALTER TABLE dlq ADD COLUMN timeout INTEGER NOT NULL DEFAULT 600` before restarting.
+- **DLQ `max_retries` column** — added post-v2. If upgrading a live DB that predates this fix, run `python3 scripts/migrate_dlq_max_retries.py` (idempotent, safe to re-run).
 - **migrate_timers.py** skips `telegram-brief-midday` (weekday-only) and `lessons-review` (monthly 14th) — migrated manually as 24h and 30d interval jobs respectively. `telegram-brief-midday` will now run 7 days/week (acceptable until cron scheduling lands). `lessons-review` next run: 2026-03-14 10:00.
 - **Deployment sequence:** `cp queue.db queue.db.pre-v2` → stop service → `python3 scripts/migrate_timers.py --execute` → start service → verify `schedule list`
 - **v2 schema migration on pre-existing DB** — `initialize()` uses `CREATE TABLE IF NOT EXISTS`, which skips if table exists. A pre-v1 `jobs` table needs 7 manual `ALTER TABLE ADD COLUMN` statements: `tag TEXT`, `max_retries INTEGER DEFAULT 0`, `retry_count INTEGER DEFAULT 0`, `retry_after REAL`, `stall_detected_at REAL`, `recurring_job_id INTEGER REFERENCES recurring_jobs(id)`, `resource_profile TEXT DEFAULT 'ollama'`. Run these before starting the service after upgrade.
