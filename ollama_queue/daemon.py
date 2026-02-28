@@ -7,12 +7,15 @@ import logging
 import os
 import signal as _signal
 import subprocess
+import threading
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 
 from ollama_queue.db import Database
 from ollama_queue.dlq import DLQManager
 from ollama_queue.estimator import DurationEstimator
 from ollama_queue.health import HealthMonitor
+from ollama_queue.models import OllamaModels
 from ollama_queue.scheduler import Scheduler
 
 _log = logging.getLogger(__name__)
@@ -33,6 +36,126 @@ class Daemon:
         self.dlq = DLQManager(db)
         self._last_prune: float = 0.0
         self._recent_job_models: dict[str, float] = {}  # model -> last_completed_at
+        # Concurrency tracking
+        self._running: dict[int, Future] = {}  # job_id → Future
+        self._running_models: dict[int, str] = {}  # job_id → model
+        self._running_lock = threading.Lock()
+        self._executor: ThreadPoolExecutor | None = None
+        self._concurrent_enabled_at: float | None = None  # for shadow mode
+        self._ollama_models = OllamaModels()
+
+    # --- Concurrency helpers ---
+
+    def _max_slots(self) -> int:
+        return max(1, int(self.db.get_setting("max_concurrent_jobs") or 1))
+
+    def _shadow_hours(self) -> float:
+        return float(self.db.get_setting("concurrent_shadow_hours") or 24)
+
+    def _in_shadow_mode(self) -> bool:
+        if self._max_slots() <= 1:
+            return False
+        if self._concurrent_enabled_at is None:
+            self._concurrent_enabled_at = time.time()
+            return True
+        elapsed_hours = (time.time() - self._concurrent_enabled_at) / 3600
+        return elapsed_hours < self._shadow_hours()
+
+    def _free_vram_mb(self) -> float | None:
+        """Free VRAM in MB from nvidia-smi, or None if unavailable."""
+        try:
+            result = subprocess.run(
+                ["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                return float(result.stdout.strip().split("\n")[0])
+        except Exception:
+            _log.debug("nvidia-smi unavailable for VRAM check")
+        return None
+
+    def _free_ram_mb(self) -> float:
+        """Free RAM in MB from /proc/meminfo."""
+        info = HealthMonitor._parse_meminfo()
+        return info.get("MemAvailable", 0) / 1024.0  # kB → MB
+
+    def _model_pull_in_progress(self, model_name: str) -> bool:
+        if not model_name:
+            return False
+        with self.db._lock:
+            row = (
+                self.db._connect()
+                .execute(
+                    "SELECT id FROM model_pulls WHERE model = ? AND status = 'pulling'",
+                    (model_name,),
+                )
+                .fetchone()
+            )
+        return row is not None
+
+    def _model_exists(self, model_name: str) -> bool:
+        if not model_name:
+            return True  # no model required, command-only job
+        models = self._ollama_models.list_local()
+        return any(m["name"] == model_name for m in models)
+
+    def _can_admit(self, job: dict) -> bool:
+        """Three-factor admission gate. Returns True if job can start now."""
+        profile = self._ollama_models.classify(job.get("model") or "")["resource_profile"]
+
+        # embed: always concurrent (up to 4), no VRAM gate
+        if profile == "embed":
+            with self._running_lock:
+                return len(self._running) < 4
+
+        # heavy: serialize — never concurrent
+        if profile == "heavy":
+            with self._running_lock:
+                return len(self._running) == 0
+
+        # Same model already running → serialize
+        model = job.get("model") or ""
+        with self._running_lock:
+            if model and model in self._running_models.values():
+                return False
+            running_count = len(self._running)
+
+        # Pull in progress → block
+        if self._model_pull_in_progress(model):
+            return False
+
+        # Already at capacity → block
+        if running_count >= self._max_slots():
+            return False
+
+        # VRAM + RAM check
+        free_vram = self._free_vram_mb()
+        free_ram = self._free_ram_mb()
+        model_vram = self._ollama_models.estimate_vram_mb(model, self.db) if model else 0.0
+
+        vram_ok = free_vram is None or model_vram <= free_vram * 0.8
+        ram_ok = model_vram * 0.5 <= free_ram * 0.8
+
+        # Health gate — reuse existing hysteresis logic
+        snap = self.health.check()
+        settings = self.db.get_all_settings()
+        health_eval = self.health.evaluate(snap, settings, currently_paused=False)
+
+        if not vram_ok or not ram_ok or health_eval["should_pause"]:
+            return False
+
+        # Shadow mode — log but don't admit second job yet
+        if self._in_shadow_mode() and running_count > 0:
+            _log.info(
+                "SHADOW: would admit concurrent job #%d (%s) — shadow mode active",
+                job["id"],
+                job.get("source", ""),
+            )
+            return False
+
+        return True
 
     def _recover_orphans(self) -> None:
         """Reset jobs stuck in 'running' on daemon startup (no live subprocess)."""
@@ -51,17 +174,13 @@ class Daemon:
         """Single poll cycle.
 
         1. Check if manually paused -> skip
-        2. Check if already running a job -> skip
+        2. Clean up completed futures; skip if at max slots
         3. Get health snapshot + log it
         4. Get next pending job
         5. If no job -> set idle, return
         6. Evaluate health -> if pause needed, update state, return
         7. Evaluate yield -> if interactive user, update state, return
-        8. Start job (subprocess.Popen with shell=True)
-        9. Wait with timeout
-        10. Record result (complete/fail/kill)
-        11. Record duration if successful
-        12. Update daemon state back to idle
+        8. Admit via _can_admit; dispatch to executor thread
         """
         now = time.time()
 
@@ -90,10 +209,12 @@ class Daemon:
             self.db.update_daemon_state(last_poll_at=now)
             return
 
-        # 2. Check if already running a job
-        if state["state"] == "running" and state["current_job_id"] is not None:
-            self.db.update_daemon_state(last_poll_at=now)
-            return
+        # 2. Clean up completed futures
+        with self._running_lock:
+            done_ids = [jid for jid, fut in self._running.items() if fut.done()]
+            for jid in done_ids:
+                self._running.pop(jid)
+                self._running_models.pop(jid, None)
 
         # 3. Get health snapshot + log it
         snap = self.health.check()
@@ -154,17 +275,45 @@ class Daemon:
             )
             return
 
-        # 8. Start job
+        # 8. Admit and dispatch
+        if not self._can_admit(job):
+            self.db.update_daemon_state(state="idle", last_poll_at=now, current_job_id=None)
+            return
+
+        if self._executor is None:
+            self._executor = ThreadPoolExecutor(max_workers=self._max_slots(), thread_name_prefix="oq-worker")
+
         self.db.start_job(job["id"])
+        with self.db._lock:
+            conn = self.db._connect()
+            conn.execute("UPDATE jobs SET pid = -1 WHERE id = ?", (job["id"],))
+            conn.commit()
+
+        with self._running_lock:
+            self._running_models[job["id"]] = job.get("model") or ""
+
+        fut = self._executor.submit(self._run_job, job)
+        with self._running_lock:
+            self._running[job["id"]] = fut
+
+        with self._running_lock:
+            running_count = len(self._running)
+        state_label = "running" if running_count == 1 else f"running({running_count})"
         self.db.update_daemon_state(
-            state="running",
+            state=state_label,
             current_job_id=job["id"],
             paused_reason=None,
             paused_since=None,
             last_poll_at=now,
         )
 
+    def _run_job(self, job: dict) -> None:
+        """Execute a job in a worker thread. Records result in DB."""
         start_time = time.time()
+
+        # Sample VRAM before job for observed-VRAM recording
+        vram_before = self._free_vram_mb()
+
         proc = subprocess.Popen(
             job["command"],
             shell=True,
@@ -177,35 +326,28 @@ class Daemon:
             conn.execute("UPDATE jobs SET pid = ? WHERE id = ?", (proc.pid, job["id"]))
             conn.commit()
 
-        # 9. Wait with timeout
+        # Wait with timeout
         try:
             proc.wait(timeout=job["timeout"])
         except subprocess.TimeoutExpired:
-            # 10a. Timeout -> kill, then drain pipes with a safety timeout
             with contextlib.suppress(ProcessLookupError):
                 proc.kill()
             try:
                 out, err = proc.communicate(timeout=5)
             except subprocess.TimeoutExpired:
                 out, err = b"", b""
-            stdout_tail = out[-500:].decode("utf-8", errors="replace")
-            stderr_tail = err[-500:].decode("utf-8", errors="replace")
             self.db.kill_job(
                 job["id"],
                 reason=f"timeout after {job['timeout']}s",
-                stdout_tail=stdout_tail,
-                stderr_tail=stderr_tail,
+                stdout_tail=out[-500:].decode("utf-8", errors="replace"),
+                stderr_tail=err[-500:].decode("utf-8", errors="replace"),
             )
-            failed_count = (state.get("jobs_failed_today") or 0) + 1
-            self.db.update_daemon_state(
-                state="idle",
-                current_job_id=None,
-                last_poll_at=time.time(),
-                jobs_failed_today=failed_count,
-            )
+            with self._running_lock:
+                self._running.pop(job["id"], None)
+                self._running_models.pop(job["id"], None)
             return
 
-        # 10b. Record result
+        # Record result
         duration = time.time() - start_time
         exit_code = proc.returncode
         assert proc.stdout is not None
@@ -228,8 +370,7 @@ class Daemon:
         # Route failed jobs through DLQ (retry or dead-letter)
         if exit_code != 0:
             try:
-                failure_reason = f"exit code {exit_code}"
-                self.dlq.handle_failure(job["id"], failure_reason)
+                self.dlq.handle_failure(job["id"], f"exit code {exit_code}")
             except Exception:
                 _log.exception("DLQ routing failed for job #%d", job["id"])
 
@@ -237,7 +378,7 @@ class Daemon:
         if job.get("model"):
             self._recent_job_models[job["model"]] = time.time()
 
-        # 11. Record duration if successful
+        # Record duration if successful
         if exit_code == 0:
             self.db.record_duration(
                 source=job["source"],
@@ -245,9 +386,14 @@ class Daemon:
                 duration=duration,
                 exit_code=exit_code,
             )
+            # Record observed VRAM delta
+            vram_after = self._free_vram_mb()
+            if vram_before is not None and vram_after is not None and job.get("model"):
+                delta = vram_before - vram_after
+                if delta > 0:
+                    self._ollama_models.record_observed_vram(job["model"], delta, self.db)
 
-        # Update recurring schedule regardless of success/failure to prevent
-        # infinite re-promotion of failed jobs every poll cycle.
+        # Update recurring schedule
         if job.get("recurring_job_id"):
             try:
                 self.scheduler.update_next_run(
@@ -258,15 +404,9 @@ class Daemon:
             except Exception:
                 _log.exception("Scheduler next_run update failed for job #%d", job["id"])
 
-        # 12. Update daemon state back to idle + increment daily counters
-        counter_field = "jobs_completed_today" if exit_code == 0 else "jobs_failed_today"
-        current_count = (state.get(counter_field) or 0) + 1
-        self.db.update_daemon_state(
-            state="idle",
-            current_job_id=None,
-            last_poll_at=time.time(),
-            **{counter_field: current_count},
-        )
+        with self._running_lock:
+            self._running.pop(job["id"], None)
+            self._running_models.pop(job["id"], None)
 
     def _check_stalled_jobs(self, now: float) -> None:
         """Flag running jobs whose elapsed time exceeds stall_multiplier x estimated_duration."""

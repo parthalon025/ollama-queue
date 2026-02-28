@@ -1,11 +1,24 @@
 """Tests for the daemon polling loop and job runner."""
 
+import concurrent.futures
+import logging
 import time
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from ollama_queue.daemon import Daemon
+
+
+def _drain(daemon):
+    """Wait for all submitted daemon worker futures to complete (test helper)."""
+    if daemon._executor is None:
+        return
+    futs = []
+    with daemon._running_lock:
+        futs = list(daemon._running.values())
+    if futs:
+        concurrent.futures.wait(futs, timeout=10)
 
 
 @pytest.fixture
@@ -47,6 +60,7 @@ def test_poll_runs_job(daemon):
         mock_sub.Popen.return_value = proc
 
         daemon.poll_once()
+        _drain(daemon)
 
     job = daemon.db.get_job(1)
     assert job["status"] == "completed"
@@ -126,6 +140,7 @@ def test_timeout_kills_job(daemon):
         mock_sub.TimeoutExpired = __import__("subprocess").TimeoutExpired
 
         daemon.poll_once()
+        _drain(daemon)
 
     job = daemon.db.get_job(1)
     assert job["status"] == "killed"
@@ -167,6 +182,7 @@ def test_records_duration_on_success(daemon):
         mock_sub.Popen.return_value = proc
 
         daemon.poll_once()
+        _drain(daemon)
 
     history = daemon.db.get_duration_history("test-src")
     assert len(history) == 1
@@ -200,6 +216,7 @@ class TestDaemonSchedulerIntegration:
             proc.returncode = 0
             mock_sub.Popen.return_value = proc
             daemon.poll_once()
+            _drain(daemon)
         # Job was promoted by scheduler, then picked up and run
         jobs = db.get_pending_jobs()
         completed = [j for j in db.get_history() if j["command"] == "echo hi"]
@@ -259,6 +276,7 @@ def test_no_self_block_after_queue_job(daemon):
         proc.returncode = 0
         mock_sub.Popen.return_value = proc
         daemon.poll_once()
+        _drain(daemon)
 
     job1 = daemon.db.get_job(1)
     assert job1["status"] == "completed"
@@ -288,6 +306,7 @@ def test_no_self_block_after_queue_job(daemon):
         proc.returncode = 0
         mock_sub.Popen.return_value = proc
         daemon.poll_once()
+        _drain(daemon)
 
     job2 = daemon.db.get_job(2)
     assert job2["status"] == "completed"  # should NOT be blocked
@@ -341,3 +360,94 @@ def test_reset_job_to_pending(db):
     assert job["status"] == "pending"
     assert job["started_at"] is None
     assert job["pid"] is None
+
+
+# --- T6: ThreadPoolExecutor + admission gate ---
+
+
+def test_embed_jobs_always_admitted(db, monkeypatch):
+    """Embed-profile jobs bypass VRAM gate."""
+    d = Daemon(db)
+    job = {
+        "id": 1,
+        "model": "nomic-embed-text:latest",
+        "resource_profile": "embed",
+        "command": "echo",
+        "source": "test",
+        "timeout": 60,
+        "priority": 5,
+    }
+    monkeypatch.setattr(d, "_free_vram_mb", lambda: 0.0)
+    assert d._can_admit(job) is True
+
+
+def test_heavy_jobs_serialize(db):
+    """Heavy-profile jobs are blocked when another job is running."""
+    d = Daemon(db)
+    d._running[99] = MagicMock()
+    job = {
+        "id": 2,
+        "model": "deepseek-r1:70b",
+        "resource_profile": "heavy",
+        "command": "echo",
+        "source": "test",
+        "timeout": 60,
+        "priority": 5,
+    }
+    assert d._can_admit(job) is False
+
+
+def test_same_model_blocks_second(db):
+    """Two jobs with same model cannot run concurrently."""
+    d = Daemon(db)
+    d._running[1] = MagicMock()
+    d._running_models[1] = "qwen2.5:7b"
+    job = {
+        "id": 2,
+        "model": "qwen2.5:7b",
+        "resource_profile": "ollama",
+        "command": "echo",
+        "source": "test",
+        "timeout": 60,
+        "priority": 5,
+    }
+    assert d._can_admit(job) is False
+
+
+def test_shadow_mode_logs_but_does_not_run(db, monkeypatch, caplog):
+    """Shadow mode logs 'SHADOW' but does not actually admit second job."""
+    db.set_setting("max_concurrent_jobs", 2)
+    db.set_setting("concurrent_shadow_hours", 24)
+    d = Daemon(db)
+    d._concurrent_enabled_at = time.time() - 3600  # 1h ago, still in 24h window
+    d._running[1] = MagicMock()
+    d._running_models[1] = "qwen2.5:7b"
+    job = {
+        "id": 2,
+        "model": "llama3.2:3b",
+        "resource_profile": "ollama",
+        "command": "echo",
+        "source": "test",
+        "timeout": 60,
+        "priority": 5,
+    }
+    monkeypatch.setattr(d, "_free_vram_mb", lambda: 16000.0)
+    monkeypatch.setattr(d, "_free_ram_mb", lambda: 32000.0)
+    with (
+        patch.object(
+            d.health,
+            "check",
+            return_value={
+                "ram_pct": 20.0,
+                "swap_pct": 5.0,
+                "load_avg": 0.5,
+                "cpu_count": 4,
+                "vram_pct": 20.0,
+                "ollama_model": None,
+            },
+        ),
+        caplog.at_level(logging.INFO),
+    ):
+        admitted = d._can_admit(job)
+    assert admitted is False
+    assert any("SHADOW" in r.message for r in caplog.records)
