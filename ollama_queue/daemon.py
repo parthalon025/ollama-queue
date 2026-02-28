@@ -63,6 +63,24 @@ class Daemon:
         elapsed_hours = (time.time() - self._concurrent_enabled_at) / 3600
         return elapsed_hours < self._shadow_hours()
 
+    def _committed_vram_mb(self) -> float:
+        """Estimate VRAM already committed to running jobs.
+
+        Computed from the model estimates of jobs currently in _running_models
+        rather than a live GPU reading, so two simultaneous admission checks
+        both see the same deterministic committed total.  Must be called with
+        _running_lock held so _running_models is stable. (#5)
+        """
+        model_counts: dict[str, int] = {}
+        for model_name in self._running_models.values():
+            if model_name:
+                model_counts[model_name] = model_counts.get(model_name, 0) + 1
+        total = 0.0
+        for model_name, count in model_counts.items():
+            per_model = self._ollama_models.estimate_vram_mb(model_name, self.db) or 0.0
+            total += per_model * count
+        return total
+
     def _free_vram_mb(self) -> float | None:
         """Free VRAM in MB from nvidia-smi, or None if unavailable."""
         try:
@@ -134,6 +152,9 @@ class Daemon:
             if model and model in self._running_models.values():
                 return False
             running_count = len(self._running)
+            # Compute committed VRAM inside the lock so the snapshot is consistent
+            # with the running_count snapshot above. (#5)
+            committed_vram = self._committed_vram_mb()
 
         # Pull in progress → block
         if self._model_pull_in_progress(model):
@@ -143,14 +164,23 @@ class Daemon:
         if running_count >= self._max_slots():
             return False
 
-        # Resource gate: model must fit in combined available VRAM + RAM.
-        # Ollama layers models across GPU VRAM first, then spills to system RAM — total is additive.
-        free_vram = self._free_vram_mb()
-        free_ram = self._free_ram_mb()
+        # Resource gate: estimate whether the new model fits alongside already-committed
+        # models.  We derive "available" VRAM from committed model estimates rather than
+        # a live nvidia-smi read, so two concurrent admission checks both see the same
+        # deterministic value and cannot both pass on a tight GPU. (#5)
+        #
+        # max_vram_mb: optional DB setting; if absent, skip the absolute VRAM check
+        # (health.evaluate's vram_pct gate still applies below as a safety net).
         model_vram = self._ollama_models.estimate_vram_mb(model, self.db) if model else 0.0
-
-        available_mb = (free_vram if free_vram is not None else 0.0) + free_ram
-        resource_ok = free_vram is None or model_vram <= available_mb * 0.8
+        max_vram_raw = self.db.get_setting("max_vram_mb")
+        if max_vram_raw is not None:
+            max_vram = float(max_vram_raw)
+            resource_ok = (committed_vram + model_vram) <= max_vram * 0.8
+        else:
+            # TODO: read total GPU VRAM once from nvidia-smi at startup and cache it,
+            # then use (total - committed) as the available headroom.  For now skip the
+            # absolute check and rely on health.evaluate's vram_pct threshold.
+            resource_ok = True
 
         # Health gate — reuse existing hysteresis logic
         snap = self.health.check()
@@ -301,7 +331,11 @@ class Daemon:
             return
 
         if self._executor is None:
-            self._executor = ThreadPoolExecutor(max_workers=self._max_slots(), thread_name_prefix="oq-worker")
+            # max_workers is a ceiling; actual concurrency is governed entirely by
+            # _can_admit, which reads the live max_concurrent_jobs setting.  Using a
+            # fixed large value means changing the setting at runtime is reflected
+            # immediately without recreating the executor.  (#4)
+            self._executor = ThreadPoolExecutor(max_workers=32, thread_name_prefix="ollama-worker")
 
         self.db.start_job(job["id"])
         with self.db._lock:
@@ -355,17 +389,19 @@ class Daemon:
                     out, err = proc.communicate(timeout=5)
                 except _TimeoutExpired:
                     out, err = b"", b""
-                self.db.kill_job(
-                    job["id"],
-                    reason=f"timeout after {job['timeout']}s",
-                    stdout_tail=out[-500:].decode("utf-8", errors="replace"),
-                    stderr_tail=err[-500:].decode("utf-8", errors="replace"),
-                )
-                # Route timed-out jobs through DLQ so retry logic applies
-                try:
-                    self.dlq.handle_failure(job["id"], f"timeout after {job['timeout']}s")
-                except Exception:
-                    _log.exception("DLQ routing failed for timed-out job #%d", job["id"])
+                # Atomic: no reader sees 'killed' before DLQ routing decides retry/dead.
+                # db._lock is RLock — kill_job and handle_failure re-acquire safely. (#3)
+                with self.db._lock:
+                    self.db.kill_job(
+                        job["id"],
+                        reason=f"timeout after {job['timeout']}s",
+                        stdout_tail=out[-500:].decode("utf-8", errors="replace"),
+                        stderr_tail=err[-500:].decode("utf-8", errors="replace"),
+                    )
+                    try:
+                        self.dlq.handle_failure(job["id"], f"timeout after {job['timeout']}s")
+                    except Exception:
+                        _log.exception("DLQ routing failed for timed-out job #%d", job["id"])
                 return
 
             # Record result
@@ -378,13 +414,21 @@ class Daemon:
             if exit_code != 0:
                 outcome_reason = f"exit code {exit_code}"
 
-            self.db.complete_job(
-                job["id"],
-                exit_code=exit_code,
-                stdout_tail=stdout_tail,
-                stderr_tail=stderr_tail,
-                outcome_reason=outcome_reason,
-            )
+            # Atomic: no reader sees 'failed' before DLQ routing decides retry/dead.
+            # db._lock is RLock — complete_job and handle_failure re-acquire safely. (#3)
+            with self.db._lock:
+                self.db.complete_job(
+                    job["id"],
+                    exit_code=exit_code,
+                    stdout_tail=stdout_tail,
+                    stderr_tail=stderr_tail,
+                    outcome_reason=outcome_reason,
+                )
+                if exit_code != 0:
+                    try:
+                        self.dlq.handle_failure(job["id"], f"exit code {exit_code}")
+                    except Exception:
+                        _log.exception("DLQ routing failed for job #%d", job["id"])
 
             # Increment daily counters atomically
             counter_field = "jobs_completed_today" if exit_code == 0 else "jobs_failed_today"
@@ -392,13 +436,6 @@ class Daemon:
                 conn = self.db._connect()
                 conn.execute(f"UPDATE daemon_state SET {counter_field} = COALESCE({counter_field}, 0) + 1 WHERE id = 1")
                 conn.commit()
-
-            # Route failed jobs through DLQ (retry or dead-letter)
-            if exit_code != 0:
-                try:
-                    self.dlq.handle_failure(job["id"], f"exit code {exit_code}")
-                except Exception:
-                    _log.exception("DLQ routing failed for job #%d", job["id"])
 
             # Track model so interactive-yield check doesn't self-block
             if job.get("model"):
@@ -433,23 +470,26 @@ class Daemon:
 
         except Exception as exc:
             _log.exception("Unhandled exception in worker thread for job #%d; marking failed", job["id"])
-            try:
-                self.db.complete_job(
-                    job["id"],
-                    exit_code=-1,
-                    stdout_tail="",
-                    stderr_tail="",
-                    outcome_reason="internal error",
-                )
-            except Exception:
-                _log.exception("Failed to mark job #%d failed after worker exception", job["id"])
-            try:
-                self.dlq.handle_failure(
-                    job["id"],
-                    f"internal error: {type(exc).__name__}",
-                )
-            except Exception:
-                _log.exception("Failed to route job #%d to DLQ after internal error", job["id"])
+            # Atomic: complete_job + handle_failure under one lock so no reader
+            # sees a transient 'failed' state before DLQ decides retry/dead. (#3)
+            with self.db._lock:
+                try:
+                    self.db.complete_job(
+                        job["id"],
+                        exit_code=-1,
+                        stdout_tail="",
+                        stderr_tail="",
+                        outcome_reason="internal error",
+                    )
+                except Exception:
+                    _log.exception("Failed to mark job #%d failed after worker exception", job["id"])
+                try:
+                    self.dlq.handle_failure(
+                        job["id"],
+                        f"internal error: {type(exc).__name__}",
+                    )
+                except Exception:
+                    _log.exception("Failed to route job #%d to DLQ after internal error", job["id"])
         finally:
             with self._running_lock:
                 self._running.pop(job["id"], None)
