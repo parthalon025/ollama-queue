@@ -432,3 +432,35 @@ def test_proxy_claim_respects_concurrent_slot_limit(db):
     db.start_job(jid)
     claimed = db.try_claim_for_proxy()
     assert claimed is False
+
+
+def test_stall_signals_column_exists(db):
+    """initialize() creates stall_signals column on jobs table."""
+    conn = db._connect()
+    row = conn.execute("PRAGMA table_info(jobs)").fetchall()
+    col_names = [r["name"] for r in row]
+    assert "stall_signals" in col_names
+
+
+def test_set_stall_detected(db):
+    """set_stall_detected() writes stall_detected_at and stall_signals JSON."""
+    import json
+    import time
+
+    job_id = db.submit_job("echo hi", "qwen2.5:7b", 5, 600, "test")
+    now = time.time()
+    signals = {"process": 3.56, "cpu": 2.08, "silence": 1.79, "ps": 0.0, "posterior": 0.92}
+    db.set_stall_detected(job_id, now, signals)
+    conn = db._connect()
+    row = conn.execute("SELECT stall_detected_at, stall_signals FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    assert row["stall_detected_at"] == pytest.approx(now, abs=0.01)
+    parsed = json.loads(row["stall_signals"])
+    assert parsed["posterior"] == pytest.approx(0.92, abs=0.001)
+
+
+def test_new_stall_settings_have_defaults(db):
+    """Three new stall settings exist with correct defaults."""
+    settings = db.get_all_settings()
+    assert settings["stall_posterior_threshold"] == pytest.approx(0.8)
+    assert settings["stall_action"] == "log"
+    assert settings["stall_kill_grace_seconds"] == pytest.approx(60)

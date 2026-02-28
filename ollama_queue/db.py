@@ -28,6 +28,9 @@ DEFAULTS = {
     "retry_backoff_base_seconds": 60,
     "retry_backoff_multiplier": 2.0,
     "stall_multiplier": 2.0,
+    "stall_posterior_threshold": 0.8,
+    "stall_action": "log",
+    "stall_kill_grace_seconds": 60,
     "priority_categories": '{"critical":[1,2],"high":[3,4],"normal":[5,6],"low":[7,8],"background":[9,10]}',
     "priority_category_colors": '{"critical":"#ef4444","high":"#f97316","normal":"#3b82f6","low":"#6b7280","background":"#374151"}',  # noqa: E501
     "resource_profiles": '{"ollama":{"check_vram":true,"check_ram":true,"check_load":true},"any":{"check_vram":false,"check_ram":false,"check_load":false}}',  # noqa: E501
@@ -224,6 +227,13 @@ class Database:
             if "duplicate column" in str(e).lower():
                 _log.debug("jobs.pid column already exists — skipping migration")
             else:
+                raise
+
+        try:
+            conn.execute("ALTER TABLE jobs ADD COLUMN stall_signals TEXT")
+            conn.commit()
+        except sqlite3.OperationalError as e:
+            if "duplicate column" not in str(e).lower():
                 raise
 
         # Seed settings defaults
@@ -426,6 +436,16 @@ class Database:
         conn = self._connect()
         rows = conn.execute("SELECT key, value FROM settings").fetchall()
         return {row["key"]: json.loads(row["value"]) for row in rows}
+
+    def set_stall_detected(self, job_id: int, now: float, signals: dict) -> None:
+        """Record stall detection timestamp and signal breakdown for a job."""
+        with self._lock:
+            conn = self._connect()
+            conn.execute(
+                "UPDATE jobs SET stall_detected_at = ?, stall_signals = ? WHERE id = ?",
+                (now, json.dumps(signals), job_id),
+            )
+            conn.commit()
 
     # --- Duration History ---
 
