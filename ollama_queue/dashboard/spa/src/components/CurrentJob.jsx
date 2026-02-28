@@ -27,14 +27,17 @@ export default function CurrentJob({ daemon, currentJob, latestHealth, settings 
     elapsed = now - currentJob.started_at;
     estimated = currentJob.estimated_duration || null;
     if (estimated && estimated > 0) {
-      progressPct = Math.min(100, (elapsed / estimated) * 100);
+      progressPct = (elapsed / estimated) * 100;
     }
   }
+  const isOverrun = estimated && progressPct > 100;
 
   const hp = latestHealth || {};
+  const isStalled = isRunning && currentJob && !!currentJob.stall_detected_at;
 
   return (
-    <div class="t-frame" data-label="Current">
+    <div class="t-frame" data-label="Current"
+      style={isStalled ? 'border-left: 3px solid #f97316;' : ''}>
       {isRunning ? (
         <div class="flex flex-col gap-2">
           <div class="flex items-center justify-between flex-wrap gap-2">
@@ -50,20 +53,37 @@ export default function CurrentJob({ daemon, currentJob, latestHealth, settings 
                   {currentJob.model}
                 </span>
               )}
+              {isStalled && (
+                <span style="font-size: var(--type-label); color: #f97316; background: rgba(249,115,22,0.1);
+                             padding: 1px 6px; border-radius: 3px; border: 1px solid #f97316;">
+                  ⚠ stalled
+                </span>
+              )}
             </div>
-            <div class="data-mono" style="font-size: var(--type-label); color: var(--text-secondary);">
-              {formatDuration(elapsed)}
-              {estimated ? ` / ~${formatDuration(estimated)}` : ''}
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="data-mono" style="font-size: var(--type-label); color: var(--text-secondary);">
+                {formatDuration(elapsed)}
+                {estimated ? ` / ~${formatDuration(estimated)}` : ''}
+              </span>
+              {isOverrun && (
+                <span style="font-size: var(--type-micro); color: #f97316; background: rgba(249,115,22,0.1);
+                             padding: 1px 5px; border-radius: 3px; border: 1px solid rgba(249,115,22,0.3);">
+                  +{formatDuration(elapsed - estimated)} over
+                </span>
+              )}
             </div>
           </div>
           {/* Progress bar */}
-          <div style="height: 4px; background: var(--bg-inset); border-radius: 2px; overflow: hidden;">
+          <div title={isOverrun ? 'Over estimated time' : undefined}
+               style="height: 4px; background: var(--bg-inset); border-radius: 2px; overflow: hidden;">
             <div style={{
-              width: `${progressPct}%`,
+              width: '100%',
+              maxWidth: '100%',
               height: '100%',
-              background: 'var(--accent)',
+              background: isOverrun ? '#f97316' : 'var(--accent)',
               borderRadius: '2px',
-              transition: 'width 1s linear',
+              transition: 'background 0.3s ease',
+              ...(isOverrun ? {} : { width: `${progressPct}%`, transition: 'width 1s linear' }),
             }} />
           </div>
           {/* Compact resource gauges */}

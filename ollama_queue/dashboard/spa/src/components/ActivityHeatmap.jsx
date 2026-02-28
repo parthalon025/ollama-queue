@@ -68,9 +68,19 @@ export default function ActivityHeatmap({ data }) {
           })}
         </div>
       ))}
-      <p class="data-mono" style="font-size: var(--type-micro); color: var(--text-tertiary); margin-top: 8px; text-align: center;">
-        Darker = more GPU time in that hour
-      </p>
+      <div style="display: flex; align-items: center; gap: 8px; margin-top: 8px; justify-content: flex-end;">
+        <span class="data-mono" style="font-size: var(--type-micro); color: var(--text-tertiary);">less</span>
+        {[0.1, 0.3, 0.5, 0.7, 1.0].map(opVal => (
+          <div key={opVal} style={{
+            width: 12, height: 12, borderRadius: 2,
+            background: 'var(--accent)', opacity: opVal,
+          }} />
+        ))}
+        <span class="data-mono" style="font-size: var(--type-micro); color: var(--text-tertiary);">more</span>
+        <span class="data-mono" style="font-size: var(--type-micro); color: var(--text-tertiary); margin-left: 8px;">
+          max: {maxMinutes.toFixed(0)} GPU min
+        </span>
+      </div>
     </div>
   );
 }

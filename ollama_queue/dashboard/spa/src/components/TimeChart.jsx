@@ -12,7 +12,7 @@ import uPlot from 'uplot';
  * @param {string} [props.className] - Additional CSS classes
  * @param {boolean} [props.compact=false] - Compact mode: no axes, grid, cursor, legend. Height defaults to 32px.
  */
-export default function TimeChart({ data, series, height, className, compact = false }) {
+export default function TimeChart({ data, series, height, className, compact = false, yFit = false }) {
   if (height === undefined) {
     height = compact ? 32 : 120;
   }
@@ -59,6 +59,17 @@ export default function TimeChart({ data, series, height, className, compact = f
               size: 50,
             },
           ],
+      ...(compact ? {} : {
+        scales: {
+          y: yFit ? {
+            range: (_u, dataMin, dataMax) => {
+              if (dataMin === dataMax) return [dataMin - 1, dataMax + 1];
+              const pad = (dataMax - dataMin) * 0.1;
+              return [Math.max(0, dataMin - pad), dataMax + pad];
+            },
+          } : {},
+        },
+      }),
       series: [
         {}, // x-axis (timestamps)
         ...series.map((s) => {
@@ -86,7 +97,7 @@ export default function TimeChart({ data, series, height, className, compact = f
         chartRef.current = null;
       }
     };
-  }, [data, series, height, compact]);
+  }, [data, series, height, compact, yFit]);
 
   // Resize observer
   useEffect(() => {

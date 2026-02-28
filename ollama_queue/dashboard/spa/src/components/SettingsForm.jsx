@@ -120,6 +120,12 @@ export default function SettingsForm({ settings, daemonState, onSave, onPause, o
         <div class="flex flex-col gap-3">
           <NumberRow label="Posterior Threshold" settingKey="stall_posterior_threshold" min={0} max={1} step="0.01" settings={settings} flashKey={flashKey} onBlur={handleBlur} />
           <SelectRow label="Stall Action" settingKey="stall_action" options={['log', 'kill']} settings={settings} flashKey={flashKey} onSave={onSave} flash={flash} />
+          {settings.stall_action === 'kill' && (
+            <div style="font-size: var(--type-micro); color: #f97316; background: rgba(249,115,22,0.08);
+                        border: 1px solid rgba(249,115,22,0.3); border-radius: 4px; padding: 6px 8px;">
+              ⚠ Kill mode: stalled jobs will receive SIGTERM after the grace period elapses.
+            </div>
+          )}
           <NumberRow label="Kill Grace" settingKey="stall_kill_grace_seconds" min={0} unit="sec" settings={settings} flashKey={flashKey} onBlur={handleBlur} />
         </div>
       </div>

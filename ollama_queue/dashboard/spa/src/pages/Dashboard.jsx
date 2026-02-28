@@ -1,5 +1,6 @@
 import { h } from 'preact';
-import { status, queue, history, healthData, durationData, heatmapData, settings } from '../store';
+import { useEffect, useState } from 'preact/hooks';
+import { status, queue, history, healthData, durationData, heatmapData, settings, connectionStatus } from '../store';
 import CurrentJob from '../components/CurrentJob.jsx';
 import QueueList from '../components/QueueList.jsx';
 import HeroCard from '../components/HeroCard.jsx';
@@ -24,15 +25,30 @@ export default function Dashboard() {
   // Latest health entry for resource gauges (health rows are DESC, first = newest)
   const latestHealth = health && health.length > 0 ? health[0] : null;
 
-  const stalledJobs = (q || []).filter(j => j.stall_detected_at && j.status === 'running');
+  const isStalled = !!(currentJob && currentJob.stall_detected_at);
+
+  // #9 — live/disconnected timestamp ticker
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 5000);
+    return () => clearInterval(t);
+  }, []);
 
   return (
     <div class="flex flex-col gap-4 animate-page-enter">
-      {/* Stall alert banner */}
-      {stalledJobs.length > 0 && (
+      {/* Stall alert banner — current running job only */}
+      {isStalled && (
         <div style={{ background: '#7c2d12', color: '#fff', padding: '0.5rem 1rem',
                       borderRadius: 4 }}>
-          ⚠ {stalledJobs.length} job{stalledJobs.length > 1 ? 's' : ''} may be stalled. Check Queue tab.
+          ⚠ Running job #{currentJob.id} ({currentJob.source}) may be stalled. Check stall action in Settings.
+        </div>
+      )}
+
+      {/* #2 — Disconnected banner */}
+      {connectionStatus.value === 'disconnected' && (
+        <div style={{ background: '#1c1917', color: '#f97316', padding: '0.5rem 1rem',
+                      borderRadius: 4, border: '1px solid rgba(249,115,22,0.4)' }}>
+          ⚠ Disconnected — retrying...
         </div>
       )}
 
@@ -40,25 +56,38 @@ export default function Dashboard() {
       <CurrentJob daemon={daemon} currentJob={currentJob} latestHealth={latestHealth} settings={sett} />
 
       {/* 2. Queue — collapsible, default open if jobs pending */}
-      <CollapsibleSection title="Queue" defaultOpen={q && q.length > 0} summary={`${(q || []).length} pending`}>
-        <QueueList jobs={q} />
+      <CollapsibleSection title="Queue" defaultOpen={q && q.length > 0} summary={`${(q || []).length} pending${currentJob ? ' • 1 running' : ''}`}>
+        <QueueList jobs={q} currentJob={currentJob} />
       </CollapsibleSection>
 
       {/* 3. Hero Cards — 4-up KPI grid */}
+      {/* #9 — live/disconnected indicator */}
+      <div style="text-align: right; margin-bottom: -8px;">
+        <span class="data-mono" style={`font-size: var(--type-micro); color: ${connectionStatus.value === 'ok' ? 'var(--status-healthy)' : 'var(--status-error)'};`}>
+          ● {connectionStatus.value === 'ok' ? 'live' : 'disconnected'}
+        </span>
+      </div>
       <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {/* #5 — HeroCard sparklines */}
         <HeroCard
           label="Jobs / 24h"
           value={kpis ? kpis.jobs_24h : '--'}
+          sparkData={buildHealthSparkline(health, 'ram_pct')}
+          sparkColor="var(--accent)"
         />
         <HeroCard
           label="Avg Wait"
           value={kpis ? formatWaitReadable(kpis.avg_wait_seconds) : '--'}
+          sparkData={buildDurationSparkline(durations)}
+          sparkColor="var(--accent)"
         />
         <HeroCard
           label="Pause Time"
           value={kpis ? `${kpis.pause_minutes_24h}` : '--'}
           unit="min"
           warning={kpis && kpis.pause_minutes_24h > 30}
+          sparkData={buildHealthSparkline(health, 'ram_pct')}
+          sparkColor="var(--status-warning)"
         />
         <HeroCard
           label="Success Rate"
@@ -68,10 +97,10 @@ export default function Dashboard() {
         />
       </div>
 
-      {/* 4. Resource Trends — 3 small TimeChart multiples */}
+      {/* 4. Resource Trends — 4 small TimeChart multiples (#4 — added Swap chart) */}
       <CollapsibleSection title="Resource Trends" defaultOpen={false} summary={health && health.length > 0 ? `${health.length} samples` : 'no data'}>
         {health && health.length > 0 ? (
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
             <div class="t-frame" data-label="RAM %">
               <TimeChart
                 data={buildHealthSeries(health, 'ram_pct')}
@@ -90,6 +119,13 @@ export default function Dashboard() {
               <TimeChart
                 data={buildHealthSeries(health, 'load_avg')}
                 series={[{ label: 'Load', color: 'var(--accent-purple)', width: 1.5 }]}
+                height={100}
+              />
+            </div>
+            <div class="t-frame" data-label="Swap %">
+              <TimeChart
+                data={buildHealthSeries(health, 'swap_pct')}
+                series={[{ label: 'Swap', color: '#a78bfa', width: 1.5 }]}
                 height={100}
               />
             </div>
@@ -170,6 +206,28 @@ function formatWaitReadable(seconds) {
   if (s < 60) return `${s}s`;
   const m = Math.floor(s / 60);
   if (m < 60) return `${m}m ${s % 60}s`;
-  const h = Math.floor(m / 60);
-  return `${h}h ${m % 60}m`;
+  const hr = Math.floor(m / 60);
+  return `${hr}h ${m % 60}m`;
+}
+
+/**
+ * #5 — Build sparkline data from health_log rows for a given field.
+ * Returns uPlot-compatible [timestamps[], values[]] in chronological order,
+ * or null if insufficient data.
+ */
+function buildHealthSparkline(rows, field) {
+  if (!rows || rows.length < 2) return null;
+  const sorted = [...rows].reverse();
+  return [sorted.map((r) => r.timestamp), sorted.map((r) => r[field] ?? null)];
+}
+
+/**
+ * #5 — Build sparkline data from duration_history rows.
+ * Takes the last 24 records sorted chronologically.
+ * Returns uPlot-compatible [timestamps[], values[]], or null if insufficient data.
+ */
+function buildDurationSparkline(rows) {
+  if (!rows || rows.length < 2) return null;
+  const sorted = [...rows].sort((a, b) => a.recorded_at - b.recorded_at).slice(-24);
+  return [sorted.map((r) => r.recorded_at), sorted.map((r) => r.duration)];
 }

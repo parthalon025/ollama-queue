@@ -16,30 +16,68 @@ export const models = signal([]);
 export const modelPulls = signal([]);
 export const modelCatalog = signal({ curated: [], search_results: [] });
 export const queueEtas = signal([]);
+export const connectionStatus = signal('ok'); // 'ok' | 'disconnected'
 
 // Derive API base from current URL so it works behind Tailscale Serve path prefix.
 // /ui/ → /api, /queue/ui/ → /queue/api
 const pathBase = window.location.pathname.replace(/\/ui\/.*$/, '').replace(/\/ui$/, '');
 export const API = `${pathBase}/api`;
 
-const POLL_INTERVAL = 5000;
+let POLL_INTERVAL = 5000;
 let pollTimer = null;
+let _pollFailures = 0;
+let _pollCount = 0;
+let _backoffMs = 5000;
 
 export function startPolling() {
     fetchAll();
-    pollTimer = setInterval(fetchStatus, POLL_INTERVAL);
+    pollTimer = setTimeout(fetchStatus, POLL_INTERVAL);
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) fetchAll();
+    });
 }
 
 export function stopPolling() {
-    if (pollTimer) clearInterval(pollTimer);
+    if (pollTimer) clearTimeout(pollTimer);
 }
 
 async function fetchStatus() {
     try {
         const resp = await fetch(`${API}/status`);
-        if (resp.ok) status.value = await resp.json();
+        if (resp.ok) {
+            const data = await resp.json();
+            status.value = data;
+            if (Array.isArray(data.queue)) queue.value = data.queue;
+            _pollFailures = 0;
+            connectionStatus.value = 'ok';
+            _backoffMs = POLL_INTERVAL;
+            _pollCount++;
+            if (_pollCount % 12 === 0) _fetchNonRealtime();
+        }
+        pollTimer = setTimeout(fetchStatus, POLL_INTERVAL);
     } catch (e) {
         console.error('Poll failed:', e);
+        _pollFailures++;
+        if (_pollFailures >= 3) connectionStatus.value = 'disconnected';
+        _backoffMs = Math.min(_backoffMs * 2, 30000);
+        pollTimer = setTimeout(fetchStatus, _backoffMs);
+    }
+}
+
+async function _fetchNonRealtime() {
+    try {
+        const [hResp, durResp, heatResp, histResp] = await Promise.all([
+            fetch(`${API}/health`),
+            fetch(`${API}/durations`),
+            fetch(`${API}/heatmap`),
+            fetch(`${API}/history`),
+        ]);
+        if (hResp.ok) healthData.value = await hResp.json();
+        if (durResp.ok) durationData.value = await durResp.json();
+        if (heatResp.ok) heatmapData.value = await heatResp.json();
+        if (histResp.ok) history.value = await histResp.json();
+    } catch (e) {
+        console.error('Non-realtime refresh failed:', e);
     }
 }
 
@@ -211,6 +249,11 @@ async function fetchAll() {
         if (durResp.ok) durationData.value = await durResp.json();
         if (heatResp.ok) heatmapData.value = await heatResp.json();
         if (setResp.ok) settings.value = await setResp.json();
+        const pi = settings.value.poll_interval_seconds;
+        if (pi && pi * 1000 !== POLL_INTERVAL) {
+            POLL_INTERVAL = pi * 1000;
+            if (pollTimer) { clearTimeout(pollTimer); pollTimer = setTimeout(fetchStatus, POLL_INTERVAL); }
+        }
     } catch (e) {
         console.error('Initial fetch failed:', e);
     }
