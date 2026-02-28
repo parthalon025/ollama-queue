@@ -171,7 +171,12 @@ export async function startModelPull(modelName) {
 }
 
 export async function cancelModelPull(pullId) {
-    await fetch(`${API}/models/pull/${pullId}`, { method: 'DELETE' });
+    const resp = await fetch(`${API}/models/pull/${pullId}`, { method: 'DELETE' });
+    if (!resp.ok) {
+        const msg = `Cancel pull failed: ${resp.status}`;
+        console.error(msg);
+        throw new Error(msg);
+    }
 }
 
 export async function fetchQueueEtas() {

@@ -163,24 +163,18 @@ class OllamaModels:
 
         Priority: observed value in model_registry → disk size × safety factor → 4000 MB default.
         """
+        # Both reads in one lock scope — prevents TOCTOU between registry and safety factor reads.
         with db._lock:
-            row = (
-                db._connect()
-                .execute(
-                    "SELECT vram_observed_mb, size_bytes FROM model_registry WHERE name = ?",
-                    (model_name,),
-                )
-                .fetchone()
-            )
+            conn = db._connect()
+            row = conn.execute(
+                "SELECT vram_observed_mb, size_bytes FROM model_registry WHERE name = ?",
+                (model_name,),
+            ).fetchone()
+            setting_row = conn.execute("SELECT value FROM settings WHERE key = 'vram_safety_factor'").fetchone()
 
         if row and row["vram_observed_mb"]:
             return float(row["vram_observed_mb"])
 
-        # Get safety factor from settings
-        with db._lock:
-            setting_row = (
-                db._connect().execute("SELECT value FROM settings WHERE key = 'vram_safety_factor'").fetchone()
-            )
         safety = float(setting_row["value"]) if setting_row else 1.3
 
         # Try model_registry size_bytes first

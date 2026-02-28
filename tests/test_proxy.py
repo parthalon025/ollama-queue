@@ -148,8 +148,15 @@ def test_generate_proxy_logs_job(client, db):
 
 def test_generate_proxy_timeout_when_busy(client, db):
     """Returns 504 if daemon never goes idle within timeout."""
-    # Set daemon to running state (simulating busy queue)
-    db.update_daemon_state(state="running", current_job_id=123)
+    # Simulate a busy queue: submit a job, mark it running in DB, and update daemon_state.
+    import time
+
+    job_id = db.submit_job("echo busy", model="test", priority=5, timeout=60, source="test")
+    with db._lock:
+        conn = db._connect()
+        conn.execute("UPDATE jobs SET status='running', started_at=? WHERE id=?", (time.time(), job_id))
+        conn.commit()
+    db.update_daemon_state(state="running", current_job_id=job_id)
 
     with patch("ollama_queue.api.PROXY_WAIT_TIMEOUT", 1), patch("ollama_queue.api.PROXY_POLL_INTERVAL", 0.1):
         resp = client.post(

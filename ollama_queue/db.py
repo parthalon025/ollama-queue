@@ -533,10 +533,10 @@ class Database:
             running = conn.execute("SELECT COUNT(*) as cnt FROM jobs WHERE status = 'running'").fetchone()["cnt"]
             if running >= max_slots:
                 return False
-            # Also block if daemon_state shows a real job in progress (current_job_id > 0)
-            # or proxy already claimed (sentinel -1)
+            # Block only when another proxy is already claimed (sentinel -1).
+            # Real running jobs are already counted via the jobs table above.
             state = conn.execute("SELECT current_job_id FROM daemon_state WHERE id=1").fetchone()
-            if state and state["current_job_id"] is not None and state["current_job_id"] != 0:
+            if state and state["current_job_id"] == -1:
                 return False
             conn.execute("UPDATE daemon_state SET state='running', current_job_id=-1 WHERE id=1")
             conn.commit()

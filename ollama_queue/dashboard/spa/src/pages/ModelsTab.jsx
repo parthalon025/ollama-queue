@@ -12,14 +12,17 @@ export default function ModelsTab() {
     const [searchQuery, setSearchQuery] = useState('');
     const [activePulls, setActivePulls] = useState({});
     const [pullError, setPullError] = useState(null);
-    const pollRef = useRef(null);
+    // Map keyed by pullId — all active poll intervals tracked here for cleanup on unmount.
+    const pullIntervalsRef = useRef({});
 
     useEffect(() => {
         fetchModels();
         fetchModelCatalog();
         fetchSchedule();
         return () => {
-            if (pollRef.current) clearInterval(pollRef.current);
+            // Clear all active pull intervals when component unmounts.
+            Object.values(pullIntervalsRef.current).forEach(iv => clearInterval(iv));
+            pullIntervalsRef.current = {};
         };
     }, []);
 
@@ -38,24 +41,32 @@ export default function ModelsTab() {
                             [pullId]: { model: modelName, progress: data.progress_pct, status: data.status },
                         }));
                         if (data.status !== 'pulling') {
-                            clearInterval(iv);
+                            clearInterval(pullIntervalsRef.current[pullId]);
+                            delete pullIntervalsRef.current[pullId];
                             if (data.status === 'completed') fetchModels();
                         }
                     }
                 } catch (pollErr) { console.warn('Pull poll error:', pollErr); }
             }, 2000);
+            pullIntervalsRef.current[pullId] = iv;
         } catch (err) {
             setPullError(`Pull failed: ${err.message}`);
         }
     }
 
     async function handleCancel(pullId) {
-        await cancelModelPull(pullId);
-        setActivePulls(prev => {
-            const next = { ...prev };
-            delete next[pullId];
-            return next;
-        });
+        try {
+            await cancelModelPull(pullId);
+            clearInterval(pullIntervalsRef.current[pullId]);
+            delete pullIntervalsRef.current[pullId];
+            setActivePulls(prev => {
+                const next = { ...prev };
+                delete next[pullId];
+                return next;
+            });
+        } catch (err) {
+            setPullError(`Cancel failed: ${err.message}`);
+        }
     }
 
     async function handleAssign(rjId, modelName) {
