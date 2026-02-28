@@ -284,13 +284,16 @@ class OllamaModels:
             except Exception as exc:
                 status = "failed"
                 _log.error("pull monitor error: %s", exc)
-            with db._lock:
-                conn = db._connect()
-                conn.execute(
-                    "UPDATE model_pulls SET status=?, completed_at=?, progress_pct=? WHERE id=?",
-                    (status, time.time(), 100.0 if status == "completed" else None, pull_id),
-                )
-                conn.commit()
+            try:
+                with db._lock:
+                    conn = db._connect()
+                    conn.execute(
+                        "UPDATE model_pulls SET status=?, completed_at=?, progress_pct=? WHERE id=?",
+                        (status, time.time(), 100.0 if status == "completed" else None, pull_id),
+                    )
+                    conn.commit()
+            except Exception:
+                _log.exception("Failed to update pull status for model %s to %s", model_name, status)
 
         t = threading.Thread(target=_monitor, daemon=True, name=f"pull-{pull_id}")
         t.start()

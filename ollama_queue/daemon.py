@@ -431,7 +431,7 @@ class Daemon:
                 except Exception:
                     _log.exception("Scheduler next_run update failed for job #%d", job["id"])
 
-        except Exception:
+        except Exception as exc:
             _log.exception("Unhandled exception in worker thread for job #%d; marking failed", job["id"])
             try:
                 self.db.complete_job(
@@ -443,6 +443,13 @@ class Daemon:
                 )
             except Exception:
                 _log.exception("Failed to mark job #%d failed after worker exception", job["id"])
+            try:
+                self.dlq.handle_failure(
+                    job["id"],
+                    f"internal error: {type(exc).__name__}",
+                )
+            except Exception:
+                _log.exception("Failed to route job #%d to DLQ after internal error", job["id"])
         finally:
             with self._running_lock:
                 self._running.pop(job["id"], None)
