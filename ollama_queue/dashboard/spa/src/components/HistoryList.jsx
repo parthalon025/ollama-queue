@@ -90,7 +90,7 @@ function HistoryRow({ job }) {
         </span>
         {/* Duration */}
         <span class="data-mono" style="font-size: var(--type-micro); color: var(--text-tertiary); width: 44px; text-align: right;">
-          {duration != null ? formatDur(duration) : '--'}
+          {duration !== null ? formatDur(duration) : '--'}
         </span>
         {/* Expand indicator */}
         {hasReason && (

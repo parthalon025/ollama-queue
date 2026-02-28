@@ -93,7 +93,7 @@ export default function CurrentJob({ daemon, currentJob, latestHealth, settings 
 }
 
 function formatDuration(seconds) {
-  if (seconds == null || seconds < 0) return '--';
+  if (seconds === null || seconds < 0) return '--';
   const s = Math.round(seconds);
   if (s < 60) return `${s}s`;
   const m = Math.floor(s / 60);

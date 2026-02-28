@@ -165,7 +165,7 @@ function buildDurationBySources(rows) {
  * Format seconds into human-readable wait time.
  */
 function formatWaitReadable(seconds) {
-  if (seconds == null || seconds <= 0) return '0s';
+  if (seconds === null || seconds <= 0) return '0s';
   const s = Math.round(seconds);
   if (s < 60) return `${s}s`;
   const m = Math.floor(s / 60);
