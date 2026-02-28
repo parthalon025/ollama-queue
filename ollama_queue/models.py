@@ -1,0 +1,332 @@
+"""Ollama model registry: list, classify, VRAM estimation, pull lifecycle."""
+
+from __future__ import annotations
+
+import logging
+import os
+import signal
+import subprocess
+import threading
+import time
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ollama_queue.db import Database
+
+_log = logging.getLogger(__name__)
+
+# Profile rules: first match wins. (keywords, profile)
+_PROFILE_RULES: list[tuple[list[str], str]] = [
+    (["embed", "nomic", "mxbai", "bge-m3", "all-minilm"], "embed"),
+    (
+        ["70b", "34b", "32b", ":671b", "deepseek-r1:14", "deepseek-r1:32", "llama3.3:70", "qwen2.5:72"],
+        "heavy",
+    ),
+]
+
+# Type tag rules: first match wins. (keywords, type_tag)
+_TYPE_RULES: list[tuple[list[str], str]] = [
+    (["embed", "nomic", "mxbai", "bge"], "embed"),
+    (["coder", "-coder", "deepseek-coder", "starcoder", "codellama"], "coding"),
+    (["r1", "o1", "think", "reason"], "reasoning"),
+]
+
+
+def _parse_size_bytes(size_str: str) -> int:
+    """Parse '4.7 GB', '274 MB', '39 GB' → bytes."""
+    parts = size_str.strip().split()
+    if len(parts) < 2:
+        return 0
+    try:
+        val = float(parts[0])
+        unit = parts[1].upper()
+        multipliers = {"B": 1, "KB": 1024, "MB": 1024**2, "GB": 1024**3, "TB": 1024**4}
+        return int(val * multipliers.get(unit, 1))
+    except (ValueError, KeyError):
+        return 0
+
+
+class OllamaModels:
+    """Interface to local Ollama model management."""
+
+    def list_local(self) -> list[dict]:
+        """Run `ollama list` and return [{name, size_bytes, modified}].
+
+        Returns empty list if ollama is not available.
+        """
+        try:
+            result = subprocess.run(
+                ["ollama", "list"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode != 0:
+                _log.warning("ollama list returned %d", result.returncode)
+                return []
+            lines = result.stdout.strip().split("\n")
+            if len(lines) < 2:
+                return []
+            # Skip header line
+            models = []
+            for line in lines[1:]:
+                parts = line.split()
+                if len(parts) < 4:
+                    continue
+                name = parts[0]
+                # SIZE is parts[2] + parts[3] (e.g. "4.7" + "GB")
+                size_str = f"{parts[2]} {parts[3]}"
+                models.append(
+                    {
+                        "name": name,
+                        "size_bytes": _parse_size_bytes(size_str),
+                        "modified": " ".join(parts[4:]) if len(parts) > 4 else "",
+                    }
+                )
+            return models
+        except (OSError, subprocess.TimeoutExpired):
+            _log.warning("ollama list failed — ollama may not be running")
+            return []
+
+    def get_loaded(self) -> list[dict]:
+        """Run `ollama ps` and return all loaded models.
+
+        Returns [{name, size_bytes, vram_pct, cpu_pct, until}].
+        """
+        try:
+            result = subprocess.run(
+                ["ollama", "ps"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode != 0:
+                return []
+            lines = result.stdout.strip().split("\n")
+            if len(lines) < 2:
+                return []
+            loaded = []
+            for line in lines[1:]:
+                parts = line.split()
+                if len(parts) < 3:
+                    continue
+                name = parts[0]
+                size_str = f"{parts[2]} {parts[3]}" if len(parts) > 3 else f"{parts[2]} B"
+                vram_pct = 0.0
+                cpu_pct = 0.0
+                processor_str = parts[4] if len(parts) > 4 else ""
+                if "/" in processor_str:
+                    halves = processor_str.split("/")
+                    try:
+                        cpu_pct = float(halves[0].strip("%"))
+                        vram_pct = float(halves[1].strip("%"))
+                    except ValueError:
+                        pass
+                elif processor_str.endswith("%"):
+                    try:
+                        vram_pct = float(processor_str.strip("%"))
+                    except ValueError:
+                        pass
+                loaded.append(
+                    {
+                        "name": name,
+                        "size_bytes": _parse_size_bytes(size_str),
+                        "vram_pct": vram_pct,
+                        "cpu_pct": cpu_pct,
+                        "until": " ".join(parts[5:]) if len(parts) > 5 else "",
+                    }
+                )
+            return loaded
+        except (OSError, subprocess.TimeoutExpired):
+            return []
+
+    def classify(self, model_name: str) -> dict:
+        """Return {resource_profile, type_tag} based on model name heuristics."""
+        name_lower = model_name.lower()
+
+        resource_profile = "ollama"
+        for keywords, profile in _PROFILE_RULES:
+            if any(kw in name_lower for kw in keywords):
+                resource_profile = profile
+                break
+
+        type_tag = "general"
+        for keywords, tag in _TYPE_RULES:
+            if any(kw in name_lower for kw in keywords):
+                type_tag = tag
+                break
+
+        return {"resource_profile": resource_profile, "type_tag": type_tag}
+
+    def estimate_vram_mb(self, model_name: str, db: Database) -> float:
+        """Return estimated VRAM in MB.
+
+        Priority: observed value in model_registry → disk size × safety factor → 4000 MB default.
+        """
+        with db._lock:
+            row = (
+                db._connect()
+                .execute(
+                    "SELECT vram_observed_mb, size_bytes FROM model_registry WHERE name = ?",
+                    (model_name,),
+                )
+                .fetchone()
+            )
+
+        if row and row["vram_observed_mb"]:
+            return float(row["vram_observed_mb"])
+
+        # Get safety factor from settings
+        with db._lock:
+            setting_row = (
+                db._connect().execute("SELECT value FROM settings WHERE key = 'vram_safety_factor'").fetchone()
+            )
+        safety = float(setting_row["value"]) if setting_row else 1.3
+
+        # Try model_registry size_bytes first
+        if row and row["size_bytes"]:
+            return (row["size_bytes"] / 1_000_000) * safety
+
+        # Try list_local
+        for m in self.list_local():
+            if m["name"] == model_name and m["size_bytes"]:
+                return (m["size_bytes"] / 1_000_000) * safety
+
+        return 4000.0  # 4 GB unknown default
+
+    def record_observed_vram(self, model_name: str, vram_mb: float, db: Database) -> None:
+        """Update model_registry with observed VRAM using EMA (α=0.3)."""
+        with db._lock:
+            conn = db._connect()
+            row = conn.execute(
+                "SELECT vram_observed_mb FROM model_registry WHERE name = ?",
+                (model_name,),
+            ).fetchone()
+            if row and row["vram_observed_mb"]:
+                new_val = 0.3 * vram_mb + 0.7 * float(row["vram_observed_mb"])
+            else:
+                new_val = vram_mb
+            conn.execute(
+                """INSERT INTO model_registry (name, vram_observed_mb, last_seen)
+                   VALUES (?, ?, ?)
+                   ON CONFLICT(name) DO UPDATE SET
+                       vram_observed_mb = excluded.vram_observed_mb,
+                       last_seen = excluded.last_seen""",
+                (model_name, new_val, time.time()),
+            )
+            conn.commit()
+
+    def refresh_registry(self, db: Database) -> None:
+        """Sync model_registry with current `ollama list` output."""
+        models = self.list_local()
+        now = time.time()
+        with db._lock:
+            conn = db._connect()
+            for m in models:
+                classification = self.classify(m["name"])
+                conn.execute(
+                    """INSERT INTO model_registry
+                           (name, size_bytes, resource_profile, type_tag, last_seen)
+                       VALUES (?, ?, ?, ?, ?)
+                       ON CONFLICT(name) DO UPDATE SET
+                           size_bytes = excluded.size_bytes,
+                           resource_profile = excluded.resource_profile,
+                           type_tag = excluded.type_tag,
+                           last_seen = excluded.last_seen""",
+                    (
+                        m["name"],
+                        m["size_bytes"],
+                        classification["resource_profile"],
+                        classification["type_tag"],
+                        now,
+                    ),
+                )
+            conn.commit()
+
+    # --- Pull lifecycle ---
+
+    def pull(self, model_name: str, db: Database) -> int:
+        """Start `ollama pull <model>` in background. Returns pull_id."""
+        now = time.time()
+        with db._lock:
+            conn = db._connect()
+            conn.execute(
+                "INSERT INTO model_pulls (model, status, progress_pct, started_at) VALUES (?,?,?,?)",
+                (model_name, "pulling", 0.0, now),
+            )
+            conn.commit()
+            pull_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+        proc = subprocess.Popen(
+            ["ollama", "pull", model_name],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        with db._lock:
+            conn = db._connect()
+            conn.execute("UPDATE model_pulls SET pid = ? WHERE id = ?", (proc.pid, pull_id))
+            conn.commit()
+
+        def _monitor() -> None:
+            try:
+                for line in proc.stdout:  # type: ignore[union-attr]
+                    if "%" in line:
+                        try:
+                            pct_str = [p for p in line.split() if p.endswith("%")]
+                            if pct_str:
+                                pct = float(pct_str[-1].strip("%"))
+                                with db._lock:
+                                    conn = db._connect()
+                                    conn.execute(
+                                        "UPDATE model_pulls SET progress_pct = ? WHERE id = ?",
+                                        (pct, pull_id),
+                                    )
+                                    conn.commit()
+                        except (ValueError, IndexError):
+                            pass
+                proc.wait()
+                status = "completed" if proc.returncode == 0 else "failed"
+            except Exception as exc:
+                status = "failed"
+                _log.error("pull monitor error: %s", exc)
+            with db._lock:
+                conn = db._connect()
+                conn.execute(
+                    "UPDATE model_pulls SET status=?, completed_at=?, progress_pct=? WHERE id=?",
+                    (status, time.time(), 100.0 if status == "completed" else None, pull_id),
+                )
+                conn.commit()
+
+        t = threading.Thread(target=_monitor, daemon=True, name=f"pull-{pull_id}")
+        t.start()
+        # Lesson #43: add done_callback for error visibility on daemon threads
+        # (threading.Thread doesn't support callbacks natively — _monitor handles its own logging)
+        return pull_id
+
+    def get_pull_status(self, pull_id: int, db: Database) -> dict:
+        """Return pull progress dict."""
+        with db._lock:
+            row = db._connect().execute("SELECT * FROM model_pulls WHERE id = ?", (pull_id,)).fetchone()
+        if not row:
+            return {"error": "not found"}
+        return dict(row)
+
+    def cancel_pull(self, pull_id: int, db: Database) -> bool:
+        """SIGTERM the pull process and mark cancelled."""
+        with db._lock:
+            row = db._connect().execute("SELECT pid FROM model_pulls WHERE id = ?", (pull_id,)).fetchone()
+        if not row or not row["pid"]:
+            return False
+        try:
+            os.kill(row["pid"], signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        with db._lock:
+            conn = db._connect()
+            conn.execute(
+                "UPDATE model_pulls SET status='cancelled', completed_at=? WHERE id=?",
+                (time.time(), pull_id),
+            )
+            conn.commit()
+        return True
