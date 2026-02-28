@@ -44,16 +44,7 @@ class Scheduler:
                 else:
                     interval = rj.get("interval_seconds") or 300  # fallback 5min
                     new_next_run = now + interval
-                if hasattr(self.db, "update_recurring_job"):
-                    self.db.update_recurring_job(rj["id"], next_run=new_next_run)
-                else:
-                    with self.db._lock:
-                        conn = self.db._connect()
-                        conn.execute(
-                            "UPDATE recurring_jobs SET next_run = ? WHERE id = ?",
-                            (new_next_run, rj["id"]),
-                        )
-                        conn.commit()
+                self.db._set_recurring_next_run(rj["id"], new_next_run)
                 continue
             job_id = self.db.submit_job(
                 command=rj["command"],
@@ -138,13 +129,7 @@ class Scheduler:
                 candidate = now + (interval * i / n)
                 new_next_run = self._nudge_past_blocked(candidate, blocked_slots, rj["name"])
 
-                with self.db._lock:
-                    conn = self.db._connect()
-                    conn.execute(
-                        "UPDATE recurring_jobs SET next_run = ? WHERE id = ?",
-                        (new_next_run, rj["id"]),
-                    )
-                    conn.commit()
+                self.db._set_recurring_next_run(rj["id"], new_next_run)
                 change = {
                     "name": rj["name"],
                     "old_next_run": old_next_run,

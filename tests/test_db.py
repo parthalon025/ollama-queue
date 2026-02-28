@@ -1,6 +1,7 @@
 """Tests for the SQLite database layer."""
 
 import time
+from unittest.mock import patch
 
 import pytest
 
@@ -76,6 +77,30 @@ class TestJobs:
         )
         conn.commit()
         assert db.get_next_job() is None
+
+    def test_get_next_job_respects_retry_after(self, db):
+        """get_next_job should not return jobs whose retry_after is in the future,
+        and should return them once time advances past retry_after."""
+        job_id = db.submit_job("cmd", "m", 5, 60, "src")
+        future_retry = time.time() + 3600
+        conn = db._connect()
+        conn.execute(
+            "UPDATE jobs SET retry_after = ? WHERE id = ?",
+            (future_retry, job_id),
+        )
+        conn.commit()
+
+        # Job is not available while retry_after is in the future
+        with patch("ollama_queue.db.time") as mock_time:
+            mock_time.time.return_value = future_retry - 1
+            assert db.get_next_job() is None
+
+        # Job becomes available once time passes retry_after
+        with patch("ollama_queue.db.time") as mock_time:
+            mock_time.time.return_value = future_retry + 1
+            job = db.get_next_job()
+            assert job is not None
+            assert job["id"] == job_id
 
     def test_next_job_fifo_within_priority(self, db):
         db.submit_job("first", "m1", priority=5, timeout=600, source="a")
@@ -275,6 +300,14 @@ class TestRecurringJobs:
         events = db.get_schedule_events(limit=10)
         assert len(events) == 1
         assert events[0]["event_type"] == "promoted"
+
+    def test_set_recurring_next_run_updates_correctly(self, db):
+        """_set_recurring_next_run updates next_run without direct _connect access."""
+        rj_id = db.add_recurring_job("job1", "echo hi", interval_seconds=3600)
+        future_time = time.time() + 7200
+        db._set_recurring_next_run(rj_id, future_time)
+        rj = db.get_recurring_job(rj_id)
+        assert abs(rj["next_run"] - future_time) < 0.01
 
 
 class TestDLQ:

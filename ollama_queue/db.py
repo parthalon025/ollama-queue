@@ -243,12 +243,14 @@ class Database:
 
     def get_next_job(self) -> dict | None:
         conn = self._connect()
+        now = time.time()
         row = conn.execute(
             """SELECT * FROM jobs
                WHERE status = 'pending'
-               AND (retry_after IS NULL OR retry_after <= unixepoch('now'))
+               AND (retry_after IS NULL OR retry_after <= ?)
                ORDER BY priority ASC, submitted_at ASC
-               LIMIT 1"""
+               LIMIT 1""",
+            (now,),
         ).fetchone()
         return dict(row) if row else None
 
@@ -718,6 +720,28 @@ class Database:
             (recurring_job_id,),
         ).fetchone()
         return row is not None
+
+    def _set_recurring_next_run(self, rj_id: int, next_run: float) -> None:
+        """Update next_run for a recurring job. Single-purpose DB API — no direct _connect() outside this class."""
+        conn = self._connect()
+        conn.execute(
+            "UPDATE recurring_jobs SET next_run = ? WHERE id = ?",
+            (next_run, rj_id),
+        )
+        conn.commit()
+
+    def _set_job_retry_after(self, job_id: int, retry_after: float) -> None:
+        """Increment retry_count and set retry_after timestamp, keeping status pending."""
+        conn = self._connect()
+        conn.execute(
+            """UPDATE jobs
+               SET retry_count = retry_count + 1,
+                   retry_after = ?,
+                   status = 'pending'
+               WHERE id = ?""",
+            (retry_after, job_id),
+        )
+        conn.commit()
 
     # --- DLQ ---
 

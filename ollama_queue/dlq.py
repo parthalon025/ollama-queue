@@ -35,19 +35,10 @@ class DLQManager:
         settings = self.db.get_all_settings()
         base = settings.get("retry_backoff_base_seconds", 60)
         multiplier = settings.get("retry_backoff_multiplier", 2.0)
-        delay = base * (multiplier ** retry_count)
+        delay = base * (multiplier**retry_count)
         retry_after = time.time() + delay
 
-        conn = self.db._connect()
-        conn.execute(
-            """UPDATE jobs
-               SET retry_count = retry_count + 1,
-                   retry_after = ?,
-                   status = 'pending'
-               WHERE id = ?""",
-            (retry_after, job_id),
-        )
-        conn.commit()
+        self.db._set_job_retry_after(job_id, retry_after)
         self.db.log_schedule_event(
             "retried",
             job_id=job_id,
