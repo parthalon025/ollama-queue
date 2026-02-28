@@ -27,7 +27,6 @@ DEFAULTS = {
     "default_max_retries": 0,
     "retry_backoff_base_seconds": 60,
     "retry_backoff_multiplier": 2.0,
-    "stall_multiplier": 2.0,
     "stall_posterior_threshold": 0.8,
     "stall_action": "log",
     "stall_kill_grace_seconds": 60,

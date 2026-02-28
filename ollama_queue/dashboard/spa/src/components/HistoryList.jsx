@@ -60,14 +60,21 @@ function HistoryRow({ job }) {
   const [expanded, setExpanded] = useState(false);
   const cfg = STATUS_CONFIG[job.status] || STATUS_CONFIG.cancelled;
   const hasReason = (job.status === 'failed' || job.status === 'killed') && job.outcome_reason;
+  const hasStall = !!job.stall_detected_at;
+  const isExpandable = hasReason || hasStall;
   const duration = job.started_at && job.completed_at ? job.completed_at - job.started_at : null;
+
+  let stallSignals = null;
+  if (hasStall && job.stall_signals) {
+    try { stallSignals = JSON.parse(job.stall_signals); } catch (_) {}
+  }
 
   return (
     <div style="border-bottom: 1px solid var(--border-subtle);">
       <div
         class="flex items-center gap-2 py-1"
-        style={hasReason ? 'cursor: pointer;' : ''}
-        onClick={hasReason ? () => setExpanded(!expanded) : undefined}
+        style={isExpandable ? 'cursor: pointer;' : ''}
+        onClick={isExpandable ? () => setExpanded(!expanded) : undefined}
       >
         {/* Status icon */}
         <span class="data-mono" style={`font-size: var(--type-body); color: ${cfg.color}; width: 16px; text-align: center;`}>
@@ -80,8 +87,8 @@ function HistoryRow({ job }) {
         {/* Source + stall indicator */}
         <span class="data-mono" style="font-size: var(--type-body); color: var(--text-primary); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
           {job.source || 'unknown'}
-          {job.stall_detected_at && (
-            <span title="Stall was detected" style="color: #f97316; margin-left: 4px;">⚠</span>
+          {hasStall && (
+            <span style="color: #f97316; margin-left: 4px;">⚠</span>
           )}
         </span>
         {/* Model */}
@@ -93,20 +100,32 @@ function HistoryRow({ job }) {
           {duration !== null ? formatDur(duration) : '--'}
         </span>
         {/* Expand indicator */}
-        {hasReason && (
+        {isExpandable && (
           <span style="font-size: 10px; color: var(--text-tertiary); width: 12px; text-align: center;">
             {expanded ? '\u25B4' : '\u25BE'}
           </span>
         )}
       </div>
-      {expanded && hasReason && (
-        <div class="data-mono" style="font-size: var(--type-micro); color: var(--status-error); padding: 4px 0 6px 24px; white-space: pre-wrap;">
-          {job.outcome_reason}
+      {expanded && (
+        <div style="padding: 2px 0 6px 24px; display: flex; flex-direction: column; gap: 3px;">
+          {hasStall && stallSignals && (
+            <div class="data-mono" style="font-size: var(--type-micro); color: #f97316;">
+              stall  posterior={pct(stallSignals.posterior)}  process={fmt(stallSignals.process)}  cpu={fmt(stallSignals.cpu)}  silence={fmt(stallSignals.silence)}  ps={fmt(stallSignals.ps)}
+            </div>
+          )}
+          {hasReason && (
+            <div class="data-mono" style="font-size: var(--type-micro); color: var(--status-error); white-space: pre-wrap;">
+              {job.outcome_reason}
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
+
+function pct(v) { return v != null ? `${Math.round(v * 100)}%` : '?'; }
+function fmt(v) { return v != null ? v.toFixed(2) : '?'; }
 
 function relativeTime(ts) {
   if (!ts) return '--';

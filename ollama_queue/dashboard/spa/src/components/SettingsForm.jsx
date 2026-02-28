@@ -118,7 +118,6 @@ export default function SettingsForm({ settings, daemonState, onSave, onPause, o
       {/* 5. Stall Detection */}
       <div class="t-frame" data-label="Stall Detection">
         <div class="flex flex-col gap-3">
-          <NumberRow label="Stall Multiplier" settingKey="stall_multiplier" min={1} step="0.1" unit="× est." settings={settings} flashKey={flashKey} onBlur={handleBlur} />
           <NumberRow label="Posterior Threshold" settingKey="stall_posterior_threshold" min={0} max={1} step="0.01" settings={settings} flashKey={flashKey} onBlur={handleBlur} />
           <SelectRow label="Stall Action" settingKey="stall_action" options={['log', 'kill']} settings={settings} flashKey={flashKey} onSave={onSave} flash={flash} />
           <NumberRow label="Kill Grace" settingKey="stall_kill_grace_seconds" min={0} unit="sec" settings={settings} flashKey={flashKey} onBlur={handleBlur} />
