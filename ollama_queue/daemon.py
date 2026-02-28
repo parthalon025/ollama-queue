@@ -36,6 +36,7 @@ class Daemon:
         self.dlq = DLQManager(db)
         self._last_prune: float = 0.0
         self._recent_job_models: dict[str, float] = {}  # model -> last_completed_at
+        self._recent_models_lock = threading.Lock()
         # Concurrency tracking
         self._running: dict[int, Future] = {}  # job_id → Future
         self._running_models: dict[int, str] = {}  # job_id → model
@@ -102,13 +103,24 @@ class Daemon:
         return any(m["name"] == model_name for m in models)
 
     def _can_admit(self, job: dict) -> bool:
-        """Three-factor admission gate. Returns True if job can start now."""
+        """Three-factor admission gate. Returns True if job can start now.
+
+        INVARIANT: must only be called from the poll_once main thread.
+        The running_count snapshot taken inside the lock is used outside it —
+        this is safe only because poll_once is single-threaded and never calls
+        _can_admit from worker threads.
+        """
         profile = self._ollama_models.classify(job.get("model") or "")["resource_profile"]
 
-        # embed: always concurrent (up to 4), no VRAM gate
+        # embed: up to 4 concurrent embed jobs, no VRAM gate
         if profile == "embed":
             with self._running_lock:
-                return len(self._running) < 4
+                embed_count = sum(
+                    1
+                    for jid in self._running
+                    if self._ollama_models.classify(self._running_models.get(jid, ""))["resource_profile"] == "embed"
+                )
+                return embed_count < 4
 
         # heavy: serialize — never concurrent
         if profile == "heavy":
@@ -242,16 +254,18 @@ class Daemon:
         # 6. Evaluate health -> if pause needed, update state, return
         settings = self.db.get_all_settings()
         currently_paused = current_state.startswith("paused")
-        # Prune expired entries from recent job models
-        self._recent_job_models = {
-            m: t for m, t in self._recent_job_models.items() if now - t < self.RECENT_MODEL_WINDOW
-        }
+        # Prune expired entries from recent job models (lock: written by worker threads)
+        with self._recent_models_lock:
+            self._recent_job_models = {
+                m: t for m, t in self._recent_job_models.items() if now - t < self.RECENT_MODEL_WINDOW
+            }
+            recent_models_snapshot = set(self._recent_job_models.keys())
         evaluation = self.health.evaluate(
             snap,
             settings,
             currently_paused=currently_paused,
             queued_model=job["model"],
-            recent_job_models=set(self._recent_job_models.keys()),
+            recent_job_models=recent_models_snapshot,
         )
 
         if evaluation["should_pause"]:
@@ -289,12 +303,10 @@ class Daemon:
             conn.execute("UPDATE jobs SET pid = -1 WHERE id = ?", (job["id"],))
             conn.commit()
 
-        with self._running_lock:
-            self._running_models[job["id"]] = job.get("model") or ""
-
         fut = self._executor.submit(self._run_job, job)
         with self._running_lock:
             self._running[job["id"]] = fut
+            self._running_models[job["id"]] = job.get("model") or ""
 
         with self._running_lock:
             running_count = len(self._running)
@@ -367,6 +379,13 @@ class Daemon:
             outcome_reason=outcome_reason,
         )
 
+        # Increment daily counters atomically
+        counter_field = "jobs_completed_today" if exit_code == 0 else "jobs_failed_today"
+        with self.db._lock:
+            conn = self.db._connect()
+            conn.execute(f"UPDATE daemon_state SET {counter_field} = COALESCE({counter_field}, 0) + 1 WHERE id = 1")
+            conn.commit()
+
         # Route failed jobs through DLQ (retry or dead-letter)
         if exit_code != 0:
             try:
@@ -376,7 +395,8 @@ class Daemon:
 
         # Track model so interactive-yield check doesn't self-block
         if job.get("model"):
-            self._recent_job_models[job["model"]] = time.time()
+            with self._recent_models_lock:
+                self._recent_job_models[job["model"]] = time.time()
 
         # Record duration if successful
         if exit_code == 0:
@@ -409,46 +429,50 @@ class Daemon:
             self._running_models.pop(job["id"], None)
 
     def _check_stalled_jobs(self, now: float) -> None:
-        """Flag running jobs whose elapsed time exceeds stall_multiplier x estimated_duration."""
+        """Flag all running jobs exceeding stall threshold (multi-job aware)."""
         settings = self.db.get_all_settings()
         multiplier = settings.get("stall_multiplier", 2.0)
         conn = self.db._connect()
-        running = conn.execute("SELECT * FROM jobs WHERE status = 'running' AND stall_detected_at IS NULL").fetchall()
-        for row in running:
+        # Iterate tracked running jobs (not just current_job_id)
+        with self._running_lock:
+            running_ids = list(self._running.keys())
+        for job_id in running_ids:
+            row = conn.execute(
+                "SELECT * FROM jobs WHERE id = ? AND stall_detected_at IS NULL",
+                (job_id,),
+            ).fetchone()
+            if not row:
+                continue
             job = dict(row)
             estimated = job.get("estimated_duration")
             started = job.get("started_at")
             if estimated and started:
                 elapsed = now - started
-                min_stall_seconds = 60
-                stall_window = max(min_stall_seconds, estimated * multiplier)
+                stall_window = max(60, estimated * multiplier)
                 if elapsed > stall_window:
-                    conn.execute(
-                        "UPDATE jobs SET stall_detected_at = ? WHERE id = ?",
-                        (now, job["id"]),
-                    )
-                    conn.commit()
-                    self.db.log_schedule_event(
-                        "stall_detected",
-                        job_id=job["id"],
-                        details={"elapsed": elapsed, "estimated": estimated, "multiplier": multiplier},
-                    )
+                    with self.db._lock:
+                        conn.execute(
+                            "UPDATE jobs SET stall_detected_at = ? WHERE id = ?",
+                            (now, job_id),
+                        )
+                        conn.commit()
                     _log.warning(
                         "Job #%d stalled: elapsed=%.0fs, estimated=%.0fs",
-                        job["id"],
+                        job_id,
                         elapsed,
                         estimated,
                     )
 
     def _check_retryable_jobs(self, now: float) -> None:
         """Clear retry_after for pending jobs whose backoff window has elapsed."""
-        conn = self.db._connect()
-        conn.execute(
-            """UPDATE jobs SET retry_after = NULL
-               WHERE status = 'pending' AND retry_after IS NOT NULL AND retry_after <= ?""",
-            (now,),
-        )
-        conn.commit()
+        with self.db._lock:
+            conn = self.db._connect()
+            conn.execute(
+                """UPDATE jobs SET retry_after = NULL
+                   WHERE status = 'pending' AND retry_after IS NOT NULL AND retry_after <= ?""",
+                (now,),
+            )
+            conn.commit()
 
     def run(self, poll_interval: int | None = None) -> None:
         """Main loop: poll_once() every N seconds. Prunes old data daily."""
