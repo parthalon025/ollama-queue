@@ -10,6 +10,7 @@ import subprocess
 import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
+from subprocess import TimeoutExpired as _TimeoutExpired
 
 from ollama_queue.db import Database
 from ollama_queue.dlq import DLQManager
@@ -173,7 +174,7 @@ class Daemon:
         """Reset jobs stuck in 'running' on daemon startup (no live subprocess)."""
         orphans = self.db.get_running_jobs()
         for job in orphans:
-            if job.get("pid"):
+            if job.get("pid") and job["pid"] > 0:
                 try:
                     os.kill(job["pid"], _signal.SIGTERM)
                     _log.info("Sent SIGTERM to orphaned pid=%d (job #%d)", job["pid"], job["id"])
@@ -221,12 +222,16 @@ class Daemon:
             self.db.update_daemon_state(last_poll_at=now)
             return
 
-        # 2. Clean up completed futures
+        # 2. Clean up completed futures; call .result() to surface worker exceptions
         with self._running_lock:
             done_ids = [jid for jid, fut in self._running.items() if fut.done()]
             for jid in done_ids:
-                self._running.pop(jid)
+                fut = self._running.pop(jid)
                 self._running_models.pop(jid, None)
+                try:
+                    fut.result()
+                except Exception:
+                    _log.exception("Worker thread for job #%d raised unhandled exception", jid)
 
         # 3. Get health snapshot + log it
         snap = self.health.check()
@@ -326,121 +331,136 @@ class Daemon:
         # Sample VRAM before job for observed-VRAM recording
         vram_before = self._free_vram_mb()
 
-        proc = subprocess.Popen(
-            job["command"],
-            shell=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        # Record real PID immediately for orphan recovery
-        with self.db._lock:
-            conn = self.db._connect()
-            conn.execute("UPDATE jobs SET pid = ? WHERE id = ?", (proc.pid, job["id"]))
-            conn.commit()
-
-        # Wait with timeout
         try:
-            proc.wait(timeout=job["timeout"])
-        except subprocess.TimeoutExpired:
-            with contextlib.suppress(ProcessLookupError):
-                proc.kill()
-            try:
-                out, err = proc.communicate(timeout=5)
-            except subprocess.TimeoutExpired:
-                out, err = b"", b""
-            self.db.kill_job(
-                job["id"],
-                reason=f"timeout after {job['timeout']}s",
-                stdout_tail=out[-500:].decode("utf-8", errors="replace"),
-                stderr_tail=err[-500:].decode("utf-8", errors="replace"),
+            proc = subprocess.Popen(
+                job["command"],
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
             )
+            # Record real PID immediately for orphan recovery
+            with self.db._lock:
+                conn = self.db._connect()
+                conn.execute("UPDATE jobs SET pid = ? WHERE id = ?", (proc.pid, job["id"]))
+                conn.commit()
+
+            # communicate() drains pipes while waiting — avoids deadlock on large output
+            try:
+                out, err = proc.communicate(timeout=job["timeout"])
+            except _TimeoutExpired:
+                with contextlib.suppress(ProcessLookupError):
+                    proc.kill()
+                try:
+                    out, err = proc.communicate(timeout=5)
+                except _TimeoutExpired:
+                    out, err = b"", b""
+                self.db.kill_job(
+                    job["id"],
+                    reason=f"timeout after {job['timeout']}s",
+                    stdout_tail=out[-500:].decode("utf-8", errors="replace"),
+                    stderr_tail=err[-500:].decode("utf-8", errors="replace"),
+                )
+                # Route timed-out jobs through DLQ so retry logic applies
+                try:
+                    self.dlq.handle_failure(job["id"], f"timeout after {job['timeout']}s")
+                except Exception:
+                    _log.exception("DLQ routing failed for timed-out job #%d", job["id"])
+                return
+
+            # Record result
+            duration = time.time() - start_time
+            exit_code = proc.returncode
+            stdout_tail = out[-500:].decode("utf-8", errors="replace")
+            stderr_tail = err[-500:].decode("utf-8", errors="replace")
+
+            outcome_reason = None
+            if exit_code != 0:
+                outcome_reason = f"exit code {exit_code}"
+
+            self.db.complete_job(
+                job["id"],
+                exit_code=exit_code,
+                stdout_tail=stdout_tail,
+                stderr_tail=stderr_tail,
+                outcome_reason=outcome_reason,
+            )
+
+            # Increment daily counters atomically
+            counter_field = "jobs_completed_today" if exit_code == 0 else "jobs_failed_today"
+            with self.db._lock:
+                conn = self.db._connect()
+                conn.execute(f"UPDATE daemon_state SET {counter_field} = COALESCE({counter_field}, 0) + 1 WHERE id = 1")
+                conn.commit()
+
+            # Route failed jobs through DLQ (retry or dead-letter)
+            if exit_code != 0:
+                try:
+                    self.dlq.handle_failure(job["id"], f"exit code {exit_code}")
+                except Exception:
+                    _log.exception("DLQ routing failed for job #%d", job["id"])
+
+            # Track model so interactive-yield check doesn't self-block
+            if job.get("model"):
+                with self._recent_models_lock:
+                    self._recent_job_models[job["model"]] = time.time()
+
+            # Record duration if successful
+            if exit_code == 0:
+                self.db.record_duration(
+                    source=job["source"],
+                    model=job["model"],
+                    duration=duration,
+                    exit_code=exit_code,
+                )
+                # Record observed VRAM delta
+                vram_after = self._free_vram_mb()
+                if vram_before is not None and vram_after is not None and job.get("model"):
+                    delta = vram_before - vram_after
+                    if delta > 0:
+                        self._ollama_models.record_observed_vram(job["model"], delta, self.db)
+
+            # Update recurring schedule
+            if job.get("recurring_job_id"):
+                try:
+                    self.scheduler.update_next_run(
+                        job["recurring_job_id"],
+                        completed_at=time.time(),
+                        job_id=job["id"],
+                    )
+                except Exception:
+                    _log.exception("Scheduler next_run update failed for job #%d", job["id"])
+
+        except Exception:
+            _log.exception("Unhandled exception in worker thread for job #%d; marking failed", job["id"])
+            try:
+                self.db.complete_job(
+                    job["id"],
+                    exit_code=-1,
+                    stdout_tail="",
+                    stderr_tail="",
+                    outcome_reason="internal error",
+                )
+            except Exception:
+                _log.exception("Failed to mark job #%d failed after worker exception", job["id"])
+        finally:
             with self._running_lock:
                 self._running.pop(job["id"], None)
                 self._running_models.pop(job["id"], None)
-            return
-
-        # Record result
-        duration = time.time() - start_time
-        exit_code = proc.returncode
-        assert proc.stdout is not None
-        assert proc.stderr is not None
-        stdout_tail = proc.stdout.read()[-500:].decode("utf-8", errors="replace")
-        stderr_tail = proc.stderr.read()[-500:].decode("utf-8", errors="replace")
-
-        outcome_reason = None
-        if exit_code != 0:
-            outcome_reason = f"exit code {exit_code}"
-
-        self.db.complete_job(
-            job["id"],
-            exit_code=exit_code,
-            stdout_tail=stdout_tail,
-            stderr_tail=stderr_tail,
-            outcome_reason=outcome_reason,
-        )
-
-        # Increment daily counters atomically
-        counter_field = "jobs_completed_today" if exit_code == 0 else "jobs_failed_today"
-        with self.db._lock:
-            conn = self.db._connect()
-            conn.execute(f"UPDATE daemon_state SET {counter_field} = COALESCE({counter_field}, 0) + 1 WHERE id = 1")
-            conn.commit()
-
-        # Route failed jobs through DLQ (retry or dead-letter)
-        if exit_code != 0:
-            try:
-                self.dlq.handle_failure(job["id"], f"exit code {exit_code}")
-            except Exception:
-                _log.exception("DLQ routing failed for job #%d", job["id"])
-
-        # Track model so interactive-yield check doesn't self-block
-        if job.get("model"):
-            with self._recent_models_lock:
-                self._recent_job_models[job["model"]] = time.time()
-
-        # Record duration if successful
-        if exit_code == 0:
-            self.db.record_duration(
-                source=job["source"],
-                model=job["model"],
-                duration=duration,
-                exit_code=exit_code,
-            )
-            # Record observed VRAM delta
-            vram_after = self._free_vram_mb()
-            if vram_before is not None and vram_after is not None and job.get("model"):
-                delta = vram_before - vram_after
-                if delta > 0:
-                    self._ollama_models.record_observed_vram(job["model"], delta, self.db)
-
-        # Update recurring schedule
-        if job.get("recurring_job_id"):
-            try:
-                self.scheduler.update_next_run(
-                    job["recurring_job_id"],
-                    completed_at=time.time(),
-                    job_id=job["id"],
-                )
-            except Exception:
-                _log.exception("Scheduler next_run update failed for job #%d", job["id"])
-
-        with self._running_lock:
-            self._running.pop(job["id"], None)
-            self._running_models.pop(job["id"], None)
 
     def _check_stalled_jobs(self, now: float) -> None:
         """Flag all running jobs exceeding stall threshold (multi-job aware)."""
         settings = self.db.get_all_settings()
         multiplier = settings.get("stall_multiplier", 2.0)
-        conn = self.db._connect()
         # Iterate tracked running jobs (not just current_job_id)
         with self._running_lock:
             running_ids = list(self._running.keys())
         for job_id in running_ids:
-            row = conn.execute(
-                "SELECT * FROM jobs WHERE id = ? AND stall_detected_at IS NULL",
-                (job_id,),
-            ).fetchone()
+            with self.db._lock:
+                conn = self.db._connect()
+                row = conn.execute(
+                    "SELECT * FROM jobs WHERE id = ? AND stall_detected_at IS NULL",
+                    (job_id,),
+                ).fetchone()
             if not row:
                 continue
             job = dict(row)
@@ -451,6 +471,7 @@ class Daemon:
                 stall_window = max(60, estimated * multiplier)
                 if elapsed > stall_window:
                     with self.db._lock:
+                        conn = self.db._connect()
                         conn.execute(
                             "UPDATE jobs SET stall_detected_at = ? WHERE id = ?",
                             (now, job_id),
@@ -498,8 +519,8 @@ class Daemon:
                 try:
                     self.db.prune_old_data()
                     self.db.update_daemon_state(jobs_completed_today=0, jobs_failed_today=0)
+                    self._last_prune = now
                 except Exception:
                     _log.exception("Daily prune failed; will retry next cycle")
-                self._last_prune = now
 
             time.sleep(poll_interval)

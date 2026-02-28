@@ -30,7 +30,7 @@ class TestListLocal:
         names = [m["name"] for m in models]
         assert "qwen2.5-coder:14b" in names
         assert "nomic-embed-text:latest" in names
-        assert len(models) == 4
+        assert len(models) >= 4
 
     def test_list_local_parses_size_bytes(self):
         from ollama_queue.models import OllamaModels

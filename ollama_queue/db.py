@@ -199,22 +199,31 @@ class Database:
         try:
             conn.execute("ALTER TABLE recurring_jobs ADD COLUMN cron_expression TEXT")
             conn.commit()
-        except Exception:
-            _log.debug("cron_expression column already exists — skipping migration")
+        except sqlite3.OperationalError as e:
+            if "duplicate column" in str(e).lower():
+                _log.debug("cron_expression column already exists — skipping migration")
+            else:
+                raise
 
         # Migrate DBs that lack the pinned column
         try:
             conn.execute("ALTER TABLE recurring_jobs ADD COLUMN pinned INTEGER DEFAULT 0")
             conn.commit()
-        except Exception:
-            _log.debug("pinned column already exists — skipping migration")
+        except sqlite3.OperationalError as e:
+            if "duplicate column" in str(e).lower():
+                _log.debug("pinned column already exists — skipping migration")
+            else:
+                raise
 
         # Migrate: add pid column to jobs
         try:
             conn.execute("ALTER TABLE jobs ADD COLUMN pid INTEGER")
             conn.commit()
-        except Exception:
-            _log.debug("jobs.pid column already exists — skipping migration")
+        except sqlite3.OperationalError as e:
+            if "duplicate column" in str(e).lower():
+                _log.debug("jobs.pid column already exists — skipping migration")
+            else:
+                raise
 
         # Seed settings defaults
         now = time.time()
@@ -243,28 +252,29 @@ class Database:
         resource_profile: str = "ollama",
         recurring_job_id: int | None = None,
     ) -> int:
-        conn = self._connect()
-        cur = conn.execute(
-            """INSERT INTO jobs
-               (command, model, priority, timeout, source, submitted_at,
-                tag, max_retries, resource_profile, recurring_job_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                command,
-                model,
-                priority,
-                timeout,
-                source,
-                time.time(),
-                tag,
-                max_retries,
-                resource_profile,
-                recurring_job_id,
-            ),
-        )
-        conn.commit()
-        assert cur.lastrowid is not None
-        return cur.lastrowid
+        with self._lock:
+            conn = self._connect()
+            cur = conn.execute(
+                """INSERT INTO jobs
+                   (command, model, priority, timeout, source, submitted_at,
+                    tag, max_retries, resource_profile, recurring_job_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    command,
+                    model,
+                    priority,
+                    timeout,
+                    source,
+                    time.time(),
+                    tag,
+                    max_retries,
+                    resource_profile,
+                    recurring_job_id,
+                ),
+            )
+            conn.commit()
+            assert cur.lastrowid is not None
+            return cur.lastrowid
 
     def get_job(self, job_id: int) -> dict | None:
         conn = self._connect()
@@ -342,24 +352,26 @@ class Database:
             conn.commit()
 
     def cancel_job(self, job_id: int) -> None:
-        conn = self._connect()
-        conn.execute(
-            """UPDATE jobs
-               SET status = 'cancelled', outcome_reason = 'user cancelled', completed_at = ?
-               WHERE id = ? AND status = 'pending'""",
-            (time.time(), job_id),
-        )
-        conn.commit()
+        with self._lock:
+            conn = self._connect()
+            conn.execute(
+                """UPDATE jobs
+                   SET status = 'cancelled', outcome_reason = 'user cancelled', completed_at = ?
+                   WHERE id = ? AND status = 'pending'""",
+                (time.time(), job_id),
+            )
+            conn.commit()
 
     def set_job_priority(self, job_id: int, priority: int) -> bool:
         """Update priority of a pending job. Returns True if updated."""
-        conn = self._connect()
-        cur = conn.execute(
-            "UPDATE jobs SET priority = ? WHERE id = ? AND status = 'pending'",
-            (priority, job_id),
-        )
-        conn.commit()
-        return cur.rowcount > 0
+        with self._lock:
+            conn = self._connect()
+            cur = conn.execute(
+                "UPDATE jobs SET priority = ? WHERE id = ? AND status = 'pending'",
+                (priority, job_id),
+            )
+            conn.commit()
+            return cur.rowcount > 0
 
     def get_pending_jobs(self) -> list[dict]:
         conn = self._connect()
@@ -516,7 +528,7 @@ class Database:
         conn = self._connect()
         row = conn.execute("SELECT * FROM daemon_state WHERE id = 1").fetchone()
         if row is None:
-            return {"state": "idle", "current_job_id": None, "paused_at": None, "paused_reason": None}
+            return {"state": "idle", "current_job_id": None, "paused_since": None, "paused_reason": None}
         return dict(row)
 
     # --- Proxy ---
@@ -658,7 +670,6 @@ class Database:
         return [dict(r) for r in rows]
 
     def update_recurring_next_run(self, rj_id: int, completed_at: float, job_id: int | None = None) -> None:
-        conn = self._connect()
         rj = self.get_recurring_job(rj_id)
         if rj is None:
             _log.error("update_recurring_next_run: recurring job id=%d not found (deleted?)", rj_id)
@@ -673,22 +684,25 @@ class Database:
             next_run = croniter(cron_expr, start_dt).get_next(datetime.datetime).timestamp()
         else:
             next_run = completed_at + rj["interval_seconds"]
-        conn.execute(
-            """UPDATE recurring_jobs
-               SET next_run = ?, last_run = ?, last_job_id = ?
-               WHERE id = ?""",
-            (next_run, completed_at, job_id, rj_id),
-        )
-        conn.commit()
+        with self._lock:
+            conn = self._connect()
+            conn.execute(
+                """UPDATE recurring_jobs
+                   SET next_run = ?, last_run = ?, last_job_id = ?
+                   WHERE id = ?""",
+                (next_run, completed_at, job_id, rj_id),
+            )
+            conn.commit()
 
     def set_recurring_job_enabled(self, name: str, enabled: bool) -> bool:
-        conn = self._connect()
-        cur = conn.execute(
-            "UPDATE recurring_jobs SET enabled = ? WHERE name = ?",
-            (1 if enabled else 0, name),
-        )
-        conn.commit()
-        return cur.rowcount > 0
+        with self._lock:
+            conn = self._connect()
+            cur = conn.execute(
+                "UPDATE recurring_jobs SET enabled = ? WHERE name = ?",
+                (1 if enabled else 0, name),
+            )
+            conn.commit()
+            return cur.rowcount > 0
 
     def delete_recurring_job(self, name: str) -> bool:
         conn = self._connect()
@@ -786,58 +800,61 @@ class Database:
 
     def _set_recurring_next_run(self, rj_id: int, next_run: float) -> None:
         """Update next_run for a recurring job. Single-purpose DB API — no direct _connect() outside this class."""
-        conn = self._connect()
-        conn.execute(
-            "UPDATE recurring_jobs SET next_run = ? WHERE id = ?",
-            (next_run, rj_id),
-        )
-        conn.commit()
+        with self._lock:
+            conn = self._connect()
+            conn.execute(
+                "UPDATE recurring_jobs SET next_run = ? WHERE id = ?",
+                (next_run, rj_id),
+            )
+            conn.commit()
 
     def _set_job_retry_after(self, job_id: int, retry_after: float) -> None:
         """Increment retry_count and set retry_after timestamp, keeping status pending."""
-        conn = self._connect()
-        conn.execute(
-            """UPDATE jobs
-               SET retry_count = retry_count + 1,
-                   retry_after = ?,
-                   status = 'pending'
-               WHERE id = ?""",
-            (retry_after, job_id),
-        )
-        conn.commit()
+        with self._lock:
+            conn = self._connect()
+            conn.execute(
+                """UPDATE jobs
+                   SET retry_count = retry_count + 1,
+                       retry_after = ?,
+                       status = 'pending'
+                   WHERE id = ?""",
+                (retry_after, job_id),
+            )
+            conn.commit()
 
     # --- DLQ ---
 
     def move_to_dlq(self, job_id: int, failure_reason: str) -> int | None:
-        conn = self._connect()
         job = self.get_job(job_id)
         if not job:
             return None
-        cur = conn.execute(
-            """INSERT INTO dlq
-               (original_job_id, command, model, source, tag, priority,
-                timeout, resource_profile, failure_reason, stdout_tail, stderr_tail,
-                retry_count, moved_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                job_id,
-                job["command"],
-                job["model"],
-                job["source"],
-                job.get("tag"),
-                job["priority"],
-                job.get("timeout", 600),
-                job.get("resource_profile", "ollama"),
-                failure_reason,
-                job.get("stdout_tail", ""),
-                job.get("stderr_tail", ""),
-                job.get("retry_count", 0),
-                time.time(),
-            ),
-        )
-        conn.execute("UPDATE jobs SET status = 'dead' WHERE id = ?", (job_id,))
-        conn.commit()
-        return cur.lastrowid
+        with self._lock:
+            conn = self._connect()
+            cur = conn.execute(
+                """INSERT INTO dlq
+                   (original_job_id, command, model, source, tag, priority,
+                    timeout, resource_profile, failure_reason, stdout_tail, stderr_tail,
+                    retry_count, moved_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    job_id,
+                    job["command"],
+                    job["model"],
+                    job["source"],
+                    job.get("tag"),
+                    job["priority"],
+                    job.get("timeout", 600),
+                    job.get("resource_profile", "ollama"),
+                    failure_reason,
+                    job.get("stdout_tail", ""),
+                    job.get("stderr_tail", ""),
+                    job.get("retry_count", 0),
+                    time.time(),
+                ),
+            )
+            conn.execute("UPDATE jobs SET status = 'dead' WHERE id = ?", (job_id,))
+            conn.commit()
+            return cur.lastrowid
 
     def get_dlq_entry(self, dlq_id: int) -> dict | None:
         conn = self._connect()

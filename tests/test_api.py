@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from ollama_queue.api import create_app
 from ollama_queue.db import Database
+from ollama_queue.scheduler import Scheduler
 
 
 @pytest.fixture
@@ -166,7 +167,7 @@ def test_load_map_endpoint(client):
     assert resp.status_code == 200
     data = resp.json()
     assert "slots" in data
-    assert len(data["slots"]) == 48
+    assert len(data["slots"]) == Scheduler._SLOT_COUNT
     assert all(isinstance(s, int | float) for s in data["slots"])
 
 

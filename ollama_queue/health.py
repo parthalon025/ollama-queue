@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
+
+_log = logging.getLogger(__name__)
 
 
 class HealthMonitor:
@@ -208,5 +211,5 @@ class HealthMonitor:
                         except ValueError:
                             pass
         except OSError:
-            pass
+            _log.warning("Failed to read /proc/meminfo; health metrics will report 0")
         return info

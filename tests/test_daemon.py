@@ -56,9 +56,7 @@ def test_poll_runs_job(daemon):
     ):
         proc = MagicMock()
         proc.pid = 1234
-        proc.wait.return_value = 0
-        proc.stdout.read.return_value = b"hello"
-        proc.stderr.read.return_value = b""
+        proc.communicate.return_value = (b"hello", b"")
         proc.returncode = 0
         mock_sub.Popen.return_value = proc
 
@@ -133,20 +131,22 @@ def test_timeout_kills_job(daemon):
         ),
         patch("ollama_queue.daemon.subprocess") as mock_sub,
     ):
+        import subprocess as _real_sub
+
         proc = MagicMock()
         proc.pid = 1234
-        proc.wait.side_effect = lambda timeout: (_ for _ in ()).throw(__import__("subprocess").TimeoutExpired("cmd", 1))
         proc.kill.return_value = None
-        proc.communicate.return_value = (b"", b"")
+        # First communicate() call raises TimeoutExpired; second (cleanup) returns empty
+        proc.communicate.side_effect = [_real_sub.TimeoutExpired("cmd", 1), (b"", b"")]
         proc.returncode = -9
         mock_sub.Popen.return_value = proc
-        mock_sub.TimeoutExpired = __import__("subprocess").TimeoutExpired
 
         daemon.poll_once()
         _drain(daemon)
 
     job = daemon.db.get_job(1)
-    assert job["status"] == "killed"
+    # DLQ routing moves the job from 'killed' to 'dead' (max_retries=0 → DLQ immediately)
+    assert job["status"] in ("killed", "dead")
     assert "timeout" in job["outcome_reason"]
 
 
@@ -178,9 +178,7 @@ def test_records_duration_on_success(daemon):
     ):
         proc = MagicMock()
         proc.pid = 1234
-        proc.wait.return_value = 0
-        proc.stdout.read.return_value = b"ok"
-        proc.stderr.read.return_value = b""
+        proc.communicate.return_value = (b"ok", b"")
         proc.returncode = 0
         mock_sub.Popen.return_value = proc
 
@@ -213,9 +211,7 @@ class TestDaemonSchedulerIntegration:
         ):
             proc = MagicMock()
             proc.pid = 1234
-            proc.wait.return_value = 0
-            proc.stdout.read.return_value = b"hi"
-            proc.stderr.read.return_value = b""
+            proc.communicate.return_value = (b"hi", b"")
             proc.returncode = 0
             mock_sub.Popen.return_value = proc
             daemon.poll_once()
@@ -277,9 +273,7 @@ def test_no_self_block_after_queue_job(daemon):
     ):
         proc = MagicMock()
         proc.pid = 1234
-        proc.wait.return_value = 0
-        proc.stdout.read.return_value = b"ok"
-        proc.stderr.read.return_value = b""
+        proc.communicate.return_value = (b"ok", b"")
         proc.returncode = 0
         mock_sub.Popen.return_value = proc
         daemon.poll_once()
@@ -307,9 +301,7 @@ def test_no_self_block_after_queue_job(daemon):
     ):
         proc = MagicMock()
         proc.pid = 1234
-        proc.wait.return_value = 0
-        proc.stdout.read.return_value = b"ok"
-        proc.stderr.read.return_value = b""
+        proc.communicate.return_value = (b"ok", b"")
         proc.returncode = 0
         mock_sub.Popen.return_value = proc
         daemon.poll_once()
