@@ -12,10 +12,16 @@ from typing import cast
 
 _log = logging.getLogger(__name__)
 
+import time as _time
+
 import httpx
 from fastapi import Body, FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+
+# Simple TTL cache for catalog search results
+_catalog_cache: dict[str, tuple[list, float]] = {}  # query -> (results, expires_at)
+_CATALOG_CACHE_TTL = 300.0  # 5 minutes
 
 from ollama_queue.db import DEFAULTS, Database
 from ollama_queue.estimator import DurationEstimator
@@ -447,16 +453,22 @@ def create_app(db: Database) -> FastAPI:
         curated = [c.copy() for c in _CURATED_MODELS]
         search_results = []
         if q:
-            try:
-                import json as _json
-                import urllib.parse
-                import urllib.request
+            import json as _json
+            import urllib.parse
+            import urllib.request
 
-                url = f"https://ollama.com/search?q={urllib.parse.quote(q)}&format=json"
-                with urllib.request.urlopen(url, timeout=5) as r:  # noqa: S310
-                    search_results = _json.loads(r.read())[:10]
-            except Exception as exc:
-                _log.warning("Ollama catalog search failed: %s", exc)
+            now = _time.time()
+            cached = _catalog_cache.get(q)
+            if cached and cached[1] > now:
+                search_results = cached[0]
+            else:
+                try:
+                    url = f"https://ollama.com/search?q={urllib.parse.quote(q)}&format=json"
+                    with urllib.request.urlopen(url, timeout=2) as r:  # noqa: S310
+                        search_results = _json.loads(r.read())[:10]
+                    _catalog_cache[q] = (search_results, now + _CATALOG_CACHE_TTL)
+                except Exception as exc:
+                    _log.warning("Ollama catalog search failed: %s", exc)
         return {"curated": curated, "search_results": search_results}
 
     @app.post("/api/models/pull")
