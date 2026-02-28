@@ -18,8 +18,75 @@ from ollama_queue.estimator import DurationEstimator
 from ollama_queue.health import HealthMonitor
 from ollama_queue.models import OllamaModels
 from ollama_queue.scheduler import Scheduler
+from ollama_queue.stall import StallDetector
 
 _log = logging.getLogger(__name__)
+
+
+def _drain_pipes_with_tracking(
+    proc: subprocess.Popen,
+    job_id: int,
+    stall_detector: StallDetector,
+) -> tuple[bytes, bytes]:
+    """Drain stdout+stderr via select() loop, tracking stdout activity.
+
+    Uses non-blocking fds + select() to avoid: (1) deadlock on large output,
+    (2) blocking the worker thread from observing process exit.
+    """
+    import fcntl
+    import select as _select
+
+    stdout_fd = proc.stdout.fileno()  # type: ignore[union-attr]
+    stderr_fd = proc.stderr.fileno()  # type: ignore[union-attr]
+
+    for fd in (stdout_fd, stderr_fd):
+        flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+        fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+
+    stdout_chunks: list[bytes] = []
+    stderr_chunks: list[bytes] = []
+    open_fds: set[int] = {stdout_fd, stderr_fd}
+
+    while open_fds:
+        try:
+            ready, _, _ = _select.select(list(open_fds), [], [], 1.0)
+        except (ValueError, OSError):
+            break
+
+        if not ready:
+            if proc.poll() is not None:
+                # Process exited — drain any buffered bytes then exit
+                for fd in list(open_fds):
+                    try:
+                        while True:
+                            chunk = os.read(fd, 4096)
+                            if not chunk:
+                                open_fds.discard(fd)
+                                break
+                            (stdout_chunks if fd == stdout_fd else stderr_chunks).append(chunk)
+                            if fd == stdout_fd:
+                                stall_detector.update_stdout_activity(job_id, time.time())
+                    except (BlockingIOError, OSError):
+                        open_fds.discard(fd)
+                break
+            continue
+
+        for fd in ready:
+            try:
+                chunk = os.read(fd, 4096)
+            except (BlockingIOError, OSError):
+                open_fds.discard(fd)
+                continue
+            if not chunk:
+                open_fds.discard(fd)
+                continue
+            if fd == stdout_fd:
+                stdout_chunks.append(chunk)
+                stall_detector.update_stdout_activity(job_id, time.time())
+            else:
+                stderr_chunks.append(chunk)
+
+    return b"".join(stdout_chunks), b"".join(stderr_chunks)
 
 
 class Daemon:
@@ -45,6 +112,7 @@ class Daemon:
         self._executor: ThreadPoolExecutor | None = None
         self._concurrent_enabled_at: float | None = None  # for shadow mode
         self._ollama_models = OllamaModels()
+        self.stall_detector = StallDetector()
 
     # --- Concurrency helpers ---
 
@@ -379,30 +447,35 @@ class Daemon:
                 conn.execute("UPDATE jobs SET pid = ? WHERE id = ?", (proc.pid, job["id"]))
                 conn.commit()
 
-            # communicate() drains pipes while waiting — avoids deadlock on large output
-            try:
-                out, err = proc.communicate(timeout=job["timeout"])
-            except _TimeoutExpired:
-                with contextlib.suppress(ProcessLookupError):
-                    proc.kill()
+            # LLM jobs: select()-based drain (no hard timeout - stall detector handles it)
+            # Non-LLM jobs: communicate() with hard timeout
+            if job.get("resource_profile") == "ollama":
+                out, err = _drain_pipes_with_tracking(proc, job["id"], self.stall_detector)
+                proc.wait()  # ensure returncode is set (drain loop exits on proc.poll())
+            else:
                 try:
-                    out, err = proc.communicate(timeout=5)
+                    out, err = proc.communicate(timeout=job["timeout"])
                 except _TimeoutExpired:
-                    out, err = b"", b""
-                # Atomic: no reader sees 'killed' before DLQ routing decides retry/dead.
-                # db._lock is RLock — kill_job and handle_failure re-acquire safely. (#3)
-                with self.db._lock:
-                    self.db.kill_job(
-                        job["id"],
-                        reason=f"timeout after {job['timeout']}s",
-                        stdout_tail=out[-500:].decode("utf-8", errors="replace"),
-                        stderr_tail=err[-500:].decode("utf-8", errors="replace"),
-                    )
+                    with contextlib.suppress(ProcessLookupError):
+                        proc.kill()
                     try:
-                        self.dlq.handle_failure(job["id"], f"timeout after {job['timeout']}s")
-                    except Exception:
-                        _log.exception("DLQ routing failed for timed-out job #%d", job["id"])
-                return
+                        out, err = proc.communicate(timeout=5)
+                    except _TimeoutExpired:
+                        out, err = b"", b""
+                    # Atomic: no reader sees 'killed' before DLQ routing decides retry/dead.
+                    # db._lock is RLock — kill_job and handle_failure re-acquire safely. (#3)
+                    with self.db._lock:
+                        self.db.kill_job(
+                            job["id"],
+                            reason=f"timeout after {job['timeout']}s",
+                            stdout_tail=out[-500:].decode("utf-8", errors="replace"),
+                            stderr_tail=err[-500:].decode("utf-8", errors="replace"),
+                        )
+                        try:
+                            self.dlq.handle_failure(job["id"], f"timeout after {job['timeout']}s")
+                        except Exception:
+                            _log.exception("DLQ routing failed for timed-out job #%d", job["id"])
+                    return
 
             # Record result
             duration = time.time() - start_time
@@ -491,6 +564,7 @@ class Daemon:
                 except Exception:
                     _log.exception("Failed to route job #%d to DLQ after internal error", job["id"])
         finally:
+            self.stall_detector.forget(job["id"])
             with self._running_lock:
                 self._running.pop(job["id"], None)
                 self._running_models.pop(job["id"], None)

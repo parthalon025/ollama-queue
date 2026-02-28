@@ -53,10 +53,10 @@ def test_poll_runs_job(daemon):
             },
         ),
         patch("ollama_queue.daemon.subprocess") as mock_sub,
+        patch("ollama_queue.daemon._drain_pipes_with_tracking", return_value=(b"hello", b"")),
     ):
         proc = MagicMock()
         proc.pid = 1234
-        proc.communicate.return_value = (b"hello", b"")
         proc.returncode = 0
         mock_sub.Popen.return_value = proc
 
@@ -65,6 +65,36 @@ def test_poll_runs_job(daemon):
 
     job = daemon.db.get_job(1)
     assert job["status"] == "completed"
+
+
+def test_llm_job_does_not_use_communicate(daemon):
+    """LLM jobs (resource_profile='ollama') use pipe drain, not communicate()."""
+    daemon.db.submit_job("echo hello", "qwen2.5:7b", 5, 60, "test")
+    with (
+        patch.object(
+            daemon.health,
+            "check",
+            return_value={
+                "ram_pct": 50.0,
+                "swap_pct": 10.0,
+                "load_avg": 1.0,
+                "cpu_count": 4,
+                "vram_pct": 50.0,
+                "ollama_model": None,
+            },
+        ),
+        patch("ollama_queue.daemon.subprocess") as mock_sub,
+        patch("ollama_queue.daemon._drain_pipes_with_tracking", return_value=(b"hello", b"")) as mock_drain,
+    ):
+        proc = MagicMock()
+        proc.pid = 1234
+        proc.returncode = 0
+        mock_sub.Popen.return_value = proc
+        daemon.poll_once()
+        _drain(daemon)
+
+    mock_drain.assert_called_once()
+    proc.communicate.assert_not_called()
 
 
 def test_poll_pauses_on_health(daemon):
@@ -114,8 +144,8 @@ def test_poll_yields_to_interactive(daemon):
 
 
 def test_timeout_kills_job(daemon):
-    """Job exceeding timeout is killed."""
-    daemon.db.submit_job("sleep 999", "m", 5, 1, "test")  # 1s timeout
+    """Job exceeding timeout is killed (non-ollama resource_profile uses hard timeout)."""
+    daemon.db.submit_job("sleep 999", "m", 5, 1, "test", resource_profile="any")  # 1s timeout
     with (
         patch.object(
             daemon.health,
@@ -175,10 +205,10 @@ def test_records_duration_on_success(daemon):
             },
         ),
         patch("ollama_queue.daemon.subprocess") as mock_sub,
+        patch("ollama_queue.daemon._drain_pipes_with_tracking", return_value=(b"ok", b"")),
     ):
         proc = MagicMock()
         proc.pid = 1234
-        proc.communicate.return_value = (b"ok", b"")
         proc.returncode = 0
         mock_sub.Popen.return_value = proc
 
@@ -208,10 +238,10 @@ class TestDaemonSchedulerIntegration:
                 },
             ),
             patch("ollama_queue.daemon.subprocess") as mock_sub,
+            patch("ollama_queue.daemon._drain_pipes_with_tracking", return_value=(b"hi", b"")),
         ):
             proc = MagicMock()
             proc.pid = 1234
-            proc.communicate.return_value = (b"hi", b"")
             proc.returncode = 0
             mock_sub.Popen.return_value = proc
             daemon.poll_once()
@@ -270,10 +300,10 @@ def test_no_self_block_after_queue_job(daemon):
             },
         ),
         patch("ollama_queue.daemon.subprocess") as mock_sub,
+        patch("ollama_queue.daemon._drain_pipes_with_tracking", return_value=(b"ok", b"")),
     ):
         proc = MagicMock()
         proc.pid = 1234
-        proc.communicate.return_value = (b"ok", b"")
         proc.returncode = 0
         mock_sub.Popen.return_value = proc
         daemon.poll_once()
@@ -298,10 +328,10 @@ def test_no_self_block_after_queue_job(daemon):
             },
         ),
         patch("ollama_queue.daemon.subprocess") as mock_sub,
+        patch("ollama_queue.daemon._drain_pipes_with_tracking", return_value=(b"ok", b"")),
     ):
         proc = MagicMock()
         proc.pid = 1234
-        proc.communicate.return_value = (b"ok", b"")
         proc.returncode = 0
         mock_sub.Popen.return_value = proc
         daemon.poll_once()
