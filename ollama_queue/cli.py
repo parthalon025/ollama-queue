@@ -96,8 +96,8 @@ def queue(ctx):
     click.echo("-" * 75)
     for job in pending:
         click.echo(
-            f"{job['id']:>5}  {job['priority']:>3}  {(job['source'] or '')::<15}  "
-            f"{(job['model'] or '')::<20}  {job['command']}"
+            f"{job['id']:>5}  {job['priority']:>3}  {(job['source'] or ''):<15}  "
+            f"{(job['model'] or ''):<20}  {job['command']}"
         )
 
 

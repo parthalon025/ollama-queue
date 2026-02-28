@@ -137,7 +137,7 @@ def create_app(db: Database) -> FastAPI:
         timeout: int = req.timeout if req.timeout is not None else cast(int, DEFAULTS["default_timeout_seconds"])
         job_id = db.submit_job(
             command=req.command,
-            model=req.model or "",
+            model=req.model or None,
             priority=priority,
             timeout=timeout,
             source=req.source,

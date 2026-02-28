@@ -42,6 +42,11 @@ class Scheduler:
                     start_dt = datetime.datetime.fromtimestamp(now)
                     new_next_run = croniter(cron_expr, start_dt).get_next(datetime.datetime).timestamp()
                 else:
+                    if not rj.get("interval_seconds") and not rj.get("cron_expression"):
+                        _log.warning(
+                            "Recurring job #%d has neither interval_seconds nor cron_expression; defaulting to 300s",
+                            rj.get("id"),
+                        )
                     interval = rj.get("interval_seconds") or 300  # fallback 5min
                     new_next_run = now + interval
                 self.db._set_recurring_next_run(rj["id"], new_next_run)

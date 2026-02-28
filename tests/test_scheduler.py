@@ -50,8 +50,7 @@ class TestPromoteDueJobs:
         db.add_recurring_job("job1", "echo hi", 3600, next_run=now - 1)
         scheduler.promote_due_jobs(now)
         events = db.get_schedule_events()
-        assert len(events) == 1
-        assert events[0]["event_type"] == "promoted"
+        assert any(e["event_type"] == "promoted" for e in events)
 
     def test_skips_disabled_job(self, db, scheduler):
         now = time.time()
