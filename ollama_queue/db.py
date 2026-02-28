@@ -522,14 +522,25 @@ class Database:
     # --- Proxy ---
 
     def try_claim_for_proxy(self) -> bool:
-        """Atomically claim daemon state for proxy request. Returns True if claimed."""
+        """Claim a queue slot for a proxy /api/generate request.
+
+        Respects max_concurrent_jobs. Returns True if claimed.
+        """
         with self._lock:
             conn = self._connect()
-            cur = conn.execute(
-                "UPDATE daemon_state SET state = 'running', current_job_id = -1 " "WHERE id = 1 AND state = 'idle'"
-            )
+            max_slots = int(self.get_setting("max_concurrent_jobs") or 1)
+            # Count running jobs from jobs table
+            running = conn.execute("SELECT COUNT(*) as cnt FROM jobs WHERE status = 'running'").fetchone()["cnt"]
+            if running >= max_slots:
+                return False
+            # Also block if daemon_state shows a real job in progress (current_job_id > 0)
+            # or proxy already claimed (sentinel -1)
+            state = conn.execute("SELECT current_job_id FROM daemon_state WHERE id=1").fetchone()
+            if state and state["current_job_id"] is not None and state["current_job_id"] != 0:
+                return False
+            conn.execute("UPDATE daemon_state SET state='running', current_job_id=-1 WHERE id=1")
             conn.commit()
-            return cur.rowcount > 0
+            return True
 
     def release_proxy_claim(self) -> None:
         """Release proxy claim back to idle."""

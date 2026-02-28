@@ -422,3 +422,12 @@ class TestModelConcurrencySchema:
         # Calling initialize() twice must not raise
         db.initialize()
         db.initialize()
+
+
+def test_proxy_claim_respects_concurrent_slot_limit(db):
+    """Proxy claims count against max_concurrent_jobs."""
+    db.set_setting("max_concurrent_jobs", 1)
+    jid = db.submit_job("echo", "", 5, 60, "test")
+    db.start_job(jid)
+    claimed = db.try_claim_for_proxy()
+    assert claimed is False
