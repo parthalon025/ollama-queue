@@ -97,18 +97,22 @@ export default function ScheduleTab() {
     }, []);
 
     async function handleModelSave(rjId, modelName) {
-        setEditingModel(null);
         try {
             await updateScheduleJob(rjId, { model: modelName || null });
         } catch (e) {
             console.error('Model update failed:', e);
             setRunError('Failed to update model');
+        } finally {
+            setEditingModel(null);
         }
     }
 
     // Running job banner — reference tick to subscribe to 1s elapsed updates
     void tick;
-    const runningJob = status.value?.daemon?.state === 'running' ? status.value?.current_job : null;
+    const _daemonState = status.value?.daemon?.state ?? '';
+    const runningJob = (_daemonState === 'running' || _daemonState.startsWith('running('))
+        ? status.value?.current_job
+        : null;
     const runningElapsed = runningJob?.started_at
         ? Math.floor(Date.now() / 1000 - runningJob.started_at)
         : null;
