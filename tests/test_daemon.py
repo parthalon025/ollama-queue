@@ -2,6 +2,7 @@
 
 import concurrent.futures
 import logging
+import signal as _signal
 import time
 from unittest.mock import MagicMock, patch
 
@@ -252,30 +253,31 @@ class TestDaemonSchedulerIntegration:
         assert len(completed) == 1 or len(jobs) == 0  # promoted and ran
 
     def test_poll_once_detects_stall(self, db):
-        job_id = db.submit_job("slow", "m", 5, 600, "src")
+        job_id = db.submit_job("slow", "qwen2.5:7b", 5, 600, "src")
         db.start_job(job_id)
-        # Fake a job that started 1000s ago with estimated_duration=100s
         conn = db._connect()
-        conn.execute(
-            "UPDATE jobs SET started_at = ?, estimated_duration = 100 WHERE id = ?", (time.time() - 1000, job_id)
-        )
+        conn.execute("UPDATE jobs SET started_at = ?, pid = 9999 WHERE id = ?", (time.time() - 400, job_id))
         conn.commit()
         daemon = Daemon(db)
         # Simulate job tracked in _running (required by multi-job stall detection)
         mock_fut = MagicMock()
         mock_fut.done.return_value = False
         daemon._running[job_id] = mock_fut
-        with patch.object(
-            daemon.health,
-            "check",
-            return_value={
-                "ram_pct": 10,
-                "vram_pct": 10,
-                "load_avg": 0.1,
-                "swap_pct": 5,
-                "cpu_count": 4,
-                "ollama_model": None,
-            },
+        with (
+            patch.object(
+                daemon.health,
+                "check",
+                return_value={
+                    "ram_pct": 10,
+                    "vram_pct": 10,
+                    "load_avg": 0.1,
+                    "swap_pct": 5,
+                    "cpu_count": 4,
+                    "ollama_model": None,
+                },
+            ),
+            patch.object(daemon.stall_detector, "compute_posterior", return_value=(0.95, {"posterior": 0.95})),
+            patch.object(daemon.stall_detector, "get_ollama_ps_models", return_value=set()),
         ):
             daemon.poll_once()
         job = db.get_job(job_id)
@@ -520,21 +522,109 @@ def test_shadow_mode_logs_but_does_not_run(db, monkeypatch, caplog):
 def test_stall_detection_checks_all_running_jobs(db):
     """Stall detection iterates self._running, not just current_job_id."""
     d = Daemon(db)
-    j1 = db.submit_job(command="sleep 999", model="", priority=5, timeout=10, source="test")
-    j2 = db.submit_job(command="sleep 999", model="", priority=5, timeout=10, source="test")
+    j1 = db.submit_job(command="sleep 999", model="qwen2.5:7b", priority=5, timeout=10, source="test")
+    j2 = db.submit_job(command="sleep 999", model="qwen2.5:7b", priority=5, timeout=10, source="test")
     db.start_job(j1)
     db.start_job(j2)
     conn = db._connect()
     conn.execute(
-        "UPDATE jobs SET started_at=?, estimated_duration=60 WHERE id IN (?,?)",
-        (time.time() - 500, j1, j2),
+        "UPDATE jobs SET started_at=?, pid=9998 WHERE id=?",
+        (time.time() - 500, j1),
+    )
+    conn.execute(
+        "UPDATE jobs SET started_at=?, pid=9999 WHERE id=?",
+        (time.time() - 500, j2),
     )
     conn.commit()
     # Simulate both in _running
     d._running[j1] = MagicMock()
     d._running[j2] = MagicMock()
 
-    d._check_stalled_jobs(time.time())
+    with (
+        patch.object(d.stall_detector, "compute_posterior", return_value=(0.95, {"posterior": 0.95})),
+        patch.object(d.stall_detector, "get_ollama_ps_models", return_value=set()),
+    ):
+        d._check_stalled_jobs(time.time())
 
     assert db.get_job(j1)["stall_detected_at"] is not None
     assert db.get_job(j2)["stall_detected_at"] is not None
+
+
+# --- T8: Bayesian stall detection ---
+
+
+def test_stall_detection_flags_job(daemon):
+    """_check_stalled_jobs sets stall_detected_at when posterior >= threshold."""
+    job_id = daemon.db.submit_job("sleep 9999", "qwen2.5:7b", 5, 600, "test")
+    with daemon.db._lock:
+        conn = daemon.db._connect()
+        conn.execute(
+            "UPDATE jobs SET status='running', started_at=?, pid=9999 WHERE id=?",
+            (time.time() - 400, job_id),
+        )
+        conn.commit()
+
+    with daemon._running_lock:
+        daemon._running[job_id] = MagicMock()
+
+    with (
+        patch.object(daemon.stall_detector, "compute_posterior", return_value=(0.95, {"posterior": 0.95})),
+        patch.object(daemon.stall_detector, "get_ollama_ps_models", return_value=set()),
+    ):
+        daemon._check_stalled_jobs(time.time())
+
+    job = daemon.db.get_job(job_id)
+    assert job["stall_detected_at"] is not None
+
+
+def test_stall_kill_action(daemon):
+    """_check_stalled_jobs calls os.kill when stall_action='kill' and grace elapsed."""
+    daemon.db.set_setting("stall_action", "kill")
+    daemon.db.set_setting("stall_kill_grace_seconds", 0)  # no grace period
+    job_id = daemon.db.submit_job("sleep 9999", "qwen2.5:7b", 5, 600, "test")
+    stall_time = time.time() - 120
+    with daemon.db._lock:
+        conn = daemon.db._connect()
+        conn.execute(
+            "UPDATE jobs SET status='running', started_at=?, pid=9999, stall_detected_at=? WHERE id=?",
+            (time.time() - 400, stall_time, job_id),
+        )
+        conn.commit()
+
+    with daemon._running_lock:
+        daemon._running[job_id] = MagicMock()
+
+    with (
+        patch.object(daemon.stall_detector, "compute_posterior", return_value=(0.95, {"posterior": 0.95})),
+        patch.object(daemon.stall_detector, "get_ollama_ps_models", return_value=set()),
+        patch("ollama_queue.daemon.os.kill") as mock_kill,
+    ):
+        daemon._check_stalled_jobs(time.time())
+
+    mock_kill.assert_called_once_with(9999, _signal.SIGTERM)
+
+
+def test_stall_no_kill_within_grace(daemon):
+    """_check_stalled_jobs does NOT kill if stall_kill_grace_seconds not elapsed."""
+    daemon.db.set_setting("stall_action", "kill")
+    daemon.db.set_setting("stall_kill_grace_seconds", 300)
+    job_id = daemon.db.submit_job("sleep 9999", "qwen2.5:7b", 5, 600, "test")
+    with daemon.db._lock:
+        conn = daemon.db._connect()
+        conn.execute(
+            "UPDATE jobs SET status='running', started_at=?, pid=9999, stall_detected_at=? WHERE id=?",
+            (time.time() - 400, time.time() - 10, job_id),  # stalled only 10s ago
+        )
+        conn.commit()
+
+    with daemon._running_lock:
+        daemon._running[job_id] = MagicMock()
+
+    with (
+        patch.object(daemon.stall_detector, "compute_posterior", return_value=(0.95, {"posterior": 0.95})),
+        patch.object(daemon.stall_detector, "get_ollama_ps_models", return_value=set()),
+        patch("ollama_queue.daemon.os.kill") as mock_kill,
+    ):
+        daemon._check_stalled_jobs(time.time())
+
+    mock_kill.assert_not_called()

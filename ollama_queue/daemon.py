@@ -570,41 +570,65 @@ class Daemon:
                 self._running_models.pop(job["id"], None)
 
     def _check_stalled_jobs(self, now: float) -> None:
-        """Flag all running jobs exceeding stall threshold (multi-job aware)."""
+        """Bayesian multi-signal stall detection for running LLM jobs.
+
+        One /api/ps HTTP call per poll cycle. Flags stall via DB when posterior
+        exceeds threshold. Optionally sends SIGTERM after grace period elapses.
+        """
         settings = self.db.get_all_settings()
-        multiplier = settings.get("stall_multiplier", 2.0)
-        # Iterate tracked running jobs (not just current_job_id)
+        threshold = float(settings.get("stall_posterior_threshold", 0.8))
+        action = settings.get("stall_action", "log")
+        grace = float(settings.get("stall_kill_grace_seconds", 60))
+
         with self._running_lock:
             running_ids = list(self._running.keys())
+
+        if not running_ids:
+            return
+
+        ps_models = self.stall_detector.get_ollama_ps_models()
+
         for job_id in running_ids:
             with self.db._lock:
                 conn = self.db._connect()
-                row = conn.execute(
-                    "SELECT * FROM jobs WHERE id = ? AND stall_detected_at IS NULL",
-                    (job_id,),
-                ).fetchone()
+                row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
             if not row:
                 continue
             job = dict(row)
-            estimated = job.get("estimated_duration")
-            started = job.get("started_at")
-            if estimated and started:
-                elapsed = now - started
-                stall_window = max(60, estimated * multiplier)
-                if elapsed > stall_window:
-                    with self.db._lock:
-                        conn = self.db._connect()
-                        conn.execute(
-                            "UPDATE jobs SET stall_detected_at = ? WHERE id = ?",
-                            (now, job_id),
-                        )
-                        conn.commit()
+
+            if job.get("resource_profile") != "ollama":
+                continue  # non-LLM jobs use hard timeout, not stall detection
+
+            pid = job.get("pid") or 0
+            if pid <= 0:
+                continue
+
+            posterior, signals = self.stall_detector.compute_posterior(
+                job_id, pid, job.get("model") or "", now, ps_models
+            )
+
+            stall_detected_at = job.get("stall_detected_at")
+
+            if posterior >= threshold:
+                if not stall_detected_at:
+                    self.db.set_stall_detected(job_id, now, signals)
                     _log.warning(
-                        "Job #%d stalled: elapsed=%.0fs, estimated=%.0fs",
+                        "Job #%d stall detected: posterior=%.2f signals=%s",
                         job_id,
-                        elapsed,
-                        estimated,
+                        posterior,
+                        signals,
                     )
+                elif action == "kill":
+                    stall_age = now - stall_detected_at
+                    if stall_age >= grace:
+                        _log.warning(
+                            "Killing stalled job #%d (stall_age=%.0fs posterior=%.2f)",
+                            job_id,
+                            stall_age,
+                            posterior,
+                        )
+                        with contextlib.suppress(ProcessLookupError, PermissionError):
+                            os.kill(pid, _signal.SIGTERM)
 
     def _check_retryable_jobs(self, now: float) -> None:
         """Clear retry_after for pending jobs whose backoff window has elapsed."""
