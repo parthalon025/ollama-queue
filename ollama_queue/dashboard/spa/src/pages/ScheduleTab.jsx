@@ -1,7 +1,7 @@
 import { h } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import {
-    scheduleJobs, scheduleEvents,
+    status, scheduleJobs, scheduleEvents, models,
     fetchSchedule, toggleScheduleJob, triggerRebalance, runScheduleJobNow,
     updateScheduleJob, fetchModels,
 } from '../store';
@@ -40,6 +40,17 @@ function parseInterval(str) {
     return Math.round(val * multipliers[unit]);
 }
 
+function formatDuration(secs) {
+    if (secs === null || secs === undefined || secs < 0) return '--';
+    const s = Math.round(secs);
+    if (s < 60) return `${s}s`;
+    const mins = Math.floor(s / 60);
+    const rem = s % 60;
+    if (mins < 60) return `${mins}m ${rem}s`;
+    const hrs = Math.floor(mins / 60);
+    return `${hrs}h ${mins % 60}m`;
+}
+
 // Priority → design token colors (theme-aware)
 const CATEGORY_COLORS = {
     critical:   'var(--status-error)',
@@ -65,6 +76,7 @@ export default function ScheduleTab() {
     const [runError, setRunError] = useState(null);
     const [editingInterval, setEditingInterval] = useState(null);   // { id, value }
     const [editingPriority, setEditingPriority] = useState(null);   // { id, value }
+    const [editingModel, setEditingModel] = useState(null);         // { id, value }
 
     const refreshingRef = useRef(false);
 
@@ -83,6 +95,23 @@ export default function ScheduleTab() {
             clearInterval(refreshInterval);
         };
     }, []);
+
+    async function handleModelSave(rjId, modelName) {
+        setEditingModel(null);
+        try {
+            await updateScheduleJob(rjId, { model: modelName || null });
+        } catch (e) {
+            console.error('Model update failed:', e);
+            setRunError('Failed to update model');
+        }
+    }
+
+    // Running job banner — reference tick to subscribe to 1s elapsed updates
+    void tick;
+    const runningJob = status.value?.daemon?.state === 'running' ? status.value?.current_job : null;
+    const runningElapsed = runningJob?.started_at
+        ? Math.floor(Date.now() / 1000 - runningJob.started_at)
+        : null;
 
     const jobs = scheduleJobs.value;
     const events = scheduleEvents.value;
@@ -162,6 +191,39 @@ export default function ScheduleTab() {
                 </div>
             )}
 
+            {runningJob && (
+                <div class="t-frame" style={{
+                    borderLeft: '3px solid var(--status-success)',
+                    padding: '0.5rem 0.75rem',
+                    display: 'flex', alignItems: 'center', gap: '0.75rem',
+                    flexWrap: 'wrap',
+                }}>
+                    <span style={{ color: 'var(--status-success)', fontFamily: 'var(--font-mono)',
+                                   fontWeight: 700, fontSize: 'var(--type-label)',
+                                   textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+                        ● Running
+                    </span>
+                    <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)',
+                                   fontSize: 'var(--type-body)' }}>
+                        {runningJob.source || '—'}
+                    </span>
+                    {runningJob.model && (
+                        <span style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)',
+                                       fontSize: 'var(--type-label)' }}>
+                            {runningJob.model}
+                        </span>
+                    )}
+                    <span style={{ color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)',
+                                   fontSize: 'var(--type-label)', marginLeft: 'auto',
+                                   fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                        {formatDuration(runningElapsed)}
+                        {runningJob.estimated_duration
+                            ? ` / ~${formatDuration(runningJob.estimated_duration)}`
+                            : ''}
+                    </span>
+                </div>
+            )}
+
             <GanttChart jobs={jobs} tick={tick} windowHours={24} />
 
             {jobs.length === 0 ? (
@@ -212,16 +274,51 @@ export default function ScheduleTab() {
                                             </span>
                                         </td>
                                         <td style={{ textAlign: 'center', padding: '0.5rem' }}>
-                                            {rj.model ? (
-                                                <ModelBadge profile={rj.model_profile} typeTag={rj.model_type} />
+                                            {editingModel && editingModel.id === rj.id ? (
+                                                <select
+                                                    value={editingModel.value}
+                                                    ref={el => el && el.focus()}
+                                                    onChange={ev => handleModelSave(rj.id, ev.target.value)}
+                                                    onBlur={() => setEditingModel(null)}
+                                                    onKeyDown={ev => { if (ev.key === 'Escape') setEditingModel(null); }}
+                                                    style={{
+                                                        fontFamily: 'var(--font-mono)',
+                                                        fontSize: 'var(--type-label)',
+                                                        background: 'var(--bg-inset)',
+                                                        color: 'var(--text-primary)',
+                                                        border: '1px solid var(--accent)',
+                                                        borderRadius: 'var(--radius)',
+                                                        padding: '0.1rem 0.3rem',
+                                                        maxWidth: '10rem',
+                                                    }}>
+                                                    <option value="">— none —</option>
+                                                    {models.value.map(modelRow => (
+                                                        <option key={modelRow.name} value={modelRow.name}>{modelRow.name}</option>
+                                                    ))}
+                                                    {rj.model && !models.value.find(modelRow => modelRow.name === rj.model) && (
+                                                        <option value={rj.model}>{rj.model}</option>
+                                                    )}
+                                                </select>
                                             ) : (
-                                                <span style={{ color: 'var(--text-tertiary)', fontSize: 'var(--type-label)' }}>—</span>
-                                            )}
-                                            {rj.model && (
-                                                <div style={{ fontSize: 'var(--type-label)', color: 'var(--text-secondary)',
-                                                              fontFamily: 'var(--font-mono)' }}>
-                                                    {rj.model.split(':')[0]}
-                                                </div>
+                                                <span
+                                                    style={{ cursor: 'pointer', display: 'flex', flexDirection: 'column',
+                                                             alignItems: 'center', gap: '0.2rem' }}
+                                                    title="Click to change model"
+                                                    onClick={() => setEditingModel({ id: rj.id, value: rj.model || '' })}>
+                                                    {rj.model ? (
+                                                        <>
+                                                            <ModelBadge profile={rj.model_profile} typeTag={rj.model_type} />
+                                                            <div style={{ fontSize: 'var(--type-label)', color: 'var(--text-secondary)',
+                                                                          fontFamily: 'var(--font-mono)',
+                                                                          borderBottom: '1px dashed var(--text-tertiary)' }}>
+                                                                {rj.model.split(':')[0]}
+                                                            </div>
+                                                        </>
+                                                    ) : (
+                                                        <span style={{ color: 'var(--text-tertiary)', fontSize: 'var(--type-label)',
+                                                                       borderBottom: '1px dashed var(--text-tertiary)' }}>—</span>
+                                                    )}
+                                                </span>
                                             )}
                                         </td>
                                         <td style={{ textAlign: 'center', fontFamily: 'var(--font-mono)',

@@ -352,7 +352,7 @@ def create_app(db: Database) -> FastAPI:
 
     @app.put("/api/schedule/{rj_id}")
     def update_schedule(rj_id: int, body: RecurringJobUpdate):
-        updated = db.update_recurring_job(rj_id, **body.model_dump(exclude_none=True))
+        updated = db.update_recurring_job(rj_id, **body.model_dump(exclude_unset=True))
         if not updated:
             raise HTTPException(status_code=404, detail="Recurring job not found")
         # Rebalance next_run after edit
