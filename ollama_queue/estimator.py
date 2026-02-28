@@ -6,6 +6,7 @@ Uses rolling average from DB history, with model-based and generic fallbacks.
 from typing import ClassVar
 
 from ollama_queue.db import Database
+from ollama_queue.models import OllamaModels
 
 
 class DurationEstimator:
@@ -43,22 +44,31 @@ class DurationEstimator:
         return self.GENERIC_DEFAULT
 
     def queue_etas(self, queue_jobs: list[dict]) -> list[dict]:
-        """Given list of pending jobs, return ETAs for each.
+        """Given list of pending jobs, return ETAs for each, concurrency-aware.
+
+        Embed-profile jobs don't consume a serial slot — they show concurrent=True
+        and don't advance the cumulative offset for subsequent jobs.
 
         Each job dict must have 'source' and 'model' keys.
-        Returns list of dicts with 'estimated_start_offset' and 'estimated_duration'.
+        Returns list of dicts with 'estimated_start_offset', 'estimated_duration',
+        and 'concurrent'.
         """
         results = []
-        cumulative_offset: float = 0
+        cumulative_offset: float = 0.0
+        om = OllamaModels()
 
         for job in queue_jobs:
             duration = self.estimate(job["source"], model=job.get("model"))
+            profile = job.get("resource_profile") or om.classify(job.get("model") or "")["resource_profile"]
+            is_concurrent = profile == "embed"
             results.append(
                 {
-                    "estimated_start_offset": cumulative_offset,
+                    "estimated_start_offset": 0.0 if is_concurrent else cumulative_offset,
                     "estimated_duration": duration,
+                    "concurrent": is_concurrent,
                 }
             )
-            cumulative_offset += duration
+            if not is_concurrent:
+                cumulative_offset += duration
 
         return results

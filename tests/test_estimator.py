@@ -33,6 +33,17 @@ def test_estimate_unknown_everything(estimator):
     assert est == 600  # generic default
 
 
+def test_embed_jobs_dont_block_serial_slots(db):
+    """Embed jobs run concurrently — serial queue offset stays 0 for next job."""
+    jobs = [
+        {"source": "aria-embed", "model": "nomic-embed-text:latest", "resource_profile": "embed"},
+        {"source": "aria-full", "model": "qwen2.5-coder:14b", "resource_profile": "ollama"},
+    ]
+    etas = DurationEstimator(db).queue_etas(jobs)
+    assert etas[0]["concurrent"] is True
+    assert etas[1]["estimated_start_offset"] == 0.0
+
+
 def test_queue_eta(estimator, db):
     for d in [60, 60, 60, 60, 60]:
         db.record_duration("a", "m", d, 0)
