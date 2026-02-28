@@ -248,3 +248,65 @@ def test_yield_when_model_is_truly_interactive():
         recent_job_models={"nomic-embed-text"},
     )
     assert decision["should_yield"] is True
+
+
+# --- T4: get_loaded_models() multi-model support ---
+
+
+def test_get_loaded_models_empty_when_none(monkeypatch):
+    import subprocess
+    from unittest.mock import MagicMock
+
+    mock = MagicMock()
+    mock.returncode = 0
+    mock.stdout = "NAME    ID    SIZE    PROCESSOR    UNTIL\n"
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: mock)
+    result = HealthMonitor().get_loaded_models()
+    assert result == []
+
+
+def test_get_loaded_models_single():
+    from unittest.mock import MagicMock, patch
+
+    output = "NAME          ID            SIZE    PROCESSOR    UNTIL\nqwen2.5:7b    abc           4.7 GB  100% GPU     4 minutes from now\n"
+    mock = MagicMock()
+    mock.returncode = 0
+    mock.stdout = output
+    with patch("subprocess.run", return_value=mock):
+        result = HealthMonitor().get_loaded_models()
+    assert len(result) == 1
+    assert result[0]["name"] == "qwen2.5:7b"
+
+
+def test_get_loaded_models_multi():
+    from unittest.mock import MagicMock, patch
+
+    output = (
+        "NAME                ID    SIZE      PROCESSOR    UNTIL\n"
+        "qwen2.5:7b          a     4.7 GB    100% GPU     3 min\n"
+        "nomic-embed-text    b     274 MB    0% GPU       5 min\n"
+    )
+    mock = MagicMock()
+    mock.returncode = 0
+    mock.stdout = output
+    with patch("subprocess.run", return_value=mock):
+        result = HealthMonitor().get_loaded_models()
+    assert len(result) == 2
+    names = [r["name"] for r in result]
+    assert "qwen2.5:7b" in names
+    assert "nomic-embed-text" in names
+
+
+def test_check_includes_loaded_models_list():
+    from unittest.mock import MagicMock, patch
+
+    output = "NAME    ID    SIZE    PROCESSOR    UNTIL\nqwen2.5:7b    abc    4.7 GB    100% GPU    3 min\n"
+    mock = MagicMock()
+    mock.returncode = 0
+    mock.stdout = output
+    with patch("subprocess.run", return_value=mock):
+        snap = HealthMonitor().check()
+    assert "ollama_loaded_models" in snap
+    assert isinstance(snap["ollama_loaded_models"], list)
+    # backward compat: ollama_model is still present
+    assert "ollama_model" in snap

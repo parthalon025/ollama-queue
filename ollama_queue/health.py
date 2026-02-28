@@ -48,9 +48,10 @@ class HealthMonitor:
         """
         try:
             result = subprocess.run(
-                ["nvidia-smi", "--query-gpu=memory.used,memory.total",
-                 "--format=csv,noheader,nounits"],
-                capture_output=True, text=True, timeout=5,
+                ["nvidia-smi", "--query-gpu=memory.used,memory.total", "--format=csv,noheader,nounits"],
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
             if result.returncode != 0:
                 return None
@@ -73,7 +74,9 @@ class HealthMonitor:
         try:
             result = subprocess.run(
                 ["ollama", "ps"],
-                capture_output=True, text=True, timeout=5,
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
             if result.returncode != 0:
                 return None
@@ -87,15 +90,23 @@ class HealthMonitor:
         except (OSError, subprocess.TimeoutExpired, ValueError, IndexError, UnicodeDecodeError):
             return None
 
+    def get_loaded_models(self) -> list[dict]:
+        """Return all currently loaded Ollama models. Multi-model aware."""
+        from ollama_queue.models import OllamaModels
+
+        return OllamaModels().get_loaded()
+
     def check(self) -> dict:
         """Return a full health snapshot."""
+        loaded = self.get_loaded_models()
         return {
             "ram_pct": self.get_ram_pct(),
             "swap_pct": self.get_swap_pct(),
             "load_avg": self.get_load_avg(),
             "cpu_count": self.get_cpu_count(),
             "vram_pct": self.get_vram_pct(),
-            "ollama_model": self.get_ollama_active_model(),
+            "ollama_model": loaded[0]["name"] if loaded else self.get_ollama_active_model(),
+            "ollama_loaded_models": loaded,
         }
 
     def evaluate(
@@ -172,9 +183,7 @@ class HealthMonitor:
             and snap["ollama_model"] not in _recent
         ):
             should_yield = True
-            reasons.append(
-                f"ollama ps shows {snap['ollama_model']} loaded (interactive user); yielding"
-            )
+            reasons.append(f"ollama ps shows {snap['ollama_model']} loaded (interactive user); yielding")
 
         return {
             "should_pause": should_pause,

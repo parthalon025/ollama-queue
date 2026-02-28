@@ -35,7 +35,7 @@ ignore = [
 # Daemon poll loop is a single long method by design; shell=True is intentional for user commands
 "ollama_queue/daemon.py" = ["C901", "PLR0912", "PLR0915", "S602", "S603", "S607"]
 # Health checks run known system binaries (nvidia-smi, ollama) — not user input
-"ollama_queue/health.py" = ["S607", "C901", "SIM105", "S110"]
+"ollama_queue/health.py" = ["S603", "S607", "C901", "SIM105", "S110"]
 # Model registry runs known ollama binary — not user input; SIM105/RUF002 are stylistic
 "ollama_queue/models.py" = ["S603", "S607", "SIM105", "RUF002"]
 # Admin migration script — subprocess calls use known binary paths, not user input
