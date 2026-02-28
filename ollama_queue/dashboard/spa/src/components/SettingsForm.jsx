@@ -119,6 +119,9 @@ export default function SettingsForm({ settings, daemonState, onSave, onPause, o
       <div class="t-frame" data-label="Stall Detection">
         <div class="flex flex-col gap-3">
           <NumberRow label="Stall Multiplier" settingKey="stall_multiplier" min={1} step="0.1" unit="× est." settings={settings} flashKey={flashKey} onBlur={handleBlur} />
+          <NumberRow label="Posterior Threshold" settingKey="stall_posterior_threshold" min={0} max={1} step="0.01" settings={settings} flashKey={flashKey} onBlur={handleBlur} />
+          <SelectRow label="Stall Action" settingKey="stall_action" options={['log', 'kill']} settings={settings} flashKey={flashKey} onSave={onSave} flash={flash} />
+          <NumberRow label="Kill Grace" settingKey="stall_kill_grace_seconds" min={0} unit="sec" settings={settings} flashKey={flashKey} onBlur={handleBlur} />
         </div>
       </div>
 
@@ -262,6 +265,51 @@ function NumberRow({ label, settingKey, min, max, step, unit, settings, flashKey
           <span style="font-size: var(--type-label); color: var(--text-tertiary); min-width: 30px;">{unit}</span>
         )}
       </div>
+    </label>
+  );
+}
+
+/**
+ * Select row for string enum settings.
+ */
+function SelectRow({ label, settingKey, options, settings, flashKey, onSave, flash }) {
+  const val = settings[settingKey];
+  const isFlash = flashKey === settingKey;
+
+  const handleChange = async (e) => {
+    const selected = e.target.value;
+    if (selected === val) return;
+    const ok = await onSave(settingKey, selected);
+    if (ok) flash(settingKey);
+  };
+
+  return (
+    <label
+      class="flex items-center justify-between gap-3"
+      style={{
+        background: isFlash ? 'var(--status-healthy-glow)' : 'transparent',
+        transition: 'background 0.3s ease',
+        padding: '4px 0',
+        borderRadius: 'var(--radius)',
+      }}
+    >
+      <span style="font-size: var(--type-body); color: var(--text-secondary);">
+        {label}
+      </span>
+      <select
+        class="t-input data-mono"
+        style={{
+          width: '90px',
+          padding: '4px 8px',
+          fontSize: 'var(--type-body)',
+          background: isFlash ? 'var(--status-healthy-glow)' : 'var(--bg-inset)',
+          transition: 'background 0.3s ease',
+        }}
+        value={val ?? options[0]}
+        onChange={handleChange}
+      >
+        {options.map(o => <option key={o} value={o}>{o}</option>)}
+      </select>
     </label>
   );
 }
