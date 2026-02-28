@@ -194,3 +194,52 @@ def test_update_schedule_pin(client):
     # Verify
     jobs = client.get("/api/schedule").json()
     assert jobs[0]["pinned"] == 1
+
+
+def test_get_models_returns_list(client):
+    from unittest.mock import patch
+
+    with (
+        patch(
+            "ollama_queue.models.OllamaModels.list_local",
+            return_value=[{"name": "qwen2.5:7b", "size_bytes": 4_700_000_000, "modified": "1w"}],
+        ),
+        patch("ollama_queue.models.OllamaModels.get_loaded", return_value=[]),
+    ):
+        resp = client.get("/api/models")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert isinstance(data, list)
+    assert data[0]["name"] == "qwen2.5:7b"
+    assert "resource_profile" in data[0]
+    assert "type_tag" in data[0]
+    assert "vram_mb" in data[0]
+
+
+def test_schedule_includes_estimated_duration(client):
+    resp = client.get("/api/schedule")
+    assert resp.status_code == 200
+    assert isinstance(resp.json(), list)
+
+
+def test_queue_etas_endpoint(client):
+    resp = client.get("/api/queue/etas")
+    assert resp.status_code == 200
+    assert isinstance(resp.json(), list)
+
+
+def test_post_models_pull(client):
+    from unittest.mock import patch
+
+    with patch("ollama_queue.models.OllamaModels.pull", return_value=1):
+        resp = client.post("/api/models/pull", json={"model": "llama3.2:3b"})
+    assert resp.status_code == 200
+    assert resp.json()["pull_id"] == 1
+
+
+def test_get_models_catalog(client):
+    resp = client.get("/api/models/catalog")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "curated" in data
+    assert len(data["curated"]) > 0

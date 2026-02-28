@@ -18,10 +18,58 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from ollama_queue.db import DEFAULTS, Database
+from ollama_queue.estimator import DurationEstimator
+from ollama_queue.models import OllamaModels
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
 PROXY_WAIT_TIMEOUT = 300
 PROXY_POLL_INTERVAL = 0.5
+
+
+_CURATED_MODELS = [
+    {
+        "name": "nomic-embed-text",
+        "type_tag": "embed",
+        "resource_profile": "embed",
+        "description": "Best embedding model — fast, 274MB",
+        "recommended": True,
+    },
+    {
+        "name": "qwen2.5:7b",
+        "type_tag": "general",
+        "resource_profile": "ollama",
+        "description": "Fast general-purpose model — 4.7GB",
+        "recommended": True,
+    },
+    {
+        "name": "qwen2.5-coder:14b",
+        "type_tag": "coding",
+        "resource_profile": "ollama",
+        "description": "Best local coding model — 8.9GB",
+        "recommended": True,
+    },
+    {
+        "name": "deepseek-r1:8b",
+        "type_tag": "reasoning",
+        "resource_profile": "ollama",
+        "description": "Reasoning model with CoT — 4.9GB",
+        "recommended": True,
+    },
+    {
+        "name": "llama3.2:3b",
+        "type_tag": "general",
+        "resource_profile": "ollama",
+        "description": "Lightweight — 2GB",
+        "recommended": False,
+    },
+    {
+        "name": "deepseek-r1:70b",
+        "type_tag": "reasoning",
+        "resource_profile": "heavy",
+        "description": "Max reasoning power — 39GB",
+        "recommended": False,
+    },
+]
 
 
 class SubmitJobRequest(BaseModel):
@@ -257,7 +305,24 @@ def create_app(db: Database) -> FastAPI:
 
     @app.get("/api/schedule")
     def list_schedule():
-        return db.list_recurring_jobs()
+        jobs = db.list_recurring_jobs()
+        est = DurationEstimator(db)
+        om = OllamaModels()
+        for rj in jobs:
+            rj["estimated_duration"] = est.estimate(
+                rj.get("name") or rj.get("source") or "",
+                model=rj.get("model"),
+            )
+            if rj.get("model"):
+                classification = om.classify(rj["model"])
+                rj["model_profile"] = classification["resource_profile"]
+                rj["model_type"] = classification["type_tag"]
+                rj["model_vram_mb"] = round(om.estimate_vram_mb(rj["model"], db), 1)
+            else:
+                rj["model_profile"] = "ollama"
+                rj["model_type"] = "general"
+                rj["model_vram_mb"] = None
+        return jobs
 
     @app.post("/api/schedule/rebalance")
     def trigger_rebalance():
@@ -351,6 +416,75 @@ def create_app(db: Database) -> FastAPI:
     def clear_dlq():
         n = db.clear_dlq()
         return {"cleared": n}
+
+    # --- Models ---
+
+    @app.get("/api/models")
+    def get_models():
+        om = OllamaModels()
+        local = om.list_local()
+        loaded_names = {m["name"] for m in om.get_loaded()}
+        result = []
+        for m in local:
+            classification = om.classify(m["name"])
+            vram_mb = om.estimate_vram_mb(m["name"], db)
+            est = DurationEstimator(db).estimate(m["name"], model=m["name"])
+            result.append(
+                {
+                    "name": m["name"],
+                    "size_bytes": m["size_bytes"],
+                    "vram_mb": round(vram_mb, 1),
+                    "resource_profile": classification["resource_profile"],
+                    "type_tag": classification["type_tag"],
+                    "loaded": m["name"] in loaded_names,
+                    "avg_duration_seconds": est,
+                }
+            )
+        return result
+
+    @app.get("/api/models/catalog")
+    def get_catalog(q: str | None = None):
+        curated = [c.copy() for c in _CURATED_MODELS]
+        search_results = []
+        if q:
+            try:
+                import json as _json
+                import urllib.parse
+                import urllib.request
+
+                url = f"https://ollama.com/search?q={urllib.parse.quote(q)}&format=json"
+                with urllib.request.urlopen(url, timeout=5) as r:  # noqa: S310
+                    search_results = _json.loads(r.read())[:10]
+            except Exception as exc:
+                _log.warning("Ollama catalog search failed: %s", exc)
+        return {"curated": curated, "search_results": search_results}
+
+    @app.post("/api/models/pull")
+    def start_pull(body: dict = Body(...)):
+        model = body.get("model", "").strip()
+        if not model:
+            raise HTTPException(status_code=400, detail="model is required")
+        pull_id = OllamaModels().pull(model, db)
+        return {"pull_id": pull_id}
+
+    @app.get("/api/models/pull/{pull_id}")
+    def get_pull_status_endpoint(pull_id: int):
+        status = OllamaModels().get_pull_status(pull_id, db)
+        if "error" in status:
+            raise HTTPException(status_code=404, detail=status["error"])
+        return status
+
+    @app.delete("/api/models/pull/{pull_id}")
+    def cancel_pull_endpoint(pull_id: int):
+        ok = OllamaModels().cancel_pull(pull_id, db)
+        return {"cancelled": ok}
+
+    # --- Queue ETAs ---
+
+    @app.get("/api/queue/etas")
+    def get_queue_etas():
+        jobs = db.get_pending_jobs()
+        return DurationEstimator(db).queue_etas(jobs)
 
     # --- Static files for SPA ---
     spa_dir = Path(__file__).parent / "dashboard" / "spa" / "dist"
