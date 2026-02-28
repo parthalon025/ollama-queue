@@ -31,6 +31,9 @@ DEFAULTS = {
     "priority_categories": '{"critical":[1,2],"high":[3,4],"normal":[5,6],"low":[7,8],"background":[9,10]}',
     "priority_category_colors": '{"critical":"#ef4444","high":"#f97316","normal":"#3b82f6","low":"#6b7280","background":"#374151"}',  # noqa: E501
     "resource_profiles": '{"ollama":{"check_vram":true,"check_ram":true,"check_load":true},"any":{"check_vram":false,"check_ram":false,"check_load":false}}',  # noqa: E501
+    "max_concurrent_jobs": 1,
+    "concurrent_shadow_hours": 24,
+    "vram_safety_factor": 1.3,
 }
 
 
@@ -170,6 +173,26 @@ class Database:
 
             CREATE INDEX IF NOT EXISTS idx_jobs_recurring_job_id
                 ON jobs (recurring_job_id) WHERE recurring_job_id IS NOT NULL;
+
+            CREATE TABLE IF NOT EXISTS model_registry (
+                name              TEXT PRIMARY KEY,
+                size_bytes        INTEGER,
+                vram_observed_mb  REAL,
+                resource_profile  TEXT DEFAULT 'ollama',
+                type_tag          TEXT DEFAULT 'general',
+                last_seen         REAL
+            );
+
+            CREATE TABLE IF NOT EXISTS model_pulls (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                model        TEXT NOT NULL,
+                status       TEXT DEFAULT 'pulling',
+                progress_pct REAL DEFAULT 0,
+                pid          INTEGER,
+                started_at   REAL,
+                completed_at REAL,
+                error        TEXT
+            );
         """)
 
         # Migrate pre-cron DBs that lack the cron_expression column
@@ -185,6 +208,13 @@ class Database:
             conn.commit()
         except Exception:
             _log.debug("pinned column already exists — skipping migration")
+
+        # Migrate: add pid column to jobs
+        try:
+            conn.execute("ALTER TABLE jobs ADD COLUMN pid INTEGER")
+            conn.commit()
+        except Exception:
+            _log.debug("jobs.pid column already exists — skipping migration")
 
         # Seed settings defaults
         now = time.time()

@@ -23,6 +23,8 @@ class TestInitialize:
             "recurring_jobs",
             "schedule_events",
             "dlq",
+            "model_registry",
+            "model_pulls",
         }
         assert expected == set(tables)
 
@@ -391,3 +393,32 @@ def test_update_recurring_job_pinned(tmp_path):
     db.update_recurring_job(rj_id, pinned=1)
     rj = db.get_recurring_job(rj_id)
     assert rj["pinned"] == 1
+
+
+# --- T1: model_registry, model_pulls, jobs.pid, new settings ---
+
+
+class TestModelConcurrencySchema:
+    def test_model_registry_table_exists(self, db):
+        tables = db.list_tables()
+        assert "model_registry" in tables
+
+    def test_model_pulls_table_exists(self, db):
+        tables = db.list_tables()
+        assert "model_pulls" in tables
+
+    def test_jobs_has_pid_column(self, db):
+        conn = db._connect()
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(jobs)").fetchall()]
+        assert "pid" in cols
+
+    def test_new_settings_seeded(self, db):
+        s = db.get_all_settings()
+        assert "max_concurrent_jobs" in s
+        assert "concurrent_shadow_hours" in s
+        assert "vram_safety_factor" in s
+
+    def test_migration_idempotent(self, db):
+        # Calling initialize() twice must not raise
+        db.initialize()
+        db.initialize()
