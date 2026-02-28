@@ -11,6 +11,7 @@ import urllib.request
 _log = logging.getLogger(__name__)
 
 PRIOR_LOG_ODDS: float = math.log(0.05 / 0.95)  # P(stuck)=0.05 → -2.944
+_TICK_HZ: int = os.sysconf("SC_CLK_TCK")  # compile-time constant, always 100 on Linux
 
 
 def _sigmoid(x: float) -> float:
@@ -55,11 +56,18 @@ class StallDetector:
     # ── CPU delta ─────────────────────────────────────────────────────────────
 
     def _read_cpu_ticks(self, pid: int) -> int | None:
-        """Return utime+stime ticks from /proc/{pid}/stat, or None on error."""
+        """Return utime+stime ticks from /proc/{pid}/stat, or None on error.
+
+        Parses past field 2 (comm) which is parenthesised and may contain spaces,
+        then indexes utime/stime relative to the post-comm fields.
+        """
         try:
             with open(f"/proc/{pid}/stat") as fh:
-                fields = fh.read().split()
-            return int(fields[13]) + int(fields[14])  # utime + stime
+                raw = fh.read()
+            # Comm field may contain spaces; find the last ')' to get a stable anchor.
+            end = raw.rindex(")")
+            fields = raw[end + 2 :].split()  # state, ppid, ... utime=fields[11], stime=fields[12]
+            return int(fields[11]) + int(fields[12])
         except (OSError, IndexError, ValueError):
             return None
 
@@ -76,8 +84,7 @@ class StallDetector:
         elapsed = now - prev_time
         if elapsed <= 0:
             return None
-        tick_hz = os.sysconf("SC_CLK_TCK")  # 100 on Linux
-        return ((ticks - prev_ticks) / tick_hz / elapsed) * 100.0
+        return ((ticks - prev_ticks) / _TICK_HZ / elapsed) * 100.0
 
     # ── Ollama /api/ps ────────────────────────────────────────────────────────
 
@@ -88,7 +95,8 @@ class StallDetector:
             with urllib.request.urlopen("http://localhost:11434/api/ps", timeout=2) as resp:
                 data = _json.loads(resp.read())
             return {m.get("name", "").split(":")[0] for m in data.get("models", [])}
-        except Exception:
+        except Exception as exc:
+            _log.debug("get_ollama_ps_models failed: %s", exc)
             return set()
 
     # ── log-likelihood ratios per group ──────────────────────────────────────
