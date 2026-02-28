@@ -143,20 +143,21 @@ class Daemon:
         if running_count >= self._max_slots():
             return False
 
-        # VRAM + RAM check
+        # Resource gate: model must fit in combined available VRAM + RAM.
+        # Ollama layers models across GPU VRAM first, then spills to system RAM — total is additive.
         free_vram = self._free_vram_mb()
         free_ram = self._free_ram_mb()
         model_vram = self._ollama_models.estimate_vram_mb(model, self.db) if model else 0.0
 
-        vram_ok = free_vram is None or model_vram <= free_vram * 0.8
-        ram_ok = model_vram * 0.5 <= free_ram * 0.8
+        available_mb = (free_vram if free_vram is not None else 0.0) + free_ram
+        resource_ok = free_vram is None or model_vram <= available_mb * 0.8
 
         # Health gate — reuse existing hysteresis logic
         snap = self.health.check()
         settings = self.db.get_all_settings()
         health_eval = self.health.evaluate(snap, settings, currently_paused=False)
 
-        if not vram_ok or not ram_ok or health_eval["should_pause"]:
+        if not resource_ok or health_eval["should_pause"]:
             return False
 
         # Shadow mode — log but don't admit second job yet

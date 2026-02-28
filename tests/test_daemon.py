@@ -413,6 +413,38 @@ def test_same_model_blocks_second(db):
     assert d._can_admit(job) is False
 
 
+def test_can_admit_split_load_vram_ram(db, monkeypatch):
+    """Model larger than free VRAM but fitting VRAM+RAM is admitted (Ollama split execution)."""
+    d = Daemon(db)
+    job = {
+        "id": 1,
+        "model": "deepseek-r1:8b",
+        "resource_profile": "ollama",
+        "command": "echo",
+        "source": "test",
+        "timeout": 120,
+        "priority": 5,
+    }
+    # Model ~5000 MB; VRAM only 2500 MB (not enough alone); RAM 10000 MB; combined 12500 > 5000.
+    monkeypatch.setattr(d, "_free_vram_mb", lambda: 2500.0)
+    monkeypatch.setattr(d, "_free_ram_mb", lambda: 10000.0)
+    monkeypatch.setattr(d._ollama_models, "estimate_vram_mb", lambda model, db: 5000.0)
+    with patch.object(
+        d.health,
+        "check",
+        return_value={
+            "ram_pct": 30.0,
+            "swap_pct": 5.0,
+            "load_avg": 0.5,
+            "cpu_count": 4,
+            "vram_pct": 40.0,
+            "ollama_model": None,
+        },
+    ):
+        admitted = d._can_admit(job)
+    assert admitted is True
+
+
 def test_shadow_mode_logs_but_does_not_run(db, monkeypatch, caplog):
     """Shadow mode logs 'SHADOW' but does not actually admit second job."""
     db.set_setting("max_concurrent_jobs", 2)
