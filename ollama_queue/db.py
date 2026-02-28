@@ -322,6 +322,22 @@ class Database:
         )
         conn.commit()
 
+    def get_running_jobs(self) -> list[dict]:
+        """Return all jobs currently in 'running' status."""
+        with self._lock:
+            rows = self._connect().execute("SELECT * FROM jobs WHERE status = 'running'").fetchall()
+        return [dict(r) for r in rows]
+
+    def reset_job_to_pending(self, job_id: int) -> None:
+        """Reset a job from running back to pending (orphan recovery)."""
+        with self._lock:
+            conn = self._connect()
+            conn.execute(
+                "UPDATE jobs SET status='pending', started_at=NULL, pid=NULL WHERE id=?",
+                (job_id,),
+            )
+            conn.commit()
+
     def cancel_job(self, job_id: int) -> None:
         conn = self._connect()
         conn.execute(

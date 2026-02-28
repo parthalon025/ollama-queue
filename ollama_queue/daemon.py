@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import os
+import signal as _signal
 import subprocess
 import time
 
@@ -31,6 +33,19 @@ class Daemon:
         self.dlq = DLQManager(db)
         self._last_prune: float = 0.0
         self._recent_job_models: dict[str, float] = {}  # model -> last_completed_at
+
+    def _recover_orphans(self) -> None:
+        """Reset jobs stuck in 'running' on daemon startup (no live subprocess)."""
+        orphans = self.db.get_running_jobs()
+        for job in orphans:
+            if job.get("pid"):
+                try:
+                    os.kill(job["pid"], _signal.SIGTERM)
+                    _log.info("Sent SIGTERM to orphaned pid=%d (job #%d)", job["pid"], job["id"])
+                except ProcessLookupError:
+                    pass  # process already gone
+            self.db.reset_job_to_pending(job["id"])
+            _log.warning("Reset orphaned job #%d to pending", job["id"])
 
     def poll_once(self) -> None:
         """Single poll cycle.
@@ -156,6 +171,11 @@ class Daemon:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
+        # Record real PID immediately for orphan recovery
+        with self.db._lock:
+            conn = self.db._connect()
+            conn.execute("UPDATE jobs SET pid = ? WHERE id = ?", (proc.pid, job["id"]))
+            conn.commit()
 
         # 9. Wait with timeout
         try:
@@ -295,6 +315,7 @@ class Daemon:
         if poll_interval is None:
             poll_interval = self.db.get_setting("poll_interval_seconds") or 5
 
+        self._recover_orphans()
         self.db.update_daemon_state(state="idle", uptime_since=time.time())
 
         while True:

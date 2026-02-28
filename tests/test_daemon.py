@@ -39,6 +39,7 @@ def test_poll_runs_job(daemon):
         patch("ollama_queue.daemon.subprocess") as mock_sub,
     ):
         proc = MagicMock()
+        proc.pid = 1234
         proc.wait.return_value = 0
         proc.stdout.read.return_value = b"hello"
         proc.stderr.read.return_value = b""
@@ -116,6 +117,7 @@ def test_timeout_kills_job(daemon):
         patch("ollama_queue.daemon.subprocess") as mock_sub,
     ):
         proc = MagicMock()
+        proc.pid = 1234
         proc.wait.side_effect = lambda timeout: (_ for _ in ()).throw(__import__("subprocess").TimeoutExpired("cmd", 1))
         proc.kill.return_value = None
         proc.communicate.return_value = (b"", b"")
@@ -157,6 +159,7 @@ def test_records_duration_on_success(daemon):
         patch("ollama_queue.daemon.subprocess") as mock_sub,
     ):
         proc = MagicMock()
+        proc.pid = 1234
         proc.wait.return_value = 0
         proc.stdout.read.return_value = b"ok"
         proc.stderr.read.return_value = b""
@@ -190,6 +193,7 @@ class TestDaemonSchedulerIntegration:
             patch("ollama_queue.daemon.subprocess") as mock_sub,
         ):
             proc = MagicMock()
+            proc.pid = 1234
             proc.wait.return_value = 0
             proc.stdout.read.return_value = b"hi"
             proc.stderr.read.return_value = b""
@@ -248,6 +252,7 @@ def test_no_self_block_after_queue_job(daemon):
         patch("ollama_queue.daemon.subprocess") as mock_sub,
     ):
         proc = MagicMock()
+        proc.pid = 1234
         proc.wait.return_value = 0
         proc.stdout.read.return_value = b"ok"
         proc.stderr.read.return_value = b""
@@ -276,6 +281,7 @@ def test_no_self_block_after_queue_job(daemon):
         patch("ollama_queue.daemon.subprocess") as mock_sub,
     ):
         proc = MagicMock()
+        proc.pid = 1234
         proc.wait.return_value = 0
         proc.stdout.read.return_value = b"ok"
         proc.stderr.read.return_value = b""
@@ -287,3 +293,51 @@ def test_no_self_block_after_queue_job(daemon):
     assert job2["status"] == "completed"  # should NOT be blocked
     state = daemon.db.get_daemon_state()
     assert state["state"] != "paused_interactive"
+
+
+# --- T5: PID tracking + orphan recovery ---
+
+
+def test_recover_orphans_resets_running_jobs(db):
+    d = Daemon(db)
+    job_id = db.submit_job(command="echo hi", model="", priority=5, timeout=60, source="test")
+    db.start_job(job_id)
+    # Write a non-existent PID to simulate orphaned job
+    db._connect().execute("UPDATE jobs SET pid = 999999 WHERE id = ?", (job_id,))
+    db._connect().commit()
+
+    d._recover_orphans()
+
+    job = db.get_job(job_id)
+    assert job["status"] == "pending"
+
+
+def test_recover_orphans_handles_no_pid(db):
+    """Jobs with no PID are still reset to pending."""
+    d = Daemon(db)
+    job_id = db.submit_job(command="echo hi", model="", priority=5, timeout=60, source="test")
+    db.start_job(job_id)
+    # pid column is NULL (not set yet)
+
+    d._recover_orphans()
+
+    job = db.get_job(job_id)
+    assert job["status"] == "pending"
+
+
+def test_get_running_jobs_returns_running(db):
+    job_id = db.submit_job(command="echo hi", model="", priority=5, timeout=60, source="test")
+    db.start_job(job_id)
+    running = db.get_running_jobs()
+    assert len(running) == 1
+    assert running[0]["id"] == job_id
+
+
+def test_reset_job_to_pending(db):
+    job_id = db.submit_job(command="echo hi", model="", priority=5, timeout=60, source="test")
+    db.start_job(job_id)
+    db.reset_job_to_pending(job_id)
+    job = db.get_job(job_id)
+    assert job["status"] == "pending"
+    assert job["started_at"] is None
+    assert job["pid"] is None
