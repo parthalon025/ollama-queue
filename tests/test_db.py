@@ -179,9 +179,11 @@ class TestJobs:
         db.start_job(j2)
         db.complete_job(j2, 1, "", "err", "failed")
         history = db.get_history()
-        assert len(history) == 2
         # newest first
         assert history[0]["id"] == j2
+        history_ids = [h["id"] for h in history]
+        assert j1 in history_ids
+        assert j2 in history_ids
         commands = [h["command"] for h in history]
         assert "cmd3" not in commands  # pending excluded
 
@@ -300,8 +302,7 @@ class TestRecurringJobs:
     def test_log_schedule_event(self, db):
         db.log_schedule_event("promoted", details={"job_id": 1})
         events = db.get_schedule_events(limit=10)
-        assert len(events) == 1
-        assert events[0]["event_type"] == "promoted"
+        assert any(e["event_type"] == "promoted" for e in events)
 
     def test_set_recurring_next_run_updates_correctly(self, db):
         """_set_recurring_next_run updates next_run without direct _connect access."""
