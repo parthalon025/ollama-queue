@@ -1,10 +1,12 @@
 import { h } from 'preact';
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import {
     scheduleJobs, scheduleEvents,
     fetchSchedule, toggleScheduleJob, triggerRebalance, runScheduleJobNow,
-    updateScheduleJob,
+    updateScheduleJob, fetchModels,
 } from '../store';
+import { GanttChart } from '../components/GanttChart';
+import { ModelBadge } from '../components/ModelBadge';
 
 // Note: local vars named 'hrs'/'mins' to avoid shadowing the injected 'h' JSX factory.
 function formatCountdown(next_run) {
@@ -55,40 +57,6 @@ function priorityCategory(p) {
     return 'background';
 }
 
-function TimelineBar({ jobs, tick }) {
-    // tick dependency forces re-render each second
-    void tick;
-    const now = Date.now() / 1000;
-    const daySeconds = 86400;
-    return (
-        <div style={{ position: 'relative', height: 40,
-                      background: 'var(--bg-inset)',
-                      border: '1px solid var(--border-subtle)',
-                      borderRadius: 'var(--radius)',
-                      overflow: 'hidden', margin: '1rem 0' }}>
-            {jobs.map(rj => {
-                const secsFromNow = rj.next_run - now;
-                const pct = secsFromNow <= 0
-                    ? 0
-                    : Math.min(100, (secsFromNow / daySeconds) * 100);
-                const color = CATEGORY_COLORS[priorityCategory(rj.priority)];
-                return (
-                    <div key={rj.id}
-                         title={`${rj.pinned ? '★ PINNED: ' : ''}${rj.name} — ${formatCountdown(rj.next_run)}`}
-                         style={{
-                             position: 'absolute', left: `${pct}%`,
-                             width: rj.pinned ? 5 : 3,
-                             top: rj.pinned ? 0 : 4,
-                             bottom: rj.pinned ? 0 : 4,
-                             background: color,
-                             opacity: rj.pinned ? 1.0 : 0.75,
-                             borderRadius: rj.pinned ? 0 : 2,
-                         }} />
-                );
-            })}
-        </div>
-    );
-}
 
 export default function ScheduleTab() {
     // tick increments every second to force live countdown re-renders
@@ -98,10 +66,22 @@ export default function ScheduleTab() {
     const [editingInterval, setEditingInterval] = useState(null);   // { id, value }
     const [editingPriority, setEditingPriority] = useState(null);   // { id, value }
 
+    const refreshingRef = useRef(false);
+
     useEffect(() => {
         fetchSchedule();
-        const interval = setInterval(() => setTick(t => t + 1), 1000);
-        return () => clearInterval(interval);
+        fetchModels();
+        const tickInterval = setInterval(() => setTick(t => t + 1), 1000);
+        const refreshInterval = setInterval(() => {
+            if (!refreshingRef.current) {
+                refreshingRef.current = true;
+                fetchSchedule().finally(() => { refreshingRef.current = false; });
+            }
+        }, 10000);
+        return () => {
+            clearInterval(tickInterval);
+            clearInterval(refreshInterval);
+        };
     }, []);
 
     const jobs = scheduleJobs.value;
@@ -182,7 +162,7 @@ export default function ScheduleTab() {
                 </div>
             )}
 
-            <TimelineBar jobs={jobs} tick={tick} />
+            <GanttChart jobs={jobs} tick={tick} windowHours={24} />
 
             {jobs.length === 0 ? (
                 <div class="t-frame" style={{ textAlign: 'center', padding: '2rem',
@@ -197,7 +177,7 @@ export default function ScheduleTab() {
                         <thead>
                             <tr style={{ borderBottom: '1px solid var(--border-subtle)',
                                          background: 'var(--bg-surface-raised)' }}>
-                                {['Name', 'Tag', 'Schedule', 'Priority', 'Next Run', '★', 'Enabled', ''].map(col => (
+                                {['Name', 'Model', 'VRAM', 'Tag', 'Schedule', 'Priority', 'Next Run', 'ETA', '★', 'Enabled', ''].map(col => (
                                     <th key={col} style={{
                                         textAlign: col === 'Name' ? 'left' : 'center',
                                         padding: '0.5rem 0.75rem',
@@ -230,6 +210,23 @@ export default function ScheduleTab() {
                                                            fontSize: 'var(--type-body)' }}>
                                                 {rj.name}
                                             </span>
+                                        </td>
+                                        <td style={{ textAlign: 'center', padding: '0.5rem' }}>
+                                            {rj.model ? (
+                                                <ModelBadge profile={rj.model_profile} typeTag={rj.model_type} />
+                                            ) : (
+                                                <span style={{ color: 'var(--text-tertiary)', fontSize: 'var(--type-label)' }}>—</span>
+                                            )}
+                                            {rj.model && (
+                                                <div style={{ fontSize: 'var(--type-label)', color: 'var(--text-secondary)',
+                                                              fontFamily: 'var(--font-mono)' }}>
+                                                    {rj.model.split(':')[0]}
+                                                </div>
+                                            )}
+                                        </td>
+                                        <td style={{ textAlign: 'center', fontFamily: 'var(--font-mono)',
+                                                     fontSize: 'var(--type-label)', color: 'var(--text-secondary)' }}>
+                                            {rj.model_vram_mb ? `${(rj.model_vram_mb / 1024).toFixed(1)} GB` : '—'}
                                         </td>
                                         <td style={{ textAlign: 'center',
                                                      color: 'var(--text-secondary)',
@@ -323,6 +320,12 @@ export default function ScheduleTab() {
                                                      fontVariantNumeric: 'tabular-nums',
                                                      minWidth: '7rem' }}>
                                             {formatCountdown(rj.next_run)}
+                                        </td>
+                                        <td style={{ textAlign: 'center', fontFamily: 'var(--font-mono)',
+                                                     fontSize: 'var(--type-label)', color: 'var(--text-tertiary)' }}>
+                                            {rj.estimated_duration
+                                                ? `~${Math.round(rj.estimated_duration / 60)}m`
+                                                : '—'}
                                         </td>
                                         <td style={{ textAlign: 'center' }}>
                                             <button
