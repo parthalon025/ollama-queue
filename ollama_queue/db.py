@@ -285,12 +285,13 @@ class Database:
         return dict(row) if row else None
 
     def start_job(self, job_id: int) -> None:
-        conn = self._connect()
-        conn.execute(
-            "UPDATE jobs SET status = 'running', started_at = ? WHERE id = ?",
-            (time.time(), job_id),
-        )
-        conn.commit()
+        with self._lock:
+            conn = self._connect()
+            conn.execute(
+                "UPDATE jobs SET status = 'running', started_at = ? WHERE id = ?",
+                (time.time(), job_id),
+            )
+            conn.commit()
 
     def complete_job(
         self,
@@ -301,26 +302,28 @@ class Database:
         outcome_reason: str | None = None,
     ) -> None:
         status = "completed" if exit_code == 0 else "failed"
-        conn = self._connect()
-        conn.execute(
-            """UPDATE jobs
-               SET status = ?, exit_code = ?, stdout_tail = ?, stderr_tail = ?,
-                   outcome_reason = ?, completed_at = ?
-               WHERE id = ?""",
-            (status, exit_code, stdout_tail, stderr_tail, outcome_reason, time.time(), job_id),
-        )
-        conn.commit()
+        with self._lock:
+            conn = self._connect()
+            conn.execute(
+                """UPDATE jobs
+                   SET status = ?, exit_code = ?, stdout_tail = ?, stderr_tail = ?,
+                       outcome_reason = ?, completed_at = ?
+                   WHERE id = ?""",
+                (status, exit_code, stdout_tail, stderr_tail, outcome_reason, time.time(), job_id),
+            )
+            conn.commit()
 
     def kill_job(self, job_id: int, reason: str, stdout_tail: str = "", stderr_tail: str = "") -> None:
-        conn = self._connect()
-        conn.execute(
-            """UPDATE jobs
-               SET status = 'killed', outcome_reason = ?, completed_at = ?,
-                   stdout_tail = ?, stderr_tail = ?
-               WHERE id = ?""",
-            (reason, time.time(), stdout_tail, stderr_tail, job_id),
-        )
-        conn.commit()
+        with self._lock:
+            conn = self._connect()
+            conn.execute(
+                """UPDATE jobs
+                   SET status = 'killed', outcome_reason = ?, completed_at = ?,
+                       stdout_tail = ?, stderr_tail = ?
+                   WHERE id = ?""",
+                (reason, time.time(), stdout_tail, stderr_tail, job_id),
+            )
+            conn.commit()
 
     def get_running_jobs(self) -> list[dict]:
         """Return all jobs currently in 'running' status."""
@@ -413,13 +416,14 @@ class Database:
     # --- Duration History ---
 
     def record_duration(self, source: str, model: str, duration: float, exit_code: int) -> None:
-        conn = self._connect()
-        conn.execute(
-            """INSERT INTO duration_history (source, model, duration, exit_code, recorded_at)
-               VALUES (?, ?, ?, ?, ?)""",
-            (source, model, duration, exit_code, time.time()),
-        )
-        conn.commit()
+        with self._lock:
+            conn = self._connect()
+            conn.execute(
+                """INSERT INTO duration_history (source, model, duration, exit_code, recorded_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (source, model, duration, exit_code, time.time()),
+            )
+            conn.commit()
 
     def get_duration_history(self, source: str, limit: int = 5) -> list[dict]:
         conn = self._connect()
@@ -501,11 +505,12 @@ class Database:
         unknown = set(kwargs) - self._DAEMON_STATE_FIELDS
         if unknown:
             raise ValueError(f"Unknown daemon_state fields: {unknown}")
-        conn = self._connect()
-        sets = ", ".join(f"{k} = ?" for k in kwargs)
-        vals = list(kwargs.values())
-        conn.execute(f"UPDATE daemon_state SET {sets} WHERE id = 1", vals)
-        conn.commit()
+        with self._lock:
+            conn = self._connect()
+            sets = ", ".join(f"{k} = ?" for k in kwargs)
+            vals = list(kwargs.values())
+            conn.execute(f"UPDATE daemon_state SET {sets} WHERE id = 1", vals)
+            conn.commit()
 
     def get_daemon_state(self) -> dict:
         conn = self._connect()
@@ -740,14 +745,15 @@ class Database:
         job_id: int | None = None,
         details: dict | None = None,
     ) -> None:
-        conn = self._connect()
-        conn.execute(
-            """INSERT INTO schedule_events
-               (timestamp, event_type, recurring_job_id, job_id, details)
-               VALUES (?, ?, ?, ?, ?)""",
-            (time.time(), event_type, recurring_job_id, job_id, json.dumps(details) if details else None),
-        )
-        conn.commit()
+        with self._lock:
+            conn = self._connect()
+            conn.execute(
+                """INSERT INTO schedule_events
+                   (timestamp, event_type, recurring_job_id, job_id, details)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (time.time(), event_type, recurring_job_id, job_id, json.dumps(details) if details else None),
+            )
+            conn.commit()
 
     def get_schedule_events(self, limit: int = 100) -> list[dict]:
         conn = self._connect()

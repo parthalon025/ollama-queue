@@ -11,7 +11,8 @@ from ollama_queue.daemon import Daemon
 
 
 def _drain(daemon):
-    """Wait for all submitted daemon worker futures to complete (test helper)."""
+    """Wait for all submitted daemon worker futures to complete (test helper).
+    Re-raises any exceptions from worker threads to make failures visible."""
     if daemon._executor is None:
         return
     futs = []
@@ -19,6 +20,8 @@ def _drain(daemon):
         futs = list(daemon._running.values())
     if futs:
         concurrent.futures.wait(futs, timeout=10)
+        for fut in futs:
+            fut.result()  # re-raise any exception from _run_job
 
 
 @pytest.fixture
@@ -232,6 +235,10 @@ class TestDaemonSchedulerIntegration:
         )
         conn.commit()
         daemon = Daemon(db)
+        # Simulate job tracked in _running (required by multi-job stall detection)
+        mock_fut = MagicMock()
+        mock_fut.done.return_value = False
+        daemon._running[job_id] = mock_fut
         with patch.object(
             daemon.health,
             "check",
@@ -451,3 +458,29 @@ def test_shadow_mode_logs_but_does_not_run(db, monkeypatch, caplog):
         admitted = d._can_admit(job)
     assert admitted is False
     assert any("SHADOW" in r.message for r in caplog.records)
+
+
+# --- T7: Multi-job stall detection ---
+
+
+def test_stall_detection_checks_all_running_jobs(db):
+    """Stall detection iterates self._running, not just current_job_id."""
+    d = Daemon(db)
+    j1 = db.submit_job(command="sleep 999", model="", priority=5, timeout=10, source="test")
+    j2 = db.submit_job(command="sleep 999", model="", priority=5, timeout=10, source="test")
+    db.start_job(j1)
+    db.start_job(j2)
+    conn = db._connect()
+    conn.execute(
+        "UPDATE jobs SET started_at=?, estimated_duration=60 WHERE id IN (?,?)",
+        (time.time() - 500, j1, j2),
+    )
+    conn.commit()
+    # Simulate both in _running
+    d._running[j1] = MagicMock()
+    d._running[j2] = MagicMock()
+
+    d._check_stalled_jobs(time.time())
+
+    assert db.get_job(j1)["stall_detected_at"] is not None
+    assert db.get_job(j2)["stall_detected_at"] is not None
