@@ -72,19 +72,27 @@ export function buildDensityBuckets(jobs, now, windowSecs) {
     return buckets;
 }
 
-export function findHeavyConflicts(jobs) {
-    const heavy = jobs.filter(j => j.model_profile === 'heavy');
-    const conflictIds = new Set();
-    for (let i = 0; i < heavy.length; i++) {
-        for (let j = i + 1; j < heavy.length; j++) {
-            const a = heavy[i], b = heavy[j];
+export function getConflictingPairs(jobs) {
+    const pairs = [];
+    for (let i = 0; i < jobs.length; i++) {
+        for (let j = i + 1; j < jobs.length; j++) {
+            const a = jobs[i], b = jobs[j];
             const aEnd = a.next_run + (a.estimated_duration || 600);
             const bEnd = b.next_run + (b.estimated_duration || 600);
             if (a.next_run < bEnd && b.next_run < aEnd) {
-                conflictIds.add(a.id);
-                conflictIds.add(b.id);
+                pairs.push([a, b]);
             }
         }
+    }
+    return pairs;
+}
+
+export function findHeavyConflicts(jobs) {
+    const heavy = jobs.filter(j => j.model_profile === 'heavy');
+    const conflictIds = new Set();
+    for (const [a, b] of getConflictingPairs(heavy)) {
+        conflictIds.add(a.id);
+        conflictIds.add(b.id);
     }
     return conflictIds;
 }
@@ -182,41 +190,36 @@ export function GanttChart({ jobs, tick, windowHours = 24 }) {
                 {conflictIds.size > 0 && (() => {
                     const heavy = laneJobs.filter(j => j.model_profile === 'heavy' && conflictIds.has(j.id));
                     const badges = [];
-                    for (let ci = 0; ci < heavy.length; ci++) {
-                        for (let cj = ci + 1; cj < heavy.length; cj++) {
-                            const a = heavy[ci], b = heavy[cj];
-                            const aEnd = a.next_run + (a.estimated_duration || 600);
-                            const bEnd = b.next_run + (b.estimated_duration || 600);
-                            if (a.next_run < bEnd && b.next_run < aEnd) {
-                                const midStart = Math.max(a.next_run, b.next_run);
-                                const midEnd = Math.min(aEnd, bEnd);
-                                const midPoint = (midStart + midEnd) / 2;
-                                const leftPct = ((midPoint - now) / windowSecs) * 100;
-                                const topLane = Math.max(a._lane, b._lane);
-                                badges.push(
-                                    <div
-                                        key={`conflict-${a.id}-${b.id}`}
-                                        title="Two heavy models overlap — one will queue behind the other"
-                                        style={{
-                                            position: 'absolute',
-                                            left: `${Math.max(1, Math.min(leftPct - 4, 88))}%`,
-                                            top: topLane * laneHeight + laneHeight / 4,
-                                            background: 'var(--status-error)',
-                                            color: '#fff',
-                                            fontSize: 'var(--type-micro)',
-                                            fontFamily: 'var(--font-mono)',
-                                            padding: '1px 5px',
-                                            borderRadius: 3,
-                                            pointerEvents: 'none',
-                                            zIndex: 10,
-                                            whiteSpace: 'nowrap',
-                                        }}
-                                    >
-                                        ⚠ conflict
-                                    </div>
-                                );
-                            }
-                        }
+                    for (const [a, b] of getConflictingPairs(heavy)) {
+                        const aEnd = a.next_run + (a.estimated_duration || 600);
+                        const bEnd = b.next_run + (b.estimated_duration || 600);
+                        const midStart = Math.max(a.next_run, b.next_run);
+                        const midEnd = Math.min(aEnd, bEnd);
+                        const midPoint = (midStart + midEnd) / 2;
+                        const leftPct = ((midPoint - now) / windowSecs) * 100;
+                        const lowerLane = Math.max(a._lane, b._lane);
+                        badges.push(
+                            <div
+                                key={`conflict-${a.id}-${b.id}`}
+                                title="Two heavy models overlap — one will queue behind the other"
+                                style={{
+                                    position: 'absolute',
+                                    left: `${Math.max(1, Math.min(leftPct - 4, 88))}%`,
+                                    top: lowerLane * laneHeight + laneHeight / 4,
+                                    background: 'var(--status-error)',
+                                    color: '#fff',
+                                    fontSize: 'var(--type-micro)',
+                                    fontFamily: 'var(--font-mono)',
+                                    padding: '1px 5px',
+                                    borderRadius: 3,
+                                    pointerEvents: 'none',
+                                    zIndex: 10,
+                                    whiteSpace: 'nowrap',
+                                }}
+                            >
+                                ⚠ conflict
+                            </div>
+                        );
                     }
                     return badges;
                 })()}

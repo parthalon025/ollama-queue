@@ -1,5 +1,5 @@
 // ollama_queue/dashboard/spa/src/components/GanttChart.test.js
-import { sourceColor, formatDuration, assignLanes, buildTooltip, buildDensityBuckets, findHeavyConflicts } from './GanttChart.jsx';
+import { sourceColor, formatDuration, assignLanes, buildTooltip, buildDensityBuckets, findHeavyConflicts, getConflictingPairs } from './GanttChart.jsx';
 
 describe('sourceColor', () => {
     it('returns accent for aria', () => {
@@ -205,5 +205,67 @@ describe('findHeavyConflicts', () => {
         ];
         // job 1 ends at 1600, job 2 starts at 1600 — strict < means no overlap
         expect(findHeavyConflicts(jobs).size).toBe(0);
+    });
+});
+
+describe('getConflictingPairs', () => {
+    it('returns empty array for empty input', () => {
+        expect(getConflictingPairs([])).toEqual([]);
+    });
+
+    it('returns empty array for a single job', () => {
+        const jobs = [{ id: 1, next_run: 1000, estimated_duration: 600 }];
+        expect(getConflictingPairs(jobs)).toEqual([]);
+    });
+
+    it('returns [[a, b]] when two jobs overlap', () => {
+        const a = { id: 1, next_run: 1000, estimated_duration: 600 };
+        const b = { id: 2, next_run: 1300, estimated_duration: 600 };
+        const result = getConflictingPairs([a, b]);
+        expect(result).toHaveLength(1);
+        expect(result[0][0]).toBe(a);
+        expect(result[0][1]).toBe(b);
+    });
+
+    it('returns empty array when two jobs do not overlap', () => {
+        const jobs = [
+            { id: 1, next_run: 1000, estimated_duration: 600 },
+            { id: 2, next_run: 2000, estimated_duration: 600 },
+        ];
+        expect(getConflictingPairs(jobs)).toEqual([]);
+    });
+
+    it('treats exactly-touching jobs (end === start) as non-overlapping', () => {
+        const jobs = [
+            { id: 1, next_run: 1000, estimated_duration: 600 },
+            { id: 2, next_run: 1600, estimated_duration: 600 },
+        ];
+        // job 1 ends at 1600, job 2 starts at 1600 — strict < means no overlap
+        expect(getConflictingPairs(jobs)).toEqual([]);
+    });
+
+    it('uses 600s default when estimated_duration is null', () => {
+        const a = { id: 1, next_run: 1000, estimated_duration: null };
+        const b = { id: 2, next_run: 1300, estimated_duration: null };
+        // both default to 600s: a ends at 1600, b ends at 1900 — overlap
+        const result = getConflictingPairs([a, b]);
+        expect(result).toHaveLength(1);
+    });
+
+    it('does not filter by model_profile — caller decides what to pass', () => {
+        // both jobs are ollama profile; getConflictingPairs still detects the overlap
+        const a = { id: 1, model_profile: 'ollama', next_run: 1000, estimated_duration: 600 };
+        const b = { id: 2, model_profile: 'ollama', next_run: 1300, estimated_duration: 600 };
+        const result = getConflictingPairs([a, b]);
+        expect(result).toHaveLength(1);
+    });
+
+    it('returns all overlapping pairs when three jobs all overlap', () => {
+        const a = { id: 1, next_run: 1000, estimated_duration: 600 };
+        const b = { id: 2, next_run: 1100, estimated_duration: 600 };
+        const c = { id: 3, next_run: 1200, estimated_duration: 600 };
+        // a-b, a-c, and b-c all overlap
+        const result = getConflictingPairs([a, b, c]);
+        expect(result).toHaveLength(3);
     });
 });
