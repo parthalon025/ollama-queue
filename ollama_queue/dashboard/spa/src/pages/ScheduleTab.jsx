@@ -68,6 +68,27 @@ function priorityCategory(p) {
     return 'background';
 }
 
+// Change 5: relative time for rebalance log
+function relativeTimeLog(ts) {
+    if (!ts) return '—';
+    const diff = Math.max(0, Math.floor(Date.now() / 1000 - ts));
+    if (diff < 60) return `${diff}s ago`;
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+    const dateObj = new Date(ts * 1000);
+    return `${dateObj.toLocaleDateString()} ${dateObj.toLocaleTimeString()}`;
+}
+
+// Change 6: debounce hook for live search
+function useDebounce(value, delay) {
+    const [debounced, setDebounced] = useState(value);
+    useEffect(() => {
+        const timer = setTimeout(() => setDebounced(value), delay);
+        return () => clearTimeout(timer);
+    }, [value, delay]);
+    return debounced;
+}
+
 
 export default function ScheduleTab() {
     // tick increments every second to force live countdown re-renders
@@ -77,8 +98,16 @@ export default function ScheduleTab() {
     const [editingInterval, setEditingInterval] = useState(null);   // { id, value }
     const [editingPriority, setEditingPriority] = useState(null);   // { id, value }
     const [editingModel, setEditingModel] = useState(null);         // { id, value }
+    // Change 4: rebalance button state
+    const [rebalancing, setRebalancing] = useState(false);
+    const [rebalanceFlash, setRebalanceFlash] = useState(null);     // 'ok' | 'error' | null
+    // Change 6: search state
+    const [search, setSearch] = useState('');
 
     const refreshingRef = useRef(false);
+
+    // Change 6: debounced search
+    const debouncedSearch = useDebounce(search, 300);
 
     useEffect(() => {
         fetchSchedule();
@@ -120,6 +149,11 @@ export default function ScheduleTab() {
     const jobs = scheduleJobs.value;
     const events = scheduleEvents.value;
 
+    // Change 6: filtered jobs for display
+    const visibleJobs = debouncedSearch
+        ? jobs.filter(rj => rj.name.toLowerCase().includes(debouncedSearch.toLowerCase()))
+        : jobs;
+
     async function handleIntervalSave(rjId) {
         if (!editingInterval || editingInterval.id !== rjId) return;
         const seconds = parseInterval(editingInterval.value);
@@ -158,7 +192,12 @@ export default function ScheduleTab() {
         }
     }
 
+    // Change 7: confirmation for long-running jobs
     async function handleRunNow(rj) {
+        if (rj.estimated_duration > 300) {
+            const ok = window.confirm(`Run "${rj.name}" now? Estimated duration: ~${Math.round(rj.estimated_duration / 60)}m`);
+            if (!ok) return;
+        }
         setRunningIds(prev => new Set([...prev, rj.id]));
         setRunError(null);
         try {
@@ -175,6 +214,24 @@ export default function ScheduleTab() {
         }
     }
 
+    // Change 4: rebalance with loading/success/error state
+    async function handleRebalance() {
+        setRebalancing(true);
+        setRebalanceFlash(null);
+        try {
+            await triggerRebalance();
+            setRebalanceFlash('ok');
+            setTimeout(() => setRebalanceFlash(null), 2000);
+            fetchSchedule();
+        } catch (err) {
+            console.error('Rebalance failed:', err);
+            setRebalanceFlash('error');
+            setTimeout(() => setRebalanceFlash(null), 4000);
+        } finally {
+            setRebalancing(false);
+        }
+    }
+
     return (
         <div class="flex flex-col gap-4 animate-page-enter">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -182,9 +239,26 @@ export default function ScheduleTab() {
                              fontSize: 'var(--type-headline)', color: 'var(--text-primary)' }}>
                     Schedule
                 </h2>
-                <button class="t-btn t-btn-primary px-4 py-2 text-sm" onClick={triggerRebalance}>
-                    Rebalance Now
-                </button>
+                {/* Change 4: rebalance button with loading/success/error feedback */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    {rebalanceFlash === 'error' && (
+                        <span style={{ color: 'var(--status-error)', fontSize: 'var(--type-label)',
+                                       fontFamily: 'var(--font-mono)' }}>
+                            Rebalance failed
+                        </span>
+                    )}
+                    <button
+                        class="t-btn t-btn-primary px-4 py-2 text-sm"
+                        onClick={handleRebalance}
+                        disabled={rebalancing}
+                        style={{
+                            opacity: rebalancing ? 0.6 : 1,
+                            background: rebalanceFlash === 'ok' ? 'var(--status-success)' : undefined,
+                            transition: 'background 0.3s ease',
+                        }}>
+                        {rebalancing ? '…' : rebalanceFlash === 'ok' ? '✓ Done' : 'Rebalance Now'}
+                    </button>
+                </div>
             </div>
 
             {runError && (
@@ -237,233 +311,292 @@ export default function ScheduleTab() {
                     <code class="data-mono">ollama-queue schedule add</code>
                 </div>
             ) : (
-                <div class="t-frame" style={{ padding: 0, overflow: 'hidden' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse',
-                                    fontSize: 'var(--type-body)' }}>
-                        <thead>
-                            <tr style={{ borderBottom: '1px solid var(--border-subtle)',
-                                         background: 'var(--bg-surface-raised)' }}>
-                                {['Name', 'Model', 'VRAM', 'Tag', 'Schedule', 'Priority', 'Next Run', 'ETA', '★', 'Enabled', ''].map(col => (
-                                    <th key={col} style={{
-                                        textAlign: col === 'Name' ? 'left' : 'center',
-                                        padding: '0.5rem 0.75rem',
-                                        fontSize: 'var(--type-label)',
-                                        color: 'var(--text-secondary)',
-                                        fontWeight: 600,
-                                        textTransform: 'uppercase',
-                                        letterSpacing: '0.05em',
-                                        fontFamily: 'var(--font-mono)',
-                                        whiteSpace: 'nowrap',
-                                    }}>{col}</th>
-                                ))}
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {jobs.map(rj => {
-                                const cat = priorityCategory(rj.priority);
-                                const color = CATEGORY_COLORS[cat];
-                                const overdue = rj.next_run < Date.now() / 1000;
-                                const isRunning = runningIds.has(rj.id);
-                                // Read tick to subscribe this row to per-second updates
-                                void tick;
-                                return (
-                                    <tr key={rj.id}
-                                        style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                                        <td style={{ padding: '0.5rem 0.75rem',
-                                                     borderLeft: `3px solid ${color}` }}>
-                                            <span style={{ color: 'var(--text-primary)',
-                                                           fontFamily: 'var(--font-mono)',
-                                                           fontSize: 'var(--type-body)' }}>
-                                                {rj.name}
-                                            </span>
-                                        </td>
-                                        <td style={{ textAlign: 'center', padding: '0.5rem' }}>
-                                            {editingModel && editingModel.id === rj.id ? (
-                                                <select
-                                                    value={editingModel.value}
-                                                    ref={el => el && el.focus()}
-                                                    onChange={ev => handleModelSave(rj.id, ev.target.value)}
-                                                    onBlur={() => setEditingModel(null)}
-                                                    onKeyDown={ev => { if (ev.key === 'Escape') setEditingModel(null); }}
-                                                    style={{
-                                                        fontFamily: 'var(--font-mono)',
-                                                        fontSize: 'var(--type-label)',
-                                                        background: 'var(--bg-inset)',
-                                                        color: 'var(--text-primary)',
-                                                        border: '1px solid var(--accent)',
-                                                        borderRadius: 'var(--radius)',
-                                                        padding: '0.1rem 0.3rem',
-                                                        maxWidth: '10rem',
-                                                    }}>
-                                                    <option value="">— none —</option>
-                                                    {models.value.map(modelRow => (
-                                                        <option key={modelRow.name} value={modelRow.name}>{modelRow.name}</option>
-                                                    ))}
-                                                    {rj.model && !models.value.find(modelRow => modelRow.name === rj.model) && (
-                                                        <option value={rj.model}>{rj.model}</option>
-                                                    )}
-                                                </select>
-                                            ) : (
-                                                <span
-                                                    style={{ cursor: 'pointer', display: 'flex', flexDirection: 'column',
-                                                             alignItems: 'center', gap: '0.2rem' }}
-                                                    title="Click to change model"
-                                                    onClick={() => setEditingModel({ id: rj.id, value: rj.model || '' })}>
-                                                    {rj.model ? (
-                                                        <>
-                                                            <ModelBadge profile={rj.model_profile} typeTag={rj.model_type} />
-                                                            <div style={{ fontSize: 'var(--type-label)', color: 'var(--text-secondary)',
-                                                                          fontFamily: 'var(--font-mono)',
-                                                                          borderBottom: '1px dashed var(--text-tertiary)' }}>
-                                                                {rj.model.split(':')[0]}
-                                                            </div>
-                                                        </>
-                                                    ) : (
-                                                        <span style={{ color: 'var(--text-tertiary)', fontSize: 'var(--type-label)',
-                                                                       borderBottom: '1px dashed var(--text-tertiary)' }}>—</span>
-                                                    )}
-                                                </span>
-                                            )}
-                                        </td>
-                                        <td style={{ textAlign: 'center', fontFamily: 'var(--font-mono)',
-                                                     fontSize: 'var(--type-label)', color: 'var(--text-secondary)' }}>
-                                            {rj.model_vram_mb ? `${(rj.model_vram_mb / 1024).toFixed(1)} GB` : '—'}
-                                        </td>
-                                        <td style={{ textAlign: 'center',
-                                                     color: 'var(--text-secondary)',
-                                                     fontSize: 'var(--type-label)',
-                                                     fontFamily: 'var(--font-mono)' }}>
-                                            {rj.tag || '—'}
-                                        </td>
-                                        <td style={{ textAlign: 'center',
-                                                     fontFamily: 'var(--font-mono)',
-                                                     color: 'var(--text-primary)' }}>
-                                            {editingInterval && editingInterval.id === rj.id ? (
-                                                <input
-                                                    type="text"
-                                                    value={editingInterval.value}
-                                                    onInput={ev => setEditingInterval({ id: rj.id, value: ev.target.value })}
-                                                    onBlur={() => handleIntervalSave(rj.id)}
-                                                    onKeyDown={ev => {
-                                                        if (ev.key === 'Enter') handleIntervalSave(rj.id);
-                                                        if (ev.key === 'Escape') setEditingInterval(null);
-                                                    }}
-                                                    ref={el => el && el.focus()}
-                                                    style={{
-                                                        width: '4.5rem', textAlign: 'center',
-                                                        fontFamily: 'var(--font-mono)',
-                                                        fontSize: 'var(--type-body)',
-                                                        background: 'var(--bg-inset)',
-                                                        color: 'var(--text-primary)',
-                                                        border: '1px solid var(--accent)',
-                                                        borderRadius: 'var(--radius)',
-                                                        padding: '0.1rem 0.3rem',
-                                                        outline: 'none',
-                                                    }}
-                                                />
-                                            ) : rj.cron_expression ? (
-                                                <span style={{ color: 'var(--text-secondary)',
-                                                               fontSize: 'var(--type-label)' }}>
-                                                    {rj.cron_expression}
-                                                </span>
-                                            ) : (
-                                                <span
-                                                    style={{ cursor: 'pointer', borderBottom: '1px dashed var(--text-tertiary)' }}
-                                                    title="Click to edit interval (e.g. 4h, 30m, 7d)"
-                                                    onClick={() => setEditingInterval({ id: rj.id, value: formatInterval(rj.interval_seconds) })}>
-                                                    {formatInterval(rj.interval_seconds)}
-                                                </span>
-                                            )}
-                                        </td>
-                                        <td style={{ textAlign: 'center' }}>
-                                            {editingPriority && editingPriority.id === rj.id ? (
-                                                <input
-                                                    type="number" min="1" max="10"
-                                                    value={editingPriority.value}
-                                                    onInput={ev => setEditingPriority({ id: rj.id, value: ev.target.value })}
-                                                    onBlur={() => handlePrioritySave(rj.id)}
-                                                    onKeyDown={ev => {
-                                                        if (ev.key === 'Enter') handlePrioritySave(rj.id);
-                                                        if (ev.key === 'Escape') setEditingPriority(null);
-                                                    }}
-                                                    ref={el => el && el.focus()}
-                                                    style={{
-                                                        width: '3rem', textAlign: 'center',
-                                                        fontFamily: 'var(--font-mono)',
-                                                        background: 'var(--bg-inset)',
-                                                        color: 'var(--text-primary)',
-                                                        border: '1px solid var(--accent)',
-                                                        borderRadius: 'var(--radius)',
-                                                        padding: '0.1rem 0.2rem',
-                                                    }}
-                                                />
-                                            ) : (
-                                                <span
-                                                    style={{ background: color,
-                                                             color: 'var(--accent-text)',
-                                                             padding: '0.1rem 0.5rem',
-                                                             borderRadius: 'var(--radius)',
-                                                             fontSize: 'var(--type-label)',
-                                                             fontFamily: 'var(--font-mono)',
-                                                             fontWeight: 600, cursor: 'pointer',
-                                                             borderBottom: '1px dashed var(--accent-text)' }}
-                                                    title="Click to edit priority (1=highest, 10=lowest)"
-                                                    onClick={() => setEditingPriority({ id: rj.id, value: String(rj.priority) })}>
-                                                    {cat} ({rj.priority})
-                                                </span>
-                                            )}
-                                        </td>
-                                        <td style={{ textAlign: 'center',
-                                                     fontFamily: 'var(--font-mono)',
-                                                     color: overdue
-                                                         ? 'var(--status-error)'
-                                                         : 'var(--text-primary)',
-                                                     fontVariantNumeric: 'tabular-nums',
-                                                     minWidth: '7rem' }}>
-                                            {formatCountdown(rj.next_run)}
-                                        </td>
-                                        <td style={{ textAlign: 'center', fontFamily: 'var(--font-mono)',
-                                                     fontSize: 'var(--type-label)', color: 'var(--text-tertiary)' }}>
-                                            {rj.estimated_duration
-                                                ? `~${Math.round(rj.estimated_duration / 60)}m`
-                                                : '—'}
-                                        </td>
-                                        <td style={{ textAlign: 'center' }}>
-                                            <button
-                                                title={rj.pinned ? 'Pinned — click to unpin' : 'Click to pin this time slot'}
-                                                onClick={() => handlePinToggle(rj)}
-                                                style={{
-                                                    background: 'none', border: 'none',
-                                                    cursor: 'pointer', fontSize: '1.1rem',
-                                                    color: rj.pinned ? 'var(--status-warning)' : 'var(--text-tertiary)',
-                                                    opacity: rj.pinned ? 1 : 0.4,
-                                                }}>
-                                                ★
-                                            </button>
-                                        </td>
-                                        <td style={{ textAlign: 'center' }}>
-                                            <input type="checkbox" checked={!!rj.enabled}
-                                                   style={{ accentColor: 'var(--accent)',
-                                                            width: 16, height: 16 }}
-                                                   onChange={ev => toggleScheduleJob(rj.id, ev.target.checked)} />
-                                        </td>
-                                        <td style={{ textAlign: 'center', padding: '0.25rem 0.5rem' }}>
-                                            <button
-                                                class="t-btn t-btn-secondary"
-                                                style={{ fontSize: 'var(--type-label)',
-                                                         padding: '0.2rem 0.6rem',
-                                                         opacity: isRunning ? 0.5 : 1 }}
-                                                disabled={isRunning}
-                                                onClick={() => handleRunNow(rj)}>
-                                                {isRunning ? '…' : '▶ Run'}
-                                            </button>
-                                        </td>
+                <>
+                    {/* Change 6: live search bar */}
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.5rem' }}>
+                        <input
+                            class="t-input"
+                            type="text"
+                            placeholder="Filter jobs…"
+                            value={search}
+                            onInput={ev => setSearch(ev.target.value)}
+                            style={{ width: '200px', padding: '4px 8px', fontSize: 'var(--type-body)', fontFamily: 'var(--font-mono)' }}
+                        />
+                        {search && (
+                            <button class="t-btn t-btn-secondary"
+                                    style={{ padding: '4px 8px', fontSize: 'var(--type-label)' }}
+                                    onClick={() => setSearch('')}>✕</button>
+                        )}
+                    </div>
+                    {visibleJobs.length === 0 && debouncedSearch && (
+                        <p style={{ color: 'var(--text-tertiary)', fontSize: 'var(--type-body)', textAlign: 'center', padding: '1rem 0' }}>
+                            No jobs match "{debouncedSearch}"
+                        </p>
+                    )}
+                    {/* Change 1: outer frame allows overflow-x; inner scroll div handles horizontal */}
+                    <div class="t-frame" style={{ padding: 0, overflowX: 'auto' }}>
+                        <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+                            <table style={{ width: '100%', minWidth: 700, borderCollapse: 'collapse',
+                                            fontSize: 'var(--type-body)' }}>
+                                <thead>
+                                    <tr style={{ borderBottom: '1px solid var(--border-subtle)',
+                                                 background: 'var(--bg-surface-raised)' }}>
+                                        {['Name', 'Model', 'VRAM', 'Tag', 'Schedule', 'Priority', 'Next Run', 'ETA', '★', 'Enabled', ''].map(col => (
+                                            <th key={col} style={{
+                                                textAlign: col === 'Name' ? 'left' : 'center',
+                                                padding: '0.5rem 0.75rem',
+                                                fontSize: 'var(--type-label)',
+                                                color: 'var(--text-secondary)',
+                                                fontWeight: 600,
+                                                textTransform: 'uppercase',
+                                                letterSpacing: '0.05em',
+                                                fontFamily: 'var(--font-mono)',
+                                                whiteSpace: 'nowrap',
+                                                // Change 1: sticky Name column header
+                                                ...(col === 'Name' ? {
+                                                    position: 'sticky',
+                                                    left: 0,
+                                                    background: 'var(--bg-surface-raised)',
+                                                    zIndex: 1,
+                                                } : {}),
+                                            }}>{col}</th>
+                                        ))}
                                     </tr>
-                                );
-                            })}
-                        </tbody>
-                    </table>
-                </div>
+                                </thead>
+                                <tbody>
+                                    {/* Change 6: use visibleJobs instead of jobs */}
+                                    {visibleJobs.map(rj => {
+                                        const cat = priorityCategory(rj.priority);
+                                        const color = CATEGORY_COLORS[cat];
+                                        const overdue = rj.next_run < Date.now() / 1000;
+                                        const isRunning = runningIds.has(rj.id);
+                                        // Read tick to subscribe this row to per-second updates
+                                        void tick;
+                                        return (
+                                            <tr key={rj.id}
+                                                style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                                                {/* Change 1: sticky Name td */}
+                                                <td style={{
+                                                    padding: '0.5rem 0.75rem',
+                                                    borderLeft: `3px solid ${color}`,
+                                                    position: 'sticky',
+                                                    left: 0,
+                                                    background: 'var(--bg-panel)',
+                                                    zIndex: 1,
+                                                }}>
+                                                    <span style={{ color: 'var(--text-primary)',
+                                                                   fontFamily: 'var(--font-mono)',
+                                                                   fontSize: 'var(--type-body)' }}>
+                                                        {rj.name}
+                                                    </span>
+                                                </td>
+                                                <td style={{ textAlign: 'center', padding: '0.5rem' }}>
+                                                    {editingModel && editingModel.id === rj.id ? (
+                                                        <select
+                                                            value={editingModel.value}
+                                                            ref={el => el && el.focus()}
+                                                            onChange={ev => handleModelSave(rj.id, ev.target.value)}
+                                                            onBlur={() => setEditingModel(null)}
+                                                            onKeyDown={ev => { if (ev.key === 'Escape') setEditingModel(null); }}
+                                                            style={{
+                                                                fontFamily: 'var(--font-mono)',
+                                                                fontSize: 'var(--type-label)',
+                                                                background: 'var(--bg-inset)',
+                                                                color: 'var(--text-primary)',
+                                                                border: '1px solid var(--accent)',
+                                                                borderRadius: 'var(--radius)',
+                                                                padding: '0.1rem 0.3rem',
+                                                                maxWidth: '10rem',
+                                                            }}>
+                                                            <option value="">— none —</option>
+                                                            {models.value.map(modelRow => (
+                                                                <option key={modelRow.name} value={modelRow.name}>{modelRow.name}</option>
+                                                            ))}
+                                                            {rj.model && !models.value.find(modelRow => modelRow.name === rj.model) && (
+                                                                <option value={rj.model}>{rj.model}</option>
+                                                            )}
+                                                        </select>
+                                                    ) : (
+                                                        <span
+                                                            style={{ cursor: 'pointer', display: 'flex', flexDirection: 'column',
+                                                                     alignItems: 'center', gap: '0.2rem' }}
+                                                            title="Click to change model"
+                                                            onClick={() => setEditingModel({ id: rj.id, value: rj.model || '' })}>
+                                                            {rj.model ? (
+                                                                <>
+                                                                    <ModelBadge profile={rj.model_profile} typeTag={rj.model_type} />
+                                                                    <div style={{ fontSize: 'var(--type-label)', color: 'var(--text-secondary)',
+                                                                                  fontFamily: 'var(--font-mono)',
+                                                                                  borderBottom: '1px dashed var(--text-tertiary)' }}>
+                                                                        {rj.model.split(':')[0]}
+                                                                    </div>
+                                                                </>
+                                                            ) : (
+                                                                <span style={{ color: 'var(--text-tertiary)', fontSize: 'var(--type-label)',
+                                                                               borderBottom: '1px dashed var(--text-tertiary)' }}>—</span>
+                                                            )}
+                                                        </span>
+                                                    )}
+                                                </td>
+                                                <td style={{ textAlign: 'center', fontFamily: 'var(--font-mono)',
+                                                             fontSize: 'var(--type-label)', color: 'var(--text-secondary)' }}>
+                                                    {rj.model_vram_mb ? `${(rj.model_vram_mb / 1024).toFixed(1)} GB` : '—'}
+                                                </td>
+                                                <td style={{ textAlign: 'center',
+                                                             color: 'var(--text-secondary)',
+                                                             fontSize: 'var(--type-label)',
+                                                             fontFamily: 'var(--font-mono)' }}>
+                                                    {rj.tag || '—'}
+                                                </td>
+                                                <td style={{ textAlign: 'center',
+                                                             fontFamily: 'var(--font-mono)',
+                                                             color: 'var(--text-primary)' }}>
+                                                    {editingInterval && editingInterval.id === rj.id ? (
+                                                        <input
+                                                            type="text"
+                                                            value={editingInterval.value}
+                                                            onInput={ev => setEditingInterval({ id: rj.id, value: ev.target.value })}
+                                                            onBlur={() => handleIntervalSave(rj.id)}
+                                                            onKeyDown={ev => {
+                                                                if (ev.key === 'Enter') handleIntervalSave(rj.id);
+                                                                if (ev.key === 'Escape') setEditingInterval(null);
+                                                            }}
+                                                            ref={el => el && el.focus()}
+                                                            style={{
+                                                                width: '4.5rem', textAlign: 'center',
+                                                                fontFamily: 'var(--font-mono)',
+                                                                fontSize: 'var(--type-body)',
+                                                                background: 'var(--bg-inset)',
+                                                                color: 'var(--text-primary)',
+                                                                border: '1px solid var(--accent)',
+                                                                borderRadius: 'var(--radius)',
+                                                                padding: '0.1rem 0.3rem',
+                                                                outline: 'none',
+                                                            }}
+                                                        />
+                                                    ) : rj.cron_expression ? (
+                                                        <span style={{ color: 'var(--text-secondary)',
+                                                                       fontSize: 'var(--type-label)' }}>
+                                                            {rj.cron_expression}
+                                                        </span>
+                                                    ) : (
+                                                        <span
+                                                            style={{ cursor: 'pointer', borderBottom: '1px dashed var(--text-tertiary)' }}
+                                                            title="Click to edit interval (e.g. 4h, 30m, 7d)"
+                                                            onClick={() => setEditingInterval({ id: rj.id, value: formatInterval(rj.interval_seconds) })}>
+                                                            {formatInterval(rj.interval_seconds)}
+                                                        </span>
+                                                    )}
+                                                </td>
+                                                <td style={{ textAlign: 'center' }}>
+                                                    {editingPriority && editingPriority.id === rj.id ? (
+                                                        <input
+                                                            type="number" min="1" max="10"
+                                                            value={editingPriority.value}
+                                                            onInput={ev => setEditingPriority({ id: rj.id, value: ev.target.value })}
+                                                            onBlur={() => handlePrioritySave(rj.id)}
+                                                            onKeyDown={ev => {
+                                                                if (ev.key === 'Enter') handlePrioritySave(rj.id);
+                                                                if (ev.key === 'Escape') setEditingPriority(null);
+                                                            }}
+                                                            ref={el => el && el.focus()}
+                                                            style={{
+                                                                width: '3rem', textAlign: 'center',
+                                                                fontFamily: 'var(--font-mono)',
+                                                                background: 'var(--bg-inset)',
+                                                                color: 'var(--text-primary)',
+                                                                border: '1px solid var(--accent)',
+                                                                borderRadius: 'var(--radius)',
+                                                                padding: '0.1rem 0.2rem',
+                                                            }}
+                                                        />
+                                                    ) : (
+                                                        <span
+                                                            style={{ background: color,
+                                                                     color: 'var(--accent-text)',
+                                                                     padding: '0.1rem 0.5rem',
+                                                                     borderRadius: 'var(--radius)',
+                                                                     fontSize: 'var(--type-label)',
+                                                                     fontFamily: 'var(--font-mono)',
+                                                                     fontWeight: 600, cursor: 'pointer',
+                                                                     borderBottom: '1px dashed var(--accent-text)' }}
+                                                            title="Click to edit priority (1=highest, 10=lowest)"
+                                                            onClick={() => setEditingPriority({ id: rj.id, value: String(rj.priority) })}>
+                                                            {cat} ({rj.priority})
+                                                        </span>
+                                                    )}
+                                                </td>
+                                                {/* Changes 2 & 3: Next Run with tooltip + overdue badge */}
+                                                <td style={{ textAlign: 'center',
+                                                             fontFamily: 'var(--font-mono)',
+                                                             color: overdue
+                                                                 ? 'var(--status-error)'
+                                                                 : 'var(--text-primary)',
+                                                             fontVariantNumeric: 'tabular-nums',
+                                                             minWidth: '7rem' }}>
+                                                    <span title={new Date(rj.next_run * 1000).toLocaleString()}>
+                                                        {formatCountdown(rj.next_run)}
+                                                        {overdue && (() => {
+                                                            const overdueSeconds = Date.now() / 1000 - rj.next_run;
+                                                            const isSevere = rj.interval_seconds && overdueSeconds > rj.interval_seconds * 2;
+                                                            return (
+                                                                <span style={{
+                                                                    marginLeft: 6,
+                                                                    fontSize: 'var(--type-micro)',
+                                                                    color: isSevere ? 'var(--status-error)' : '#f97316',
+                                                                    background: isSevere ? 'rgba(239,68,68,0.12)' : 'rgba(249,115,22,0.12)',
+                                                                    border: `1px solid ${isSevere ? 'rgba(239,68,68,0.4)' : 'rgba(249,115,22,0.4)'}`,
+                                                                    borderRadius: 4,
+                                                                    padding: '1px 5px',
+                                                                }}>OVERDUE</span>
+                                                            );
+                                                        })()}
+                                                    </span>
+                                                </td>
+                                                <td style={{ textAlign: 'center', fontFamily: 'var(--font-mono)',
+                                                             fontSize: 'var(--type-label)', color: 'var(--text-tertiary)' }}>
+                                                    {rj.estimated_duration
+                                                        ? `~${Math.round(rj.estimated_duration / 60)}m`
+                                                        : '—'}
+                                                </td>
+                                                <td style={{ textAlign: 'center' }}>
+                                                    <button
+                                                        title={rj.pinned ? 'Pinned — click to unpin' : 'Click to pin this time slot'}
+                                                        onClick={() => handlePinToggle(rj)}
+                                                        style={{
+                                                            background: 'none', border: 'none',
+                                                            cursor: 'pointer', fontSize: '1.1rem',
+                                                            color: rj.pinned ? 'var(--status-warning)' : 'var(--text-tertiary)',
+                                                            opacity: rj.pinned ? 1 : 0.4,
+                                                        }}>
+                                                        ★
+                                                    </button>
+                                                </td>
+                                                <td style={{ textAlign: 'center' }}>
+                                                    <input type="checkbox" checked={!!rj.enabled}
+                                                           style={{ accentColor: 'var(--accent)',
+                                                                    width: 16, height: 16 }}
+                                                           onChange={ev => toggleScheduleJob(rj.id, ev.target.checked)} />
+                                                </td>
+                                                <td style={{ textAlign: 'center', padding: '0.25rem 0.5rem' }}>
+                                                    <button
+                                                        class="t-btn t-btn-secondary"
+                                                        style={{ fontSize: 'var(--type-label)',
+                                                                 padding: '0.2rem 0.6rem',
+                                                                 opacity: isRunning ? 0.5 : 1 }}
+                                                        disabled={isRunning}
+                                                        onClick={() => handleRunNow(rj)}>
+                                                        {isRunning ? '…' : '▶ Run'}
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </>
             )}
 
             <section>
@@ -494,25 +627,28 @@ export default function ScheduleTab() {
                                 </tr>
                             </thead>
                             <tbody>
-                                {events.slice(0, 20).map(ev => (
-                                    <tr key={ev.id}
+                                {events.slice(0, 20).map(evItem => (
+                                    <tr key={evItem.id}
                                         style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                                        {/* Change 5: relative timestamps with absolute on hover */}
                                         <td style={{ padding: '0.4rem 0.75rem',
                                                      color: 'var(--text-tertiary)',
                                                      fontFamily: 'var(--font-mono)',
                                                      whiteSpace: 'nowrap' }}>
-                                            {new Date(ev.timestamp * 1000).toLocaleTimeString()}
+                                            <span title={new Date(evItem.timestamp * 1000).toLocaleString()}>
+                                                {relativeTimeLog(evItem.timestamp)}
+                                            </span>
                                         </td>
                                         <td style={{ padding: '0.4rem 0.75rem' }}>
                                             <code class="data-mono"
                                                   style={{ color: 'var(--accent)',
                                                            fontSize: 'var(--type-label)' }}>
-                                                {ev.event_type}
+                                                {evItem.event_type}
                                             </code>
                                         </td>
                                         <td style={{ padding: '0.4rem 0.75rem',
                                                      color: 'var(--text-secondary)' }}>
-                                            {ev.details || '—'}
+                                            {evItem.details || '—'}
                                         </td>
                                     </tr>
                                 ))}
