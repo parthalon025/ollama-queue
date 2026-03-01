@@ -93,7 +93,9 @@ npm run build        # Production
 npm run dev          # Watch mode
 ```
 
-4 tabs: Dashboard (status, queue, KPIs, resource trends, duration trends, heatmap, history) + Schedule (24h timeline, recurring job list) + DLQ (dead letter queue with retry/dismiss) + Settings (thresholds, defaults, retention, daemon controls).
+Sidebar nav (desktop) + bottom tab bar (mobile). 5 views: **Now** (2-column command center: running job, queue, resource gauges, KPI cards, alert strip) + **Plan** (24h Gantt timeline, recurring job list) + **History** (DLQ entries, duration trends, activity heatmap, job list) + **Models** (model table) + **Settings** (thresholds, defaults, retention, daemon controls).
+
+Route IDs: `now` | `plan` | `history` | `models` | `settings`. Sidebar: 200px desktop, 64px icon-only (768–1023px), hidden on mobile. CSS classes: `layout-root`, `layout-sidebar`, `layout-main`, `now-grid`, `history-top-grid`, `mobile-bottom-nav`.
 
 ## Pipeline Verification
 
