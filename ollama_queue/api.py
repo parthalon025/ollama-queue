@@ -592,4 +592,6 @@ def _compute_kpis_locked(db: Database) -> dict:
         "avg_wait_seconds": avg_wait_seconds,
         "pause_minutes_24h": pause_minutes_24h,
         "success_rate_7d": success_rate_7d,
+        "jobs_7d_ok": ok,
+        "jobs_7d_bad": bad,
     }

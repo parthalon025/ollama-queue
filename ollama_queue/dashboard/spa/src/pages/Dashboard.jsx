@@ -94,6 +94,7 @@ export default function Dashboard() {
           value={kpis ? `${Math.round(kpis.success_rate_7d * 100)}` : '--'}
           unit="%"
           warning={kpis && kpis.success_rate_7d < 0.9}
+          delta={kpis ? buildSuccessRateDelta(kpis) : null}
         />
       </div>
 
@@ -230,4 +231,17 @@ function buildDurationSparkline(rows) {
   if (!rows || rows.length < 2) return null;
   const sorted = [...rows].sort((a, b) => a.recorded_at - b.recorded_at).slice(-24);
   return [sorted.map((r) => r.recorded_at), sorted.map((r) => r.duration)];
+}
+
+/**
+ * Build a plain-English delta string for the Success Rate card.
+ * e.g. "47 of 50 jobs · 3 failed" or "all 12 jobs clean" or "no jobs yet"
+ */
+function buildSuccessRateDelta(kpis) {
+  const ok = kpis.jobs_7d_ok ?? 0;
+  const bad = kpis.jobs_7d_bad ?? 0;
+  const total = ok + bad;
+  if (total === 0) return 'no jobs in last 7 days';
+  if (bad === 0) return `all ${total} job${total === 1 ? '' : 's'} clean · 7 days`;
+  return `${ok} of ${total} jobs · ${bad} failed`;
 }
