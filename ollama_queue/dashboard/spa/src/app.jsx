@@ -1,19 +1,16 @@
 import { h } from 'preact';
 import { useEffect } from 'preact/hooks';
-import { currentTab, dlqCount, fetchModels, startPolling, stopPolling } from './store';
-import Dashboard from './pages/Dashboard.jsx';
-import ScheduleTab from './pages/ScheduleTab.jsx';
-import DLQTab from './pages/DLQTab.jsx';
-import Settings from './pages/Settings.jsx';
+import {
+    currentTab, dlqCount, fetchModels, fetchSchedule,
+    startPolling, stopPolling, status,
+} from './store';
+import Sidebar from './components/Sidebar.jsx';
+import BottomNav from './components/BottomNav.jsx';
+import Now from './pages/Now.jsx';
+import Plan from './pages/Plan.jsx';
+import History from './pages/History.jsx';
 import ModelsTab from './pages/ModelsTab.jsx';
-
-const TABS = [
-    { id: 'dashboard', label: 'Dashboard' },
-    { id: 'schedule',  label: 'Schedule' },
-    { id: 'dlq',       label: 'DLQ' },
-    { id: 'models',    label: 'Models' },
-    { id: 'settings',  label: 'Settings' },
-];
+import Settings from './pages/Settings.jsx';
 
 export function App() {
     useEffect(() => {
@@ -21,67 +18,40 @@ export function App() {
         return () => stopPolling();
     }, []);
 
-    function renderPage() {
+    function handleNavigate(viewId) {
+        currentTab.value = viewId;
+        if (viewId === 'models') fetchModels();
+        if (viewId === 'plan') fetchSchedule();
+    }
+
+    function renderView() {
         switch (currentTab.value) {
-            case 'schedule': return <ScheduleTab />;
-            case 'dlq':      return <DLQTab />;
+            case 'plan':     return <Plan />;
+            case 'history':  return <History />;
             case 'models':   return <ModelsTab />;
             case 'settings': return <Settings />;
-            default:         return <Dashboard />;
+            default:         return <Now />;
         }
     }
 
-    function handleTabClick(tabId) {
-        currentTab.value = tabId;
-        if (tabId === 'models') fetchModels();
-    }
+    const daemonState = status.value?.daemon ?? null;
 
     return (
-        <div class="min-h-screen" style="background: var(--bg-root); color: var(--text-primary);">
-            {/* Desktop: top tab bar */}
-            <nav class="hidden md:flex border-b" style="border-color: var(--border);">
-                {TABS.map(tab => (
-                    <TabButton key={tab.id} tab={tab.id} label={tabLabel(tab)} onActivate={handleTabClick} />
-                ))}
-            </nav>
-
-            <main class="p-4 pb-20 md:pb-4 max-w-5xl mx-auto">
-                {renderPage()}
+        <div class="layout-root" style="background: var(--bg-base); color: var(--text-primary);">
+            <Sidebar
+                active={currentTab.value}
+                onNavigate={handleNavigate}
+                daemonState={daemonState}
+                dlqCount={dlqCount.value}
+            />
+            <main class="layout-main animate-page-enter">
+                {renderView()}
             </main>
-
-            {/* Mobile: bottom tab bar */}
-            <nav class="md:hidden fixed bottom-0 left-0 right-0 flex border-t"
-                 style="background: var(--bg-card); border-color: var(--border);">
-                {TABS.map(tab => (
-                    <TabButton key={tab.id} tab={tab.id} label={tabLabel(tab)} onActivate={handleTabClick} mobile />
-                ))}
-            </nav>
+            <BottomNav
+                active={currentTab.value}
+                onNavigate={handleNavigate}
+                dlqCount={dlqCount.value}
+            />
         </div>
-    );
-}
-
-function tabLabel(tab) {
-    if (tab.id === 'dlq' && dlqCount.value > 0) {
-        return `DLQ (${dlqCount.value})`;
-    }
-    return tab.label;
-}
-
-function TabButton({ tab, label, mobile, onActivate }) {
-    const active = currentTab.value === tab;
-    const baseClass = mobile
-        ? "flex-1 py-3 text-center text-sm"
-        : "px-6 py-3 text-sm font-medium";
-    return (
-        <button
-            class={baseClass}
-            style={{
-                color: active ? 'var(--accent)' : 'var(--text-secondary)',
-                borderBottom: !mobile && active ? '2px solid var(--accent)' : 'none',
-            }}
-            onClick={() => onActivate(tab)}
-        >
-            {label}
-        </button>
     );
 }
