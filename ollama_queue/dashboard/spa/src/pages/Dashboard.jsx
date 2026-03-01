@@ -94,7 +94,7 @@ export default function Dashboard() {
           value={kpis ? `${Math.round(kpis.success_rate_7d * 100)}` : '--'}
           unit="%"
           warning={kpis && kpis.success_rate_7d < 0.9}
-          delta={kpis ? buildSuccessRateDelta(kpis) : null}
+          delta={kpis ? buildSuccessRateDelta(kpis, hist) : null}
         />
       </div>
 
@@ -234,14 +234,41 @@ function buildDurationSparkline(rows) {
 }
 
 /**
- * Build a plain-English delta string for the Success Rate card.
- * e.g. "47 of 50 jobs · 3 failed" or "all 12 jobs clean" or "no jobs yet"
+ * Build a plain-English explanation + recommendation for the Success Rate card.
+ * Uses recent history to detect failure patterns (timeouts, stalls, crashes).
  */
-function buildSuccessRateDelta(kpis) {
+function buildSuccessRateDelta(kpis, hist) {
   const ok = kpis.jobs_7d_ok ?? 0;
   const bad = kpis.jobs_7d_bad ?? 0;
   const total = ok + bad;
-  if (total === 0) return 'no jobs in last 7 days';
-  if (bad === 0) return `all ${total} job${total === 1 ? '' : 's'} clean · 7 days`;
-  return `${ok} of ${total} jobs · ${bad} failed`;
+  if (total === 0) return 'no jobs run in the last 7 days';
+  if (bad === 0) return 'everything is running clean';
+
+  const sevenDaysAgo = Date.now() / 1000 - 7 * 86400;
+  const recentFails = (hist || []).filter(
+    (j) => (j.status === 'failed' || j.status === 'killed') && j.completed_at >= sevenDaysAgo
+  );
+
+  const timeouts = recentFails.filter(
+    (j) => j.outcome_reason && /timeout/i.test(j.outcome_reason)
+  );
+  const stalls = recentFails.filter((j) => j.stall_detected_at);
+  const crashes = recentFails.filter(
+    (j) => j.outcome_reason && /exit code [^0]|non.zero|crash|error/i.test(j.outcome_reason)
+  );
+
+  const n = bad;
+  const s = n === 1 ? '' : 's';
+
+  if (timeouts.length > 0 && timeouts.length >= recentFails.length / 2) {
+    return `${n} job${s} ran past their time limit — raise Default Timeout in Settings`;
+  }
+  if (stalls.length > 0 && stalls.length >= recentFails.length / 2) {
+    return `${n} job${s} appeared stuck and were killed — review Stall Detection in Settings`;
+  }
+  if (crashes.length > 0 && crashes.length >= recentFails.length / 2) {
+    return `${n} job${s} crashed with an error — check History for the command output`;
+  }
+  if (bad === 1) return '1 job failed — tap History to see what went wrong';
+  return `${n} jobs failed this week — check History or DLQ for patterns`;
 }
