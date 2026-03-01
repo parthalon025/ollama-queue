@@ -97,10 +97,9 @@ export function findHeavyConflicts(jobs) {
     return conflictIds;
 }
 
-export function runStatus(lastRun, intervalSeconds) {
+export function runStatus(lastRun, intervalSeconds, _now = Date.now() / 1000) {
     if (!lastRun) return { label: 'never', color: 'var(--text-tertiary)' };
-    const now = Date.now() / 1000;
-    const elapsed = now - lastRun;
+    const elapsed = _now - lastRun;
     const interval = intervalSeconds || 3600;
     const drift = elapsed - interval;
     const threshold = interval * 0.05;
@@ -299,8 +298,8 @@ export function GanttChart({ jobs, tick, windowHours = 24 }) {
                                     {modelLabel}
                                 </span>
                             )}
-                            {/* On-time status dot */}
-                            {(() => {
+                            {/* On-time status dot — only shown when bar is wide enough */}
+                            {showChip && (() => {
                                 const { label, color } = runStatus(job.last_run, job.interval_seconds);
                                 const lastRunStr = job.last_run
                                     ? new Date(job.last_run * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })

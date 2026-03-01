@@ -271,42 +271,40 @@ describe('getConflictingPairs', () => {
 });
 
 describe('runStatus', () => {
+    const NOW = 2_000_000; // fixed reference
+
     it('returns never for null last_run', () => {
-        expect(runStatus(null, 3600)).toEqual({ label: 'never', color: 'var(--text-tertiary)' });
+        expect(runStatus(null, 3600, NOW)).toEqual({ label: 'never', color: 'var(--text-tertiary)' });
     });
 
     it('returns never for undefined last_run', () => {
-        expect(runStatus(undefined, 3600)).toEqual({ label: 'never', color: 'var(--text-tertiary)' });
+        expect(runStatus(undefined, 3600, NOW)).toEqual({ label: 'never', color: 'var(--text-tertiary)' });
     });
 
     it('returns on-time when drift is within 5% of interval', () => {
         const interval = 3600;
-        const now = Date.now() / 1000;
         // 3% drift — within threshold
-        const lastRun = now - interval - interval * 0.03;
-        expect(runStatus(lastRun, interval).label).toBe('on time');
+        const lastRun = NOW - interval - interval * 0.03;
+        expect(runStatus(lastRun, interval, NOW).label).toBe('on time');
     });
 
     it('returns late when drift exceeds 5% of interval', () => {
         const interval = 3600;
-        const now = Date.now() / 1000;
         // 10% drift — past threshold
-        const lastRun = now - interval - interval * 0.10;
-        expect(runStatus(lastRun, interval).label).toBe('late');
+        const lastRun = NOW - interval - interval * 0.10;
+        expect(runStatus(lastRun, interval, NOW).label).toBe('late');
     });
 
     it('returns on-time when exactly at the boundary (5%)', () => {
         const interval = 3600;
-        const now = Date.now() / 1000;
-        // Exactly at threshold — should still be on time (drift <= threshold)
-        const lastRun = now - interval - interval * 0.05;
-        expect(runStatus(lastRun, interval).label).toBe('on time');
+        // Exactly at threshold — drift = 5% = threshold, so drift <= threshold is true
+        const lastRun = NOW - interval - interval * 0.05;
+        expect(runStatus(lastRun, interval, NOW).label).toBe('on time');
     });
 
     it('handles null interval_seconds with 3600 default', () => {
-        const now = Date.now() / 1000;
         // No interval — uses 3600 default; ran 3% late relative to 3600
-        const lastRun = now - 3600 - 3600 * 0.03;
-        expect(runStatus(lastRun, null).label).toBe('on time');
+        const lastRun = NOW - 3600 - 3600 * 0.03;
+        expect(runStatus(lastRun, null, NOW).label).toBe('on time');
     });
 });
