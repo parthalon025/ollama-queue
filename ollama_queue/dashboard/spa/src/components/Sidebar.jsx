@@ -68,7 +68,6 @@ export default function Sidebar({ active, onNavigate, daemonState, dlqCount }) {
                                 cursor: 'pointer',
                                 border: 'none',
                                 borderLeft: isActive ? '3px solid var(--accent)' : '3px solid transparent',
-                                outline: 'none',
                                 transition: 'background 0.15s ease, color 0.15s ease',
                                 position: 'relative',
                                 whiteSpace: 'nowrap',
