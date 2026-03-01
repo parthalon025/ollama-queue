@@ -1,17 +1,33 @@
 import { h } from 'preact';
 
-// NOTE: all .map() callbacks use descriptive names (job, slot, lane) — never 'h'
+// NOTE: all .map() callbacks use descriptive names (job, slot, laneIdx) — never 'h'
 // as that shadows the JSX factory esbuild injects.
 
-const PROFILE_COLORS = {
-    embed:  'var(--status-ok)',
-    ollama: 'var(--accent)',
-    heavy:  'var(--status-warning)',
+// --- Pure helpers (exported for testing) ---
+
+export const SOURCE_COLORS = {
+    aria:     'var(--accent)',
+    telegram: '#f97316',
+    notion:   '#a78bfa',
 };
+
+export function sourceColor(source) {
+    if (!source) return 'var(--text-tertiary)';
+    return SOURCE_COLORS[source.toLowerCase()] ?? 'var(--text-tertiary)';
+}
+
+export function formatDuration(seconds) {
+    if (seconds == null) return '~10m';
+    const s = Math.round(seconds);
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    const rem = s % 60;
+    return rem === 0 ? `${m}m` : `${m}m ${rem}s`;
+}
 
 function assignLanes(jobs) {
     const sorted = [...jobs].sort((a, b) => a.next_run - b.next_run);
-    const laneEnds = [];  // tracks end time of last job in each lane
+    const laneEnds = [];
     return sorted.map(job => {
         const start = job.next_run;
         const end = start + (job.estimated_duration || 600);
@@ -22,8 +38,23 @@ function assignLanes(jobs) {
     });
 }
 
+function buildTooltip(job, isConcurrent) {
+    const nextRunStr = new Date(job.next_run * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const lastRunStr = job.last_run
+        ? new Date(job.last_run * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+        : 'never';
+    const modelStr = job.model || job.model_profile || 'ollama';
+    const parts = [
+        `${job.name}`,
+        `via ${job.source || 'unknown'} · ${modelStr}`,
+        `est. ${formatDuration(job.estimated_duration)} · next: ${nextRunStr}`,
+        `last run: ${lastRunStr}`,
+    ];
+    if (isConcurrent) parts.push('⟡ runs concurrently');
+    return parts.join('\n');
+}
+
 export function GanttChart({ jobs, tick, windowHours = 24 }) {
-    // tick forces re-render every second for live countdowns
     void tick;
     const now = Date.now() / 1000;
     const windowSecs = windowHours * 3600;
@@ -79,25 +110,34 @@ export function GanttChart({ jobs, tick, windowHours = 24 }) {
                     const duration = job.estimated_duration || 600;
                     const leftPct = (startOffset / windowSecs) * 100;
                     const widthPct = Math.max(0.5, (duration / windowSecs) * 100);
-                    const color = PROFILE_COLORS[job.model_profile] || PROFILE_COLORS.ollama;
+                    const color = sourceColor(job.source);
+                    const isHeavy = job.model_profile === 'heavy';
                     const isConcurrent = job._lane > 0;
+                    const modelLabel = job.model
+                        ? job.model.split(':')[0]
+                        : (job.model_profile || null);
+                    const barWidth = Math.min(widthPct, 100 - leftPct);
+                    const showChip = barWidth > 8;
+
                     return (
                         <div
                             key={job.id}
-                            title={`${job.name}${isConcurrent ? ' ⟡ concurrent' : ''} — ${Math.round(duration / 60)}min`}
+                            title={buildTooltip(job, isConcurrent)}
                             style={{
                                 position: 'absolute',
                                 left: `${Math.min(leftPct, 99.5)}%`,
-                                width: `${Math.min(widthPct, 100 - leftPct)}%`,
+                                width: `${barWidth}%`,
                                 top: job._lane * laneHeight + 4,
                                 height: laneHeight - 8,
                                 background: color,
                                 opacity: 0.85,
                                 borderRadius: 'var(--radius)',
+                                borderLeft: isHeavy ? '3px solid var(--status-warning)' : undefined,
                                 overflow: 'hidden',
                                 display: 'flex',
                                 alignItems: 'center',
-                                paddingLeft: '0.4rem',
+                                paddingLeft: isHeavy ? '0.3rem' : '0.4rem',
+                                gap: '0.3rem',
                                 cursor: 'default',
                             }}
                         >
@@ -109,9 +149,24 @@ export function GanttChart({ jobs, tick, windowHours = 24 }) {
                                 whiteSpace: 'nowrap',
                                 overflow: 'hidden',
                                 textOverflow: 'ellipsis',
+                                flexShrink: 1,
                             }}>
                                 {isConcurrent && '⟡ '}{job.name}
                             </span>
+                            {showChip && modelLabel && (
+                                <span style={{
+                                    fontFamily: 'var(--font-mono)',
+                                    fontSize: 'var(--type-micro)',
+                                    color: 'rgba(255,255,255,0.7)',
+                                    background: 'rgba(0,0,0,0.25)',
+                                    borderRadius: 3,
+                                    padding: '1px 4px',
+                                    whiteSpace: 'nowrap',
+                                    flexShrink: 0,
+                                }}>
+                                    {modelLabel}
+                                </span>
+                            )}
                         </div>
                     );
                 })}
