@@ -7,8 +7,20 @@ import {
 
 export default function DLQTab() {
     const [expanded, setExpanded] = useState(null);
+    const [retryingAll, setRetryingAll] = useState(false);
     useEffect(() => { fetchDLQ(); }, []);
     const entries = dlqEntries.value;
+
+    async function handleRetryAll() {
+        if (!window.confirm(`Retry all ${entries.length} failed jobs?`)) return;
+        setRetryingAll(true);
+        try {
+            await retryAllDLQ();
+            await fetchDLQ();
+        } finally {
+            setRetryingAll(false);
+        }
+    }
 
     if (entries.length === 0) {
         return (
@@ -38,8 +50,10 @@ export default function DLQTab() {
                 </h2>
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
                     <button class="t-btn t-btn-primary px-4 py-2 text-sm"
-                            onClick={retryAllDLQ}>
-                        Retry All
+                            onClick={handleRetryAll}
+                            disabled={retryingAll}
+                            style={{ opacity: retryingAll ? 0.6 : 1 }}>
+                        {retryingAll ? '⟳ Retrying…' : `Retry All (${entries.length})`}
                     </button>
                     <button class="t-btn t-btn-secondary px-4 py-2 text-sm"
                             onClick={clearDLQ}>
