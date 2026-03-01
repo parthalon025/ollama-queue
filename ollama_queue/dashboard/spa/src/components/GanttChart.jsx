@@ -18,14 +18,14 @@ export function sourceColor(source) {
 
 export function formatDuration(seconds) {
     if (seconds == null) return '~10m';
-    const s = Math.round(seconds);
+    const s = Math.floor(seconds);
     if (s < 60) return `${s}s`;
     const m = Math.floor(s / 60);
     const rem = s % 60;
     return rem === 0 ? `${m}m` : `${m}m ${rem}s`;
 }
 
-function assignLanes(jobs) {
+export function assignLanes(jobs) {
     const sorted = [...jobs].sort((a, b) => a.next_run - b.next_run);
     const laneEnds = [];
     return sorted.map(job => {
@@ -38,7 +38,7 @@ function assignLanes(jobs) {
     });
 }
 
-function buildTooltip(job, isConcurrent) {
+export function buildTooltip(job, isConcurrent) {
     const nextRunStr = new Date(job.next_run * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const lastRunStr = job.last_run
         ? new Date(job.last_run * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
@@ -116,7 +116,7 @@ export function GanttChart({ jobs, tick, windowHours = 24 }) {
                     const modelLabel = job.model
                         ? job.model.split(':')[0]
                         : (job.model_profile || null);
-                    const barWidth = Math.min(widthPct, 100 - leftPct);
+                    const barWidth = Math.max(0.5, Math.min(widthPct, 100 - leftPct));
                     const showChip = barWidth > 8;
 
                     return (

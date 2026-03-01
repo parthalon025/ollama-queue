@@ -1,5 +1,5 @@
 // ollama_queue/dashboard/spa/src/components/GanttChart.test.js
-import { sourceColor, formatDuration } from './GanttChart.jsx';
+import { sourceColor, formatDuration, assignLanes, buildTooltip } from './GanttChart.jsx';
 
 describe('sourceColor', () => {
     it('returns accent for aria', () => {
@@ -35,5 +35,77 @@ describe('formatDuration', () => {
     });
     it('handles null with default', () => {
         expect(formatDuration(null)).toBe('~10m');
+    });
+});
+
+describe('formatDuration edge cases', () => {
+    it('formats 0 as 0s', () => {
+        expect(formatDuration(0)).toBe('0s');
+    });
+    it('formatDuration(59) returns 59s not 60s (floor not round)', () => {
+        expect(formatDuration(59)).toBe('59s');
+    });
+    it('formatDuration(59.9) returns 59s not 60s (floor not round)', () => {
+        expect(formatDuration(59.9)).toBe('59s');
+    });
+});
+
+describe('assignLanes', () => {
+    it('returns empty array for no jobs', () => {
+        expect(assignLanes([])).toEqual([]);
+    });
+    it('assigns single job to lane 0', () => {
+        const jobs = [{ id: 1, next_run: 1000, estimated_duration: 600 }];
+        const result = assignLanes(jobs);
+        expect(result[0]._lane).toBe(0);
+    });
+    it('assigns non-overlapping jobs to lane 0', () => {
+        const jobs = [
+            { id: 1, next_run: 1000, estimated_duration: 600 },
+            { id: 2, next_run: 2000, estimated_duration: 600 },
+        ];
+        const result = assignLanes(jobs);
+        expect(result.every(job => job._lane === 0)).toBe(true);
+    });
+    it('assigns overlapping jobs to separate lanes', () => {
+        const jobs = [
+            { id: 1, next_run: 1000, estimated_duration: 600 },
+            { id: 2, next_run: 1300, estimated_duration: 600 },
+        ];
+        const result = assignLanes(jobs);
+        const lanes = result.map(job => job._lane);
+        expect(new Set(lanes).size).toBe(2);
+    });
+    it('handles null estimated_duration with 600 default', () => {
+        const jobs = [
+            { id: 1, next_run: 1000, estimated_duration: null },
+            { id: 2, next_run: 1300, estimated_duration: null },
+        ];
+        const result = assignLanes(jobs);
+        const lanes = result.map(job => job._lane);
+        expect(new Set(lanes).size).toBe(2);
+    });
+});
+
+describe('buildTooltip', () => {
+    it('includes job name', () => {
+        const job = { name: 'aria-morning', source: 'aria', model: null, model_profile: 'ollama', next_run: Date.now() / 1000 + 3600, estimated_duration: 600, last_run: null };
+        expect(buildTooltip(job, false)).toContain('aria-morning');
+    });
+    it('includes source', () => {
+        const job = { name: 'test', source: 'telegram', model: null, model_profile: 'ollama', next_run: Date.now() / 1000 + 3600, estimated_duration: 300, last_run: null };
+        expect(buildTooltip(job, false)).toContain('telegram');
+    });
+    it('shows "never" for null last_run', () => {
+        const job = { name: 'test', source: 'aria', model: null, model_profile: 'ollama', next_run: Date.now() / 1000 + 3600, estimated_duration: 300, last_run: null };
+        expect(buildTooltip(job, false)).toContain('never');
+    });
+    it('includes concurrent marker when isConcurrent', () => {
+        const job = { name: 'test', source: 'aria', model: null, model_profile: 'ollama', next_run: Date.now() / 1000 + 3600, estimated_duration: 300, last_run: null };
+        expect(buildTooltip(job, true)).toContain('⟡');
+    });
+    it('omits concurrent marker when not concurrent', () => {
+        const job = { name: 'test', source: 'aria', model: null, model_profile: 'ollama', next_run: Date.now() / 1000 + 3600, estimated_duration: 300, last_run: null };
+        expect(buildTooltip(job, false)).not.toContain('⟡');
     });
 });
