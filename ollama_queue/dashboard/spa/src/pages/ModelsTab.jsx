@@ -103,9 +103,12 @@ export default function ModelsTab() {
         return 0;
     });
 
+    const curatedNames = new Set(modelCatalog.value.curated.map(m => m.name));
     const allCatalogModels = [
         ...modelCatalog.value.curated,
-        ...modelCatalog.value.search_results.map(catalogResult => ({ ...catalogResult, recommended: false })),
+        ...modelCatalog.value.search_results
+            .filter(r => !curatedNames.has(r.name))
+            .map(catalogResult => ({ ...catalogResult, recommended: false })),
     ];
 
     const thStyle = {
