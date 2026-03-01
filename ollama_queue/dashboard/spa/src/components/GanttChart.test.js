@@ -1,5 +1,5 @@
 // ollama_queue/dashboard/spa/src/components/GanttChart.test.js
-import { sourceColor, formatDuration, assignLanes, buildTooltip, buildDensityBuckets, findHeavyConflicts, getConflictingPairs } from './GanttChart.jsx';
+import { sourceColor, formatDuration, assignLanes, buildTooltip, buildDensityBuckets, findHeavyConflicts, getConflictingPairs, runStatus } from './GanttChart.jsx';
 
 describe('sourceColor', () => {
     it('returns accent for aria', () => {
@@ -267,5 +267,46 @@ describe('getConflictingPairs', () => {
         // a-b, a-c, and b-c all overlap
         const result = getConflictingPairs([a, b, c]);
         expect(result).toHaveLength(3);
+    });
+});
+
+describe('runStatus', () => {
+    it('returns never for null last_run', () => {
+        expect(runStatus(null, 3600)).toEqual({ label: 'never', color: 'var(--text-tertiary)' });
+    });
+
+    it('returns never for undefined last_run', () => {
+        expect(runStatus(undefined, 3600)).toEqual({ label: 'never', color: 'var(--text-tertiary)' });
+    });
+
+    it('returns on-time when drift is within 5% of interval', () => {
+        const interval = 3600;
+        const now = Date.now() / 1000;
+        // 3% drift — within threshold
+        const lastRun = now - interval - interval * 0.03;
+        expect(runStatus(lastRun, interval).label).toBe('on time');
+    });
+
+    it('returns late when drift exceeds 5% of interval', () => {
+        const interval = 3600;
+        const now = Date.now() / 1000;
+        // 10% drift — past threshold
+        const lastRun = now - interval - interval * 0.10;
+        expect(runStatus(lastRun, interval).label).toBe('late');
+    });
+
+    it('returns on-time when exactly at the boundary (5%)', () => {
+        const interval = 3600;
+        const now = Date.now() / 1000;
+        // Exactly at threshold — should still be on time (drift <= threshold)
+        const lastRun = now - interval - interval * 0.05;
+        expect(runStatus(lastRun, interval).label).toBe('on time');
+    });
+
+    it('handles null interval_seconds with 3600 default', () => {
+        const now = Date.now() / 1000;
+        // No interval — uses 3600 default; ran 3% late relative to 3600
+        const lastRun = now - 3600 - 3600 * 0.03;
+        expect(runStatus(lastRun, null).label).toBe('on time');
     });
 });

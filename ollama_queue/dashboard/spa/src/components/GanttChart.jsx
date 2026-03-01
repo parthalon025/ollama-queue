@@ -97,6 +97,17 @@ export function findHeavyConflicts(jobs) {
     return conflictIds;
 }
 
+export function runStatus(lastRun, intervalSeconds) {
+    if (!lastRun) return { label: 'never', color: 'var(--text-tertiary)' };
+    const now = Date.now() / 1000;
+    const elapsed = now - lastRun;
+    const interval = intervalSeconds || 3600;
+    const drift = elapsed - interval;
+    const threshold = interval * 0.05;
+    if (drift <= threshold) return { label: 'on time', color: 'var(--status-healthy)' };
+    return { label: 'late', color: 'var(--status-warning)' };
+}
+
 export function GanttChart({ jobs, tick, windowHours = 24 }) {
     void tick;
     const now = Date.now() / 1000;
@@ -288,6 +299,30 @@ export function GanttChart({ jobs, tick, windowHours = 24 }) {
                                     {modelLabel}
                                 </span>
                             )}
+                            {/* On-time status dot */}
+                            {(() => {
+                                const { label, color } = runStatus(job.last_run, job.interval_seconds);
+                                const lastRunStr = job.last_run
+                                    ? new Date(job.last_run * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                                    : 'never';
+                                return (
+                                    <span
+                                        title={`Last run: ${lastRunStr} (${label})`}
+                                        style={{
+                                            position: 'absolute',
+                                            right: 4,
+                                            top: '50%',
+                                            transform: 'translateY(-50%)',
+                                            width: 7,
+                                            height: 7,
+                                            borderRadius: '50%',
+                                            background: color,
+                                            border: '1px solid rgba(0,0,0,0.3)',
+                                            flexShrink: 0,
+                                        }}
+                                    />
+                                );
+                            })()}
                         </div>
                     );
                 })}
