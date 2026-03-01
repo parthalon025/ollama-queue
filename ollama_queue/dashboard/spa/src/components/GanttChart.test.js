@@ -5,17 +5,33 @@ describe('sourceColor', () => {
     it('returns accent for aria', () => {
         expect(sourceColor('aria')).toBe('var(--accent)');
     });
+    it('returns accent for aria-full (prefix match)', () => {
+        expect(sourceColor('aria-full')).toBe('var(--accent)');
+    });
+    it('returns accent for aria-intraday (prefix match)', () => {
+        expect(sourceColor('aria-intraday')).toBe('var(--accent)');
+    });
     it('returns orange for telegram', () => {
         expect(sourceColor('telegram')).toBe('#f97316');
+    });
+    it('returns orange for telegram-brief-morning (prefix match)', () => {
+        expect(sourceColor('telegram-brief-morning')).toBe('#f97316');
     });
     it('returns purple for notion', () => {
         expect(sourceColor('notion')).toBe('#a78bfa');
     });
+    it('returns purple for notion-vector-sync (prefix match)', () => {
+        expect(sourceColor('notion-vector-sync')).toBe('#a78bfa');
+    });
     it('returns tertiary for unknown source', () => {
         expect(sourceColor('unknown')).toBe('var(--text-tertiary)');
     });
+    it('returns tertiary for "none"', () => {
+        expect(sourceColor('none')).toBe('var(--text-tertiary)');
+    });
     it('is case-insensitive', () => {
         expect(sourceColor('Aria')).toBe('var(--accent)');
+        expect(sourceColor('Aria-Full')).toBe('var(--accent)');
     });
     it('handles null/undefined', () => {
         expect(sourceColor(null)).toBe('var(--text-tertiary)');

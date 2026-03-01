@@ -12,8 +12,12 @@ export const SOURCE_COLORS = {
 };
 
 export function sourceColor(source) {
-    if (!source) return 'var(--text-tertiary)';
-    return SOURCE_COLORS[source.toLowerCase()] ?? 'var(--text-tertiary)';
+    if (!source || source === 'none') return 'var(--text-tertiary)';
+    const s = source.toLowerCase();
+    if (s === 'aria' || s.startsWith('aria-')) return 'var(--accent)';
+    if (s === 'telegram' || s.startsWith('telegram-')) return '#f97316';
+    if (s === 'notion' || s.startsWith('notion-')) return '#a78bfa';
+    return 'var(--text-tertiary)';
 }
 
 export function formatDuration(seconds) {
