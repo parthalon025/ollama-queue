@@ -689,6 +689,12 @@ body {
   border-radius: var(--radius);
 }
 
+/* Keyboard focus ring for bottom nav buttons */
+.mobile-bottom-nav button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
 /* Collapsed sidebar: icon-only (768px–1023px) */
 @media (min-width: 768px) and (max-width: 1023px) {
   .layout-sidebar { width: var(--sidebar-width-sm); }
