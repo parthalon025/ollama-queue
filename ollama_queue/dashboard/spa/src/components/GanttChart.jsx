@@ -54,6 +54,24 @@ export function buildTooltip(job, isConcurrent) {
     return parts.join('\n');
 }
 
+export function buildDensityBuckets(jobs, now, windowSecs) {
+    const bucketCount = 24;
+    const bucketSecs = windowSecs / bucketCount;
+    const buckets = Array(bucketCount).fill(0);
+    for (const job of jobs) {
+        const jobStart = job.next_run;
+        const jobEnd = jobStart + (job.estimated_duration || 600);
+        for (let i = 0; i < bucketCount; i++) {
+            const bucketStart = now + i * bucketSecs;
+            const bucketEnd = bucketStart + bucketSecs;
+            if (jobStart < bucketEnd && jobEnd > bucketStart) {
+                buckets[i]++;
+            }
+        }
+    }
+    return buckets;
+}
+
 export function GanttChart({ jobs, tick, windowHours = 24 }) {
     void tick;
     const now = Date.now() / 1000;
@@ -69,6 +87,43 @@ export function GanttChart({ jobs, tick, windowHours = 24 }) {
 
     return (
         <div style={{ position: 'relative', width: '100%' }}>
+            {/* Load density strip — 24 hourly buckets, colored by job count */}
+            {(() => {
+                const visibleJobs = jobs.filter(job => job.next_run < windowEnd);
+                const buckets = buildDensityBuckets(visibleJobs, now, windowSecs);
+                return (
+                    <div
+                        style={{
+                            display: 'flex',
+                            height: 10,
+                            borderRadius: 'var(--radius)',
+                            overflow: 'hidden',
+                            marginBottom: '0.2rem',
+                            border: '1px solid var(--border-subtle)',
+                        }}
+                        title="Job density per hour — darker = more jobs active"
+                    >
+                        {buckets.map((count, bucketIdx) => (
+                            <div
+                                key={bucketIdx}
+                                style={{
+                                    flex: 1,
+                                    background: count === 0
+                                        ? 'var(--bg-inset)'
+                                        : count === 1
+                                            ? 'rgba(99,179,237,0.25)'
+                                            : count === 2
+                                                ? 'rgba(99,179,237,0.55)'
+                                                : 'rgba(99,179,237,0.9)',
+                                    borderRight: bucketIdx < 23 ? '1px solid var(--border-subtle)' : 'none',
+                                }}
+                                title={count > 0 ? `${count} job${count > 1 ? 's' : ''} active` : undefined}
+                            />
+                        ))}
+                    </div>
+                );
+            })()}
+
             {/* Time axis labels */}
             <div style={{ display: 'flex', justifyContent: 'space-between',
                           fontSize: 'var(--type-label)', color: 'var(--text-tertiary)',

@@ -1,5 +1,5 @@
 // ollama_queue/dashboard/spa/src/components/GanttChart.test.js
-import { sourceColor, formatDuration, assignLanes, buildTooltip } from './GanttChart.jsx';
+import { sourceColor, formatDuration, assignLanes, buildTooltip, buildDensityBuckets } from './GanttChart.jsx';
 
 describe('sourceColor', () => {
     it('returns accent for aria', () => {
@@ -107,5 +107,49 @@ describe('buildTooltip', () => {
     it('omits concurrent marker when not concurrent', () => {
         const job = { name: 'test', source: 'aria', model: null, model_profile: 'ollama', next_run: Date.now() / 1000 + 3600, estimated_duration: 300, last_run: null };
         expect(buildTooltip(job, false)).not.toContain('⟡');
+    });
+});
+
+describe('buildDensityBuckets', () => {
+    const now = 1000000;
+    const windowSecs = 24 * 3600;
+
+    it('returns 24 buckets', () => {
+        expect(buildDensityBuckets([], now, windowSecs)).toHaveLength(24);
+    });
+
+    it('all buckets zero for empty jobs', () => {
+        const buckets = buildDensityBuckets([], now, windowSecs);
+        expect(buckets.every(b => b === 0)).toBe(true);
+    });
+
+    it('counts a job that spans the first bucket', () => {
+        const jobs = [{ next_run: now, estimated_duration: 3600 }];
+        const buckets = buildDensityBuckets(jobs, now, windowSecs);
+        expect(buckets[0]).toBe(1);
+        expect(buckets[1]).toBe(0);
+    });
+
+    it('counts a job spanning multiple buckets', () => {
+        const jobs = [{ next_run: now, estimated_duration: 7200 }];
+        const buckets = buildDensityBuckets(jobs, now, windowSecs);
+        expect(buckets[0]).toBe(1);
+        expect(buckets[1]).toBe(1);
+        expect(buckets[2]).toBe(0);
+    });
+
+    it('counts two concurrent jobs in same bucket', () => {
+        const jobs = [
+            { next_run: now, estimated_duration: 1800 },
+            { next_run: now + 900, estimated_duration: 1800 },
+        ];
+        const buckets = buildDensityBuckets(jobs, now, windowSecs);
+        expect(buckets[0]).toBe(2);
+    });
+
+    it('uses 600s default when estimated_duration is null', () => {
+        const jobs = [{ next_run: now, estimated_duration: null }];
+        const buckets = buildDensityBuckets(jobs, now, windowSecs);
+        expect(buckets[0]).toBe(1); // 600s < 3600s so only bucket 0
     });
 });
