@@ -4,21 +4,31 @@ import {
     models, modelCatalog, API,
     fetchModels, fetchModelCatalog,
     startModelPull, cancelModelPull,
-    scheduleJobs, fetchSchedule, assignModelToJob,
 } from '../store';
 import { ModelBadge } from '../components/ModelBadge';
+
+function useDebounce(value, delay) {
+    const [debounced, setDebounced] = useState(value);
+    useEffect(() => {
+        const t = setTimeout(() => setDebounced(value), delay);
+        return () => clearTimeout(t);
+    }, [value, delay]);
+    return debounced;
+}
 
 export default function ModelsTab() {
     const [searchQuery, setSearchQuery] = useState('');
     const [activePulls, setActivePulls] = useState({});
     const [pullError, setPullError] = useState(null);
+    const [sortCol, setSortCol] = useState('size_bytes');
+    const [sortDir, setSortDir] = useState('desc');
     // Map keyed by pullId — all active poll intervals tracked here for cleanup on unmount.
     const pullIntervalsRef = useRef({});
 
+    const debouncedSearch = useDebounce(searchQuery, 300);
+
     useEffect(() => {
         fetchModels();
-        fetchModelCatalog();
-        fetchSchedule();
         return () => {
             // Clear all active pull intervals when component unmounts.
             Object.values(pullIntervalsRef.current).forEach(iv => clearInterval(iv));
@@ -26,11 +36,24 @@ export default function ModelsTab() {
         };
     }, []);
 
+    useEffect(() => {
+        fetchModelCatalog(debouncedSearch);
+    }, [debouncedSearch]);
+
+    function handleSort(col) {
+        if (sortCol === col) {
+            setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+        } else {
+            setSortCol(col);
+            setSortDir('desc');
+        }
+    }
+
     async function handlePull(modelName) {
         setPullError(null);
         try {
             const pullId = await startModelPull(modelName);
-            setActivePulls(prev => ({ ...prev, [pullId]: { model: modelName, progress: 0, status: 'pulling' } }));
+            setActivePulls(prev => ({ ...prev, [pullId]: { model: modelName, progress: 0, status: 'pulling', startedAt: Date.now() } }));
             const iv = setInterval(async () => {
                 try {
                     const resp = await fetch(`${API}/models/pull/${pullId}`);
@@ -38,7 +61,7 @@ export default function ModelsTab() {
                         const data = await resp.json();
                         setActivePulls(prev => ({
                             ...prev,
-                            [pullId]: { model: modelName, progress: data.progress_pct, status: data.status },
+                            [pullId]: { model: modelName, progress: data.progress_pct, status: data.status, startedAt: prev[pullId]?.startedAt },
                         }));
                         if (data.status !== 'pulling') {
                             clearInterval(pullIntervalsRef.current[pullId]);
@@ -69,16 +92,28 @@ export default function ModelsTab() {
         }
     }
 
-    async function handleAssign(rjId, modelName) {
-        try {
-            await assignModelToJob(rjId, modelName);
-            await fetchSchedule();
-        } catch (err) {
-            setPullError(`Assign failed: ${err.message}`);
-        }
-    }
-
     const installedNames = new Set(models.value.map(mdl => mdl.name));
+
+    const sortedModels = [...models.value].sort((a, b) => {
+        let av = a[sortCol] ?? 0;
+        let bv = b[sortCol] ?? 0;
+        if (typeof av === 'string') { av = av.toLowerCase(); bv = (b[sortCol] ?? '').toLowerCase(); }
+        if (av < bv) return sortDir === 'asc' ? -1 : 1;
+        if (av > bv) return sortDir === 'asc' ? 1 : -1;
+        return 0;
+    });
+
+    const allCatalogModels = [
+        ...modelCatalog.value.curated,
+        ...modelCatalog.value.search_results.map(catalogResult => ({ ...catalogResult, recommended: false })),
+    ];
+
+    const thStyle = {
+        textAlign: 'left', padding: '0.5rem 0.75rem',
+        fontSize: 'var(--type-label)', fontWeight: 600,
+        color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)',
+        textTransform: 'uppercase', letterSpacing: '0.05em',
+    };
 
     return (
         <div class="flex flex-col gap-4 animate-page-enter">
@@ -108,6 +143,11 @@ export default function ModelsTab() {
                                    color: 'var(--text-secondary)', minWidth: '3rem' }}>
                         {pull.status === 'completed' ? '✓' : `${Math.round(pull.progress || 0)}%`}
                     </span>
+                    {pull.startedAt && pull.status === 'pulling' && (
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)' }}>
+                            {formatElapsed(pull.startedAt)}
+                        </span>
+                    )}
                     {pull.status === 'pulling' && (
                         <button class="t-btn t-btn-secondary"
                                 style={{ fontSize: 'var(--type-label)', padding: '0.2rem 0.6rem' }}
@@ -130,18 +170,22 @@ export default function ModelsTab() {
                         <thead>
                             <tr style={{ borderBottom: '1px solid var(--border-subtle)',
                                          background: 'var(--bg-surface-raised)' }}>
-                                {['Name', 'Type', 'Size', 'VRAM', 'Avg Duration', 'Status', 'Assign to Job'].map(col => (
-                                    <th key={col} style={{ textAlign: 'left', padding: '0.5rem 0.75rem',
-                                                           fontSize: 'var(--type-label)', fontWeight: 600,
-                                                           color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)',
-                                                           textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                                        {col}
-                                    </th>
-                                ))}
+                                <th onClick={() => handleSort('name')}
+                                    style={{ cursor: 'pointer', userSelect: 'none', ...thStyle }}>
+                                    Name {sortCol === 'name' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
+                                </th>
+                                <th style={thStyle}>Type</th>
+                                <th onClick={() => handleSort('size_bytes')}
+                                    style={{ cursor: 'pointer', userSelect: 'none', ...thStyle }}>
+                                    Size {sortCol === 'size_bytes' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
+                                </th>
+                                <th style={thStyle}>VRAM</th>
+                                <th style={thStyle}>Avg Duration</th>
+                                <th style={thStyle}>Status</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {models.value.map(model => (
+                            {sortedModels.map(model => (
                                 <tr key={model.name} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                                     <td style={{ padding: '0.5rem 0.75rem', fontFamily: 'var(--font-mono)',
                                                  color: 'var(--text-primary)' }}>{model.name}</td>
@@ -168,23 +212,6 @@ export default function ModelsTab() {
                                                              fontSize: 'var(--type-label)' }}>● loaded</span>
                                             : <span style={{ color: 'var(--text-tertiary)', fontSize: 'var(--type-label)' }}>idle</span>}
                                     </td>
-                                    <td style={{ padding: '0.5rem 0.75rem' }}>
-                                        <select
-                                            style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)',
-                                                     background: 'var(--bg-inset)', color: 'var(--text-primary)',
-                                                     border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius)',
-                                                     padding: '0.2rem 0.4rem' }}
-                                            onChange={ev => {
-                                                const rjId = parseInt(ev.target.value, 10);
-                                                if (rjId) handleAssign(rjId, model.name);
-                                                ev.target.value = '';
-                                            }}>
-                                            <option value="">Assign to…</option>
-                                            {scheduleJobs.value.map(rj => (
-                                                <option key={rj.id} value={rj.id}>{rj.name}</option>
-                                            ))}
-                                        </select>
-                                    </td>
                                 </tr>
                             ))}
                         </tbody>
@@ -200,28 +227,24 @@ export default function ModelsTab() {
                     Download Models
                 </h3>
 
-                <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
-                    <input
-                        type="text" placeholder="Search ollama.com…"
-                        value={searchQuery}
-                        onInput={ev => setSearchQuery(ev.target.value)}
-                        style={{ flex: 1, fontFamily: 'var(--font-mono)', fontSize: 'var(--type-body)',
-                                 background: 'var(--bg-inset)', color: 'var(--text-primary)',
-                                 border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius)',
-                                 padding: '0.4rem 0.75rem', outline: 'none' }}
-                    />
-                    <button class="t-btn t-btn-primary px-4 py-2 text-sm"
-                            onClick={() => fetchModelCatalog(searchQuery)}>
-                        Search
-                    </button>
-                </div>
+                <input
+                    type="text" placeholder="Search ollama.com…"
+                    value={searchQuery}
+                    onInput={ev => setSearchQuery(ev.target.value)}
+                    style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'var(--font-mono)',
+                             fontSize: 'var(--type-body)', background: 'var(--bg-inset)',
+                             color: 'var(--text-primary)', border: '1px solid var(--border-subtle)',
+                             borderRadius: 'var(--radius)', padding: '0.4rem 0.75rem',
+                             outline: 'none', marginBottom: '1rem' }}
+                />
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '0.75rem' }}>
-                    {[
-                        ...modelCatalog.value.curated,
-                        ...modelCatalog.value.search_results.map(catalogResult => ({ ...catalogResult, recommended: false })),
-                    ].map(catalogModel => {
+                    {allCatalogModels.map(catalogModel => {
                         const isInstalled = installedNames.has(catalogModel.name);
+                        const vramMap = { light: '< 4GB', medium: '~8GB', heavy: '16GB+' };
+                        const vramLabel = catalogModel.resource_profile && catalogModel.resource_profile !== 'ollama'
+                            ? vramMap[catalogModel.resource_profile]
+                            : null;
                         return (
                             <div key={catalogModel.name} class="t-frame"
                                  style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
@@ -245,6 +268,19 @@ export default function ModelsTab() {
                                     profile={catalogModel.resource_profile || 'ollama'}
                                     typeTag={catalogModel.type_tag || 'general'}
                                 />
+                                {vramLabel && (
+                                    <span style={{
+                                        fontSize: 'var(--type-micro)',
+                                        color: 'var(--text-tertiary)',
+                                        background: 'var(--bg-inset)',
+                                        border: '1px solid var(--border-subtle)',
+                                        borderRadius: 4,
+                                        padding: '1px 5px',
+                                        alignSelf: 'flex-start',
+                                    }}>
+                                        VRAM: {vramLabel}
+                                    </span>
+                                )}
                                 <button
                                     class={`t-btn ${isInstalled ? 't-btn-secondary' : 't-btn-primary'}`}
                                     style={{ fontSize: 'var(--type-label)', padding: '0.3rem 0.75rem',
@@ -257,7 +293,26 @@ export default function ModelsTab() {
                         );
                     })}
                 </div>
+
+                {debouncedSearch && allCatalogModels.length === 0 && (
+                    <div style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--text-tertiary)', fontSize: 'var(--type-body)' }}>
+                        No models match "{debouncedSearch}"
+                        <br />
+                        <button class="t-btn t-btn-secondary"
+                                style={{ marginTop: '0.5rem', padding: '4px 12px', fontSize: 'var(--type-label)' }}
+                                onClick={() => setSearchQuery('')}>Clear</button>
+                    </div>
+                )}
             </section>
         </div>
     );
+}
+
+function formatElapsed(ms) {
+    if (!ms) return '';
+    const secs = Math.round((Date.now() - ms) / 1000);
+    if (secs < 60) return `${secs}s`;
+    const mins = Math.floor(secs / 60);
+    if (mins < 60) return `${mins}m ${secs % 60}s`;
+    return `${Math.floor(mins / 60)}h ${mins % 60}m`;
 }
