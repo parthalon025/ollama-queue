@@ -276,14 +276,13 @@ function buildPauseDelta(minutes) {
 function buildRAMFooter(h) {
   if (!h || h.ram_pct == null) return undefined;
   const v = h.ram_pct;
-  const status = v < 70 ? 'healthy' : v < 90 ? 'elevated' : 'high — may pause';
+  const status = v < 70 ? 'healthy' : v < 90 ? 'elevated — watch threshold' : 'high — will pause';
   return `now: ${Math.round(v)}% — ${status}`;
 }
 function buildVRAMFooter(h) {
   if (!h || h.vram_pct == null) return undefined;
   const v = h.vram_pct;
-  const status = v < 70 ? 'healthy' : v < 90 ? 'elevated' : 'high — may pause';
-  return `now: ${Math.round(v)}% — ${status}`;
+  return `now: ${Math.round(v)}% — ollama managed`;
 }
 function buildLoadFooter(h) {
   if (!h || h.load_avg == null) return undefined;

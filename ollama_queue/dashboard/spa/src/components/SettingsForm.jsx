@@ -50,15 +50,6 @@ export default function SettingsForm({ settings, daemonState, onSave, onPause, o
             onBlur={handleBlur}
           />
           <ThresholdPair
-            label="VRAM"
-            pauseKey="vram_pause_pct"
-            resumeKey="vram_resume_pct"
-            unit="%"
-            settings={settings}
-            flashKey={flashKey}
-            onBlur={handleBlur}
-          />
-          <ThresholdPair
             label="Load"
             pauseKey="load_pause_multiplier"
             resumeKey="load_resume_multiplier"

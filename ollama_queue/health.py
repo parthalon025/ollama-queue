@@ -153,9 +153,6 @@ class HealthMonitor:
                     f"Load {snap['load_avg']} >= {load_pause} "
                     f"({settings['load_pause_multiplier']}x {snap['cpu_count']} CPUs)"
                 )
-            if snap["vram_pct"] is not None and snap["vram_pct"] >= settings["vram_pause_pct"]:
-                reasons.append(f"VRAM {snap['vram_pct']}% >= {settings['vram_pause_pct']}%")
-
             should_pause = len(reasons) > 0
         else:
             # Currently paused: only resume if ALL metrics below resume thresholds
@@ -170,9 +167,6 @@ class HealthMonitor:
                     f"Load {snap['load_avg']} > {load_resume} "
                     f"({settings['load_resume_multiplier']}x {snap['cpu_count']} CPUs)"
                 )
-            if snap["vram_pct"] is not None and snap["vram_pct"] > settings["vram_resume_pct"]:
-                still_high.append(f"VRAM {snap['vram_pct']}% > {settings['vram_resume_pct']}%")
-
             should_pause = len(still_high) > 0
             reasons = still_high if still_high else ["all metrics below resume thresholds"]
 
