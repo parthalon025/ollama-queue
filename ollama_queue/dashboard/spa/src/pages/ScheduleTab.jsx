@@ -105,6 +105,7 @@ export default function ScheduleTab() {
     const [search, setSearch] = useState('');
 
     const refreshingRef = useRef(false);
+    const rebalanceTimerRef = useRef(null);
 
     // Change 6: debounced search
     const debouncedSearch = useDebounce(search, 300);
@@ -122,6 +123,7 @@ export default function ScheduleTab() {
         return () => {
             clearInterval(tickInterval);
             clearInterval(refreshInterval);
+            if (rebalanceTimerRef.current) clearTimeout(rebalanceTimerRef.current);
         };
     }, []);
 
@@ -221,12 +223,13 @@ export default function ScheduleTab() {
         try {
             await triggerRebalance();
             setRebalanceFlash('ok');
-            setTimeout(() => setRebalanceFlash(null), 2000);
-            fetchSchedule();
+            if (rebalanceTimerRef.current) clearTimeout(rebalanceTimerRef.current);
+            rebalanceTimerRef.current = setTimeout(() => setRebalanceFlash(null), 2000);
         } catch (err) {
             console.error('Rebalance failed:', err);
             setRebalanceFlash('error');
-            setTimeout(() => setRebalanceFlash(null), 4000);
+            if (rebalanceTimerRef.current) clearTimeout(rebalanceTimerRef.current);
+            rebalanceTimerRef.current = setTimeout(() => setRebalanceFlash(null), 4000);
         } finally {
             setRebalancing(false);
         }

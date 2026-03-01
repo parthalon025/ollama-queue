@@ -114,12 +114,9 @@ export async function toggleScheduleJob(id, enabled) {
 }
 
 export async function triggerRebalance() {
-    try {
-        await fetch(`${API}/schedule/rebalance`, { method: 'POST' });
-        await fetchSchedule();
-    } catch (e) {
-        console.error('triggerRebalance failed:', e);
-    }
+    const resp = await fetch(`${API}/schedule/rebalance`, { method: 'POST' });
+    if (!resp.ok) throw new Error(`triggerRebalance failed: ${resp.status}`);
+    await fetchSchedule();
 }
 
 export async function runScheduleJobNow(id) {
