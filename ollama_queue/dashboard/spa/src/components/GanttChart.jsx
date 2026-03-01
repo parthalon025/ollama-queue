@@ -72,6 +72,23 @@ export function buildDensityBuckets(jobs, now, windowSecs) {
     return buckets;
 }
 
+export function findHeavyConflicts(jobs) {
+    const heavy = jobs.filter(j => j.model_profile === 'heavy');
+    const conflictIds = new Set();
+    for (let i = 0; i < heavy.length; i++) {
+        for (let j = i + 1; j < heavy.length; j++) {
+            const a = heavy[i], b = heavy[j];
+            const aEnd = a.next_run + (a.estimated_duration || 600);
+            const bEnd = b.next_run + (b.estimated_duration || 600);
+            if (a.next_run < bEnd && b.next_run < aEnd) {
+                conflictIds.add(a.id);
+                conflictIds.add(b.id);
+            }
+        }
+    }
+    return conflictIds;
+}
+
 export function GanttChart({ jobs, tick, windowHours = 24 }) {
     void tick;
     const now = Date.now() / 1000;
@@ -81,6 +98,7 @@ export function GanttChart({ jobs, tick, windowHours = 24 }) {
     const laneJobs = assignLanes(
         jobs.filter(job => job.next_run < windowEnd)
     );
+    const conflictIds = findHeavyConflicts(laneJobs);
     const laneCount = laneJobs.reduce((max, job) => Math.max(max, job._lane + 1), 1);
     const laneHeight = 44;
     const chartHeight = laneCount * laneHeight + 8;
@@ -160,6 +178,49 @@ export function GanttChart({ jobs, tick, windowHours = 24 }) {
                 ))}
 
                 {/* Job blocks */}
+                {/* Heavy conflict badges */}
+                {conflictIds.size > 0 && (() => {
+                    const heavy = laneJobs.filter(j => j.model_profile === 'heavy' && conflictIds.has(j.id));
+                    const badges = [];
+                    for (let ci = 0; ci < heavy.length; ci++) {
+                        for (let cj = ci + 1; cj < heavy.length; cj++) {
+                            const a = heavy[ci], b = heavy[cj];
+                            const aEnd = a.next_run + (a.estimated_duration || 600);
+                            const bEnd = b.next_run + (b.estimated_duration || 600);
+                            if (a.next_run < bEnd && b.next_run < aEnd) {
+                                const midStart = Math.max(a.next_run, b.next_run);
+                                const midEnd = Math.min(aEnd, bEnd);
+                                const midPoint = (midStart + midEnd) / 2;
+                                const leftPct = ((midPoint - now) / windowSecs) * 100;
+                                const topLane = Math.max(a._lane, b._lane);
+                                badges.push(
+                                    <div
+                                        key={`conflict-${a.id}-${b.id}`}
+                                        title="Two heavy models overlap — one will queue behind the other"
+                                        style={{
+                                            position: 'absolute',
+                                            left: `${Math.max(1, Math.min(leftPct - 4, 88))}%`,
+                                            top: topLane * laneHeight + laneHeight / 4,
+                                            background: 'var(--status-error)',
+                                            color: '#fff',
+                                            fontSize: 'var(--type-micro)',
+                                            fontFamily: 'var(--font-mono)',
+                                            padding: '1px 5px',
+                                            borderRadius: 3,
+                                            pointerEvents: 'none',
+                                            zIndex: 10,
+                                            whiteSpace: 'nowrap',
+                                        }}
+                                    >
+                                        ⚠ conflict
+                                    </div>
+                                );
+                            }
+                        }
+                    }
+                    return badges;
+                })()}
+
                 {laneJobs.map(job => {
                     const startOffset = Math.max(0, job.next_run - now);
                     const duration = job.estimated_duration || 600;
@@ -188,6 +249,8 @@ export function GanttChart({ jobs, tick, windowHours = 24 }) {
                                 opacity: 0.85,
                                 borderRadius: 'var(--radius)',
                                 borderLeft: isHeavy ? '3px solid var(--status-warning)' : undefined,
+                                outline: conflictIds.has(job.id) ? '2px solid var(--status-error)' : undefined,
+                                outlineOffset: conflictIds.has(job.id) ? '-2px' : undefined,
                                 overflow: 'hidden',
                                 display: 'flex',
                                 alignItems: 'center',

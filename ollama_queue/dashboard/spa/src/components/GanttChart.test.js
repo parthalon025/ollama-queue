@@ -1,5 +1,5 @@
 // ollama_queue/dashboard/spa/src/components/GanttChart.test.js
-import { sourceColor, formatDuration, assignLanes, buildTooltip, buildDensityBuckets } from './GanttChart.jsx';
+import { sourceColor, formatDuration, assignLanes, buildTooltip, buildDensityBuckets, findHeavyConflicts } from './GanttChart.jsx';
 
 describe('sourceColor', () => {
     it('returns accent for aria', () => {
@@ -151,5 +151,59 @@ describe('buildDensityBuckets', () => {
         const jobs = [{ next_run: now, estimated_duration: null }];
         const buckets = buildDensityBuckets(jobs, now, windowSecs);
         expect(buckets[0]).toBe(1); // 600s < 3600s so only bucket 0
+    });
+});
+
+describe('findHeavyConflicts', () => {
+    it('returns empty Set for no jobs', () => {
+        expect(findHeavyConflicts([])).toEqual(new Set());
+    });
+
+    it('returns empty Set for a single heavy job', () => {
+        const jobs = [{ id: 1, model_profile: 'heavy', next_run: 1000, estimated_duration: 600 }];
+        expect(findHeavyConflicts(jobs).size).toBe(0);
+    });
+
+    it('returns empty Set when heavy jobs do not overlap', () => {
+        const jobs = [
+            { id: 1, model_profile: 'heavy', next_run: 1000, estimated_duration: 600 },
+            { id: 2, model_profile: 'heavy', next_run: 2000, estimated_duration: 600 },
+        ];
+        expect(findHeavyConflicts(jobs).size).toBe(0);
+    });
+
+    it('flags both jobs when two heavy jobs overlap', () => {
+        const jobs = [
+            { id: 1, model_profile: 'heavy', next_run: 1000, estimated_duration: 600 },
+            { id: 2, model_profile: 'heavy', next_run: 1300, estimated_duration: 600 },
+        ];
+        const conflicts = findHeavyConflicts(jobs);
+        expect(conflicts.has(1)).toBe(true);
+        expect(conflicts.has(2)).toBe(true);
+    });
+
+    it('does not flag non-heavy overlapping jobs', () => {
+        const jobs = [
+            { id: 1, model_profile: 'ollama', next_run: 1000, estimated_duration: 600 },
+            { id: 2, model_profile: 'ollama', next_run: 1300, estimated_duration: 600 },
+        ];
+        expect(findHeavyConflicts(jobs).size).toBe(0);
+    });
+
+    it('does not flag heavy job that overlaps with non-heavy', () => {
+        const jobs = [
+            { id: 1, model_profile: 'heavy', next_run: 1000, estimated_duration: 600 },
+            { id: 2, model_profile: 'ollama', next_run: 1300, estimated_duration: 600 },
+        ];
+        expect(findHeavyConflicts(jobs).size).toBe(0);
+    });
+
+    it('handles exactly-touching jobs (end === start) as non-overlapping', () => {
+        const jobs = [
+            { id: 1, model_profile: 'heavy', next_run: 1000, estimated_duration: 600 },
+            { id: 2, model_profile: 'heavy', next_run: 1600, estimated_duration: 600 },
+        ];
+        // job 1 ends at 1600, job 2 starts at 1600 — strict < means no overlap
+        expect(findHeavyConflicts(jobs).size).toBe(0);
     });
 });
