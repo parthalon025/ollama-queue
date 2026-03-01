@@ -259,8 +259,20 @@ export default function ScheduleTab() {
                             background: rebalanceFlash === 'ok' ? 'var(--status-success)' : undefined,
                             transition: 'background 0.3s ease',
                         }}>
-                        {rebalancing ? '…' : rebalanceFlash === 'ok' ? '✓ Done' : 'Rebalance Now'}
+                        {rebalancing ? '…' : rebalanceFlash === 'ok' ? '✓ Done' : 'Spread run times'}
                     </button>
+                    <span
+                        title="Adjusts next-run times so jobs don't pile up in the same hour. Run once after adding or changing jobs. Does not change intervals or priorities."
+                        style={{
+                            fontFamily: 'var(--font-mono)',
+                            fontSize: 'var(--type-label)',
+                            color: 'var(--text-tertiary)',
+                            cursor: 'help',
+                            userSelect: 'none',
+                        }}
+                    >
+                        ⓘ
+                    </span>
                 </div>
             </div>
 
