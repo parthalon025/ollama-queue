@@ -1,7 +1,7 @@
 import { h } from 'preact';
 import {
     status, queue, history, healthData, durationData, settings,
-    dlqEntries, dlqCount, connectionStatus, currentTab,
+    dlqCount, connectionStatus, currentTab,
 } from '../store';
 import CurrentJob from '../components/CurrentJob.jsx';
 import QueueList from '../components/QueueList.jsx';
@@ -173,14 +173,6 @@ export default function Now() {
 }
 
 // ── Data helpers (copied verbatim from Dashboard.jsx) ────────────────────────
-
-function buildHealthSeries(rows, field) {
-    if (!rows || rows.length === 0) return [[], []];
-    const sorted = [...rows].reverse();
-    const ts = sorted.map((r) => r.timestamp);
-    const vals = sorted.map((r) => r[field] ?? null);
-    return [ts, vals];
-}
 
 function buildDurationSparkline(rows) {
     if (!rows || rows.length < 2) return null;
