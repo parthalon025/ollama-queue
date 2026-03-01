@@ -74,12 +74,14 @@ export default function Dashboard() {
           value={kpis ? kpis.jobs_24h : '--'}
           sparkData={buildHealthSparkline(health, 'ram_pct')}
           sparkColor="var(--accent)"
+          delta={kpis ? buildJobsDelta(kpis, hist) : null}
         />
         <HeroCard
           label="Avg Wait"
           value={kpis ? formatWaitReadable(kpis.avg_wait_seconds) : '--'}
           sparkData={buildDurationSparkline(durations)}
           sparkColor="var(--accent)"
+          delta={kpis ? buildWaitDelta(kpis.avg_wait_seconds) : null}
         />
         <HeroCard
           label="Pause Time"
@@ -88,6 +90,7 @@ export default function Dashboard() {
           warning={kpis && kpis.pause_minutes_24h > 30}
           sparkData={buildHealthSparkline(health, 'ram_pct')}
           sparkColor="var(--status-warning)"
+          delta={kpis ? buildPauseDelta(kpis.pause_minutes_24h) : null}
         />
         <HeroCard
           label="Success Rate"
@@ -102,28 +105,28 @@ export default function Dashboard() {
       <CollapsibleSection title="Resource Trends" defaultOpen={false} summary={health && health.length > 0 ? `${health.length} samples` : 'no data'}>
         {health && health.length > 0 ? (
           <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div class="t-frame" data-label="RAM %">
+            <div class="t-frame" data-label="RAM %" data-footer={buildRAMFooter(latestHealth)}>
               <TimeChart
                 data={buildHealthSeries(health, 'ram_pct')}
                 series={[{ label: 'RAM', color: 'var(--accent)', width: 1.5 }]}
                 height={100}
               />
             </div>
-            <div class="t-frame" data-label="VRAM %">
+            <div class="t-frame" data-label="VRAM %" data-footer={buildVRAMFooter(latestHealth)}>
               <TimeChart
                 data={buildHealthSeries(health, 'vram_pct')}
                 series={[{ label: 'VRAM', color: 'var(--status-warning)', width: 1.5 }]}
                 height={100}
               />
             </div>
-            <div class="t-frame" data-label="Load">
+            <div class="t-frame" data-label="Load" data-footer={buildLoadFooter(latestHealth)}>
               <TimeChart
                 data={buildHealthSeries(health, 'load_avg')}
                 series={[{ label: 'Load', color: 'var(--accent-purple)', width: 1.5 }]}
                 height={100}
               />
             </div>
-            <div class="t-frame" data-label="Swap %">
+            <div class="t-frame" data-label="Swap %" data-footer={buildSwapFooter(latestHealth)}>
               <TimeChart
                 data={buildHealthSeries(health, 'swap_pct')}
                 series={[{ label: 'Swap', color: '#a78bfa', width: 1.5 }]}
@@ -231,6 +234,68 @@ function buildDurationSparkline(rows) {
   if (!rows || rows.length < 2) return null;
   const sorted = [...rows].sort((a, b) => a.recorded_at - b.recorded_at).slice(-24);
   return [sorted.map((r) => r.recorded_at), sorted.map((r) => r.duration)];
+}
+
+/**
+ * Delta for Jobs / 24h card — how many failed today vs all successful.
+ */
+function buildJobsDelta(kpis, hist) {
+  if (!kpis || kpis.jobs_24h === 0) return 'no jobs in the last 24h';
+  const oneDayAgo = Date.now() / 1000 - 86400;
+  const todayFailed = (hist || []).filter(
+    (j) => (j.status === 'failed' || j.status === 'killed') && (j.completed_at ?? 0) >= oneDayAgo
+  ).length;
+  if (todayFailed === 0) return 'all completed successfully';
+  const s = todayFailed === 1 ? '' : 's';
+  return `${todayFailed} job${s} failed today`;
+}
+
+/**
+ * Delta for Avg Wait card — qualitative queue health.
+ */
+function buildWaitDelta(seconds) {
+  if (seconds === null || seconds <= 0) return 'no wait data yet';
+  if (seconds <= 30) return 'queue flowing smoothly';
+  if (seconds <= 120) return 'light wait — normal range';
+  if (seconds <= 300) return 'moderate backlog — check queue';
+  return 'heavy wait — jobs are stacking up';
+}
+
+/**
+ * Delta for Pause Time card — qualitative pause health.
+ */
+function buildPauseDelta(minutes) {
+  if (!minutes || minutes <= 0) return 'no pauses — running clean';
+  if (minutes <= 30) return 'some pauses — health thresholds triggered';
+  return 'frequent pauses — lower thresholds in Settings';
+}
+
+/**
+ * Footer labels for resource trend chart tiles.
+ */
+function buildRAMFooter(h) {
+  if (!h || h.ram_pct == null) return undefined;
+  const v = h.ram_pct;
+  const status = v < 70 ? 'healthy' : v < 90 ? 'elevated' : 'high — may pause';
+  return `now: ${Math.round(v)}% — ${status}`;
+}
+function buildVRAMFooter(h) {
+  if (!h || h.vram_pct == null) return undefined;
+  const v = h.vram_pct;
+  const status = v < 70 ? 'healthy' : v < 90 ? 'elevated' : 'high — may pause';
+  return `now: ${Math.round(v)}% — ${status}`;
+}
+function buildLoadFooter(h) {
+  if (!h || h.load_avg == null) return undefined;
+  const v = h.load_avg;
+  const status = v < 2 ? 'light' : v < 4 ? 'moderate' : 'high';
+  return `now: ${v.toFixed(1)} — ${status}`;
+}
+function buildSwapFooter(h) {
+  if (!h || h.swap_pct == null) return undefined;
+  const v = h.swap_pct;
+  const status = v < 5 ? 'minimal' : v < 25 ? 'in use' : 'heavy pressure';
+  return `now: ${Math.round(v)}% — ${status}`;
 }
 
 /**
