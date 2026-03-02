@@ -396,7 +396,7 @@ export default function Plan() {
                                                     borderLeft: `3px solid ${color}`,
                                                     position: 'sticky',
                                                     left: 0,
-                                                    background: 'var(--bg-panel)',
+                                                    background: 'var(--bg-surface-raised)',
                                                     zIndex: 1,
                                                 }}>
                                                     <span style={{ color: 'var(--text-primary)',

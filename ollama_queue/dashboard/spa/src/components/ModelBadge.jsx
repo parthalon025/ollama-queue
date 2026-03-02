@@ -1,14 +1,14 @@
 import { h } from 'preact';
 
 const PROFILE_COLORS = {
-    embed:  { bg: 'var(--status-ok)',      label: 'embed' },
+    embed:  { bg: 'var(--status-healthy)',      label: 'embed' },
     ollama: { bg: 'var(--accent)',         label: 'llm' },
     heavy:  { bg: 'var(--status-warning)', label: 'heavy' },
 };
 const TYPE_COLORS = {
     coding:    'var(--accent)',
     reasoning: 'var(--status-warning)',
-    embed:     'var(--status-ok)',
+    embed:     'var(--status-healthy)',
     general:   'var(--text-tertiary)',
 };
 

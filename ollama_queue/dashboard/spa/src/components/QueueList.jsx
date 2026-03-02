@@ -150,7 +150,7 @@ export default function QueueList({ jobs, currentJob }) {
                   'transition: opacity 0.1s, background 0.1s;',
                   !job._isRunning && dragIndex !== null && dragIdx === dragIndex ? 'opacity: 0.35;' : 'opacity: 1;',
                   !job._isRunning && dragIndex !== null && dropIdx === dragIndex && dragIdx !== dragIndex
-                    ? 'background: var(--surface-raised); border-radius: 4px;' : '',
+                    ? 'background: var(--bg-surface-raised); border-radius: 4px;' : '',
                 ].join(' ')}
               >
                 {/* Drag handle — hidden/greyed for running job */}

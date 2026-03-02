@@ -211,7 +211,7 @@ export default function ModelsTab() {
                                     </td>
                                     <td style={{ padding: '0.5rem 0.75rem' }}>
                                         {model.loaded
-                                            ? <span style={{ color: 'var(--status-ok)', fontFamily: 'var(--font-mono)',
+                                            ? <span style={{ color: 'var(--status-healthy)', fontFamily: 'var(--font-mono)',
                                                              fontSize: 'var(--type-label)' }}>● loaded</span>
                                             : <span style={{ color: 'var(--text-tertiary)', fontSize: 'var(--type-label)' }}>idle</span>}
                                     </td>
@@ -257,7 +257,7 @@ export default function ModelsTab() {
                                         {catalogModel.name}
                                     </span>
                                     {catalogModel.recommended && (
-                                        <span style={{ background: 'var(--status-ok)', color: 'var(--accent-text)',
+                                        <span style={{ background: 'var(--status-healthy)', color: 'var(--accent-text)',
                                                        fontSize: 'var(--type-label)', padding: '0.1rem 0.4rem',
                                                        borderRadius: 'var(--radius)', fontFamily: 'var(--font-mono)',
                                                        fontWeight: 700 }}>★ rec</span>
