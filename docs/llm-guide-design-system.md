@@ -136,7 +136,7 @@ Priority 9-10 (background): var(--text-tertiary)     deep muted at reduced opaci
 ```
 aria / aria-*:         var(--accent)        gold    -> target chroma: lune (analytical)
 telegram / telegram-*: #f97316              orange  -> target chroma: maelle (active interaction)
-notion / notion-*:     #a78bfa              purple  -> target chroma: sciel (data sync)
+notion / notion-*:     #a78bfa              purple  -> target chroma: lune (analytical/data processing)  # matches project-hub canonical assignment
 unknown/other:         var(--text-tertiary)  muted  -> target chroma: verso (outsider)
 ```
 
