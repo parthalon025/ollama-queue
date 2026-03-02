@@ -122,6 +122,20 @@ Route IDs: `now` | `plan` | `history` | `models` | `settings`. Sidebar: 200px de
 Full design: `~/Documents/docs/plans/2026-02-14-ollama-queue-scheduler-design.md`
 Implementation plan: `~/Documents/docs/plans/2026-02-14-ollama-queue-implementation.md`
 
+## Design System Usage
+
+**Full guide:** `docs/llm-guide-design-system.md` (~700 lines) — LLM reference for applying the design system to the queue dashboard.
+
+Pipeline: ui-template (base) → expedition33-ui (theme) → ollama-queue (consumer). Key mappings:
+- **Running job** → BattlePanel + StatBar progress (gustave/active)
+- **Queued job** → TurnSlot in TurnQueue (verso/waiting)
+- **Failed/DLQ** → HUDFrame + InkSplatter (maelle/dread)
+- **Priority** → GlyphBadge (critical=maelle, high=enemy, normal=gustave, low=verso)
+- **Resources** → StatBar (HP=RAM, AP=VRAM) with threshold markers
+- **Daemon state** → GlyphBadge (running=gustave/dawn, paused=sciel/nostalgic, offline=maelle/dread)
+- **Tabs:** Now=lumiere/dawn, Plan=continent/wonder, History=wasteland/dread, Models=continent/nostalgic
+- **Battle metaphor:** Job queued=unit enters turn queue, running=active turn, complete=victory, fail=unit falls
+
 ## Code Factory
 
 ## Scope Tags
