@@ -125,6 +125,38 @@ export async function runScheduleJobNow(id) {
     await fetchSchedule();
 }
 
+export async function batchToggleJobs(tag, enabled) {
+    const resp = await fetch(`${API}/schedule/batch-toggle`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tag, enabled }),
+    });
+    if (!resp.ok) throw new Error(`batch-toggle failed: ${resp.status}`);
+    await fetchSchedule();
+}
+
+export async function batchRunJobs(tag) {
+    const resp = await fetch(`${API}/schedule/batch-run`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tag }),
+    });
+    if (!resp.ok) throw new Error(`batch-run failed: ${resp.status}`);
+    await fetchSchedule();
+}
+
+export async function fetchJobRuns(rjId, limit = 5) {
+    const resp = await fetch(`${API}/schedule/${rjId}/runs?limit=${limit}`);
+    if (!resp.ok) throw new Error(`fetchJobRuns failed: ${resp.status}`);
+    return resp.json();
+}
+
+export async function deleteScheduleJob(rjId) {
+    const resp = await fetch(`${API}/schedule/${rjId}`, { method: 'DELETE' });
+    if (!resp.ok) throw new Error(`Delete failed: ${resp.status}`);
+    await fetchSchedule();
+}
+
 export async function fetchDLQ() {
     try {
         const resp = await fetch(`${API}/dlq`);

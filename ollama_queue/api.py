@@ -112,6 +112,7 @@ class RecurringJobUpdate(BaseModel):
     name: str | None = None
     model: str | None = None
     timeout: int | None = None
+    max_retries: int | None = None
     pinned: bool | None = None
 
 
@@ -371,6 +372,41 @@ def create_app(db: Database) -> FastAPI:
         slots = Scheduler(db).load_map()
         return {"slots": slots, "slot_minutes": 30, "count": len(slots)}
 
+    @app.post("/api/schedule/batch-toggle")
+    def batch_toggle_schedule(body: dict = Body(...)):
+        tag = body.get("tag")
+        enabled = body.get("enabled")
+        if not tag or enabled is None:
+            raise HTTPException(status_code=400, detail="tag and enabled are required")
+        jobs = db.list_recurring_jobs()
+        matched = [rj for rj in jobs if rj.get("tag") == tag]
+        for rj in matched:
+            db.update_recurring_job(rj["id"], enabled=bool(enabled))
+        return {"updated": len(matched)}
+
+    @app.post("/api/schedule/batch-run")
+    def batch_run_schedule(body: dict = Body(...)):
+        tag = body.get("tag")
+        if not tag:
+            raise HTTPException(status_code=400, detail="tag is required")
+        jobs = db.list_recurring_jobs()
+        matched = [rj for rj in jobs if rj.get("tag") == tag and rj.get("enabled")]
+        job_ids = []
+        for rj in matched:
+            job_id = db.submit_job(
+                command=rj["command"],
+                model=rj.get("model") or "",
+                priority=rj.get("priority", 5),
+                timeout=rj.get("timeout", 600),
+                source=rj["name"],
+                tag=rj.get("tag"),
+                recurring_job_id=rj["id"],
+                max_retries=rj.get("max_retries", 0),
+                resource_profile=rj.get("resource_profile", "ollama"),
+            )
+            job_ids.append(job_id)
+        return {"submitted": len(job_ids), "job_ids": job_ids}
+
     @app.post("/api/schedule")
     def add_schedule(body: RecurringJobCreate):
         from ollama_queue.scheduler import Scheduler
@@ -410,6 +446,20 @@ def create_app(db: Database) -> FastAPI:
             resource_profile=rj.get("resource_profile", "ollama"),
         )
         return {"job_id": job_id}
+
+    @app.get("/api/schedule/{rj_id}/runs")
+    def get_schedule_runs(rj_id: int, limit: int = 5):
+        conn = db._connect()
+        rows = conn.execute(
+            """SELECT id, status, started_at, completed_at,
+                      CASE WHEN started_at IS NOT NULL AND completed_at IS NOT NULL
+                           THEN completed_at - started_at ELSE NULL END as duration,
+                      exit_code
+               FROM jobs WHERE recurring_job_id = ?
+               ORDER BY id DESC LIMIT ?""",
+            (rj_id, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     @app.delete("/api/schedule/{rj_id}")
     def delete_schedule(rj_id: int):

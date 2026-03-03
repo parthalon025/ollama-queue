@@ -759,6 +759,7 @@ class Database:
             "enabled",
             "next_run",
             "pinned",
+            "max_retries",
         }
         updates = {k: v for k, v in fields.items() if k in allowed}
         if not updates:

@@ -147,6 +147,119 @@ class TestScheduleAPI:
         assert r.status_code == 200
 
 
+class TestBatchScheduleAPI:
+    """Tests for batch schedule endpoints."""
+
+    def _seed_jobs(self, client):
+        """Create a few recurring jobs with different tags."""
+        for name, tag, enabled in [
+            ("aria-full", "aria", True),
+            ("aria-intraday", "aria", True),
+            ("tg-brief", "telegram", True),
+            ("tg-capture", "telegram", False),
+        ]:
+            client.post(
+                "/api/schedule",
+                json={
+                    "name": name,
+                    "command": f"echo {name}",
+                    "interval_seconds": 3600,
+                    "tag": tag,
+                    "priority": 5,
+                },
+            )
+            if not enabled:
+                jobs = client.get("/api/schedule").json()
+                rj = next(j for j in jobs if j["name"] == name)
+                client.put(f"/api/schedule/{rj['id']}", json={"enabled": False})
+
+    def test_batch_toggle_disables_all(self, client):
+        self._seed_jobs(client)
+        resp = client.post("/api/schedule/batch-toggle", json={"tag": "aria", "enabled": False})
+        assert resp.status_code == 200
+        assert resp.json()["updated"] == 2
+        jobs = client.get("/api/schedule").json()
+        aria_jobs = [j for j in jobs if j["tag"] == "aria"]
+        assert all(j["enabled"] == 0 for j in aria_jobs)
+
+    def test_batch_toggle_enables_all(self, client):
+        self._seed_jobs(client)
+        resp = client.post("/api/schedule/batch-toggle", json={"tag": "telegram", "enabled": True})
+        assert resp.status_code == 200
+        assert resp.json()["updated"] == 2
+        jobs = client.get("/api/schedule").json()
+        tg_jobs = [j for j in jobs if j["tag"] == "telegram"]
+        assert all(j["enabled"] == 1 for j in tg_jobs)
+
+    def test_batch_toggle_missing_params(self, client):
+        resp = client.post("/api/schedule/batch-toggle", json={"tag": "aria"})
+        assert resp.status_code == 400
+
+    def test_batch_toggle_unknown_tag(self, client):
+        resp = client.post("/api/schedule/batch-toggle", json={"tag": "nonexistent", "enabled": True})
+        assert resp.status_code == 200
+        assert resp.json()["updated"] == 0
+
+    def test_batch_run_submits_enabled_only(self, client):
+        self._seed_jobs(client)
+        resp = client.post("/api/schedule/batch-run", json={"tag": "telegram"})
+        assert resp.status_code == 200
+        data = resp.json()
+        # Only tg-brief is enabled; tg-capture is disabled
+        assert data["submitted"] == 1
+        assert len(data["job_ids"]) == 1
+
+    def test_batch_run_all_enabled(self, client):
+        self._seed_jobs(client)
+        resp = client.post("/api/schedule/batch-run", json={"tag": "aria"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["submitted"] == 2
+        assert len(data["job_ids"]) == 2
+
+    def test_batch_run_missing_tag(self, client):
+        resp = client.post("/api/schedule/batch-run", json={})
+        assert resp.status_code == 400
+
+    def test_get_schedule_runs_empty(self, client):
+        client.post(
+            "/api/schedule",
+            json={"name": "test-job", "command": "echo hi", "interval_seconds": 3600},
+        )
+        jobs = client.get("/api/schedule").json()
+        rj_id = jobs[0]["id"]
+        resp = client.get(f"/api/schedule/{rj_id}/runs")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_get_schedule_runs_with_history(self, client):
+        client.post(
+            "/api/schedule",
+            json={"name": "test-job", "command": "echo hi", "interval_seconds": 3600, "tag": "test"},
+        )
+        jobs = client.get("/api/schedule").json()
+        rj_id = jobs[0]["id"]
+        # Submit and complete a job linked to this recurring job
+        client.post("/api/schedule/batch-run", json={"tag": "test"})
+        resp = client.get(f"/api/schedule/{rj_id}/runs?limit=5")
+        assert resp.status_code == 200
+        runs = resp.json()
+        assert len(runs) == 1
+        assert runs[0]["status"] == "pending"
+
+    def test_update_max_retries(self, client):
+        client.post(
+            "/api/schedule",
+            json={"name": "retry-job", "command": "echo hi", "interval_seconds": 3600},
+        )
+        jobs = client.get("/api/schedule").json()
+        rj_id = jobs[0]["id"]
+        resp = client.put(f"/api/schedule/{rj_id}", json={"max_retries": 3})
+        assert resp.status_code == 200
+        jobs = client.get("/api/schedule").json()
+        assert jobs[0]["max_retries"] == 3
+
+
 class TestDLQAPI:
     def test_list_dlq_empty(self, client):
         r = client.get("/api/dlq")
