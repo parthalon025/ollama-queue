@@ -119,7 +119,7 @@ function groupNextDue(groupJobs) {
 
 // --- Table layout ---
 
-const COLUMNS = ['Name', 'Model', 'VRAM', 'Schedule', 'Priority', 'Next Run', 'ETA', '\u2605', 'Enabled', ''];
+const COLUMNS = ['Name', 'Model', 'VRAM', 'Schedule', 'Priority', 'Next Run', 'ETA', 'Check', 'Runs', '\u2605', 'Enabled', ''];
 const COL_COUNT = COLUMNS.length;
 
 const STATUS_COLORS = {
@@ -532,6 +532,14 @@ export default function Plan() {
                 <td style={{ textAlign: 'center', fontFamily: 'var(--font-mono)',
                              fontSize: 'var(--type-label)', color: 'var(--text-tertiary)' }}>
                     {rj.estimated_duration ? `~${Math.round(rj.estimated_duration / 60)}m` : '\u2014'}
+                </td>
+                <td style={{ textAlign: 'center', fontSize: 'var(--type-label)',
+                             color: 'var(--status-success)' }}>
+                    {rj.check_command ? '\u2713' : ''}
+                </td>
+                <td style={{ textAlign: 'center', fontFamily: 'var(--font-mono)',
+                             fontSize: 'var(--type-label)', color: 'var(--text-secondary)' }}>
+                    {rj.max_runs != null ? `${rj.max_runs} left` : ''}
                 </td>
                 <td style={{ textAlign: 'center' }}>
                     <button
