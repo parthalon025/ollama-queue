@@ -47,3 +47,5 @@ logs/
 progress.txt
 .run-plan-state.json
 .worktrees/
+coverage/
+megalinter-reports/

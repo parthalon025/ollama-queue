@@ -92,6 +92,35 @@ ui-template (base)          -> CSS token system, component manifest, animation l
 
 ---
 
+## 1.5 Strategy Stack
+
+ollama-queue is an infrastructure operations tool. The user's core question: **"Are my AI jobs running?"** Every design decision serves confidence in the pipeline.
+
+### UX Strategies (Mission Plan)
+
+| Strategy | Priority | Application |
+|----------|----------|-------------|
+| **Outcome-Driven** | Primary | The outcome is "job submitted and completed reliably." Design backward: submit → confirm queued → monitor → see result. If it doesn't improve that path, cut it. |
+| **Friction Reduction** | Primary | Submit a job and forget about it. Minimal required fields. Smart defaults (priority=0, source="proxy", timeout=120). The daemon handles everything — the UI confirms it's working. |
+| **Trust & Predictability** | High | Daemon health visible at all times (sidebar chip). Resource gauges show system state. DLQ doesn't hide failures — it surfaces them with retry options. Predictable 5s polling cycle. |
+| **Context-Aware** | Medium | Mobile quick-check (is the daemon running? what's in queue?) vs desktop deep-ops (Gantt scheduling, model catalog, settings tuning). Bottom tab bar on mobile, full sidebar on desktop. |
+| **Anticipatory** | Medium | Smart scheduling suggests optimal times based on load map. Recurring jobs auto-promote. Stall detection catches stuck jobs before the user notices. |
+
+### UI Strategies (Weapon System)
+
+| Strategy | Priority | Application |
+|----------|----------|-------------|
+| **Clarity-First** | Primary | Now page: running job + queue = left column; health + KPIs = right column. One glance tells you everything. MonolithDisplay for queue depth. |
+| **Action-Oriented** | Primary | Strong submit flow. Clear daemon controls (pause/resume). DLQ retry is one click. Every screen answers "what can I do right now?" |
+| **Feedback-Rich** | High | 5s polling with visual refresh. Job state transitions animate. CanvasSaved on completion. CrossingOut → DLQ on failure. Resource gauges pulse at thresholds. |
+| **Gamified** | Low | Battle metaphor (job=unit, queue=turn order, completion=victory, failure=unit falls). Only where it genuinely aids mental model — the queue IS a turn-based system. |
+
+### Behavioral Target
+
+**What behavior are we engineering?** Fire-and-forget confidence. The user submits work, trusts the queue to serialize and schedule it, checks back occasionally to confirm health. The worst outcome is a silently stuck pipeline or lost jobs.
+
+---
+
 ## 2. Queue Concept -> Design System Component Mapping
 
 | Queue Concept | Design System Component | Chroma | Data Attributes |
