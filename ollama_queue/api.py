@@ -256,10 +256,21 @@ def create_app(db: Database) -> FastAPI:
 
     @app.post("/api/generate")
     async def proxy_generate(body: dict = Body(...)):
-        """Forward a generate request to Ollama, serializing through the queue."""
+        """Forward a generate request to Ollama, serializing through the queue.
+
+        Queue-specific fields (extracted from body, not forwarded to Ollama):
+          _priority: int (default 0) — job priority (lower = higher priority)
+          _source: str (default "proxy") — caller identifier for history/debugging
+          _timeout: int (default 120) — request timeout in seconds
+        """
         state = db.get_daemon_state()
         if state and state.get("state") == "paused_manual":
             raise HTTPException(status_code=503, detail="Queue is manually paused")
+
+        # Extract queue-specific fields before forwarding to Ollama
+        priority = body.pop("_priority", 0)
+        source = body.pop("_source", "proxy")
+        req_timeout = body.pop("_timeout", 120)
 
         body["stream"] = False  # MVP: no streaming
 
@@ -281,14 +292,14 @@ def create_app(db: Database) -> FastAPI:
         job_id = db.submit_job(
             command="proxy:/api/generate",
             model=model,
-            priority=0,
-            timeout=120,
-            source="proxy",
+            priority=priority,
+            timeout=req_timeout,
+            source=source,
         )
         db.start_job(job_id)
 
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as client:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(float(req_timeout))) as client:
                 resp = await client.post(f"{OLLAMA_URL}/api/generate", json=body)
                 result = resp.json()
 

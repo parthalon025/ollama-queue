@@ -244,3 +244,87 @@ def test_get_models_catalog(client):
     data = resp.json()
     assert "curated" in data
     assert len(data["curated"]) > 0
+
+
+class TestProxyPriority:
+    """Proxy /api/generate accepts _priority, _source, _timeout fields."""
+
+    def _mock_httpx_client(self, response_data):
+        from unittest.mock import AsyncMock, MagicMock
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = response_data
+
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        return mock_client
+
+    def test_priority_and_source_recorded_in_job(self, client):
+        from unittest.mock import patch
+
+        mock_client = self._mock_httpx_client({"response": "hello", "done": True})
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            resp = client.post(
+                "/api/generate",
+                json={
+                    "model": "test-model",
+                    "prompt": "hello",
+                    "_priority": 1,
+                    "_source": "eval-generate",
+                    "_timeout": 300,
+                },
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["response"] == "hello"
+
+        history = client.get("/api/history?limit=1").json()
+        assert len(history) >= 1
+        job = history[0]
+        assert job["priority"] == 1
+        assert job["source"] == "eval-generate"
+        assert job["timeout"] == 300
+
+    def test_defaults_without_queue_fields(self, client):
+        from unittest.mock import patch
+
+        mock_client = self._mock_httpx_client({"response": "ok", "done": True})
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            resp = client.post(
+                "/api/generate",
+                json={"model": "test-model", "prompt": "hello"},
+            )
+
+        assert resp.status_code == 200
+
+        history = client.get("/api/history?limit=1").json()
+        job = history[0]
+        assert job["priority"] == 0
+        assert job["source"] == "proxy"
+        assert job["timeout"] == 120
+
+    def test_queue_fields_not_forwarded_to_ollama(self, client):
+        from unittest.mock import patch
+
+        mock_client = self._mock_httpx_client({"response": "ok", "done": True})
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            client.post(
+                "/api/generate",
+                json={
+                    "model": "test-model",
+                    "prompt": "hello",
+                    "_priority": 1,
+                    "_source": "eval",
+                },
+            )
+
+        call_args = mock_client.post.call_args
+        forwarded_body = call_args.kwargs.get("json", call_args[1].get("json", {}))
+        assert "_priority" not in forwarded_body
+        assert "_source" not in forwarded_body
+        assert "_timeout" not in forwarded_body
