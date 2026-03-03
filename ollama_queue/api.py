@@ -100,6 +100,8 @@ class RecurringJobCreate(BaseModel):
     max_retries: int = 0
     resource_profile: str = "ollama"
     pinned: bool = False
+    check_command: str | None = None
+    max_runs: int | None = None
 
 
 class RecurringJobUpdate(BaseModel):
@@ -114,6 +116,8 @@ class RecurringJobUpdate(BaseModel):
     timeout: int | None = None
     max_retries: int | None = None
     pinned: bool | None = None
+    check_command: str | None = None
+    max_runs: int | None = None
 
 
 def create_app(db: Database) -> FastAPI:
@@ -427,6 +431,13 @@ def create_app(db: Database) -> FastAPI:
             Scheduler(db).rebalance()
         except Exception:
             _log.exception("rebalance after update_schedule failed")
+        return {"ok": True}
+
+    @app.post("/api/schedule/jobs/{name}/enable")
+    def enable_schedule_by_name(name: str):
+        """Re-enable a recurring job that was auto-disabled, clearing outcome_reason."""
+        if not db.set_recurring_job_enabled(name, True):
+            raise HTTPException(status_code=404, detail="Recurring job not found")
         return {"ok": True}
 
     @app.post("/api/schedule/{rj_id}/run-now")

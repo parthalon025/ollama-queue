@@ -441,3 +441,56 @@ class TestProxyPriority:
         assert "_priority" not in forwarded_body
         assert "_source" not in forwarded_body
         assert "_timeout" not in forwarded_body
+
+
+def test_add_recurring_job_with_check_command(client):
+    r = client.post(
+        "/api/schedule",
+        json={
+            "name": "check-job",
+            "command": "echo hi",
+            "interval_seconds": 3600,
+            "check_command": "exit 0",
+            "max_runs": 5,
+        },
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["check_command"] == "exit 0"
+    assert data["max_runs"] == 5
+
+
+def test_update_recurring_job_check_command(client):
+    client.post(
+        "/api/schedule",
+        json={
+            "name": "upd-job",
+            "command": "echo hi",
+            "interval_seconds": 3600,
+        },
+    )
+    r = client.put("/api/schedule/1", json={"check_command": "exit 1"})
+    assert r.status_code == 200
+
+
+def test_enable_endpoint_clears_disabled_job(client):
+    client.post(
+        "/api/schedule",
+        json={
+            "name": "disabled-job",
+            "command": "echo hi",
+            "interval_seconds": 3600,
+        },
+    )
+    client.put("/api/schedule/1", json={"enabled": False})
+    r = client.post("/api/schedule/jobs/disabled-job/enable")
+    assert r.status_code == 200
+    assert r.json()["ok"] is True
+    jobs = client.get("/api/schedule").json()
+    job = next(j for j in jobs if j["name"] == "disabled-job")
+    assert job["enabled"] == 1
+
+
+def test_enable_endpoint_not_found(client):
+    r = client.post("/api/schedule/jobs/nonexistent/enable")
+    assert r.status_code == 404
