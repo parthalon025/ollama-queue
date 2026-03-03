@@ -56,6 +56,27 @@ class Database:
                 self._conn.execute("PRAGMA foreign_keys=ON")
         return self._conn
 
+    def _add_column_if_missing(self, conn: sqlite3.Connection, table: str, col: str, defn: str) -> None:
+        """ALTER TABLE … ADD COLUMN, ignoring duplicate-column errors."""
+        try:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {defn}")
+            conn.commit()
+        except sqlite3.OperationalError as e:
+            if "duplicate column" in str(e).lower():
+                _log.debug("%s.%s already exists — skipping migration", table, col)
+            else:
+                raise
+
+    def _run_migrations(self, conn: sqlite3.Connection) -> None:
+        """Apply all incremental schema migrations (idempotent)."""
+        self._add_column_if_missing(conn, "recurring_jobs", "cron_expression", "TEXT")
+        self._add_column_if_missing(conn, "recurring_jobs", "pinned", "INTEGER DEFAULT 0")
+        self._add_column_if_missing(conn, "jobs", "pid", "INTEGER")
+        self._add_column_if_missing(conn, "jobs", "stall_signals", "TEXT")
+        self._add_column_if_missing(conn, "recurring_jobs", "check_command", "TEXT")
+        self._add_column_if_missing(conn, "recurring_jobs", "max_runs", "INTEGER")
+        self._add_column_if_missing(conn, "recurring_jobs", "outcome_reason", "TEXT")
+
     def initialize(self) -> None:
         """Create all tables and seed defaults."""
         conn = self._connect()
@@ -198,42 +219,7 @@ class Database:
             );
         """)
 
-        # Migrate pre-cron DBs that lack the cron_expression column
-        try:
-            conn.execute("ALTER TABLE recurring_jobs ADD COLUMN cron_expression TEXT")
-            conn.commit()
-        except sqlite3.OperationalError as e:
-            if "duplicate column" in str(e).lower():
-                _log.debug("cron_expression column already exists — skipping migration")
-            else:
-                raise
-
-        # Migrate DBs that lack the pinned column
-        try:
-            conn.execute("ALTER TABLE recurring_jobs ADD COLUMN pinned INTEGER DEFAULT 0")
-            conn.commit()
-        except sqlite3.OperationalError as e:
-            if "duplicate column" in str(e).lower():
-                _log.debug("pinned column already exists — skipping migration")
-            else:
-                raise
-
-        # Migrate: add pid column to jobs
-        try:
-            conn.execute("ALTER TABLE jobs ADD COLUMN pid INTEGER")
-            conn.commit()
-        except sqlite3.OperationalError as e:
-            if "duplicate column" in str(e).lower():
-                _log.debug("jobs.pid column already exists — skipping migration")
-            else:
-                raise
-
-        try:
-            conn.execute("ALTER TABLE jobs ADD COLUMN stall_signals TEXT")
-            conn.commit()
-        except sqlite3.OperationalError as e:
-            if "duplicate column" not in str(e).lower():
-                raise
+        self._run_migrations(conn)
 
         # Seed settings defaults
         now = time.time()
@@ -627,6 +613,8 @@ class Database:
         max_retries: int = 0,
         next_run: float | None = None,
         pinned: bool = False,
+        check_command: str | None = None,
+        max_runs: int | None = None,
     ) -> int:
         if interval_seconds is None and cron_expression is None:
             raise ValueError("Either interval_seconds or cron_expression must be provided")
@@ -644,8 +632,9 @@ class Database:
         cur = conn.execute(
             """INSERT INTO recurring_jobs
                (name, command, model, priority, timeout, source, tag,
-                resource_profile, interval_seconds, cron_expression, next_run, max_retries, pinned, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                resource_profile, interval_seconds, cron_expression, next_run,
+                max_retries, pinned, check_command, max_runs, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 name,
                 command,
@@ -660,6 +649,8 @@ class Database:
                 next_run,
                 max_retries,
                 1 if pinned else 0,
+                check_command,
+                max_runs,
                 now,
             ),
         )
@@ -721,12 +712,28 @@ class Database:
     def set_recurring_job_enabled(self, name: str, enabled: bool) -> bool:
         with self._lock:
             conn = self._connect()
-            cur = conn.execute(
-                "UPDATE recurring_jobs SET enabled = ? WHERE name = ?",
-                (1 if enabled else 0, name),
-            )
+            if enabled:
+                cur = conn.execute(
+                    "UPDATE recurring_jobs SET enabled = 1, outcome_reason = NULL WHERE name = ?",
+                    (name,),
+                )
+            else:
+                cur = conn.execute(
+                    "UPDATE recurring_jobs SET enabled = 0 WHERE name = ?",
+                    (name,),
+                )
             conn.commit()
             return cur.rowcount > 0
+
+    def disable_recurring_job(self, rj_id: int, reason: str) -> None:
+        """Auto-disable a recurring job and record the reason."""
+        with self._lock:
+            conn = self._connect()
+            conn.execute(
+                "UPDATE recurring_jobs SET enabled = 0, outcome_reason = ? WHERE id = ?",
+                (reason, rj_id),
+            )
+            conn.commit()
 
     def delete_recurring_job(self, name: str) -> bool:
         conn = self._connect()
@@ -760,6 +767,9 @@ class Database:
             "next_run",
             "pinned",
             "max_retries",
+            "check_command",
+            "max_runs",
+            "outcome_reason",
         }
         updates = {k: v for k, v in fields.items() if k in allowed}
         if not updates:
