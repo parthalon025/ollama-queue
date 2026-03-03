@@ -79,8 +79,9 @@ class Database:
 
     def initialize(self) -> None:
         """Create all tables and seed defaults."""
-        conn = self._connect()
-        conn.executescript("""
+        with self._lock:
+            conn = self._connect()
+            conn.executescript("""
             CREATE TABLE IF NOT EXISTS jobs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 command TEXT NOT NULL,
@@ -219,20 +220,20 @@ class Database:
             );
         """)
 
-        self._run_migrations(conn)
+            self._run_migrations(conn)
 
-        # Seed settings defaults
-        now = time.time()
-        for key, value in DEFAULTS.items():
-            conn.execute(
-                "INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES (?, ?, ?)",
-                (key, json.dumps(value), now),
-            )
+            # Seed settings defaults
+            now = time.time()
+            for key, value in DEFAULTS.items():
+                conn.execute(
+                    "INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES (?, ?, ?)",
+                    (key, json.dumps(value), now),
+                )
 
-        # Seed daemon_state singleton
-        conn.execute("INSERT OR IGNORE INTO daemon_state (id, state) VALUES (1, 'idle')")
+            # Seed daemon_state singleton
+            conn.execute("INSERT OR IGNORE INTO daemon_state (id, state) VALUES (1, 'idle')")
 
-        conn.commit()
+            conn.commit()
 
     # --- Jobs ---
 
@@ -618,43 +619,44 @@ class Database:
     ) -> int:
         if interval_seconds is None and cron_expression is None:
             raise ValueError("Either interval_seconds or cron_expression must be provided")
-        conn = self._connect()
-        now = time.time()
-        if next_run is None and cron_expression:
-            import datetime
+        with self._lock:
+            conn = self._connect()
+            now = time.time()
+            if next_run is None and cron_expression:
+                import datetime
 
-            from croniter import croniter
+                from croniter import croniter
 
-            start_dt = datetime.datetime.fromtimestamp(now)
-            next_run = croniter(cron_expression, start_dt).get_next(datetime.datetime).timestamp()
-        elif next_run is None:
-            next_run = now
-        cur = conn.execute(
-            """INSERT INTO recurring_jobs
-               (name, command, model, priority, timeout, source, tag,
-                resource_profile, interval_seconds, cron_expression, next_run,
-                max_retries, pinned, check_command, max_runs, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                name,
-                command,
-                model,
-                priority,
-                timeout,
-                source,
-                tag,
-                resource_profile,
-                interval_seconds,
-                cron_expression,
-                next_run,
-                max_retries,
-                1 if pinned else 0,
-                check_command,
-                max_runs,
-                now,
-            ),
-        )
-        conn.commit()
+                start_dt = datetime.datetime.fromtimestamp(now)
+                next_run = croniter(cron_expression, start_dt).get_next(datetime.datetime).timestamp()
+            elif next_run is None:
+                next_run = now
+            cur = conn.execute(
+                """INSERT INTO recurring_jobs
+                   (name, command, model, priority, timeout, source, tag,
+                    resource_profile, interval_seconds, cron_expression, next_run,
+                    max_retries, pinned, check_command, max_runs, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    name,
+                    command,
+                    model,
+                    priority,
+                    timeout,
+                    source,
+                    tag,
+                    resource_profile,
+                    interval_seconds,
+                    cron_expression,
+                    next_run,
+                    max_retries,
+                    1 if pinned else 0,
+                    check_command,
+                    max_runs,
+                    now,
+                ),
+            )
+            conn.commit()
         assert cur.lastrowid is not None
         return cur.lastrowid
 
