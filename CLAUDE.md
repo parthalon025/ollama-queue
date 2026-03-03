@@ -130,6 +130,8 @@ Implementation plan: `~/Documents/docs/plans/2026-02-14-ollama-queue-implementat
 
 **Full guide:** `docs/llm-guide-design-system.md` (~700 lines) — LLM reference for applying the design system to the queue dashboard.
 
+**Before building any UI:** Read `docs/llm-guide-design-system.md`. Follow §1.5 Strategy Stack (Outcome-Driven + Friction Reduction + Trust & Predictability + Action-Oriented + Feedback-Rich). Behavioral target: fire-and-forget confidence.
+
 Pipeline: ui-template (base) → expedition33-ui (theme) → ollama-queue (consumer). Key mappings:
 - **Running job** → BattlePanel + StatBar progress (gustave/active)
 - **Queued job** → TurnSlot in TurnQueue (verso/waiting)
