@@ -25,12 +25,12 @@ scripts/
   migrate_timers.py            # Migrate 8 of 10 systemd timers to recurring jobs (--dry-run / --execute)
   migrate_dlq_max_retries.py   # Add max_retries column to existing dlq table (idempotent)
 tests/
-  test_db.py          # 50 tests
+  test_db.py          # 56 tests
   test_api.py         # 46 tests (incl. proxy priority, batch schedule)
   test_scheduler.py   # 26 tests
   test_stall.py       # 24 tests
-  test_daemon.py      # 24 tests
-  test_cli.py         # 24 tests
+  test_daemon.py      # 34 tests
+  test_cli.py         # 27 tests
   test_health.py      # 18 tests
   test_models.py      # 13 tests
   test_proxy.py       # 8 tests
@@ -45,7 +45,7 @@ tests/
 cd ~/Documents/projects/ollama-queue
 source .venv/bin/activate
 
-# Run tests (239 total)
+# Run tests (262 total)
 pytest
 
 # Start the server (daemon + API + dashboard)
