@@ -674,6 +674,13 @@ class Daemon:
                 rj_id,
             )
             return "proceed"
+        except Exception:
+            _log.warning(
+                "check_command failed with exception for recurring job id=%d — proceeding (fail-open)",
+                rj_id,
+                exc_info=True,
+            )
+            return "proceed"
 
         if code == 0:
             return "proceed"
