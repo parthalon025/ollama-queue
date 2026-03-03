@@ -441,6 +441,8 @@ def test_schedule_edit_priority(tmp_path):
 
 def test_schedule_add_check_command(tmp_path):
     """schedule add accepts --check-command and --max-runs flags."""
+    from ollama_queue.db import Database
+
     db_path = str(tmp_path / "q.db")
     runner = CliRunner()
     result = runner.invoke(
@@ -464,10 +466,17 @@ def test_schedule_add_check_command(tmp_path):
     )
     assert result.exit_code == 0, result.output
     assert "cc-test" in result.output
+    db = Database(db_path)
+    job = db.get_recurring_job_by_name("cc-test")
+    assert job is not None, "Job 'cc-test' not found in DB"
+    assert job["check_command"] == "exit 0"
+    assert job["max_runs"] == 10
 
 
 def test_schedule_edit_check_command(tmp_path):
     """schedule edit accepts --check-command flag."""
+    from ollama_queue.db import Database
+
     db_path = str(tmp_path / "q.db")
     runner = CliRunner()
     runner.invoke(
@@ -498,6 +507,10 @@ def test_schedule_edit_check_command(tmp_path):
         ],
     )
     assert result.exit_code == 0, result.output
+    db = Database(db_path)
+    job = db.get_recurring_job_by_name("edit-test")
+    assert job is not None, "Job 'edit-test' not found in DB"
+    assert job["check_command"] == "exit 1"
 
 
 def test_schedule_enable_clears_outcome_reason(tmp_path):

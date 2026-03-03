@@ -442,9 +442,11 @@ def schedule_edit(ctx, name, priority, interval, new_command, pin, check_command
         click.echo("Nothing to update — specify at least one option.")
         return
     db.update_recurring_job(rj["id"], **fields)
-    from ollama_queue.scheduler import Scheduler
+    schedule_fields = {"priority", "interval_seconds", "pinned"}
+    if fields.keys() & schedule_fields:
+        from ollama_queue.scheduler import Scheduler
 
-    Scheduler(db).rebalance()
+        Scheduler(db).rebalance()
     click.echo(f"Updated '{name}': {', '.join(f'{k}={v}' for k, v in fields.items())}")
 
 
