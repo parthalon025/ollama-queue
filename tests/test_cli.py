@@ -437,3 +437,104 @@ def test_schedule_edit_priority(tmp_path):
     # Verify in list
     list_result = runner.invoke(main, ["--db", db_path, "schedule", "list"])
     assert "myjob" in list_result.output
+
+
+def test_schedule_add_check_command(tmp_path):
+    """schedule add accepts --check-command and --max-runs flags."""
+    from ollama_queue.db import Database
+
+    db_path = str(tmp_path / "q.db")
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        [
+            "--db",
+            db_path,
+            "schedule",
+            "add",
+            "--name",
+            "cc-test",
+            "--interval",
+            "1h",
+            "--check-command",
+            "exit 0",
+            "--max-runs",
+            "10",
+            "echo",
+            "hello",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "cc-test" in result.output
+    db = Database(db_path)
+    job = db.get_recurring_job_by_name("cc-test")
+    assert job is not None, "Job 'cc-test' not found in DB"
+    assert job["check_command"] == "exit 0"
+    assert job["max_runs"] == 10
+
+
+def test_schedule_edit_check_command(tmp_path):
+    """schedule edit accepts --check-command flag."""
+    from ollama_queue.db import Database
+
+    db_path = str(tmp_path / "q.db")
+    runner = CliRunner()
+    runner.invoke(
+        main,
+        [
+            "--db",
+            db_path,
+            "schedule",
+            "add",
+            "--name",
+            "edit-test",
+            "--interval",
+            "1h",
+            "echo",
+            "hi",
+        ],
+    )
+    result = runner.invoke(
+        main,
+        [
+            "--db",
+            db_path,
+            "schedule",
+            "edit",
+            "edit-test",
+            "--check-command",
+            "exit 1",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    db = Database(db_path)
+    job = db.get_recurring_job_by_name("edit-test")
+    assert job is not None, "Job 'edit-test' not found in DB"
+    assert job["check_command"] == "exit 1"
+
+
+def test_schedule_enable_clears_outcome_reason(tmp_path):
+    """schedule enable clears outcome_reason after auto-disable."""
+    from ollama_queue.db import Database
+
+    db_path = str(tmp_path / "q.db")
+    db = Database(db_path)
+    db.initialize()
+    rj_id = db.add_recurring_job(name="re-enable-test", command="echo hi", interval_seconds=3600)
+    db.disable_recurring_job(rj_id, "max_runs exhausted")
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        [
+            "--db",
+            db_path,
+            "schedule",
+            "enable",
+            "re-enable-test",
+        ],
+    )
+    assert result.exit_code == 0
+    rj = db.get_recurring_job(rj_id)
+    assert rj["enabled"] == 1
+    assert rj["outcome_reason"] is None

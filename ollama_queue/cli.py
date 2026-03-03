@@ -289,6 +289,13 @@ def schedule():
 @click.option("--max-retries", default=0, type=int)
 @click.option("--profile", default="ollama", help="Resource profile: ollama|any")
 @click.option("--pin", is_flag=True, default=False, help="Pin this job's time slot (cron jobs only)")
+@click.option(
+    "--check-command",
+    "check_command",
+    default=None,
+    help="Shell command to run before job; exit 0=run, 1=skip, 2=disable",
+)
+@click.option("--max-runs", "max_runs", default=None, type=int, help="Auto-disable after N successful completions")
 @click.argument("command", nargs=-1, required=True)
 @click.pass_context
 def schedule_add(
@@ -306,6 +313,8 @@ def schedule_add(
     max_retries,
     profile,
     pin,
+    check_command,
+    max_runs,
     command,
 ):
     db = ctx.obj["db"]
@@ -327,6 +336,8 @@ def schedule_add(
         resource_profile=profile,
         max_retries=max_retries,
         pinned=pin,
+        check_command=check_command,
+        max_runs=max_runs,
     )
     if interval_seconds is not None:
         Scheduler(db).rebalance()
@@ -404,8 +415,10 @@ def schedule_suggest(ctx, priority, top):
 @click.option("--interval", default=None, help="New interval: 6h, 30m, etc.")
 @click.option("--command", "new_command", default=None, help="New command string")
 @click.option("--pin/--no-pin", default=None, help="Pin or unpin this job's time slot")
+@click.option("--check-command", "check_command", default=None, help="New check_command (empty string to clear)")
+@click.option("--max-runs", "max_runs", default=None, type=int, help="New max_runs countdown")
 @click.pass_context
-def schedule_edit(ctx, name, priority, interval, new_command, pin):
+def schedule_edit(ctx, name, priority, interval, new_command, pin, check_command, max_runs):
     """Edit a recurring job's fields."""
     db = ctx.obj["db"]
     rj = db.get_recurring_job_by_name(name)
@@ -421,13 +434,19 @@ def schedule_edit(ctx, name, priority, interval, new_command, pin):
         fields["command"] = new_command
     if pin is not None:
         fields["pinned"] = 1 if pin else 0
+    if check_command is not None:
+        fields["check_command"] = check_command if check_command else None
+    if max_runs is not None:
+        fields["max_runs"] = max_runs
     if not fields:
         click.echo("Nothing to update — specify at least one option.")
         return
     db.update_recurring_job(rj["id"], **fields)
-    from ollama_queue.scheduler import Scheduler
+    schedule_fields = {"priority", "interval_seconds", "pinned"}
+    if fields.keys() & schedule_fields:
+        from ollama_queue.scheduler import Scheduler
 
-    Scheduler(db).rebalance()
+        Scheduler(db).rebalance()
     click.echo(f"Updated '{name}': {', '.join(f'{k}={v}' for k, v in fields.items())}")
 
 

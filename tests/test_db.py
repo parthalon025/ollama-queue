@@ -464,3 +464,53 @@ def test_new_stall_settings_have_defaults(db):
     assert settings["stall_posterior_threshold"] == pytest.approx(0.8)
     assert settings["stall_action"] == "log"
     assert settings["stall_kill_grace_seconds"] == pytest.approx(60)
+
+
+def test_add_recurring_job_with_check_command(db):
+    rj_id = db.add_recurring_job(
+        name="test-check",
+        command="echo hi",
+        interval_seconds=3600,
+        check_command="exit 0",
+        max_runs=5,
+    )
+    rj = db.get_recurring_job(rj_id)
+    assert rj["check_command"] == "exit 0"
+    assert rj["max_runs"] == 5
+
+
+def test_add_recurring_job_without_check_command(db):
+    rj_id = db.add_recurring_job(name="no-check", command="echo hi", interval_seconds=3600)
+    rj = db.get_recurring_job(rj_id)
+    assert rj["check_command"] is None
+    assert rj["max_runs"] is None
+
+
+def test_disable_recurring_job_with_reason(db):
+    rj_id = db.add_recurring_job(name="test-disable", command="echo hi", interval_seconds=3600)
+    db.disable_recurring_job(rj_id, "check_command signaled complete")
+    rj = db.get_recurring_job(rj_id)
+    assert rj["enabled"] == 0
+    assert rj["outcome_reason"] == "check_command signaled complete"
+
+
+def test_enable_recurring_job_clears_reason(db):
+    rj_id = db.add_recurring_job(name="re-enable", command="echo hi", interval_seconds=3600)
+    db.disable_recurring_job(rj_id, "max_runs exhausted")
+    db.set_recurring_job_enabled("re-enable", True)
+    rj = db.get_recurring_job(rj_id)
+    assert rj["enabled"] == 1
+    assert rj["outcome_reason"] is None
+
+
+def test_update_recurring_job_max_runs(db):
+    rj_id = db.add_recurring_job(name="update-test", command="echo hi", interval_seconds=3600, max_runs=10)
+    db.update_recurring_job(rj_id, max_runs=9)
+    rj = db.get_recurring_job(rj_id)
+    assert rj["max_runs"] == 9
+
+
+def test_recurring_job_schema_has_outcome_reason(db):
+    rj_id = db.add_recurring_job(name="schema-test", command="echo hi", interval_seconds=3600)
+    rj = db.get_recurring_job(rj_id)
+    assert "outcome_reason" in rj
