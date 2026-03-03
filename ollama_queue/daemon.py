@@ -7,6 +7,7 @@ import logging
 import os
 import signal as _signal
 import subprocess
+import subprocess as _subprocess  # real module — not replaced by test mocks targeting 'subprocess'
 import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -152,7 +153,7 @@ class Daemon:
     def _free_vram_mb(self) -> float | None:
         """Free VRAM in MB from nvidia-smi, or None if unavailable."""
         try:
-            result = subprocess.run(
+            result = _subprocess.run(
                 ["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
                 capture_output=True,
                 text=True,
@@ -431,6 +432,14 @@ class Daemon:
         """Execute a job in a worker thread. Records result in DB."""
         start_time = time.time()
 
+        # Pre-flight check_command: gate job on external signal
+        if job.get("recurring_job_id"):
+            _rj = self.db.get_recurring_job(job["recurring_job_id"])
+            if _rj and _rj.get("check_command"):
+                _check_result = self._run_check_command(job, _rj)
+                if _check_result in ("skip", "disable"):
+                    return
+
         # Sample VRAM before job for observed-VRAM recording
         vram_before = self._free_vram_mb()
 
@@ -640,6 +649,76 @@ class Daemon:
                 (now,),
             )
             conn.commit()
+
+    def _run_check_command(self, job: dict, recurring_job: dict) -> str:
+        """Run check_command for a recurring job before the main command.
+
+        Returns:
+            'proceed'  — exit 0 or fail-open: run main job
+            'skip'     — exit 1: advance next_run, complete job as skipped
+            'disable'  — exit 2: auto-disable recurring job, complete job
+        """
+        check_cmd = recurring_job["check_command"]
+        rj_id = recurring_job["id"]
+        try:
+            result = subprocess.run(
+                check_cmd,
+                shell=True,
+                capture_output=True,
+                timeout=30,
+            )
+            code = result.returncode
+        except _TimeoutExpired:
+            _log.warning(
+                "check_command timed out for recurring job id=%d — proceeding (fail-open)",
+                rj_id,
+            )
+            return "proceed"
+
+        if code == 0:
+            return "proceed"
+        elif code == 1:
+            _log.info(
+                "check_command exit 1 for recurring job id=%d (%s) — no work, skipping",
+                rj_id,
+                recurring_job.get("name", ""),
+            )
+            with self.db._lock:
+                self.db.complete_job(
+                    job["id"],
+                    exit_code=0,
+                    stdout_tail="",
+                    stderr_tail="",
+                    outcome_reason="check_command: no work (skipped)",
+                )
+            try:
+                self.scheduler.update_next_run(rj_id, completed_at=time.time(), job_id=job["id"])
+            except Exception:
+                _log.exception("Failed to advance next_run for recurring job id=%d after skip", rj_id)
+            return "skip"
+        elif code == 2:
+            _log.info(
+                "check_command exit 2 for recurring job id=%d (%s) — permanently done, auto-disabling",
+                rj_id,
+                recurring_job.get("name", ""),
+            )
+            self.db.disable_recurring_job(rj_id, "check_command signaled complete")
+            with self.db._lock:
+                self.db.complete_job(
+                    job["id"],
+                    exit_code=0,
+                    stdout_tail="",
+                    stderr_tail="",
+                    outcome_reason="check_command: permanently done (auto-disabled)",
+                )
+            return "disable"
+        else:
+            _log.warning(
+                "check_command returned unknown exit code %d for recurring job id=%d — " "proceeding (fail-open)",
+                code,
+                rj_id,
+            )
+            return "proceed"
 
     def run(self, poll_interval: int | None = None) -> None:
         """Main loop: poll_once() every N seconds. Prunes old data daily."""

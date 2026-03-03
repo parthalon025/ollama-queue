@@ -628,3 +628,139 @@ def test_stall_no_kill_within_grace(daemon):
         daemon._check_stalled_jobs(time.time())
 
     mock_kill.assert_not_called()
+
+
+# --- check_command pre-flight gate ---
+
+import subprocess as _subprocess_mod
+
+
+def _make_recurring_and_job(db, check_command=None, max_runs=None):
+    """Helper: create recurring job + pending queue job linked to it."""
+    rj_id = db.add_recurring_job(
+        name="check-test",
+        command="echo main",
+        interval_seconds=3600,
+        check_command=check_command,
+        max_runs=max_runs,
+    )
+    job_id = db.submit_job(
+        command="echo main",
+        model=None,
+        priority=5,
+        timeout=60,
+        source="check-test",
+        resource_profile="ollama",
+        recurring_job_id=rj_id,
+    )
+    db.start_job(job_id)
+    return rj_id, job_id
+
+
+def test_check_command_exit0_proceeds(daemon):
+    """check_command exit 0 → main job runs normally."""
+    rj_id, job_id = _make_recurring_and_job(daemon.db, check_command="exit 0")
+    job = daemon.db.get_job(job_id)
+
+    with patch("ollama_queue.daemon.subprocess") as mock_sub:
+        proc = MagicMock()
+        proc.pid = 9999
+        proc.returncode = 0
+        mock_sub.Popen.return_value = proc
+        mock_sub.run.return_value = MagicMock(returncode=0)
+        with patch("ollama_queue.daemon._drain_pipes_with_tracking", return_value=(b"ok", b"")):
+            daemon._run_job(job)
+
+    mock_sub.run.assert_called_once()
+    mock_sub.Popen.assert_called_once()
+    completed = daemon.db.get_job(job_id)
+    assert completed["status"] == "completed"
+
+
+def test_check_command_exit1_skips(daemon):
+    """check_command exit 1 → job skipped, next_run advanced, no Popen."""
+    rj_id, job_id = _make_recurring_and_job(daemon.db, check_command="exit 1")
+    job = daemon.db.get_job(job_id)
+
+    with patch("ollama_queue.daemon.subprocess") as mock_sub:
+        mock_sub.run.return_value = MagicMock(returncode=1)
+        daemon._run_job(job)
+
+    mock_sub.Popen.assert_not_called()
+    completed = daemon.db.get_job(job_id)
+    assert completed["status"] == "completed"
+    assert "skip" in (completed["outcome_reason"] or "").lower()
+    rj = daemon.db.get_recurring_job(rj_id)
+    assert rj["next_run"] > time.time() - 1
+
+
+def test_check_command_exit2_disables(daemon):
+    """check_command exit 2 → recurring job auto-disabled, no Popen."""
+    rj_id, job_id = _make_recurring_and_job(daemon.db, check_command="exit 2")
+    job = daemon.db.get_job(job_id)
+
+    with patch("ollama_queue.daemon.subprocess") as mock_sub:
+        mock_sub.run.return_value = MagicMock(returncode=2)
+        daemon._run_job(job)
+
+    mock_sub.Popen.assert_not_called()
+    rj = daemon.db.get_recurring_job(rj_id)
+    assert rj["enabled"] == 0
+    assert "check_command" in (rj["outcome_reason"] or "").lower()
+    completed = daemon.db.get_job(job_id)
+    assert completed["status"] == "completed"
+
+
+def test_check_command_unknown_exit_failopen(daemon):
+    """check_command exit 99 → warning logged, main job proceeds (fail-open)."""
+    rj_id, job_id = _make_recurring_and_job(daemon.db, check_command="exit 99")
+    job = daemon.db.get_job(job_id)
+
+    with patch("ollama_queue.daemon.subprocess") as mock_sub:
+        proc = MagicMock()
+        proc.pid = 9999
+        proc.returncode = 0
+        mock_sub.Popen.return_value = proc
+        mock_sub.run.return_value = MagicMock(returncode=99)
+        with patch("ollama_queue.daemon._drain_pipes_with_tracking", return_value=(b"ok", b"")):
+            daemon._run_job(job)
+
+    mock_sub.Popen.assert_called_once()
+    completed = daemon.db.get_job(job_id)
+    assert completed["status"] == "completed"
+
+
+def test_check_command_timeout_failopen(daemon):
+    """check_command TimeoutExpired → warning logged, main job proceeds."""
+    rj_id, job_id = _make_recurring_and_job(daemon.db, check_command="sleep 999")
+    job = daemon.db.get_job(job_id)
+
+    with patch("ollama_queue.daemon.subprocess") as mock_sub:
+        proc = MagicMock()
+        proc.pid = 9999
+        proc.returncode = 0
+        mock_sub.run.side_effect = _subprocess_mod.TimeoutExpired("sleep 999", 30)
+        mock_sub.Popen.return_value = proc
+        with patch("ollama_queue.daemon._drain_pipes_with_tracking", return_value=(b"ok", b"")):
+            daemon._run_job(job)
+
+    mock_sub.Popen.assert_called_once()
+    completed = daemon.db.get_job(job_id)
+    assert completed["status"] == "completed"
+
+
+def test_no_check_command_skips_check(daemon):
+    """Job with no check_command skips check, runs normally."""
+    rj_id, job_id = _make_recurring_and_job(daemon.db, check_command=None)
+    job = daemon.db.get_job(job_id)
+
+    with patch("ollama_queue.daemon.subprocess") as mock_sub:
+        proc = MagicMock()
+        proc.pid = 9999
+        proc.returncode = 0
+        mock_sub.Popen.return_value = proc
+        with patch("ollama_queue.daemon._drain_pipes_with_tracking", return_value=(b"ok", b"")):
+            daemon._run_job(job)
+
+    mock_sub.run.assert_not_called()
+    mock_sub.Popen.assert_called_once()
