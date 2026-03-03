@@ -16,6 +16,14 @@ def client(tmp_path):
     return TestClient(app)
 
 
+@pytest.fixture
+def client_and_db(tmp_path):
+    db = Database(str(tmp_path / "test.db"))
+    db.initialize()
+    app = create_app(db)
+    return TestClient(app), db
+
+
 def test_get_status(client):
     resp = client.get("/api/status")
     assert resp.status_code == 200
@@ -461,19 +469,15 @@ def test_add_recurring_job_with_check_command(client):
 
 
 def test_update_recurring_job_check_command(client):
-    client.post(
-        "/api/schedule",
-        json={
-            "name": "upd-job",
-            "command": "echo hi",
-            "interval_seconds": 3600,
-        },
-    )
+    client.post("/api/schedule", json={"name": "upd-job", "command": "echo hi", "interval_seconds": 3600})
     r = client.put("/api/schedule/1", json={"check_command": "exit 1"})
     assert r.status_code == 200
+    jobs = client.get("/api/schedule").json()
+    assert jobs[0]["check_command"] == "exit 1"
 
 
-def test_enable_endpoint_clears_disabled_job(client):
+def test_enable_endpoint_clears_disabled_job(client_and_db):
+    client, db = client_and_db
     client.post(
         "/api/schedule",
         json={
@@ -482,13 +486,15 @@ def test_enable_endpoint_clears_disabled_job(client):
             "interval_seconds": 3600,
         },
     )
-    client.put("/api/schedule/1", json={"enabled": False})
+    # Disable and set outcome_reason directly via DB (the PUT endpoint does not expose outcome_reason)
+    db.disable_recurring_job(1, "max_runs exhausted")
     r = client.post("/api/schedule/jobs/disabled-job/enable")
     assert r.status_code == 200
     assert r.json()["ok"] is True
     jobs = client.get("/api/schedule").json()
     job = next(j for j in jobs if j["name"] == "disabled-job")
     assert job["enabled"] == 1
+    assert job["outcome_reason"] is None
 
 
 def test_enable_endpoint_not_found(client):

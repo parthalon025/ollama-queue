@@ -26,7 +26,7 @@ scripts/
   migrate_dlq_max_retries.py   # Add max_retries column to existing dlq table (idempotent)
 tests/
   test_db.py          # 50 tests
-  test_api.py         # 42 tests (incl. proxy priority, batch schedule)
+  test_api.py         # 46 tests (incl. proxy priority, batch schedule)
   test_scheduler.py   # 26 tests
   test_stall.py       # 24 tests
   test_daemon.py      # 24 tests
