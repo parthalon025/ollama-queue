@@ -764,3 +764,72 @@ def test_no_check_command_skips_check(daemon):
 
     mock_sub.run.assert_not_called()
     mock_sub.Popen.assert_called_once()
+
+
+def test_max_runs_decrements_on_success(daemon):
+    """Successful main job decrements max_runs by 1."""
+    rj_id, job_id = _make_recurring_and_job(daemon.db, max_runs=3)
+    job = daemon.db.get_job(job_id)
+
+    with patch("ollama_queue.daemon.subprocess") as mock_sub:
+        proc = MagicMock()
+        proc.pid = 9999
+        proc.returncode = 0
+        mock_sub.Popen.return_value = proc
+        with patch("ollama_queue.daemon._drain_pipes_with_tracking", return_value=(b"ok", b"")):
+            daemon._run_job(job)
+
+    rj = daemon.db.get_recurring_job(rj_id)
+    assert rj["max_runs"] == 2
+
+
+def test_max_runs_no_decrement_on_failure(daemon):
+    """Failed main job does NOT decrement max_runs."""
+    rj_id, job_id = _make_recurring_and_job(daemon.db, max_runs=3)
+    job = daemon.db.get_job(job_id)
+
+    with patch("ollama_queue.daemon.subprocess") as mock_sub:
+        proc = MagicMock()
+        proc.pid = 9999
+        proc.returncode = 1  # failure
+        mock_sub.Popen.return_value = proc
+        with patch("ollama_queue.daemon._drain_pipes_with_tracking", return_value=(b"", b"err")):
+            daemon._run_job(job)
+
+    rj = daemon.db.get_recurring_job(rj_id)
+    assert rj["max_runs"] == 3  # unchanged
+
+
+def test_max_runs_zero_disables_job(daemon):
+    """When max_runs reaches 0 after success, recurring job is auto-disabled."""
+    rj_id, job_id = _make_recurring_and_job(daemon.db, max_runs=1)
+    job = daemon.db.get_job(job_id)
+
+    with patch("ollama_queue.daemon.subprocess") as mock_sub:
+        proc = MagicMock()
+        proc.pid = 9999
+        proc.returncode = 0
+        mock_sub.Popen.return_value = proc
+        with patch("ollama_queue.daemon._drain_pipes_with_tracking", return_value=(b"ok", b"")):
+            daemon._run_job(job)
+
+    rj = daemon.db.get_recurring_job(rj_id)
+    assert rj["enabled"] == 0
+    assert "max_runs" in (rj["outcome_reason"] or "").lower()
+
+
+def test_no_max_runs_no_decrement(daemon):
+    """Job with max_runs=None doesn't touch the field."""
+    rj_id, job_id = _make_recurring_and_job(daemon.db, max_runs=None)
+    job = daemon.db.get_job(job_id)
+
+    with patch("ollama_queue.daemon.subprocess") as mock_sub:
+        proc = MagicMock()
+        proc.pid = 9999
+        proc.returncode = 0
+        mock_sub.Popen.return_value = proc
+        with patch("ollama_queue.daemon._drain_pipes_with_tracking", return_value=(b"ok", b"")):
+            daemon._run_job(job)
+
+    rj = daemon.db.get_recurring_job(rj_id)
+    assert rj["max_runs"] is None

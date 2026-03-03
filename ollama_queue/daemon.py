@@ -539,6 +539,20 @@ class Daemon:
                     if delta > 0:
                         self._ollama_models.record_observed_vram(job["model"], delta, self.db)
 
+                # max_runs countdown: decrement on success, auto-disable at 0
+                if job.get("recurring_job_id"):
+                    _rj_for_maxruns = self.db.get_recurring_job(job["recurring_job_id"])
+                    if _rj_for_maxruns and _rj_for_maxruns.get("max_runs") is not None:
+                        remaining = _rj_for_maxruns["max_runs"] - 1
+                        if remaining <= 0:
+                            self.db.disable_recurring_job(job["recurring_job_id"], "max_runs exhausted")
+                            _log.info(
+                                "Recurring job id=%d auto-disabled: max_runs exhausted",
+                                job["recurring_job_id"],
+                            )
+                        else:
+                            self.db.update_recurring_job(job["recurring_job_id"], max_runs=remaining)
+
             # Update recurring schedule
             if job.get("recurring_job_id"):
                 try:
