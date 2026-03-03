@@ -25,14 +25,17 @@ scripts/
   migrate_timers.py            # Migrate 8 of 10 systemd timers to recurring jobs (--dry-run / --execute)
   migrate_dlq_max_retries.py   # Add max_retries column to existing dlq table (idempotent)
 tests/
-  test_db.py          # 22 tests
-  test_health.py      # 12 tests
-  test_daemon.py      # 9 tests (incl. scheduler + stall integration)
-  test_estimator.py   # 5 tests
-  test_cli.py         # 13 tests
-  test_api.py         # 12 tests
-  test_scheduler.py   # scheduler unit tests
-  test_dlq.py         # DLQ unit tests
+  test_db.py          # 50 tests
+  test_api.py         # 32 tests (incl. proxy priority)
+  test_scheduler.py   # 26 tests
+  test_stall.py       # 24 tests
+  test_daemon.py      # 24 tests
+  test_cli.py         # 24 tests
+  test_health.py      # 18 tests
+  test_models.py      # 13 tests
+  test_proxy.py       # 8 tests
+  test_estimator.py   # 6 tests
+  test_dlq.py         # 4 tests
 ```
 
 ## How to Run
@@ -42,7 +45,7 @@ tests/
 cd ~/Documents/projects/ollama-queue
 source .venv/bin/activate
 
-# Run tests (195 total)
+# Run tests (229 total)
 pytest
 
 # Start the server (daemon + API + dashboard)
@@ -107,6 +110,7 @@ Route IDs: `now` | `plan` | `history` | `models` | `settings`. Sidebar: 200px de
 - **check_same_thread=False** on SQLite — required for FastAPI worker threads, safe with WAL mode
 - **httpx** must be installed for API tests — `pip install httpx`
 - **Proxy endpoint uses sentinel job_id=-1** — `try_claim_for_proxy()` sets `current_job_id=-1` to distinguish proxy claims from real job execution. `release_proxy_claim()` only releases claims with `current_job_id=-1` to avoid accidentally releasing real jobs.
+- **Proxy priority fields** — `/api/generate` accepts `_priority` (int), `_source` (str), `_timeout` (int) in the JSON body. These are extracted before forwarding to Ollama, so they never reach the model server. Defaults: priority=0, source="proxy", timeout=120. Used by lessons-db eval pipeline to set job priority.
 - **Deploy proxy before ARIA restart** — ARIA routes Ollama calls through port 7683. If ollama-queue is down, ARIA's activity predictions and organic naming fail with connection refused.
 - esbuild JSX `h` shadowing — see `projects/CLAUDE.md` § Shared Gotchas.
 - **`db._lock` is `threading.RLock`** (not `Lock`) — existing callers hold the lock while calling `_connect()`. Do NOT change to `Lock` or nested acquisition will deadlock.
