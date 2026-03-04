@@ -1,5 +1,5 @@
 // ollama_queue/dashboard/spa/src/components/GanttChart.test.js
-import { sourceColor, formatDuration, assignLanes, buildTooltip, buildDensityBuckets, findHeavyConflicts, getConflictingPairs, runStatus } from './GanttChart.jsx';
+import { sourceColor, formatDuration, assignLanes, buildTooltip, buildDensityBuckets, findHeavyConflicts, getConflictingPairs, runStatus, alignLoadMapToNow, loadMapSlotColor } from './GanttChart.jsx';
 
 describe('sourceColor', () => {
     it('returns accent for aria', () => {
@@ -130,8 +130,8 @@ describe('buildDensityBuckets', () => {
     const now = 1000000;
     const windowSecs = 24 * 3600;
 
-    it('returns 24 buckets', () => {
-        expect(buildDensityBuckets([], now, windowSecs)).toHaveLength(24);
+    it('returns 48 buckets', () => {
+        expect(buildDensityBuckets([], now, windowSecs)).toHaveLength(48);
     });
 
     it('all buckets zero for empty jobs', () => {
@@ -139,19 +139,22 @@ describe('buildDensityBuckets', () => {
         expect(buckets.every(b => b === 0)).toBe(true);
     });
 
-    it('counts a job that spans the first bucket', () => {
+    it('counts a job that spans the first two buckets (3600s = 2×1800s slots)', () => {
         const jobs = [{ next_run: now, estimated_duration: 3600 }];
-        const buckets = buildDensityBuckets(jobs, now, windowSecs);
-        expect(buckets[0]).toBe(1);
-        expect(buckets[1]).toBe(0);
-    });
-
-    it('counts a job spanning multiple buckets', () => {
-        const jobs = [{ next_run: now, estimated_duration: 7200 }];
         const buckets = buildDensityBuckets(jobs, now, windowSecs);
         expect(buckets[0]).toBe(1);
         expect(buckets[1]).toBe(1);
         expect(buckets[2]).toBe(0);
+    });
+
+    it('counts a job spanning four buckets (7200s = 4×1800s slots)', () => {
+        const jobs = [{ next_run: now, estimated_duration: 7200 }];
+        const buckets = buildDensityBuckets(jobs, now, windowSecs);
+        expect(buckets[0]).toBe(1);
+        expect(buckets[1]).toBe(1);
+        expect(buckets[2]).toBe(1);
+        expect(buckets[3]).toBe(1);
+        expect(buckets[4]).toBe(0);
     });
 
     it('counts two concurrent jobs in same bucket', () => {
@@ -166,7 +169,13 @@ describe('buildDensityBuckets', () => {
     it('uses 600s default when estimated_duration is null', () => {
         const jobs = [{ next_run: now, estimated_duration: null }];
         const buckets = buildDensityBuckets(jobs, now, windowSecs);
-        expect(buckets[0]).toBe(1); // 600s < 3600s so only bucket 0
+        expect(buckets[0]).toBe(1); // 600s fits in one 1800s bucket
+    });
+
+    it('scales bucket count with windowSecs (12h window = 24 buckets)', () => {
+        const halfDayWindow = 12 * 3600;
+        const buckets = buildDensityBuckets([], now, halfDayWindow);
+        expect(buckets).toHaveLength(24); // 12h / 1800s = 24 buckets
     });
 });
 
@@ -322,5 +331,66 @@ describe('runStatus', () => {
         // No interval — uses 3600 default; ran 3% late relative to 3600
         const lastRun = NOW - 3600 - 3600 * 0.03;
         expect(runStatus(lastRun, null, NOW).label).toBe('on time');
+    });
+});
+
+describe('alignLoadMapToNow', () => {
+    // 2025-01-01 00:00:00 UTC in seconds — midnight, so nowSlot=0, array unchanged
+    const MIDNIGHT_UTC = 1735689600;
+    // 2025-01-01 01:00:00 UTC — slot 2 (3600s / 1800s = 2)
+    const HOUR1_UTC = MIDNIGHT_UTC + 3600;
+
+    it('returns empty array for null slots', () => {
+        expect(alignLoadMapToNow(null, MIDNIGHT_UTC)).toEqual([]);
+    });
+
+    it('returns empty array for empty slots', () => {
+        expect(alignLoadMapToNow([], MIDNIGHT_UTC)).toEqual([]);
+    });
+
+    it('does not rotate at midnight (slot 0)', () => {
+        const slots = [10, 20, 30, 40];
+        expect(alignLoadMapToNow(slots, MIDNIGHT_UTC)).toEqual([10, 20, 30, 40]);
+    });
+
+    it('rotates by 2 at 01:00 UTC (slot 2)', () => {
+        const slots = [10, 20, 30, 40];
+        // nowSlot=2, so result = [slots[2], slots[3], slots[0], slots[1]]
+        expect(alignLoadMapToNow(slots, HOUR1_UTC)).toEqual([30, 40, 10, 20]);
+    });
+
+    it('preserves array length after rotation', () => {
+        const slots = Array.from({ length: 48 }, (_, i) => i);
+        const result = alignLoadMapToNow(slots, HOUR1_UTC);
+        expect(result).toHaveLength(48);
+    });
+});
+
+describe('loadMapSlotColor', () => {
+    it('returns amber for pinned slot (score >= 999)', () => {
+        expect(loadMapSlotColor(999)).toBe('rgba(251,146,60,0.85)');
+        expect(loadMapSlotColor(1000)).toBe('rgba(251,146,60,0.85)');
+    });
+
+    it('returns bg-inset for zero score', () => {
+        expect(loadMapSlotColor(0)).toBe('var(--bg-inset)');
+    });
+
+    it('returns bg-inset for negative score', () => {
+        expect(loadMapSlotColor(-1)).toBe('var(--bg-inset)');
+    });
+
+    it('returns minimum-opacity blue for score 1', () => {
+        // intensity = 1/10 = 0.1; opacity = 0.20 + 0.1*0.70 = 0.27
+        expect(loadMapSlotColor(1)).toBe('rgba(99,179,237,0.27)');
+    });
+
+    it('returns maximum-opacity blue for score 10', () => {
+        // intensity = 10/10 = 1.0; opacity = 0.20 + 1.0*0.70 = 0.90
+        expect(loadMapSlotColor(10)).toBe('rgba(99,179,237,0.90)');
+    });
+
+    it('clamps at max opacity for scores above 10', () => {
+        expect(loadMapSlotColor(20)).toBe('rgba(99,179,237,0.90)');
     });
 });

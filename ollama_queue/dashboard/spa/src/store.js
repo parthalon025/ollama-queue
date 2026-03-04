@@ -17,6 +17,7 @@ export const modelPulls = signal([]);
 export const modelCatalog = signal({ curated: [], search_results: [] });
 export const queueEtas = signal([]);
 export const connectionStatus = signal('ok'); // 'ok' | 'disconnected'
+export const loadMap = signal([]);             // /api/schedule/load-map — 48-slot priority scores
 
 // Derive API base from current URL so it works behind Tailscale Serve path prefix.
 // /ui/ → /api, /queue/ui/ → /queue/api
@@ -66,16 +67,18 @@ async function fetchStatus() {
 
 async function _fetchNonRealtime() {
     try {
-        const [hResp, durResp, heatResp, histResp] = await Promise.all([
+        const [hResp, durResp, heatResp, histResp, lmResp] = await Promise.all([
             fetch(`${API}/health`),
             fetch(`${API}/durations`),
             fetch(`${API}/heatmap`),
             fetch(`${API}/history`),
+            fetch(`${API}/schedule/load-map`),
         ]);
         if (hResp.ok) healthData.value = await hResp.json();
         if (durResp.ok) durationData.value = await durResp.json();
         if (heatResp.ok) heatmapData.value = await heatResp.json();
         if (histResp.ok) history.value = await histResp.json();
+        if (lmResp.ok) { const d = await lmResp.json(); loadMap.value = d.slots || []; }
     } catch (e) {
         console.error('Non-realtime refresh failed:', e);
     }
@@ -93,6 +96,24 @@ export async function fetchSchedule() {
     } catch (e) {
         console.error('fetchSchedule failed:', e);
     }
+}
+
+export async function fetchLoadMap() {
+    try {
+        const resp = await fetch(`${API}/schedule/load-map`);
+        if (resp.ok) {
+            const data = await resp.json();
+            loadMap.value = data.slots || [];
+        }
+    } catch (e) {
+        console.error('fetchLoadMap failed:', e);
+    }
+}
+
+export async function fetchSuggestTime(priority = 5, topN = 3) {
+    const resp = await fetch(`${API}/schedule/suggest?priority=${priority}&top_n=${topN}`);
+    if (!resp.ok) throw new Error(`fetchSuggestTime failed: ${resp.status}`);
+    return resp.json(); // { suggestions: [{cron, score, slot}] }
 }
 
 export async function updateScheduleJob(id, fields) {

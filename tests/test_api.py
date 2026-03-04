@@ -292,6 +292,37 @@ def test_load_map_endpoint(client):
     assert all(isinstance(s, int | float) for s in data["slots"])
 
 
+def test_suggest_time_endpoint_returns_suggestions(client):
+    resp = client.get("/api/schedule/suggest")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "suggestions" in data
+    assert isinstance(data["suggestions"], list)
+
+
+def test_suggest_time_endpoint_top_n(client):
+    resp = client.get("/api/schedule/suggest?priority=5&top_n=2")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["suggestions"]) <= 2
+
+
+def test_suggest_time_endpoint_suggestion_shape(client):
+    # First add a cron job so there's at least something in the schedule
+    client.post(
+        "/api/schedule",
+        json={"name": "shape-test-job", "command": "echo hi", "cron_expression": "0 2 * * *"},
+    )
+    resp = client.get("/api/schedule/suggest?top_n=3")
+    assert resp.status_code == 200
+    data = resp.json()
+    for s in data["suggestions"]:
+        assert "cron" in s
+        assert "score" in s
+        assert "slot" in s
+        assert 0 <= s["slot"] < 48
+
+
 def test_create_schedule_with_pin(client):
     resp = client.post(
         "/api/schedule",

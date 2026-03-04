@@ -1,10 +1,10 @@
 import { h, Fragment } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import {
-    status, scheduleJobs, scheduleEvents, models,
-    fetchSchedule, toggleScheduleJob, triggerRebalance, runScheduleJobNow,
+    status, scheduleJobs, scheduleEvents, models, loadMap,
+    fetchSchedule, fetchLoadMap, toggleScheduleJob, triggerRebalance, runScheduleJobNow,
     updateScheduleJob, fetchModels, batchToggleJobs, batchRunJobs,
-    fetchJobRuns, deleteScheduleJob,
+    fetchJobRuns, deleteScheduleJob, fetchSuggestTime,
 } from '../store';
 import { GanttChart } from '../components/GanttChart';
 import { ModelBadge } from '../components/ModelBadge';
@@ -51,6 +51,25 @@ function formatDuration(secs) {
     if (mins < 60) return `${mins}m ${rem}s`;
     const hrs = Math.floor(mins / 60);
     return `${hrs}h ${mins % 60}m`;
+}
+
+// Traffic intensity ρ = sum(estimated_duration) / 86400.
+// Research threshold: keep ρ < 0.80 (Kingman's formula diverges as ρ → 1).
+// Includes ALL jobs (enabled + disabled) — represents maximum scheduled load.
+// Heavy-model fallback: 1800s; others: 600s (10m default for LLM tasks).
+function computeRho(jobList) {
+    if (jobList.length === 0) return 0;
+    const totalSecs = jobList.reduce((sum, j) => {
+        const fallback = j.model_profile === 'heavy' ? 1800 : 600;
+        return sum + (j.estimated_duration || fallback);
+    }, 0);
+    return totalSecs / 86400;
+}
+
+function rhoStatus(rho) {
+    if (rho < 0.60) return { label: 'safe', color: 'var(--status-healthy)' };
+    if (rho < 0.80) return { label: 'moderate', color: 'var(--status-warning)' };
+    return { label: 'dense', color: 'var(--status-error)' };
 }
 
 // Priority design token colors (theme-aware)
@@ -167,6 +186,8 @@ export default function Plan() {
     const [saving, setSaving] = useState(false);
     const [deleting, setDeleting] = useState(false);
     const [batchRunningTags, setBatchRunningTags] = useState(new Set());
+    const [suggestSlots, setSuggestSlots] = useState(null); // null=never fetched, []=fetched empty, [...]= results
+    const [suggestLoading, setSuggestLoading] = useState(false);
 
     const refreshingRef = useRef(false);
     const rebalanceTimerRef = useRef(null);
@@ -174,12 +195,14 @@ export default function Plan() {
 
     useEffect(() => {
         fetchSchedule();
+        fetchLoadMap();
         fetchModels();
         const tickInterval = setInterval(() => setTick(t => t + 1), 1000);
         const refreshInterval = setInterval(() => {
             if (!refreshingRef.current) {
                 refreshingRef.current = true;
-                fetchSchedule().finally(() => { refreshingRef.current = false; });
+                Promise.all([fetchSchedule(), fetchLoadMap()])
+                    .finally(() => { refreshingRef.current = false; });
             }
         }, 10000);
         return () => {
@@ -847,7 +870,63 @@ export default function Plan() {
                 </div>
             )}
 
-            <GanttChart jobs={jobs} tick={tick} windowHours={24} />
+            {/* ρ traffic intensity indicator */}
+            {jobs.length > 0 && (() => {
+                const rho = computeRho(jobs);
+                const { label, color } = rhoStatus(rho);
+                return (
+                    <div style={{
+                        display: 'flex', alignItems: 'center', gap: '0.5rem',
+                        marginBottom: '0.4rem',
+                    }}>
+                        <span style={{
+                            fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)',
+                            color: 'var(--text-tertiary)',
+                        }}>
+                            24h load
+                        </span>
+                        <span style={{
+                            fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)',
+                            fontWeight: 700, color,
+                            background: 'var(--bg-surface-raised)',
+                            border: `1px solid ${color}`,
+                            borderRadius: 'var(--radius)',
+                            padding: '1px 6px',
+                            letterSpacing: '0.02em',
+                        }}
+                            title={`Traffic intensity: ${rho.toFixed(2)}. Keep below 0.80 to avoid job queueing delays. Dense schedules (≥0.80) may cause jobs to wait for slots.`}
+                            aria-label={`Traffic intensity: ${rho.toFixed(2)}, status: ${label}`}
+                        >
+                            {'\u03c1'} {rho.toFixed(2)} {label}
+                        </span>
+                        <button
+                            class="t-btn t-btn--ghost"
+                            style={{ marginLeft: 'auto', fontSize: 'var(--type-label)', padding: '1px 8px' }}
+                            disabled={suggestLoading}
+                            onClick={async () => {
+                                if (suggestSlots !== null) { setSuggestSlots(null); return; }
+                                setSuggestLoading(true);
+                                try {
+                                    const data = await fetchSuggestTime(5, 3);
+                                    setSuggestSlots(data.suggestions || []);
+                                } catch (e) {
+                                    console.error('fetchSuggestTime failed:', e);
+                                } finally {
+                                    setSuggestLoading(false);
+                                }
+                            }}
+                            title="Show top-3 low-load slots for a new job"
+                        >
+                            {suggestLoading ? '…'
+                                : suggestSlots === null ? 'Suggest slot'
+                                : suggestSlots.length === 0 ? 'No slots found'
+                                : 'Clear'}
+                        </button>
+                    </div>
+                );
+            })()}
+
+            <GanttChart jobs={jobs} tick={tick} windowHours={24} loadMapSlots={loadMap.value} suggestSlots={suggestSlots || []} />
 
             {jobs.length === 0 ? (
                 <div class="t-frame" style={{ textAlign: 'center', padding: '2rem',

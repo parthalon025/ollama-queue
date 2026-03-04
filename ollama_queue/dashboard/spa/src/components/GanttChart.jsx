@@ -58,8 +58,12 @@ export function buildTooltip(job, isConcurrent) {
     return parts.join('\n');
 }
 
+// 30-min bucket duration matches the backend's 48-slot load_map contract.
+// Derived from windowSecs so non-24h views stay coherent.
+const DENSITY_BUCKET_SECS = 1800;
+
 export function buildDensityBuckets(jobs, now, windowSecs) {
-    const bucketCount = 24;
+    const bucketCount = Math.round(windowSecs / DENSITY_BUCKET_SECS);
     const bucketSecs = windowSecs / bucketCount;
     const buckets = Array(bucketCount).fill(0);
     for (const job of jobs) {
@@ -111,7 +115,31 @@ export function runStatus(lastRun, intervalSeconds, _now = Date.now() / 1000) {
     return { label: 'late', color: 'var(--status-warning)' };
 }
 
-export function GanttChart({ jobs, tick, windowHours = 24 }) {
+// Score at which a slot is considered pinned/blocked by the scheduler.
+const LOAD_MAP_PIN_SCORE = 999;
+
+// Rotate loadMapSlots (48-element, midnight-anchored) so index 0 = now.
+// Matches backend _time_to_slot() which uses local wall-clock time.
+export function alignLoadMapToNow(slots, nowUnixSec) {
+    if (!slots || slots.length === 0) return [];
+    const nowDate = new Date(nowUnixSec * 1000);
+    const secondsInDay = nowDate.getHours() * 3600 + nowDate.getMinutes() * 60 + nowDate.getSeconds();
+    const nowSlot = Math.floor(secondsInDay / DENSITY_BUCKET_SECS);
+    const n = slots.length;
+    return Array.from({ length: n }, (_, i) => slots[(nowSlot + i) % n]);
+}
+
+// Color a load_map score for the density strip.
+// Pinned slots get amber; scored slots scale blue opacity; empty = inset.
+export function loadMapSlotColor(score) {
+    if (score >= LOAD_MAP_PIN_SCORE) return 'rgba(251,146,60,0.85)'; // amber — pinned/blocked
+    if (score <= 0) return 'var(--bg-inset)';
+    const intensity = Math.min(score / 10, 1); // score range 0–10 for non-pinned
+    const opacity = 0.20 + intensity * 0.70;   // 0.20 → 0.90
+    return `rgba(99,179,237,${opacity.toFixed(2)})`;
+}
+
+export function GanttChart({ jobs, tick, windowHours = 24, loadMapSlots = [], suggestSlots = [] }) {
     void tick;
     const now = Date.now() / 1000;
     const windowSecs = windowHours * 3600;
@@ -125,12 +153,31 @@ export function GanttChart({ jobs, tick, windowHours = 24 }) {
     const laneHeight = 44;
     const chartHeight = laneCount * laneHeight + 8;
 
+    // Prefer load_map data (priority-weighted); fall back to raw job count.
+    // Clip to bucketCount so windowHours != 24 doesn't over-render cells.
+    const bucketCount = Math.round(windowSecs / DENSITY_BUCKET_SECS);
+    const useLoadMap = loadMapSlots.length > 0;
+    const densityBuckets = useLoadMap
+        ? alignLoadMapToNow(loadMapSlots, now).slice(0, bucketCount)
+        : buildDensityBuckets(jobs.filter(job => job.next_run < windowEnd), now, windowSecs);
+
+    // Convert midnight-anchored absolute slot indices to now-aligned display indices.
+    // Include seconds so slot boundary matches alignLoadMapToNow exactly.
+    const _nowDate = new Date(now * 1000);
+    const nowSlot = Math.floor(
+        (_nowDate.getHours() * 3600 + _nowDate.getMinutes() * 60 + _nowDate.getSeconds()) / DENSITY_BUCKET_SECS
+    );
+    const suggestDisplayIndices = new Set(
+        suggestSlots
+            .map(s => (s.slot - nowSlot + 48) % 48)
+            .filter(idx => idx < bucketCount)
+    );
+
     return (
         <div style={{ position: 'relative', width: '100%' }}>
-            {/* Load density strip — 24 hourly buckets, colored by job count */}
+            {/* Load density strip — priority-weighted load_map or job-count fallback */}
             {(() => {
-                const visibleJobs = jobs.filter(job => job.next_run < windowEnd);
-                const buckets = buildDensityBuckets(visibleJobs, now, windowSecs);
+                const hasPinned = densityBuckets.some(s => s >= LOAD_MAP_PIN_SCORE);
                 return (
                     <div
                         style={{
@@ -141,25 +188,39 @@ export function GanttChart({ jobs, tick, windowHours = 24 }) {
                             marginBottom: '0.2rem',
                             border: '1px solid var(--border-subtle)',
                         }}
-                        title="Job density per hour — darker = more jobs active"
+                        title={useLoadMap
+                            ? `Priority-weighted load per 30 min${hasPinned ? ' — amber = pinned/blocked slot' : ''}`
+                            : 'Job density per 30 min — darker = more jobs active'}
                     >
-                        {buckets.map((count, bucketIdx) => (
-                            <div
-                                key={bucketIdx}
-                                style={{
-                                    flex: 1,
-                                    background: count === 0
-                                        ? 'var(--bg-inset)'
-                                        : count === 1
-                                            ? 'rgba(99,179,237,0.25)'
-                                            : count === 2
-                                                ? 'rgba(99,179,237,0.55)'
-                                                : 'rgba(99,179,237,0.9)',
-                                    borderRight: bucketIdx < 23 ? '1px solid var(--border-subtle)' : 'none',
-                                }}
-                                title={count > 0 ? `${count} job${count > 1 ? 's' : ''} active` : undefined}
-                            />
-                        ))}
+                        {densityBuckets.map((score, bucketIdx) => {
+                            const isSuggested = suggestDisplayIndices.has(bucketIdx);
+                            return (
+                                <div
+                                    key={bucketIdx}
+                                    style={{
+                                        flex: 1,
+                                        position: 'relative',
+                                        background: useLoadMap
+                                            ? loadMapSlotColor(score)
+                                            : (score === 0
+                                                ? 'var(--bg-inset)'
+                                                : score === 1
+                                                    ? 'rgba(99,179,237,0.25)'
+                                                    : score === 2
+                                                        ? 'rgba(99,179,237,0.55)'
+                                                        : 'rgba(99,179,237,0.9)'),
+                                        borderRight: bucketIdx < densityBuckets.length - 1 ? '1px solid var(--border-subtle)' : 'none',
+                                        outline: isSuggested ? '2px solid rgba(52,211,153,0.9)' : 'none',
+                                        outlineOffset: '-2px',
+                                    }}
+                                    title={isSuggested
+                                        ? `Suggested slot — low load, good time for a new job`
+                                        : useLoadMap && score > 0
+                                            ? (score >= LOAD_MAP_PIN_SCORE ? 'Pinned slot — rebalancer avoids scheduling here' : `Load score: ${score}`)
+                                            : (score > 0 ? `${score} job${score > 1 ? 's' : ''} active` : undefined)}
+                                />
+                            );
+                        })}
                     </div>
                 );
             })()}
@@ -198,6 +259,34 @@ export function GanttChart({ jobs, tick, windowHours = 24 }) {
                             ? '1px solid var(--border-subtle)' : 'none',
                     }} />
                 ))}
+
+                {/* "Now" cursor needle */}
+                <div
+                    aria-hidden="true"
+                    style={{
+                        position: 'absolute',
+                        left: 0,
+                        top: 0,
+                        bottom: 0,
+                        width: 2,
+                        background: 'var(--accent)',
+                        opacity: 0.7,
+                        zIndex: 5,
+                        pointerEvents: 'none',
+                    }}
+                >
+                    {/* Downward triangle tick at top */}
+                    <div style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: -4,
+                        width: 0,
+                        height: 0,
+                        borderLeft: '4px solid transparent',
+                        borderRight: '4px solid transparent',
+                        borderTop: '5px solid var(--accent)',
+                    }} />
+                </div>
 
                 {/* Job blocks */}
                 {/* Heavy conflict badges */}
