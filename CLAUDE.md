@@ -16,7 +16,7 @@ ollama_queue/
   estimator.py        # Duration prediction: rolling avg + model-based defaults
   scheduler.py        # Recurring job promotion: promote_due_jobs, update_next_run, rebalance
   dlq.py              # DLQManager: handle_failure routes to retry (backoff) or DLQ
-  api.py              # FastAPI REST API (38 endpoints including /api/generate + /api/embed proxy) + static SPA serving
+  api.py              # FastAPI REST API (39 endpoints including /api/generate + /api/embed proxy) + static SPA serving
   dashboard/
     spa/              # Preact SPA (built separately, served as static)
       src/            # Source: JSX components, signals store, CSS tokens
@@ -26,7 +26,7 @@ scripts/
   migrate_dlq_max_retries.py   # Add max_retries column to existing dlq table (idempotent)
 tests/
   test_db.py          # 56 tests
-  test_api.py         # 46 tests (incl. proxy priority, batch schedule)
+  test_api.py         # 49 tests (incl. proxy priority, batch schedule, suggest endpoint)
   test_scheduler.py   # 26 tests
   test_stall.py       # 24 tests
   test_daemon.py      # 34 tests
@@ -96,13 +96,13 @@ npm run build        # Production
 npm run dev          # Watch mode
 ```
 
-Sidebar nav (desktop) + bottom tab bar (mobile). 5 views: **Now** (2-column command center: running job, queue, resource gauges, KPI cards, alert strip) + **Plan** (24h Gantt timeline, tag-grouped recurring jobs with collapsible sections, bulk actions, expandable detail panels) + **History** (DLQ entries, duration trends, activity heatmap, job list) + **Models** (model table) + **Settings** (thresholds, defaults, retention, daemon controls).
+Sidebar nav (desktop) + bottom tab bar (mobile). 5 views: **Now** (2-column command center: running job, queue, resource gauges, KPI cards, alert strip) + **Plan** (24h Gantt timeline with "now" needle, 48-bucket load-map density strip, ρ traffic intensity badge, "Suggest slot" button highlighting top-3 low-load windows; tag-grouped recurring jobs with collapsible sections, bulk actions, expandable detail panels) + **History** (DLQ entries, duration trends, activity heatmap, job list) + **Models** (model table) + **Settings** (thresholds, defaults, retention, daemon controls).
 
 Route IDs: `now` | `plan` | `history` | `models` | `settings`. Sidebar: 200px desktop, 64px icon-only (768–1023px), hidden on mobile. CSS classes: `layout-root`, `layout-sidebar`, `layout-main`, `now-grid`, `history-top-grid`, `mobile-bottom-nav`.
 
 ## Pipeline Verification
 
-**Horizontal:** All 38 API endpoints + static files (includes `/api/generate` and `/api/embed` proxies). **Vertical:** `ollama-queue submit` → DB row → daemon dequeue → subprocess → DB completed → API endpoints reflect → dashboard renders. Recurring: `schedule add` → `promote_due_jobs` → queue → run → `update_next_run`. DLQ: job fails max_retries → `move_to_dlq` → `dlq list` reflects. Full method: `projects/CLAUDE.md` § Pipeline Verification.
+**Horizontal:** All 39 API endpoints + static files (includes `/api/generate` and `/api/embed` proxies). **Vertical:** `ollama-queue submit` → DB row → daemon dequeue → subprocess → DB completed → API endpoints reflect → dashboard renders. Recurring: `schedule add` → `promote_due_jobs` → queue → run → `update_next_run`. DLQ: job fails max_retries → `move_to_dlq` → `dlq list` reflects. Full method: `projects/CLAUDE.md` § Pipeline Verification.
 
 ## Gotchas
 
