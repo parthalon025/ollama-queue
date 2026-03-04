@@ -613,3 +613,40 @@ class TestDatabase:
         job = db.get_job(job_id)
         assert "last_retry_delay" in job
         assert job["last_retry_delay"] is None  # NULL by default
+
+
+class TestPreemptionSupport:
+    def test_jobs_has_preemption_count_column(self, db):
+        """jobs table must have preemption_count column (default 0)."""
+        job_id = db.submit_job("echo test", "m", 5, 60, "test")
+        job = db.get_job(job_id)
+        assert "preemption_count" in job
+        assert job["preemption_count"] == 0
+
+    def test_requeue_preempted_job_sets_pending(self, db):
+        """requeue_preempted_job() sets status=pending and increments preemption_count."""
+        job_id = db.submit_job("echo test", "m", 1, 60, "test")
+        db.start_job(job_id)
+        db.requeue_preempted_job(job_id)
+        job = db.get_job(job_id)
+        assert job["status"] == "pending"
+        assert job["started_at"] is None
+        assert job["pid"] is None
+        assert job["preemption_count"] == 1
+
+    def test_requeue_increments_preemption_count_each_call(self, db):
+        """preemption_count increments on each requeue, not reset."""
+        job_id = db.submit_job("echo test", "m", 1, 60, "test")
+        db.start_job(job_id)
+        db.requeue_preempted_job(job_id)
+        db.start_job(job_id)
+        db.requeue_preempted_job(job_id)
+        job = db.get_job(job_id)
+        assert job["preemption_count"] == 2
+
+    def test_requeue_does_not_touch_dlq(self, db):
+        """requeue_preempted_job() never creates a DLQ entry."""
+        job_id = db.submit_job("echo test", "m", 1, 60, "test")
+        db.start_job(job_id)
+        db.requeue_preempted_job(job_id)
+        assert db.list_dlq() == []  # DLQ must remain empty

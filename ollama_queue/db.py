@@ -45,6 +45,12 @@ DEFAULTS = {
     "max_concurrent_jobs": 1,
     "concurrent_shadow_hours": 24,
     "vram_safety_factor": 1.3,
+    "preemption_enabled": False,  # PR4: opt-in preemption; off by default
+    "preemption_window_seconds": 120,  # PR4: only preempt jobs running < N seconds
+    "max_preemptions_per_job": 2,  # PR4: prevent infinite preemption loops
+    "entropy_alert_window": 30,  # PR4: polls for rolling entropy baseline
+    "entropy_alert_sigma": 2.0,  # PR4: std deviations for anomaly detection
+    "entropy_suspend_low_priority": True,  # PR4: suspend p8-10 promotion on critical_backlog
 }
 
 
@@ -96,6 +102,7 @@ class Database:
         self._add_column_if_missing(conn, "recurring_jobs", "outcome_reason", "TEXT")
         self._add_column_if_missing(conn, "jobs", "last_retry_delay", "REAL")  # PR1: decorrelated jitter
         self._add_column_if_missing(conn, "recurring_jobs", "description", "TEXT")  # layman description
+        self._add_column_if_missing(conn, "jobs", "preemption_count", "INTEGER DEFAULT 0")  # PR4: preemption tracking
 
     def initialize(self) -> None:
         """Create all tables and seed defaults."""
@@ -373,6 +380,27 @@ class Database:
             )
             conn.commit()
 
+    def requeue_preempted_job(self, job_id: int) -> None:
+        """Reset a preempted job to pending and increment preemption_count.
+
+        IMPORTANT: Never touches DLQ. Preempted jobs are healthy work interrupted
+        deliberately. DLQ means 'permanent failure requiring human review' — using
+        it for preemption corrupts its semantic meaning and requires manual recovery.
+        """
+        with self._lock:
+            conn = self._connect()
+            conn.execute(
+                """UPDATE jobs SET
+                       status = 'pending',
+                       started_at = NULL,
+                       pid = NULL,
+                       submitted_at = ?,
+                       preemption_count = COALESCE(preemption_count, 0) + 1
+                   WHERE id = ?""",
+                (time.time(), job_id),
+            )
+            conn.commit()
+
     def cancel_job(self, job_id: int) -> None:
         with self._lock:
             conn = self._connect()
@@ -594,7 +622,7 @@ class Database:
         with self._lock:
             conn = self._connect()
             conn.execute(
-                "UPDATE daemon_state SET state = 'idle', current_job_id = NULL " "WHERE id = 1 AND current_job_id = -1"
+                "UPDATE daemon_state SET state = 'idle', current_job_id = NULL WHERE id = 1 AND current_job_id = -1"
             )
             conn.commit()
 
