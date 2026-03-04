@@ -920,3 +920,56 @@ def test_no_max_runs_no_decrement(daemon):
 
     rj = daemon.db.get_recurring_job(rj_id)
     assert rj["max_runs"] is None
+
+
+# --- T10: Circuit breaker ---
+
+
+def test_circuit_breaker_opens_after_threshold(daemon):
+    """Circuit opens after cb_failure_threshold consecutive failures."""
+    threshold = daemon.db.get_setting("cb_failure_threshold")
+    for _ in range(threshold):
+        daemon._record_ollama_failure()
+    assert daemon._cb_state == "OPEN"
+
+
+def test_circuit_breaker_resets_on_success(daemon):
+    """A success resets failure count and closes the circuit."""
+    daemon._cb_failures = 2
+    daemon._cb_state = "HALF_OPEN"
+    daemon._record_ollama_success()
+    assert daemon._cb_failures == 0
+    assert daemon._cb_state == "CLOSED"
+
+
+def test_circuit_is_open_returns_false_when_closed(daemon):
+    """_is_circuit_open returns False when circuit is CLOSED."""
+    daemon._cb_state = "CLOSED"
+    assert daemon._is_circuit_open() is False
+
+
+def test_circuit_is_open_returns_true_when_open(daemon):
+    """_is_circuit_open returns True when circuit is OPEN and cooldown not elapsed."""
+    daemon._cb_state = "OPEN"
+    daemon._cb_opened_at = time.time()  # just opened — cooldown not elapsed
+    daemon._cb_open_attempts = 0
+    assert daemon._is_circuit_open() is True
+
+
+def test_circuit_transitions_to_half_open_after_cooldown(daemon):
+    """Circuit transitions to HALF_OPEN after cooldown expires."""
+    daemon._cb_state = "OPEN"
+    daemon._cb_opened_at = time.time() - 999  # way past any cooldown
+    daemon._cb_open_attempts = 0
+    result = daemon._is_circuit_open()
+    assert result is False  # HALF_OPEN allows one probe job through
+    assert daemon._cb_state == "HALF_OPEN"
+
+
+def test_compute_cb_cooldown_exponential(daemon):
+    """Cooldown doubles with each open attempt, capped at cb_max_cooldown."""
+    base = daemon.db.get_setting("cb_base_cooldown")
+    max_cd = daemon.db.get_setting("cb_max_cooldown")
+    assert daemon._compute_cb_cooldown(0) == base
+    assert daemon._compute_cb_cooldown(1) == min(max_cd, base * 2)
+    assert daemon._compute_cb_cooldown(10) == max_cd  # capped
