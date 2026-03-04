@@ -127,6 +127,8 @@ class Daemon:
         self._cb_state: str = "CLOSED"  # CLOSED | OPEN | HALF_OPEN
         self._cb_opened_at: float | None = None  # timestamp when circuit opened
         self._cb_open_attempts: int = 0  # how many times circuit has opened (for exponential cooldown)
+        self._cb_probe_in_flight: bool = False  # True while a HALF_OPEN probe is dispatched
+        self._cb_lock: threading.Lock = threading.Lock()  # protects all _cb_* state
 
     # --- Concurrency helpers ---
 
@@ -339,41 +341,51 @@ class Daemon:
 
     def _record_ollama_failure(self) -> None:
         """Record a consecutive Ollama failure; open circuit if threshold reached."""
-        self._cb_failures += 1
-        threshold = int(self.db.get_setting("cb_failure_threshold") or 3)
-        if self._cb_failures >= threshold and self._cb_state == "CLOSED":
-            self._cb_state = "OPEN"
-            self._cb_opened_at = time.time()
-            _log.warning("Circuit breaker OPENED after %d consecutive Ollama failures", self._cb_failures)
+        with self._cb_lock:
+            self._cb_probe_in_flight = False
+            self._cb_failures += 1
+            threshold = int(self.db.get_setting("cb_failure_threshold") or 3)
+            if self._cb_failures >= threshold and self._cb_state in ("CLOSED", "HALF_OPEN"):
+                self._cb_state = "OPEN"
+                self._cb_opened_at = time.time()
+                _log.warning("Circuit breaker OPENED after %d consecutive Ollama failures", self._cb_failures)
 
     def _record_ollama_success(self) -> None:
         """Record a successful Ollama job; reset failure count and close circuit."""
-        self._cb_failures = 0
-        self._cb_state = "CLOSED"
-        if self._cb_open_attempts > 0:
-            _log.info("Circuit breaker CLOSED after successful probe")
+        with self._cb_lock:
+            self._cb_probe_in_flight = False
+            self._cb_failures = 0
+            self._cb_state = "CLOSED"
+            if self._cb_open_attempts > 0:
+                _log.info("Circuit breaker CLOSED after successful probe")
 
     def _is_circuit_open(self) -> bool:
         """Return True if the circuit breaker should block new jobs.
 
         CLOSED -> False (normal operation)
         OPEN + cooldown not elapsed -> True (blocking)
-        OPEN + cooldown elapsed -> transition to HALF_OPEN, return False (allow probe)
-        HALF_OPEN -> False (probe in flight)
+        OPEN + cooldown elapsed -> transition to HALF_OPEN, return False (allow one probe)
+        HALF_OPEN + no probe in flight -> False (allow this probe through, mark in-flight)
+        HALF_OPEN + probe in flight -> True (block subsequent polls until probe resolves)
         """
-        if self._cb_state == "CLOSED":
-            return False
-        if self._cb_state == "HALF_OPEN":
-            return False
-        # OPEN state — check cooldown
-        cooldown = self._compute_cb_cooldown(self._cb_open_attempts)
-        elapsed = time.time() - (self._cb_opened_at or 0)
-        if elapsed >= cooldown:
-            self._cb_state = "HALF_OPEN"
-            self._cb_open_attempts += 1
-            _log.info("Circuit breaker entering HALF_OPEN state for probe job")
-            return False
-        return True
+        with self._cb_lock:
+            if self._cb_state == "CLOSED":
+                return False
+            if self._cb_state == "HALF_OPEN":
+                if self._cb_probe_in_flight:
+                    return True  # probe already dispatched, block further jobs
+                self._cb_probe_in_flight = True  # mark probe as in-flight
+                return False  # allow this one probe through
+            # OPEN state — check cooldown
+            cooldown = self._compute_cb_cooldown(self._cb_open_attempts)
+            elapsed = time.time() - (self._cb_opened_at or 0)
+            if elapsed >= cooldown:
+                self._cb_state = "HALF_OPEN"
+                self._cb_open_attempts += 1
+                self._cb_probe_in_flight = True  # first probe dispatched immediately on transition
+                _log.info("Circuit breaker entering HALF_OPEN state for probe job")
+                return False
+            return True
 
     def poll_once(self) -> None:
         """Single poll cycle.

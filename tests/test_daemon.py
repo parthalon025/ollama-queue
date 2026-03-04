@@ -973,3 +973,28 @@ def test_compute_cb_cooldown_exponential(daemon):
     assert daemon._compute_cb_cooldown(0) == base
     assert daemon._compute_cb_cooldown(1) == min(max_cd, base * 2)
     assert daemon._compute_cb_cooldown(10) == max_cd  # capped
+
+
+def test_half_open_probe_blocks_subsequent_polls(daemon):
+    """Second call to _is_circuit_open() while HALF_OPEN blocks (probe in flight)."""
+    import time
+
+    daemon._cb_state = "OPEN"
+    daemon._cb_opened_at = time.time() - 9999
+    daemon._cb_open_attempts = 0
+    first = daemon._is_circuit_open()  # transitions to HALF_OPEN, allows probe
+    second = daemon._is_circuit_open()  # probe in flight, should block
+    assert first is False  # probe allowed through
+    assert second is True  # subsequent polls blocked
+    assert daemon._cb_state == "HALF_OPEN"
+
+
+def test_half_open_failure_reopens_circuit(daemon):
+    """A failure during HALF_OPEN re-opens the circuit, not leaves it stuck."""
+    daemon._cb_state = "HALF_OPEN"
+    daemon._cb_failures = 0
+    # Drive failures to threshold
+    threshold = daemon.db.get_setting("cb_failure_threshold")
+    for _ in range(threshold):
+        daemon._record_ollama_failure()
+    assert daemon._cb_state == "OPEN"
