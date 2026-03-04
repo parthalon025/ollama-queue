@@ -1,120 +1,178 @@
 # ollama-queue
 
-Ollama job queue scheduler with priority, health monitoring, and web dashboard.
+Priority job queue for Ollama — serializes local AI inference tasks, monitors system health, and serves a web dashboard.
 
-**Repository:** https://github.com/parthalon025/ollama-queue
+## Why
 
-## In Plain English
+Running 10+ systemd timers that all use Ollama creates a contention problem. Two tasks starting simultaneously both try to load a 5GB model into RAM, causing swapping, OOM kills, or 10x slowdowns. The naive fix — spacing timer schedules 45 minutes apart — is fragile and wastes time.
 
-When multiple background tasks all need the same AI model on the same machine, they fight over memory and slow each other down. This tool makes them take turns, running jobs one at a time in order of importance, and gives you a dashboard to see what's running and what's waiting.
+ollama-queue puts all Ollama work through a single daemon. It checks RAM/VRAM before each job, runs tasks by priority, tracks duration history, and handles failures with automatic retry and a dead-letter queue. The dashboard shows what's running, what's waiting, and how long the queue will take to clear.
 
-## Why This Exists
+## Install
 
-This workstation runs 10 different systemd timers that all use Ollama for local AI inference — daily intelligence reports, automation suggestions, meta-learning reviews, email analysis, and more. Without coordination, two tasks starting at the same time would each try to load a 5GB model into memory simultaneously, causing swapping, OOM kills, or 10x slower execution. Previously this was managed by carefully spacing timer schedules 45 minutes apart, which was fragile and wasted time. ollama-queue serializes all Ollama work through a single daemon that checks system health before starting each job, runs them by priority, and tracks duration estimates so you know when the queue will clear.
-
-## Structure
-
-```
-ollama_queue/
-  __init__.py
-  cli.py              # Click CLI: submit, status, queue, history, pause, resume, cancel, serve
-  db.py                # SQLite schema and CRUD (synchronous sqlite3)
-  daemon.py            # Polling loop: health check -> dequeue -> subprocess -> record
-  health.py            # System metrics: RAM/VRAM/load/swap/ollama-ps with hysteresis
-  estimator.py         # Duration prediction: rolling avg + model-based defaults
-  api.py               # FastAPI REST API (12 endpoints) + static SPA serving
-  dashboard/
-    spa/               # Preact SPA (esbuild-bundled, Tailwind v4, uPlot charts)
-      src/             # JSX components, signals store, CSS tokens
-      dist/            # Production build output (gitignored)
-tests/
-  test_db.py           # 22 tests
-  test_health.py       # 12 tests
-  test_daemon.py       # 7 tests
-  test_estimator.py    # 5 tests
-  test_cli.py          # 13 tests
-  test_api.py          # 12 tests
+```bash
+git clone https://github.com/parthalon025/ollama-queue
+cd ollama-queue
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
 ```
 
-## Architecture
-
-```
-systemd timers (10 tasks)
-        │
-        ▼
-  ollama-queue submit --source NAME --model MODEL --priority N -- COMMAND
-        │
-        ▼
-┌─────────────────────────────────────────────────┐
-│  Daemon (5s poll loop)                          │
-│                                                 │
-│  health check ──→ RAM/VRAM/load/swap OK?        │
-│       │              │ no: pause (hysteresis)    │
-│       │ yes          │                          │
-│       ▼              │                          │
-│  dequeue by priority                            │
-│       │                                         │
-│       ▼                                         │
-│  subprocess.Popen ──→ capture stdout/stderr     │
-│       │                                         │
-│       ▼                                         │
-│  record result + duration to SQLite             │
-└─────────────────────────────────────────────────┘
-        │
-        ▼
-┌─────────────────────────────────────────────────┐
-│  FastAPI (12 endpoints)                         │
-│  GET  /status /queue /history /health           │
-│       /durations /heatmap /settings             │
-│  PUT  /settings                                 │
-│  POST /submit /cancel /pause /resume            │
-│                                                 │
-│  Static: /ui/ ──→ Preact SPA                    │
-│  (KPIs, resource trends, duration trends,       │
-│   heatmap, history, settings)                   │
-└─────────────────────────────────────────────────┘
+Link the binary to your PATH:
+```bash
+ln -sf "$(pwd)/.venv/bin/ollama-queue" ~/.local/bin/ollama-queue
 ```
 
-## Running
+Install dashboard dependencies (optional, required for the web UI):
+```bash
+cd ollama_queue/dashboard/spa
+npm install
+npm run build
+```
+
+## Use
 
 ```bash
 # Start the server (daemon + API + dashboard)
 ollama-queue serve --port 7683
 
 # Submit a job
-ollama-queue submit --source test --model qwen2.5:7b --priority 3 --timeout 120 -- echo hello
+ollama-queue submit --source myapp --model qwen2.5:7b --priority 3 --timeout 120 -- python3 run_analysis.py
 
-# Check status
+# Check queue and status
 ollama-queue status
 ollama-queue queue
 ollama-queue history
 
+# Recurring jobs
+ollama-queue schedule add --name daily-report --cron "0 23 * * *" -- python3 generate_report.py
+ollama-queue schedule list
+ollama-queue schedule remove daily-report
+
 # Pause/resume processing
 ollama-queue pause
 ollama-queue resume
+
+# Dead-letter queue
+ollama-queue dlq list
+ollama-queue dlq retry <id>
+ollama-queue dlq clear
+
+# Settings
+ollama-queue settings get
+ollama-queue settings set ram_threshold_high 85
+```
+
+The dashboard is at `http://localhost:7683/ui/` once the server is running.
+
+### Ollama proxy
+
+The server exposes `/api/generate` and `/api/embed` as a drop-in proxy for the Ollama API. Redirect Ollama calls from your apps to `http://127.0.0.1:7683` and they'll queue automatically.
+
+Pass priority metadata in the JSON body (stripped before forwarding to Ollama):
+```json
+{"model": "qwen2.5:7b", "prompt": "...", "_priority": 5, "_source": "myapp", "_timeout": 300}
+```
+
+### Systemd integration
+
+```ini
+# Run jobs through the queue by adding to each timer's ExecStart:
+ExecStart=/bin/bash -c '. ~/.env && ollama-queue submit --source %n --model qwen2.5:7b --priority 2 -- python3 /path/to/script.py'
+```
+
+## What It Does
+
+| Feature | Description |
+|---------|-------------|
+| Priority queue | Jobs run highest-priority first (int, higher = sooner) |
+| Health gating | Checks RAM/VRAM/load before each job; pauses at high threshold, resumes below lower threshold (hysteresis) |
+| Recurring jobs | Cron or interval scheduling with pin slots, rebalancing, and skip-on-busy logic |
+| Retry + DLQ | Exponential backoff retries; failed jobs move to dead-letter queue with configurable max_retries |
+| Duration estimates | Rolling average + model-based defaults; predicts queue drain time |
+| Stall detection | Bayesian detection of jobs that started but stopped producing output |
+| Ollama proxy | `/api/generate` and `/api/embed` endpoints with priority injection |
+| REST API | 38 endpoints covering queue management, scheduling, health, settings |
+| Web dashboard | 5-view Preact SPA: Now, Plan (24h Gantt), History, Models, Settings |
+
+## Architecture
+
+```
+systemd timers / apps
+        │
+        ▼
+  ollama-queue submit --priority N -- COMMAND
+        │
+        ▼
+┌─────────────────────────────────────────────┐
+│  Daemon (5s poll loop)                      │
+│                                             │
+│  health check → RAM/VRAM/load OK?           │
+│       │              pause if not           │
+│       ↓                                     │
+│  promote recurring jobs due now             │
+│       ↓                                     │
+│  dequeue by priority                        │
+│       ↓                                     │
+│  subprocess.Popen → capture stdout/stderr   │
+│       ↓                                     │
+│  record result → estimator → DLQ routing   │
+└─────────────────────────────────────────────┘
+        │
+        ▼
+┌─────────────────────────────────────────────┐
+│  FastAPI (38 endpoints)                     │
+│  /api/generate  /api/embed  (proxy)         │
+│  /api/queue     /api/history  /api/health   │
+│  /api/schedule  /api/dlq     /api/settings  │
+│                                             │
+│  Static: /ui/ → Preact SPA                  │
+└─────────────────────────────────────────────┘
+```
+
+## Structure
+
+```
+ollama_queue/
+  cli.py              # Click CLI entry point
+  db.py               # SQLite schema + CRUD (threading.RLock, WAL mode)
+  daemon.py           # 5s poll loop: health → scheduler → dequeue → subprocess → DLQ
+  health.py           # RAM/VRAM/load/swap metrics with hysteresis
+  estimator.py        # Duration prediction: rolling avg + model-based defaults
+  scheduler.py        # Recurring job promotion, rebalance, cron pin slots
+  dlq.py              # Dead-letter queue: retry with backoff, max_retries, move_to_dlq
+  api.py              # FastAPI REST API + Ollama proxy + static SPA serving
+  dashboard/spa/      # Preact SPA (build with npm run build)
+scripts/
+  migrate_timers.py            # Migrate systemd timers to recurring jobs (--dry-run / --execute)
+  migrate_dlq_max_retries.py   # Schema migration for max_retries column (idempotent)
+tests/                         # 262 tests (pytest-xdist parallel)
 ```
 
 ## Data
 
 - **Queue DB:** `~/.local/share/ollama-queue/queue.db` (SQLite, WAL mode)
-- **Symlink:** `~/.local/bin/ollama-queue` -> `.venv/bin/ollama-queue`
+- **Service:** `ollama-queue.service` (user systemd, `MemoryMax=512M`)
 
-## Services
+## Requirements
 
-- `ollama-queue.service` (user systemd, MemoryMax=512M)
-- **Tailscale Serve:** `https://<your-machine>.<your-tailnet>.ts.net/queue/` -> `http://127.0.0.1:7683`
-- **Dashboard:** `/queue/ui/`
+```
+Python 3.12+
+click>=8.1.0
+croniter>=1.4.0
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+```
 
-## Dependencies
-
-- Python 3.12 (Click, FastAPI, uvicorn, sqlite3)
-- Preact 10 + @preact/signals + Tailwind v4 + uPlot (dashboard)
-- Ollama (the thing being queued, not a direct dependency)
+Dev/test: `pip install -r requirements-dev.txt`
 
 ## Tests
 
 ```bash
-cd ~/Documents/projects/ollama-queue
 source .venv/bin/activate
-pytest  # 195 tests
+pytest  # 262 tests, parallel by default
 ```
+
+## License
+
+MIT
