@@ -85,6 +85,7 @@ class Database:
         self._add_column_if_missing(conn, "recurring_jobs", "check_command", "TEXT")
         self._add_column_if_missing(conn, "recurring_jobs", "max_runs", "INTEGER")
         self._add_column_if_missing(conn, "recurring_jobs", "outcome_reason", "TEXT")
+        self._add_column_if_missing(conn, "jobs", "last_retry_delay", "REAL")  # PR1: decorrelated jitter
 
     def initialize(self) -> None:
         """Create all tables and seed defaults."""
@@ -871,6 +872,13 @@ class Database:
                    WHERE id = ?""",
                 (retry_after, job_id),
             )
+            conn.commit()
+
+    def _set_job_retry_delay(self, job_id: int, delay: float) -> None:
+        """Store the most recent retry delay for decorrelated jitter computation."""
+        with self._lock:
+            conn = self._connect()
+            conn.execute("UPDATE jobs SET last_retry_delay = ? WHERE id = ?", (delay, job_id))
             conn.commit()
 
     # --- DLQ ---

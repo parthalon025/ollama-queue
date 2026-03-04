@@ -606,3 +606,10 @@ class TestDatabase:
         conn = db._connect()
         result = conn.execute("PRAGMA cache_size").fetchone()[0]
         assert result == -64000
+
+    def test_jobs_has_last_retry_delay_column(self, db):
+        """jobs table must have last_retry_delay column for decorrelated jitter."""
+        job_id = db.submit_job("echo test", "qwen2.5:7b", 5, 60, "test")
+        job = db.get_job(job_id)
+        assert "last_retry_delay" in job
+        assert job["last_retry_delay"] is None  # NULL by default
