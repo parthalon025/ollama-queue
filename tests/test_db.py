@@ -646,3 +646,68 @@ class TestPR2Admission:
         assert db.get_setting("cb_max_cooldown") == 600
         assert db.get_setting("max_queue_depth") == 50
         assert db.get_setting("min_model_vram_mb") == 2000
+
+
+class TestDurationBulkAndStats:
+    def test_estimate_duration_bulk_empty_sources(self, db):
+        """Returns empty dict for empty source list."""
+        result = db.estimate_duration_bulk([])
+        assert result == {}
+
+    def test_estimate_duration_bulk_returns_avg_per_source(self, db):
+        """Returns mean of successful runs per source in one query."""
+        import time
+
+        now = time.time()
+        # Source A: two successful runs, avg = 300
+        db._connect().execute(
+            "INSERT INTO duration_history (source, model, duration, exit_code, recorded_at) VALUES (?,?,?,?,?)",
+            ("src-a", "m", 200.0, 0, now),
+        )
+        db._connect().execute(
+            "INSERT INTO duration_history (source, model, duration, exit_code, recorded_at) VALUES (?,?,?,?,?)",
+            ("src-a", "m", 400.0, 0, now),
+        )
+        db._connect().commit()
+        result = db.estimate_duration_bulk(["src-a"])
+        assert abs(result["src-a"] - 300.0) < 0.1
+
+    def test_estimate_duration_bulk_excludes_failed_runs(self, db):
+        """Only counts exit_code=0 runs in the average."""
+        import time
+
+        now = time.time()
+        db._connect().execute(
+            "INSERT INTO duration_history (source, model, duration, exit_code, recorded_at) VALUES (?,?,?,?,?)",
+            ("src-b", "m", 1000.0, 1, now),  # failed — should be excluded
+        )
+        db._connect().execute(
+            "INSERT INTO duration_history (source, model, duration, exit_code, recorded_at) VALUES (?,?,?,?,?)",
+            ("src-b", "m", 100.0, 0, now),  # success
+        )
+        db._connect().commit()
+        result = db.estimate_duration_bulk(["src-b"])
+        assert abs(result["src-b"] - 100.0) < 0.1
+
+    def test_estimate_duration_stats_returns_mean_and_variance(self, db):
+        """Returns (mean, variance) tuple from last 10 successful runs."""
+        import time
+
+        now = time.time()
+        durations = [100.0, 200.0, 300.0]
+        for d in durations:
+            db._connect().execute(
+                "INSERT INTO duration_history (source, model, duration, exit_code, recorded_at) VALUES (?,?,?,?,?)",
+                ("stats-src", "m", d, 0, now),
+            )
+        db._connect().commit()
+        result = db.estimate_duration_stats("stats-src")
+        assert result is not None
+        mean, variance = result
+        assert abs(mean - 200.0) < 0.1  # (100+200+300)/3 = 200
+        assert variance > 0  # non-zero variance for these three values
+
+    def test_estimate_duration_stats_returns_none_for_missing_source(self, db):
+        """Returns None when no history exists for source."""
+        result = db.estimate_duration_stats("nonexistent-source")
+        assert result is None
