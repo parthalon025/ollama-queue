@@ -644,11 +644,13 @@ class TestAdmissionGate:
         )
         assert resp.status_code == 429
         assert "Retry-After" in resp.headers
-        retry_after = int(resp.headers["Retry-After"])
+        retry_after_str = resp.headers["Retry-After"]
+        assert retry_after_str.isdigit(), f"Retry-After must be a positive integer string, got {retry_after_str!r}"
+        retry_after = int(retry_after_str)
         assert retry_after >= 1
 
-    def test_submit_succeeds_when_below_limit(self, client_and_db):
-        """POST /api/queue/submit succeeds when pending count < max_queue_depth."""
+    def test_submit_succeeds_at_boundary_below_limit(self, client_and_db):
+        """Queue at count == max_depth - 1: submission must succeed (boundary just below 429 threshold)."""
         client, db = client_and_db
         db.set_setting("max_queue_depth", 3)
         db.submit_job("echo a", "qwen2.5:7b", 5, 60, "test")
