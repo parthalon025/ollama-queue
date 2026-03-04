@@ -1,8 +1,8 @@
 import { h, Fragment } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import {
-    status, scheduleJobs, scheduleEvents, models,
-    fetchSchedule, toggleScheduleJob, triggerRebalance, runScheduleJobNow,
+    status, scheduleJobs, scheduleEvents, models, loadMap,
+    fetchSchedule, fetchLoadMap, toggleScheduleJob, triggerRebalance, runScheduleJobNow,
     updateScheduleJob, fetchModels, batchToggleJobs, batchRunJobs,
     fetchJobRuns, deleteScheduleJob,
 } from '../store';
@@ -193,12 +193,14 @@ export default function Plan() {
 
     useEffect(() => {
         fetchSchedule();
+        fetchLoadMap();
         fetchModels();
         const tickInterval = setInterval(() => setTick(t => t + 1), 1000);
         const refreshInterval = setInterval(() => {
             if (!refreshingRef.current) {
                 refreshingRef.current = true;
-                fetchSchedule().finally(() => { refreshingRef.current = false; });
+                Promise.all([fetchSchedule(), fetchLoadMap()])
+                    .finally(() => { refreshingRef.current = false; });
             }
         }, 10000);
         return () => {
@@ -899,7 +901,7 @@ export default function Plan() {
                 );
             })()}
 
-            <GanttChart jobs={jobs} tick={tick} windowHours={24} />
+            <GanttChart jobs={jobs} tick={tick} windowHours={24} loadMapSlots={loadMap.value} />
 
             {jobs.length === 0 ? (
                 <div class="t-frame" style={{ textAlign: 'center', padding: '2rem',

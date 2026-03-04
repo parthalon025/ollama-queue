@@ -1,5 +1,5 @@
 // ollama_queue/dashboard/spa/src/components/GanttChart.test.js
-import { sourceColor, formatDuration, assignLanes, buildTooltip, buildDensityBuckets, findHeavyConflicts, getConflictingPairs, runStatus } from './GanttChart.jsx';
+import { sourceColor, formatDuration, assignLanes, buildTooltip, buildDensityBuckets, findHeavyConflicts, getConflictingPairs, runStatus, alignLoadMapToNow, loadMapSlotColor } from './GanttChart.jsx';
 
 describe('sourceColor', () => {
     it('returns accent for aria', () => {
@@ -331,5 +331,66 @@ describe('runStatus', () => {
         // No interval — uses 3600 default; ran 3% late relative to 3600
         const lastRun = NOW - 3600 - 3600 * 0.03;
         expect(runStatus(lastRun, null, NOW).label).toBe('on time');
+    });
+});
+
+describe('alignLoadMapToNow', () => {
+    // 2025-01-01 00:00:00 UTC in seconds — midnight, so nowSlot=0, array unchanged
+    const MIDNIGHT_UTC = 1735689600;
+    // 2025-01-01 01:00:00 UTC — slot 2 (3600s / 1800s = 2)
+    const HOUR1_UTC = MIDNIGHT_UTC + 3600;
+
+    it('returns empty array for null slots', () => {
+        expect(alignLoadMapToNow(null, MIDNIGHT_UTC)).toEqual([]);
+    });
+
+    it('returns empty array for empty slots', () => {
+        expect(alignLoadMapToNow([], MIDNIGHT_UTC)).toEqual([]);
+    });
+
+    it('does not rotate at midnight (slot 0)', () => {
+        const slots = [10, 20, 30, 40];
+        expect(alignLoadMapToNow(slots, MIDNIGHT_UTC)).toEqual([10, 20, 30, 40]);
+    });
+
+    it('rotates by 2 at 01:00 UTC (slot 2)', () => {
+        const slots = [10, 20, 30, 40];
+        // nowSlot=2, so result = [slots[2], slots[3], slots[0], slots[1]]
+        expect(alignLoadMapToNow(slots, HOUR1_UTC)).toEqual([30, 40, 10, 20]);
+    });
+
+    it('preserves array length after rotation', () => {
+        const slots = Array.from({ length: 48 }, (_, i) => i);
+        const result = alignLoadMapToNow(slots, HOUR1_UTC);
+        expect(result).toHaveLength(48);
+    });
+});
+
+describe('loadMapSlotColor', () => {
+    it('returns amber for pinned slot (score >= 999)', () => {
+        expect(loadMapSlotColor(999)).toBe('rgba(251,146,60,0.85)');
+        expect(loadMapSlotColor(1000)).toBe('rgba(251,146,60,0.85)');
+    });
+
+    it('returns bg-inset for zero score', () => {
+        expect(loadMapSlotColor(0)).toBe('var(--bg-inset)');
+    });
+
+    it('returns bg-inset for negative score', () => {
+        expect(loadMapSlotColor(-1)).toBe('var(--bg-inset)');
+    });
+
+    it('returns minimum-opacity blue for score 1', () => {
+        // intensity = 1/10 = 0.1; opacity = 0.20 + 0.1*0.70 = 0.27
+        expect(loadMapSlotColor(1)).toBe('rgba(99,179,237,0.27)');
+    });
+
+    it('returns maximum-opacity blue for score 10', () => {
+        // intensity = 10/10 = 1.0; opacity = 0.20 + 1.0*0.70 = 0.90
+        expect(loadMapSlotColor(10)).toBe('rgba(99,179,237,0.90)');
+    });
+
+    it('clamps at max opacity for scores above 10', () => {
+        expect(loadMapSlotColor(20)).toBe('rgba(99,179,237,0.90)');
     });
 });
