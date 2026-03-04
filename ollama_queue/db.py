@@ -60,6 +60,8 @@ class Database:
                 self._conn.execute("PRAGMA mmap_size = 536870912")  # 512MB
                 self._conn.execute("PRAGMA cache_size = -64000")  # 64MB page cache
                 self._conn.execute("PRAGMA wal_autocheckpoint = 1000")
+                # busy_timeout protects against cross-process contention (e.g., sqlite3 CLI,
+                # migration scripts); same-process thread safety is handled by self._lock.
                 self._conn.execute("PRAGMA busy_timeout = 5000")
         return self._conn
 

@@ -588,3 +588,21 @@ class TestDatabase:
         conn = db._connect()
         result = conn.execute("PRAGMA wal_autocheckpoint").fetchone()[0]
         assert result == 1000
+
+    def test_pragma_journal_mode_wal(self, db):
+        """WAL mode must be active — required for wal_autocheckpoint to have any effect."""
+        conn = db._connect()
+        result = conn.execute("PRAGMA journal_mode").fetchone()[0]
+        assert result == "wal"
+
+    def test_pragma_mmap_size(self, db):
+        """PRAGMA mmap_size should be 536870912 (512MB)."""
+        conn = db._connect()
+        result = conn.execute("PRAGMA mmap_size").fetchone()[0]
+        assert result == 536870912
+
+    def test_pragma_cache_size(self, db):
+        """PRAGMA cache_size should be -64000 (64MB, negative = KiB)."""
+        conn = db._connect()
+        result = conn.execute("PRAGMA cache_size").fetchone()[0]
+        assert result == -64000
