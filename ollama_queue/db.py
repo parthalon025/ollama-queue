@@ -27,6 +27,7 @@ DEFAULTS = {
     "default_max_retries": 0,
     "retry_backoff_base_seconds": 60,
     "retry_backoff_multiplier": 2.0,
+    "retry_backoff_cap_seconds": 3600,  # max DLQ retry interval (1 hour)
     "stall_posterior_threshold": 0.8,
     "stall_action": "log",
     "stall_kill_grace_seconds": 60,
