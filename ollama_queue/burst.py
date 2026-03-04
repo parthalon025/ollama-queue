@@ -66,6 +66,10 @@ class BurstDetector:
                     self._ewma = interval
                 else:
                     self._ewma = self._alpha * interval + (1 - self._alpha) * self._ewma
+            else:
+                _log.debug(
+                    "BurstDetector: discarding non-positive interval %.6f (clock skew or duplicate ts)", interval
+                )
         self._last_ts = ts
 
     def regime(self, now: float) -> str:
@@ -83,10 +87,13 @@ class BurstDetector:
         if len(self._baseline_samples) < 10 or self._ewma is None:
             return "unknown"
 
-        # 75th percentile baseline: robust against burst contamination
+        # 75th percentile baseline: robust against burst contamination.
+        # Nearest-rank p75 (0-indexed): ceil(0.75 * N) - 1, computed via
+        # ceiling-division trick to avoid importing math.
         sorted_samples = sorted(self._baseline_samples)
-        p75_idx = int(0.75 * len(sorted_samples))
-        baseline = sorted_samples[min(p75_idx, len(sorted_samples) - 1)]
+        n = len(sorted_samples)
+        p75_idx = min(-(-n * 3 // 4) - 1, n - 1)
+        baseline = sorted_samples[p75_idx]
 
         if baseline <= 0:
             return "unknown"
