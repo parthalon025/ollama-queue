@@ -58,8 +58,12 @@ export function buildTooltip(job, isConcurrent) {
     return parts.join('\n');
 }
 
+// 30-min bucket duration matches the backend's 48-slot load_map contract.
+// Derived from windowSecs so non-24h views stay coherent.
+const DENSITY_BUCKET_SECS = 1800;
+
 export function buildDensityBuckets(jobs, now, windowSecs) {
-    const bucketCount = 24;
+    const bucketCount = Math.round(windowSecs / DENSITY_BUCKET_SECS);
     const bucketSecs = windowSecs / bucketCount;
     const buckets = Array(bucketCount).fill(0);
     for (const job of jobs) {
@@ -127,7 +131,7 @@ export function GanttChart({ jobs, tick, windowHours = 24 }) {
 
     return (
         <div style={{ position: 'relative', width: '100%' }}>
-            {/* Load density strip — 24 hourly buckets, colored by job count */}
+            {/* Load density strip — 48 half-hour buckets, colored by job count */}
             {(() => {
                 const visibleJobs = jobs.filter(job => job.next_run < windowEnd);
                 const buckets = buildDensityBuckets(visibleJobs, now, windowSecs);
@@ -141,7 +145,7 @@ export function GanttChart({ jobs, tick, windowHours = 24 }) {
                             marginBottom: '0.2rem',
                             border: '1px solid var(--border-subtle)',
                         }}
-                        title="Job density per hour — darker = more jobs active"
+                        title="Job density per 30 min — darker = more jobs active"
                     >
                         {buckets.map((count, bucketIdx) => (
                             <div
@@ -155,7 +159,7 @@ export function GanttChart({ jobs, tick, windowHours = 24 }) {
                                             : count === 2
                                                 ? 'rgba(99,179,237,0.55)'
                                                 : 'rgba(99,179,237,0.9)',
-                                    borderRight: bucketIdx < 23 ? '1px solid var(--border-subtle)' : 'none',
+                                    borderRight: bucketIdx < buckets.length - 1 ? '1px solid var(--border-subtle)' : 'none',
                                 }}
                                 title={count > 0 ? `${count} job${count > 1 ? 's' : ''} active` : undefined}
                             />

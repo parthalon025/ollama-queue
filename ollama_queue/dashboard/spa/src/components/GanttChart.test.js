@@ -130,8 +130,8 @@ describe('buildDensityBuckets', () => {
     const now = 1000000;
     const windowSecs = 24 * 3600;
 
-    it('returns 24 buckets', () => {
-        expect(buildDensityBuckets([], now, windowSecs)).toHaveLength(24);
+    it('returns 48 buckets', () => {
+        expect(buildDensityBuckets([], now, windowSecs)).toHaveLength(48);
     });
 
     it('all buckets zero for empty jobs', () => {
@@ -139,19 +139,22 @@ describe('buildDensityBuckets', () => {
         expect(buckets.every(b => b === 0)).toBe(true);
     });
 
-    it('counts a job that spans the first bucket', () => {
+    it('counts a job that spans the first two buckets (3600s = 2×1800s slots)', () => {
         const jobs = [{ next_run: now, estimated_duration: 3600 }];
-        const buckets = buildDensityBuckets(jobs, now, windowSecs);
-        expect(buckets[0]).toBe(1);
-        expect(buckets[1]).toBe(0);
-    });
-
-    it('counts a job spanning multiple buckets', () => {
-        const jobs = [{ next_run: now, estimated_duration: 7200 }];
         const buckets = buildDensityBuckets(jobs, now, windowSecs);
         expect(buckets[0]).toBe(1);
         expect(buckets[1]).toBe(1);
         expect(buckets[2]).toBe(0);
+    });
+
+    it('counts a job spanning four buckets (7200s = 4×1800s slots)', () => {
+        const jobs = [{ next_run: now, estimated_duration: 7200 }];
+        const buckets = buildDensityBuckets(jobs, now, windowSecs);
+        expect(buckets[0]).toBe(1);
+        expect(buckets[1]).toBe(1);
+        expect(buckets[2]).toBe(1);
+        expect(buckets[3]).toBe(1);
+        expect(buckets[4]).toBe(0);
     });
 
     it('counts two concurrent jobs in same bucket', () => {
@@ -166,7 +169,13 @@ describe('buildDensityBuckets', () => {
     it('uses 600s default when estimated_duration is null', () => {
         const jobs = [{ next_run: now, estimated_duration: null }];
         const buckets = buildDensityBuckets(jobs, now, windowSecs);
-        expect(buckets[0]).toBe(1); // 600s < 3600s so only bucket 0
+        expect(buckets[0]).toBe(1); // 600s fits in one 1800s bucket
+    });
+
+    it('scales bucket count with windowSecs (12h window = 24 buckets)', () => {
+        const halfDayWindow = 12 * 3600;
+        const buckets = buildDensityBuckets([], now, halfDayWindow);
+        expect(buckets).toHaveLength(24); // 12h / 1800s = 24 buckets
     });
 });
 
