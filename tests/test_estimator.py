@@ -126,3 +126,12 @@ class TestEstimateWithVariance:
         estimator = DurationEstimator(db)
         _, cv_sq = estimator.estimate_with_variance("no-history-src")
         assert cv_sq == 1.5
+
+    def test_estimate_with_variance_uses_model_default(self, db):
+        """Model-name default tier used when no db history and no cached dict."""
+        from ollama_queue.estimator import DurationEstimator
+
+        estimator = DurationEstimator(db)
+        mean, cv_sq = estimator.estimate_with_variance("no-history-src", model="deepseek-r1:8b")
+        assert mean == 1800.0  # MODEL_DEFAULTS entry for deepseek
+        assert cv_sq == 1.5  # unknown variance → conservative default
