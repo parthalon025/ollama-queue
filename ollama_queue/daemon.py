@@ -14,11 +14,14 @@ import contextlib
 import logging
 import os
 import signal as _signal
+import statistics
 import subprocess
 import subprocess as _subprocess  # real module — not replaced by test mocks targeting 'subprocess'
 import threading
 import time
+from collections import deque
 from concurrent.futures import Future, ThreadPoolExecutor
+from math import log, log2
 from subprocess import TimeoutExpired as _TimeoutExpired
 
 from ollama_queue.db import Database
@@ -129,6 +132,9 @@ class Daemon:
         self._cb_open_attempts: int = 0  # how many times circuit has opened (for exponential cooldown)
         self._cb_probe_in_flight: bool = False  # True while a HALF_OPEN probe is dispatched
         self._cb_lock: threading.Lock = threading.Lock()  # protects all _cb_* state
+        # Adaptive entropy tracking (in-memory rolling baseline)
+        self._entropy_history: deque[float] = deque(maxlen=30)
+        self._entropy_suspend_until: float = 0.0
 
     # --- Concurrency helpers ---
 
@@ -318,6 +324,67 @@ class Daemon:
 
         return True
 
+    def _compute_queue_entropy(self, pending_jobs: list[dict], now: float) -> float:
+        """Compute age-weighted Shannon entropy of the pending queue's priority distribution.
+
+        Age-weighted: older jobs count more (log(1 + wait_seconds)).
+        Higher entropy = diverse priority mix = healthy queue.
+        Lower entropy = priority collapse = backlog or flood.
+        Returns 0.0 for empty queue.
+        """
+        if not pending_jobs:
+            return 0.0
+
+        from collections import defaultdict
+
+        weights = {j["id"]: log(1.0 + max(0.0, now - (j.get("submitted_at") or now))) for j in pending_jobs}
+        total_w = sum(weights.values()) or 1.0
+
+        priority_weights: dict[int, float] = defaultdict(float)
+        for j in pending_jobs:
+            priority_weights[j["priority"]] += weights[j["id"]] / total_w
+
+        return -sum(w * log2(w) for w in priority_weights.values() if w > 0)
+
+    def _check_entropy(self, pending_jobs: list[dict], now: float) -> None:
+        """Compute entropy, update rolling baseline, log anomalies, set suspension."""
+        entropy = self._compute_queue_entropy(pending_jobs, now)
+        self._entropy_history.append(entropy)
+
+        # Need at least 10 samples for a meaningful baseline
+        if len(self._entropy_history) < 10:
+            return
+
+        sigma = float(self.db.get_setting("entropy_alert_sigma") or 2.0)
+        mean_entropy = statistics.mean(self._entropy_history)
+        std_entropy = statistics.stdev(self._entropy_history) if len(self._entropy_history) > 1 else 0.1
+        if std_entropy == 0:
+            std_entropy = 0.1
+
+        if entropy < mean_entropy - sigma * std_entropy:
+            # Determine anomaly type
+            high_priority_count = sum(1 for j in pending_jobs if j["priority"] <= 4)
+            if high_priority_count / max(len(pending_jobs), 1) > 0.7:
+                alert_type = "critical_backlog"
+            else:
+                alert_type = "background_flood"
+
+            self.db.log_schedule_event(
+                "entropy_alert",
+                details={"entropy": entropy, "mean_entropy": mean_entropy, "sigma": sigma, "type": alert_type},
+            )
+            _log.warning(
+                "Queue entropy anomaly detected: entropy=%.2f mean=%.2f type=%s",
+                entropy,
+                mean_entropy,
+                alert_type,
+            )
+
+            suspend_enabled = self.db.get_setting("entropy_suspend_low_priority")
+            if alert_type == "critical_backlog" and suspend_enabled:
+                self._entropy_suspend_until = now + 60.0  # suspend p8-10 for 60s
+                _log.info("Suspended low-priority (p8-10) promotion for 60s due to critical_backlog")
+
     def _recover_orphans(self) -> None:
         """Reset jobs stuck in 'running' on daemon startup (no live subprocess)."""
         orphans = self.db.get_running_jobs()
@@ -428,7 +495,8 @@ class Daemon:
 
         # 0. Promote due recurring jobs (runs even while a job is running)
         try:
-            self.scheduler.promote_due_jobs(now)
+            suspend_low_priority = now < self._entropy_suspend_until
+            self.scheduler.promote_due_jobs(now, suspend_low_priority=suspend_low_priority)
         except Exception:
             _log.exception("Scheduler promotion failed; continuing")
 
@@ -481,6 +549,12 @@ class Daemon:
         if self._is_circuit_open():
             _log.debug("Circuit breaker OPEN — skipping dequeue")
             return
+
+        # 3c. Entropy anomaly detection
+        try:
+            self._check_entropy(pending_jobs, now)
+        except Exception:
+            _log.exception("Entropy check failed; continuing")
 
         # 4. Get next pending job — SJF + aging sort
         estimates = self.db.estimate_duration_bulk([j["source"] for j in pending_jobs])
