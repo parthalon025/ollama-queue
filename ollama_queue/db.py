@@ -288,6 +288,7 @@ class Database:
                ORDER BY priority ASC,
                         CASE WHEN model LIKE '%embed%' OR model LIKE '%nomic%' OR model LIKE '%bge%'
                                   OR model LIKE '%mxbai%' OR model LIKE '%all-minilm%'
+                                  OR command LIKE '%/api/embed%'
                              THEN 0 ELSE 1 END ASC,
                         submitted_at ASC
                LIMIT 1""",

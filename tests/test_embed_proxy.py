@@ -194,3 +194,95 @@ def test_embed_proxy_forwards_to_correct_url(client):
     called_url = called_args[0] if called_args else mock_client.post.call_args[1].get("url", "")
     assert "/api/embed" in called_url
     assert "/api/generate" not in called_url
+
+
+def test_embed_proxy_forces_stream_false(client):
+    """Proxy forces stream=False even if caller sends stream=True (Fix 1)."""
+    embed_response = {"model": "nomic-embed-text", "embeddings": [[0.1]]}
+
+    with patch("ollama_queue.api.httpx.AsyncClient") as mock_cls:
+        mock_client = _make_mock_client(embed_response)
+        mock_cls.return_value = mock_client
+
+        client.post(
+            "/api/embed",
+            json={"model": "nomic-embed-text", "input": "test", "stream": True},
+        )
+
+    called_kwargs = mock_client.post.call_args[1]
+    forwarded = called_kwargs.get("json", {})
+    assert forwarded["stream"] is False
+
+
+def test_embed_proxy_sets_embed_resource_profile_for_embed_model(client, db):
+    """Jobs submitted via /api/embed with embed model get resource_profile='embed' (Fix 2)."""
+    embed_response = {"model": "nomic-embed-text", "embeddings": [[0.1]]}
+
+    with patch("ollama_queue.api.httpx.AsyncClient") as mock_cls:
+        mock_cls.return_value = _make_mock_client(embed_response)
+        client.post(
+            "/api/embed",
+            json={"model": "nomic-embed-text", "input": "test"},
+        )
+
+    conn = db._connect()
+    row = conn.execute("SELECT * FROM jobs WHERE command = 'proxy:/api/embed' ORDER BY id DESC LIMIT 1").fetchone()
+    assert row is not None
+    assert row["resource_profile"] == "embed"
+
+
+def test_embed_proxy_empty_model_defaults_embed_profile(client, db):
+    """Jobs via /api/embed with no model name get resource_profile='embed' (Fix 2)."""
+    embed_response = {"embeddings": [[0.1]]}
+
+    with patch("ollama_queue.api.httpx.AsyncClient") as mock_cls:
+        mock_cls.return_value = _make_mock_client(embed_response)
+        client.post(
+            "/api/embed",
+            json={"input": "test"},
+        )
+
+    conn = db._connect()
+    row = conn.execute("SELECT * FROM jobs WHERE command = 'proxy:/api/embed' ORDER BY id DESC LIMIT 1").fetchone()
+    assert row is not None
+    assert row["resource_profile"] == "embed"
+
+
+def test_get_next_job_embed_affinity_via_command(db):
+    """get_next_job gives embed affinity to proxy:/api/embed jobs regardless of model (Fix 3)."""
+    # Submit an embed proxy job with empty model (falls through model LIKE checks)
+    embed_id = db.submit_job(
+        command="proxy:/api/embed",
+        model="",
+        priority=5,
+        timeout=60,
+        source="test",
+    )
+    # Submit a normal job with same priority submitted first (earlier submitted_at)
+    # but embed job should come first due to affinity
+    import time
+
+    time.sleep(0.01)  # ensure embed was submitted after; we confirm it still wins affinity
+    normal_id = db.submit_job(
+        command="echo hello",
+        model="qwen2.5:7b",
+        priority=5,
+        timeout=60,
+        source="test",
+    )
+
+    # The normal job was submitted second, but the embed job with command LIKE '%/api/embed%'
+    # should be dequeued first (CASE THEN 0 vs ELSE 1).
+    # Note: embed_id was submitted first so it wins on submitted_at tie-breaking anyway.
+    # To isolate the affinity fix, submit normal first, embed second, then verify embed wins.
+    conn = db._connect()
+    # Reset submitted_at so embed job appears LATER (to isolate the affinity logic)
+    conn.execute("UPDATE jobs SET submitted_at = submitted_at - 10 WHERE id = ?", (normal_id,))
+    conn.commit()
+
+    next_job = db.get_next_job()
+    assert next_job is not None
+    assert next_job["id"] == embed_id, (
+        f"Expected embed job (id={embed_id}) to win affinity over "
+        f"normal job (id={normal_id}), got id={next_job['id']}"
+    )

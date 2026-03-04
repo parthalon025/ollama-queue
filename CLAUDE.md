@@ -16,7 +16,7 @@ ollama_queue/
   estimator.py        # Duration prediction: rolling avg + model-based defaults
   scheduler.py        # Recurring job promotion: promote_due_jobs, update_next_run, rebalance
   dlq.py              # DLQManager: handle_failure routes to retry (backoff) or DLQ
-  api.py              # FastAPI REST API (26 endpoints including /api/generate proxy) + static SPA serving
+  api.py              # FastAPI REST API (38 endpoints including /api/generate + /api/embed proxy) + static SPA serving
   dashboard/
     spa/              # Preact SPA (built separately, served as static)
       src/            # Source: JSX components, signals store, CSS tokens
@@ -102,7 +102,7 @@ Route IDs: `now` | `plan` | `history` | `models` | `settings`. Sidebar: 200px de
 
 ## Pipeline Verification
 
-**Horizontal:** All 26 API endpoints + static files. **Vertical:** `ollama-queue submit` → DB row → daemon dequeue → subprocess → DB completed → API endpoints reflect → dashboard renders. Recurring: `schedule add` → `promote_due_jobs` → queue → run → `update_next_run`. DLQ: job fails max_retries → `move_to_dlq` → `dlq list` reflects. Full method: `projects/CLAUDE.md` § Pipeline Verification.
+**Horizontal:** All 38 API endpoints + static files (includes `/api/generate` and `/api/embed` proxies). **Vertical:** `ollama-queue submit` → DB row → daemon dequeue → subprocess → DB completed → API endpoints reflect → dashboard renders. Recurring: `schedule add` → `promote_due_jobs` → queue → run → `update_next_run`. DLQ: job fails max_retries → `move_to_dlq` → `dlq list` reflects. Full method: `projects/CLAUDE.md` § Pipeline Verification.
 
 ## Gotchas
 
@@ -110,7 +110,7 @@ Route IDs: `now` | `plan` | `history` | `models` | `settings`. Sidebar: 200px de
 - **check_same_thread=False** on SQLite — required for FastAPI worker threads, safe with WAL mode
 - **httpx** must be installed for API tests — `pip install httpx`
 - **Proxy endpoint uses sentinel job_id=-1** — `try_claim_for_proxy()` sets `current_job_id=-1` to distinguish proxy claims from real job execution. `release_proxy_claim()` only releases claims with `current_job_id=-1` to avoid accidentally releasing real jobs.
-- **Proxy priority fields** — `/api/generate` accepts `_priority` (int), `_source` (str), `_timeout` (int) in the JSON body. These are extracted before forwarding to Ollama, so they never reach the model server. Defaults: priority=0, source="proxy", timeout=120. Used by lessons-db eval pipeline to set job priority.
+- **Proxy priority fields** — `/api/generate` and `/api/embed` accept `_priority` (int), `_source` (str), `_timeout` (int) in the JSON body. These are extracted before forwarding to Ollama, so they never reach the model server. Defaults: priority=0, source="proxy", timeout=120. Used by lessons-db eval pipeline to set job priority.
 - **Deploy proxy before ARIA restart** — ARIA routes Ollama calls through port 7683. If ollama-queue is down, ARIA's activity predictions and organic naming fail with connection refused.
 - esbuild JSX `h` shadowing — see `projects/CLAUDE.md` § Shared Gotchas.
 - **`db._lock` is `threading.RLock`** (not `Lock`) — existing callers hold the lock while calling `_connect()`. Do NOT change to `Lock` or nested acquisition will deadlock.

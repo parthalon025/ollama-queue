@@ -259,25 +259,38 @@ def create_app(db: Database) -> FastAPI:
 
     # --- Proxy ---
 
-    @app.post("/api/generate")
-    async def proxy_generate(body: dict = Body(...)):
-        """Forward a generate request to Ollama, serializing through the queue.
+    async def _proxy_ollama_request(
+        endpoint: str,
+        command: str,
+        body: dict,
+        resource_profile: str,
+        extract_stdout_fn,
+        error_prefix: str,
+    ):
+        """Shared proxy logic for Ollama requests serialized through the queue.
 
-        Queue-specific fields (extracted from body, not forwarded to Ollama):
-          _priority: int (default 0) — job priority (lower = higher priority)
-          _source: str (default "proxy") — caller identifier for history/debugging
-          _timeout: int (default 120) — request timeout in seconds
+        Handles: pause check, _priority/_source/_timeout extraction, claim polling,
+        job logging, HTTP forwarding, and job completion/failure recording. Both
+        proxy_generate and proxy_embed delegate to this helper; the caller is
+        responsible for any endpoint-specific body mutations (e.g. stream=False)
+        before calling this function.
+
+        Args:
+            endpoint: Full Ollama URL path (e.g. "/api/generate").
+            command: Label stored in the jobs table (e.g. "proxy:/api/generate").
+            body: Request body dict (queue-specific fields are popped inside).
+            resource_profile: "ollama" for generate, "embed" for embed models.
+            extract_stdout_fn: Callable[[dict], str] — extracts a short summary
+                from the Ollama JSON response for the stdout_tail column.
+            error_prefix: Prefix for the 502 error detail message.
         """
         state = db.get_daemon_state()
         if state and state.get("state") == "paused_manual":
             raise HTTPException(status_code=503, detail="Queue is manually paused")
 
-        # Extract queue-specific fields before forwarding to Ollama
         priority = body.pop("_priority", 0)
         source = body.pop("_source", "proxy")
         req_timeout = body.pop("_timeout", 120)
-
-        body["stream"] = False  # MVP: no streaming
 
         model = body.get("model", "")
 
@@ -293,33 +306,31 @@ def create_app(db: Database) -> FastAPI:
         if not claimed:
             raise HTTPException(status_code=504, detail="Timed out waiting for queue turn")
 
-        # Log proxy request in the jobs table
         job_id = db.submit_job(
-            command="proxy:/api/generate",
+            command=command,
             model=model,
             priority=priority,
             timeout=req_timeout,
             source=source,
+            resource_profile=resource_profile,
         )
         db.start_job(job_id)
 
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(float(req_timeout))) as client:
-                resp = await client.post(f"{OLLAMA_URL}/api/generate", json=body)
+                resp = await client.post(f"{OLLAMA_URL}{endpoint}", json=body)
                 result = resp.json()
 
-            # Mark job completed
             db.complete_job(
                 job_id=job_id,
                 exit_code=0,
-                stdout_tail=str(result.get("response", ""))[:500],
+                stdout_tail=extract_stdout_fn(result),
                 stderr_tail="",
                 outcome_reason=None,
             )
             return result
         except Exception as e:
-            _log.error("proxy_generate failed for job %d: %s", job_id, e, exc_info=True)
-            # Mark job failed
+            _log.error("%s failed for job %d: %s", command, job_id, e, exc_info=True)
             db.complete_job(
                 job_id=job_id,
                 exit_code=1,
@@ -327,12 +338,31 @@ def create_app(db: Database) -> FastAPI:
                 stderr_tail=str(e)[:500],
                 outcome_reason=f"proxy error: {e}",
             )
-            raise HTTPException(status_code=502, detail=f"Ollama request failed: {e}") from e
+            raise HTTPException(status_code=502, detail=f"{error_prefix}: {e}") from e
         finally:
             try:
                 db.release_proxy_claim()
             except Exception:
                 _log.exception("release_proxy_claim failed — daemon may be stuck at sentinel job_id")
+
+    @app.post("/api/generate")
+    async def proxy_generate(body: dict = Body(...)):
+        """Forward a generate request to Ollama, serializing through the queue.
+
+        Queue-specific fields (extracted from body, not forwarded to Ollama):
+          _priority: int (default 0) — job priority (lower = higher priority)
+          _source: str (default "proxy") — caller identifier for history/debugging
+          _timeout: int (default 120) — request timeout in seconds
+        """
+        body["stream"] = False  # MVP: no streaming; prevents resp.json() failure on NDJSON
+        return await _proxy_ollama_request(
+            endpoint="/api/generate",
+            command="proxy:/api/generate",
+            body=body,
+            resource_profile="ollama",
+            extract_stdout_fn=lambda r: str(r.get("response", ""))[:500],
+            error_prefix="Ollama request failed",
+        )
 
     @app.post("/api/embed")
     async def proxy_embed(body: dict = Body(...)):
@@ -347,71 +377,22 @@ def create_app(db: Database) -> FastAPI:
           {"model": "nomic-embed-text", "input": "text"}
           {"model": "nomic-embed-text", "input": ["text1", "text2"]}
         """
-        state = db.get_daemon_state()
-        if state and state.get("state") == "paused_manual":
-            raise HTTPException(status_code=503, detail="Queue is manually paused")
-
-        # Extract queue-specific fields before forwarding to Ollama
-        priority = body.pop("_priority", 0)
-        source = body.pop("_source", "proxy")
-        req_timeout = body.pop("_timeout", 120)
-
+        body["stream"] = False  # Embed API does not stream, but force it defensively
         model = body.get("model", "")
-
-        waited = 0.0
-        claimed = False
-        while waited < PROXY_WAIT_TIMEOUT:
-            claimed = db.try_claim_for_proxy()
-            if claimed:
-                break
-            await asyncio.sleep(PROXY_POLL_INTERVAL)
-            waited += PROXY_POLL_INTERVAL
-
-        if not claimed:
-            raise HTTPException(status_code=504, detail="Timed out waiting for queue turn")
-
-        # Log proxy request in the jobs table
-        job_id = db.submit_job(
+        # Use OllamaModels.classify() to derive resource_profile from the model name,
+        # matching the daemon's own concurrency logic (embed profile = 4 concurrent slots,
+        # no VRAM gate). classify() returns "embed" for embed/nomic/bge/mxbai/all-minilm
+        # models; if model is empty or unknown, classify() returns "ollama" so we fall back
+        # to "embed" since /api/embed is always an embed workload.
+        resource_profile = OllamaModels().classify(model)["resource_profile"] if model else "embed"
+        return await _proxy_ollama_request(
+            endpoint="/api/embed",
             command="proxy:/api/embed",
-            model=model,
-            priority=priority,
-            timeout=req_timeout,
-            source=source,
+            body=body,
+            resource_profile=resource_profile,
+            extract_stdout_fn=lambda r: f"embeddings: {len(r.get('embeddings', []))} vectors",
+            error_prefix="Ollama embed request failed",
         )
-        db.start_job(job_id)
-
-        try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(float(req_timeout))) as client:
-                resp = await client.post(f"{OLLAMA_URL}/api/embed", json=body)
-                result = resp.json()
-
-            # Mark job completed
-            embeddings = result.get("embeddings", [])
-            stdout_summary = f"embeddings: {len(embeddings)} vectors"
-            db.complete_job(
-                job_id=job_id,
-                exit_code=0,
-                stdout_tail=stdout_summary[:500],
-                stderr_tail="",
-                outcome_reason=None,
-            )
-            return result
-        except Exception as e:
-            _log.error("proxy_embed failed for job %d: %s", job_id, e, exc_info=True)
-            # Mark job failed
-            db.complete_job(
-                job_id=job_id,
-                exit_code=1,
-                stdout_tail="",
-                stderr_tail=str(e)[:500],
-                outcome_reason=f"proxy error: {e}",
-            )
-            raise HTTPException(status_code=502, detail=f"Ollama embed request failed: {e}") from e
-        finally:
-            try:
-                db.release_proxy_claim()
-            except Exception:
-                _log.exception("release_proxy_claim failed — daemon may be stuck at sentinel job_id")
 
     # --- Schedule (recurring jobs) ---
     # NOTE: fixed routes (/rebalance, /events) must come before parameterized /{rj_id}
