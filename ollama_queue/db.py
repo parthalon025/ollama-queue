@@ -497,6 +497,50 @@ class Database:
             return None
         return row["avg_dur"]
 
+    def estimate_duration_bulk(self, sources: list[str]) -> dict[str, float]:
+        """Return mean duration per source in a single query.
+
+        Only counts successful runs (exit_code=0). Used by SJF sort to avoid
+        N separate DB queries per dequeue cycle.
+        """
+        if not sources:
+            return {}
+        with self._lock:
+            conn = self._connect()
+            placeholders = ",".join("?" * len(sources))
+            rows = conn.execute(
+                f"""SELECT source, AVG(duration) as avg_dur
+                    FROM duration_history
+                    WHERE source IN ({placeholders}) AND exit_code = 0
+                    GROUP BY source""",
+                sources,
+            ).fetchall()
+        return {row["source"]: row["avg_dur"] for row in rows if row["avg_dur"] is not None}
+
+    def estimate_duration_stats(self, source: str) -> tuple[float, float] | None:
+        """Return (mean, variance) from last 10 successful runs for a source.
+
+        Uses the computational formula: Var = E[X^2] - E[X]^2
+        Returns None if no history exists.
+        Used by estimate_with_variance() for risk-adjusted SJF sort.
+        """
+        with self._lock:
+            conn = self._connect()
+            row = conn.execute(
+                """SELECT AVG(duration) as mean_dur,
+                          AVG(duration * duration) - AVG(duration) * AVG(duration) as variance
+                   FROM (
+                       SELECT duration FROM duration_history
+                       WHERE source = ? AND exit_code = 0
+                       ORDER BY recorded_at DESC
+                       LIMIT 10
+                   )""",
+                (source,),
+            ).fetchone()
+        if row is None or row["mean_dur"] is None:
+            return None
+        return float(row["mean_dur"]), float(row["variance"] or 0.0)
+
     # --- Health Log ---
 
     def log_health(
