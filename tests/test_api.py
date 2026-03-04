@@ -531,3 +531,73 @@ def test_enable_endpoint_clears_disabled_job(client_and_db):
 def test_enable_endpoint_not_found(client):
     r = client.post("/api/schedule/jobs/nonexistent/enable")
     assert r.status_code == 404
+
+
+def test_get_load_map(client):
+    resp = client.get("/api/schedule/load-map")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "slots" in data
+    assert "slot_minutes" in data
+    assert data["slot_minutes"] == 30
+    assert data["count"] == len(data["slots"])
+
+
+def test_add_recurring_job_minimal(client):
+    resp = client.post(
+        "/api/schedule",
+        json={
+            "name": "test-job",
+            "command": "echo hello",
+            "interval_seconds": 3600,
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["name"] == "test-job"
+    assert data["command"] == "echo hello"
+
+
+def test_add_recurring_job_all_fields(client):
+    resp = client.post(
+        "/api/schedule",
+        json={
+            "name": "full-job",
+            "command": "aria run",
+            "interval_seconds": 86400,
+            "model": "qwen2.5:7b",
+            "priority": 3,
+            "timeout": 300,
+            "source": "test",
+            "tag": "aria",
+            "max_retries": 2,
+            "resource_profile": "ollama",
+            "pinned": False,
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["name"] == "full-job"
+    assert data["tag"] == "aria"
+
+
+def test_enable_job_by_name(client):
+    # Create a recurring job first
+    client.post(
+        "/api/schedule",
+        json={"name": "disable-me", "command": "echo x", "interval_seconds": 3600},
+    )
+    # Disable it via PUT
+    jobs = client.get("/api/schedule").json()
+    rj = next(j for j in jobs if j["name"] == "disable-me")
+    client.put(f"/api/schedule/{rj['id']}", json={"enabled": False})
+
+    # Re-enable via by-name endpoint
+    resp = client.post("/api/schedule/jobs/disable-me/enable")
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True}
+
+    # Verify re-enabled
+    jobs = client.get("/api/schedule").json()
+    rj = next(j for j in jobs if j["name"] == "disable-me")
+    assert rj["enabled"] in (True, 1)
