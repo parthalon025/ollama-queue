@@ -334,6 +334,7 @@ class TestAoISorting:
         db.start_job(job_recent)
         db.complete_job(job_recent, exit_code=0, stdout_tail="", stderr_tail="")
         db._connect().execute("UPDATE jobs SET completed_at=? WHERE id=?", (now - 0.5 * 3600, job_recent))
+        db._connect().commit()
 
         # Set both due now
         db._connect().execute("UPDATE recurring_jobs SET next_run=? WHERE id=?", (now - 1, rj_stale))
@@ -359,6 +360,7 @@ class TestAoISorting:
         db.start_job(job_ran)
         db.complete_job(job_ran, exit_code=0, stdout_tail="", stderr_tail="")
         db._connect().execute("UPDATE jobs SET completed_at=? WHERE id=?", (now - 0.1 * 3600, job_ran))
+        db._connect().commit()
 
         db._connect().execute("UPDATE recurring_jobs SET next_run=? WHERE id=?", (now - 1, rj_never))
         db._connect().execute("UPDATE recurring_jobs SET next_run=? WHERE id=?", (now - 1, rj_ran))

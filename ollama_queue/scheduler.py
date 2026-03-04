@@ -96,12 +96,15 @@ class Scheduler:
         """
         aoi_weight = float(self.db.get_setting("aoi_weight") or 0.3)
 
-        priority = int(rj.get("priority") or 5)
+        priority = max(1, min(10, int(rj.get("priority") or 5)))
         priority_norm = (priority - 1) / 9.0  # 0 = p1 (critical), 1 = p10 (background)
 
         last_success = self.db.get_last_successful_run_time(rj["id"])
         if last_success is not None:
             interval = float(rj.get("interval_seconds") or 3600)
+            # Note: cron jobs (interval_seconds=None) use 3600s fallback.
+            # This means cron jobs tend toward staleness_norm=1.0 quickly;
+            # AoI tiebreaker degrades to pure priority for cron vs cron comparisons.
             staleness_ratio = (now - last_success) / max(interval, 1.0)
             staleness_norm = min(1.0, staleness_ratio / 5.0)
         else:
