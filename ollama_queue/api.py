@@ -16,7 +16,7 @@ import time as _time
 
 import httpx
 from fastapi import Body, FastAPI, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -224,6 +224,9 @@ def create_app(db: Database) -> FastAPI:
         # Admission gate: reject with 429 when queue depth exceeds max_queue_depth
         max_depth = int(db.get_setting("max_queue_depth") or 50)
         pending = db.count_pending_jobs()
+        # count_pending_jobs() excludes retry_after-deferred jobs (not actionable yet).
+        # get_pending_jobs() returns all pending — the inline filter below must be preserved
+        # to keep ETA computation consistent with this count.
         if pending >= max_depth:
             # Estimate drain time from current queue ETAs.
             # Filter to actionable jobs only (matching count_pending_jobs semantics)
@@ -240,8 +243,8 @@ def create_app(db: Database) -> FastAPI:
                 else:
                     drain_seconds = max(1, pending * 60)
             except Exception:
+                _log.warning("ETA calculation failed for 429 response; using fallback", exc_info=True)
                 drain_seconds = max(1, pending * 60)  # fallback: 1 min per pending job
-            from fastapi.responses import JSONResponse
 
             return JSONResponse(
                 status_code=429,
