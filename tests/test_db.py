@@ -562,3 +562,54 @@ def test_recurring_job_schema_has_outcome_reason(db):
     rj_id = db.add_recurring_job(name="schema-test", command="echo hi", interval_seconds=3600)
     rj = db.get_recurring_job(rj_id)
     assert "outcome_reason" in rj
+
+
+class TestDatabase:
+    def test_pragma_synchronous_normal(self, db):
+        """PRAGMA synchronous should be NORMAL (1), not FULL (2)."""
+        conn = db._connect()
+        result = conn.execute("PRAGMA synchronous").fetchone()[0]
+        assert result == 1  # 0=OFF, 1=NORMAL, 2=FULL, 3=EXTRA
+
+    def test_pragma_temp_store_memory(self, db):
+        """PRAGMA temp_store should be MEMORY (2)."""
+        conn = db._connect()
+        result = conn.execute("PRAGMA temp_store").fetchone()[0]
+        assert result == 2  # 0=DEFAULT, 1=FILE, 2=MEMORY
+
+    def test_pragma_busy_timeout(self, db):
+        """PRAGMA busy_timeout should be 5000ms."""
+        conn = db._connect()
+        result = conn.execute("PRAGMA busy_timeout").fetchone()[0]
+        assert result == 5000
+
+    def test_pragma_wal_autocheckpoint(self, db):
+        """PRAGMA wal_autocheckpoint should be 1000 pages."""
+        conn = db._connect()
+        result = conn.execute("PRAGMA wal_autocheckpoint").fetchone()[0]
+        assert result == 1000
+
+    def test_pragma_journal_mode_wal(self, db):
+        """WAL mode must be active — required for wal_autocheckpoint to have any effect."""
+        conn = db._connect()
+        result = conn.execute("PRAGMA journal_mode").fetchone()[0]
+        assert result == "wal"
+
+    def test_pragma_mmap_size(self, db):
+        """PRAGMA mmap_size should be 536870912 (512MB)."""
+        conn = db._connect()
+        result = conn.execute("PRAGMA mmap_size").fetchone()[0]
+        assert result == 536870912
+
+    def test_pragma_cache_size(self, db):
+        """PRAGMA cache_size should be -64000 (64MB, negative = KiB)."""
+        conn = db._connect()
+        result = conn.execute("PRAGMA cache_size").fetchone()[0]
+        assert result == -64000
+
+    def test_jobs_has_last_retry_delay_column(self, db):
+        """jobs table must have last_retry_delay column for decorrelated jitter."""
+        job_id = db.submit_job("echo test", "qwen2.5:7b", 5, 60, "test")
+        job = db.get_job(job_id)
+        assert "last_retry_delay" in job
+        assert job["last_retry_delay"] is None  # NULL by default

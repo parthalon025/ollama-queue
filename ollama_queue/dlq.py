@@ -11,6 +11,7 @@ Decision it drives: Retry this job (and how long to wait) or declare it dead?
 from __future__ import annotations
 
 import logging
+import random
 import time
 
 from ollama_queue.db import Database
@@ -42,11 +43,17 @@ class DLQManager:
     def _schedule_retry(self, job_id: int, retry_count: int) -> str:
         settings = self.db.get_all_settings()
         base = settings.get("retry_backoff_base_seconds", 60)
-        multiplier = settings.get("retry_backoff_multiplier", 2.0)
-        delay = base * (multiplier**retry_count)
-        retry_after = time.time() + delay
+        cap = settings.get("retry_backoff_cap_seconds", 3600)
 
-        self.db._set_job_retry_after(job_id, retry_after)
+        # Decorrelated jitter: each delay is random in [base, prev_delay * 3]
+        # Breaks synchronization between retrying jobs (prevents thundering herd)
+        job = self.db.get_job(job_id)
+        prev_delay = job.get("last_retry_delay") or base
+        hi = max(base, prev_delay * 3)  # guard: ensure upper bound >= base
+        delay = min(cap, random.uniform(base, hi))  # noqa: S311
+
+        retry_after = time.time() + delay
+        self.db._set_job_retry(job_id, retry_after, delay)
         self.db.log_schedule_event(
             "retried",
             job_id=job_id,

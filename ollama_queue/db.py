@@ -35,6 +35,7 @@ DEFAULTS = {
     "default_max_retries": 0,
     "retry_backoff_base_seconds": 60,
     "retry_backoff_multiplier": 2.0,
+    "retry_backoff_cap_seconds": 3600,  # max DLQ retry interval (1 hour)
     "stall_posterior_threshold": 0.8,
     "stall_action": "log",
     "stall_kill_grace_seconds": 60,
@@ -62,6 +63,15 @@ class Database:
                 self._conn.row_factory = sqlite3.Row
                 self._conn.execute("PRAGMA journal_mode=WAL")
                 self._conn.execute("PRAGMA foreign_keys=ON")
+                # Performance hardening
+                self._conn.execute("PRAGMA synchronous = NORMAL")
+                self._conn.execute("PRAGMA temp_store = MEMORY")
+                self._conn.execute("PRAGMA mmap_size = 536870912")  # 512MB
+                self._conn.execute("PRAGMA cache_size = -64000")  # 64MB page cache
+                self._conn.execute("PRAGMA wal_autocheckpoint = 1000")
+                # busy_timeout protects against cross-process contention (e.g., sqlite3 CLI,
+                # migration scripts); same-process thread safety is handled by self._lock.
+                self._conn.execute("PRAGMA busy_timeout = 5000")
         return self._conn
 
     def _add_column_if_missing(self, conn: sqlite3.Connection, table: str, col: str, defn: str) -> None:
@@ -84,6 +94,7 @@ class Database:
         self._add_column_if_missing(conn, "recurring_jobs", "check_command", "TEXT")
         self._add_column_if_missing(conn, "recurring_jobs", "max_runs", "INTEGER")
         self._add_column_if_missing(conn, "recurring_jobs", "outcome_reason", "TEXT")
+        self._add_column_if_missing(conn, "jobs", "last_retry_delay", "REAL")  # PR1: decorrelated jitter
 
     def initialize(self) -> None:
         """Create all tables and seed defaults."""
@@ -432,9 +443,10 @@ class Database:
             conn.commit()
 
     def get_all_settings(self) -> dict:
-        conn = self._connect()
-        rows = conn.execute("SELECT key, value FROM settings").fetchall()
-        return {row["key"]: json.loads(row["value"]) for row in rows}
+        with self._lock:
+            conn = self._connect()
+            rows = conn.execute("SELECT key, value FROM settings").fetchall()
+            return {row["key"]: json.loads(row["value"]) for row in rows}
 
     def set_stall_detected(self, job_id: int, now: float, signals: dict) -> None:
         """Record stall detection timestamp and signal breakdown for a job."""
@@ -858,17 +870,18 @@ class Database:
             )
             conn.commit()
 
-    def _set_job_retry_after(self, job_id: int, retry_after: float) -> None:
-        """Increment retry_count and set retry_after timestamp, keeping status pending."""
+    def _set_job_retry(self, job_id: int, retry_after: float, delay: float) -> None:
+        """Atomically increment retry_count, reset status, and set retry timing."""
         with self._lock:
             conn = self._connect()
             conn.execute(
                 """UPDATE jobs
                    SET retry_count = retry_count + 1,
                        retry_after = ?,
+                       last_retry_delay = ?,
                        status = 'pending'
                    WHERE id = ?""",
-                (retry_after, job_id),
+                (retry_after, delay, job_id),
             )
             conn.commit()
 
