@@ -1,5 +1,10 @@
 # ollama-queue
 
+[![Python](https://img.shields.io/badge/python-3.12+-blue)](https://www.python.org)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Security](https://github.com/parthalon025/ollama-queue/actions/workflows/security.yml/badge.svg)](https://github.com/parthalon025/ollama-queue/actions/workflows/security.yml)
+[![CodeQL](https://github.com/parthalon025/ollama-queue/actions/workflows/codeql.yml/badge.svg)](https://github.com/parthalon025/ollama-queue/actions/workflows/codeql.yml)
+
 Priority job queue for Ollama — serializes local AI inference tasks, monitors system health, and serves a web dashboard.
 
 ## Why
