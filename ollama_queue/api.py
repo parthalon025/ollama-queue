@@ -102,6 +102,7 @@ class RecurringJobCreate(BaseModel):
     pinned: bool = False
     check_command: str | None = None
     max_runs: int | None = None
+    description: str | None = None
 
 
 class RecurringJobUpdate(BaseModel):
@@ -118,6 +119,70 @@ class RecurringJobUpdate(BaseModel):
     pinned: bool | None = None
     check_command: str | None = None
     max_runs: int | None = None
+    description: str | None = None
+
+
+_JOB_DESCRIPTION_CONTEXT = (
+    "You are describing scheduled jobs in a personal AI + home automation system owned by one person.\n\n"
+    "System context:\n"
+    "- 'aria' tag = ARIA, a Home Assistant intelligence system that runs ML predictions, detects behavioral patterns,\n"
+    "  correlates entities, and learns from logbook history\n"
+    "- 'embeddings' tag = nightly vector index generation for semantic search across project codebases and documents\n"
+    "- 'lessons' tag = a personal engineering lessons database with spaced repetition (FSRS) that schedules review of past mistakes\n"  # noqa: E501
+    "- 'telegram' tag = sends AI-generated daily briefings (morning/midday/evening) to the owner via Telegram\n"
+    "  using summarized data from Notion and Home Assistant\n"
+    "- 'notion' tag = syncs and re-indexes the owner's personal Notion workspace (7,800+ pages) for local semantic search\n"  # noqa: E501
+    "- Commands like 'aria run --mode X' run a specific ARIA analysis mode.\n"
+    "  Modes: learn=update behavioral patterns from HA logbook, predict=generate activity predictions,\n"
+    "  embeddings=generate vector index, snapshot=save model state, meta-learn=meta-learning pass\n"
+    "- Commands like 'telegram-brief --time X' send a scheduled Telegram message summarizing the day\n"
+    "- 'lessons-db' = the personal engineering lessons database CLI\n"
+    "- 'notion-sync' = syncs the local Notion replica from the cloud workspace"
+)
+
+
+def _call_generate_description(rj_id: int, name: str, tag: str | None, command: str, db_ref: Database) -> None:
+    """Call local Ollama to generate a layman description for a recurring job, then persist it.
+
+    Plain English: Asks the local AI model to write 2 sentences explaining what this scheduled
+    job does and why it runs regularly, then saves the result to the database.
+    Decision it drives: Shows job owners what each scheduled task is actually for in plain terms.
+    """
+    import json as _json
+    import urllib.request
+
+    prompt = (
+        f"{_JOB_DESCRIPTION_CONTEXT}\n\n"
+        f"Job name: {name}\n"
+        f"Tag: {tag or 'none'}\n"
+        f"Command: {command}\n\n"
+        "In 2 plain-English sentences, explain what this job does and why it runs regularly. "
+        "Write for the technical owner who built this system — be specific about what data or "
+        "action is involved, not generic. Do not start with 'This job'."
+    )
+    payload = _json.dumps(
+        {
+            "model": "qwen3:8b",
+            "prompt": prompt,
+            "temperature": 0.2,
+            "stream": False,
+            "think": False,
+        }
+    ).encode()
+    try:
+        req = urllib.request.Request(
+            "http://localhost:11434/api/generate",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=120) as resp:  # noqa: S310
+            data = _json.loads(resp.read())
+            description = data.get("response", "").strip()
+            if description:
+                db_ref.update_recurring_job(rj_id, description=description)
+    except Exception:
+        _log.exception("generate-description failed for recurring job %s", rj_id)
 
 
 def create_app(db: Database) -> FastAPI:
@@ -486,11 +551,21 @@ def create_app(db: Database) -> FastAPI:
 
     @app.post("/api/schedule")
     def add_schedule(body: RecurringJobCreate):
+        import threading as _threading
+
         from ollama_queue.scheduler import Scheduler
 
         rj_id = db.add_recurring_job(**body.model_dump())
         Scheduler(db).rebalance()
-        return db.get_recurring_job(rj_id)
+        rj = db.get_recurring_job(rj_id)
+        # Auto-generate description in background if not already provided
+        if rj and not rj.get("description"):
+            _threading.Thread(
+                target=_call_generate_description,
+                args=(rj_id, rj["name"], rj.get("tag"), rj["command"], db),
+                daemon=True,
+            ).start()
+        return rj
 
     @app.put("/api/schedule/{rj_id}")
     def update_schedule(rj_id: int, body: RecurringJobUpdate):
@@ -530,6 +605,22 @@ def create_app(db: Database) -> FastAPI:
             resource_profile=rj.get("resource_profile", "ollama"),
         )
         return {"job_id": job_id}
+
+    @app.post("/api/schedule/{rj_id}/generate-description")
+    def generate_description(rj_id: int):
+        """Ask local Ollama (qwen3:8b) to write a layman description for this recurring job.
+
+        Plain English: The caller waits while the AI model writes 2 plain-English sentences
+        about what the job does. The description is saved to the DB and returned so the UI
+        can update immediately without a second fetch.
+        Decision it drives: Lets the owner understand any job's purpose without reading its command.
+        """
+        rj = db.get_recurring_job(rj_id)
+        if not rj:
+            raise HTTPException(status_code=404, detail="Recurring job not found")
+        _call_generate_description(rj_id, rj["name"], rj.get("tag"), rj["command"], db)
+        updated = db.get_recurring_job(rj_id)
+        return {"ok": True, "description": updated.get("description") if updated else None}
 
     @app.get("/api/schedule/{rj_id}/runs")
     def get_schedule_runs(rj_id: int, limit: int = 5):

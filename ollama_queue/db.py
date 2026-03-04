@@ -95,6 +95,7 @@ class Database:
         self._add_column_if_missing(conn, "recurring_jobs", "max_runs", "INTEGER")
         self._add_column_if_missing(conn, "recurring_jobs", "outcome_reason", "TEXT")
         self._add_column_if_missing(conn, "jobs", "last_retry_delay", "REAL")  # PR1: decorrelated jitter
+        self._add_column_if_missing(conn, "recurring_jobs", "description", "TEXT")  # layman description
 
     def initialize(self) -> None:
         """Create all tables and seed defaults."""
@@ -641,6 +642,7 @@ class Database:
         pinned: bool = False,
         check_command: str | None = None,
         max_runs: int | None = None,
+        description: str | None = None,
     ) -> int:
         if interval_seconds is None and cron_expression is None:
             raise ValueError("Either interval_seconds or cron_expression must be provided")
@@ -660,8 +662,8 @@ class Database:
                 """INSERT INTO recurring_jobs
                    (name, command, model, priority, timeout, source, tag,
                     resource_profile, interval_seconds, cron_expression, next_run,
-                    max_retries, pinned, check_command, max_runs, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    max_retries, pinned, check_command, max_runs, description, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     name,
                     command,
@@ -678,6 +680,7 @@ class Database:
                     1 if pinned else 0,
                     check_command,
                     max_runs,
+                    description,
                     now,
                 ),
             )
@@ -797,6 +800,7 @@ class Database:
             "check_command",
             "max_runs",
             "outcome_reason",
+            "description",
         }
         updates = {k: v for k, v in fields.items() if k in allowed}
         if not updates:
