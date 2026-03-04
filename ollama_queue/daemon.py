@@ -711,7 +711,8 @@ class Daemon:
             std_dev = duration * (cv_sq**0.5)
             risk_adjusted = duration + 0.5 * std_dev
 
-            wait = now - (j.get("submitted_at") or now)
+            submitted = j.get("submitted_at")
+            wait = now - submitted if submitted is not None else 0
             effective = risk_adjusted / (1.0 + wait / aging_factor) if aging_factor > 0 and wait > 0 else risk_adjusted
 
             return (j["priority"], effective)

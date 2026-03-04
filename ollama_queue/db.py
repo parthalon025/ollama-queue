@@ -299,6 +299,13 @@ class Database:
         return dict(row) if row else None
 
     def get_next_job(self) -> dict | None:
+        """Return the highest-priority pending job for execution.
+
+        .. deprecated::
+            No longer used by the daemon (replaced by Daemon._dequeue_next_job()
+            which implements SJF + aging). Retained for the proxy/embed path and
+            backwards compatibility with callers outside the daemon.
+        """
         conn = self._connect()
         now = time.time()
         row = conn.execute(
