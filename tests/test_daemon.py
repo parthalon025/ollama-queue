@@ -847,17 +847,20 @@ class TestEntropyComputation:
         assert result == 0.0
 
     def test_uniform_priority_queue_has_high_entropy(self, db):
-        """Queue with equal mix of priorities has maximum entropy."""
+        """Queue with equal mix of 5 priorities approaches theoretical max = log2(5) ≈ 2.32."""
         import time
+        from math import log2
 
         from ollama_queue.daemon import Daemon
 
         daemon = Daemon(db)
         now = time.time()
-        # 5 distinct priorities — mix
+        # 5 distinct priorities — equal age → equal weight → max entropy
         jobs = [{"id": i, "priority": i, "submitted_at": now - 100} for i in range(1, 6)]
         entropy = daemon._compute_queue_entropy(jobs, now)
-        assert entropy > 1.0  # high entropy for diverse queue
+        import pytest
+
+        assert entropy == pytest.approx(log2(5), abs=0.05)
 
     def test_single_priority_queue_has_low_entropy(self, db):
         """Queue with all same priority has entropy near 0."""
@@ -883,3 +886,6 @@ class TestEntropyComputation:
         for _ in range(5):
             daemon._check_entropy(jobs, now)
         assert len(daemon._entropy_history) == 5
+        import math
+
+        assert all(v >= 0.0 and math.isfinite(v) for v in daemon._entropy_history)

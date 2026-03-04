@@ -19,7 +19,7 @@ import subprocess
 import subprocess as _subprocess  # real module — not replaced by test mocks targeting 'subprocess'
 import threading
 import time
-from collections import deque
+from collections import defaultdict, deque
 from concurrent.futures import Future, ThreadPoolExecutor
 from math import log, log2
 from subprocess import TimeoutExpired as _TimeoutExpired
@@ -303,8 +303,6 @@ class Daemon:
         """
         if not pending_jobs:
             return 0.0
-
-        from collections import defaultdict
 
         weights = {j["id"]: log(1.0 + max(0.0, now - (j.get("submitted_at") or now))) for j in pending_jobs}
         total_w = sum(weights.values()) or 1.0
