@@ -805,7 +805,8 @@ class Daemon:
             if (job.get("preemption_count") or 0) >= max_preemptions:
                 continue  # immune
 
-            started_at = job.get("started_at") or now
+            _sa = job.get("started_at")
+            started_at = _sa if _sa is not None else now
             elapsed = now - started_at
             if elapsed >= preempt_window:
                 continue  # too far into execution

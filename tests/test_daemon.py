@@ -883,7 +883,7 @@ class TestPreemption:
             conn = db._connect()
             conn.execute("UPDATE jobs SET pid=99999 WHERE id=?", (job_id,))
             conn.commit()
-        with patch("os.kill", return_value=None):
+        with patch("ollama_queue.daemon.os.kill", return_value=None):
             daemon._preempt_job(job_id)
         job = db.get_job(job_id)
         assert job["status"] == "pending", f"Expected pending, got {job['status']}"
@@ -902,7 +902,7 @@ class TestPreemption:
             conn = db._connect()
             conn.execute("UPDATE jobs SET pid=99999 WHERE id=?", (job_id,))
             conn.commit()
-        with patch("os.kill", return_value=None):
+        with patch("ollama_queue.daemon.os.kill", return_value=None):
             daemon._preempt_job(job_id)
         job = db.get_job(job_id)
         assert job["preemption_count"] == 1
