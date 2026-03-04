@@ -132,6 +132,30 @@ class Daemon:
         elapsed_hours = (time.time() - self._concurrent_enabled_at) / 3600
         return elapsed_hours < self._shadow_hours()
 
+    def _compute_max_workers(self) -> int:
+        """Compute max ThreadPoolExecutor workers based on available hardware resources.
+
+        Formula: floor((vram_available + ram_available * cpu_offload_efficiency) / min_model_vram) + 3
+        The +3 reserves slots for CPU-bound/embedding jobs that don't compete for GPU.
+        Falls back to 4 if resource metrics are unavailable.
+
+        Uses _free_vram_mb() and _free_ram_mb() (same sources as _can_admit) so the
+        executor ceiling is grounded in actual hardware state at startup time.
+        """
+        vram_available = self._free_vram_mb() or 0.0
+        ram_available = self._free_ram_mb()
+
+        cpu_efficiency = float(self.db.get_setting("cpu_offload_efficiency") or 0.3)
+        fallback_mb = int(self.db.get_setting("min_model_vram_mb") or 2000)
+        min_model_vram = self._ollama_models.min_estimated_vram_mb(self.db, fallback_mb=fallback_mb)
+
+        if min_model_vram <= 0:
+            return 4
+
+        effective_vram = vram_available + ram_available * cpu_efficiency
+        workers = max(1, int(effective_vram / min_model_vram) + 3)
+        return workers
+
     def _committed_vram_mb(self) -> float:
         """Estimate VRAM already committed to running jobs.
 
@@ -401,10 +425,13 @@ class Daemon:
 
         if self._executor is None:
             # max_workers is a ceiling; actual concurrency is governed entirely by
-            # _can_admit, which reads the live max_concurrent_jobs setting.  Using a
-            # fixed large value means changing the setting at runtime is reflected
-            # immediately without recreating the executor.  (#4)
-            self._executor = ThreadPoolExecutor(max_workers=32, thread_name_prefix="ollama-worker")
+            # _can_admit, which reads the live max_concurrent_jobs setting.  The ceiling
+            # is computed from real hardware resources at first-job startup so the thread
+            # pool isn't arbitrarily oversized on memory-constrained hosts.
+            self._executor = ThreadPoolExecutor(
+                max_workers=self._compute_max_workers(),
+                thread_name_prefix="ollama-worker",
+            )
 
         self.db.start_job(job["id"])
         with self.db._lock:
