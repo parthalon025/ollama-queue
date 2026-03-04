@@ -52,6 +52,7 @@ DEFAULTS = {
     "cb_max_cooldown": 600,  # maximum cooldown seconds (10 min)
     "max_queue_depth": 50,  # HTTP 429 when pending count exceeds this
     "min_model_vram_mb": 2000,  # minimum VRAM estimate when model is unknown
+    "sjf_aging_factor": 3600,  # PR3: seconds of wait to halve effective duration; 0=pure SJF
 }
 
 

@@ -998,3 +998,108 @@ def test_half_open_failure_reopens_circuit(daemon):
     for _ in range(threshold):
         daemon._record_ollama_failure()
     assert daemon._cb_state == "OPEN"
+
+
+class TestSJFDequeue:
+    def test_sjf_shorter_job_dequeued_first_at_same_priority(self, db):
+        """Shorter estimated job is dequeued before longer at same priority."""
+        import time
+
+        from ollama_queue.daemon import Daemon
+
+        daemon = Daemon(db)
+
+        now = time.time()
+        job_long = db.submit_job("echo long", "m", 5, 600, "long-src")
+        job_short = db.submit_job("echo short", "m", 5, 600, "short-src")
+
+        for _ in range(3):
+            db._connect().execute(
+                "INSERT INTO duration_history (source, model, duration, exit_code, recorded_at) VALUES (?,?,?,?,?)",
+                ("long-src", "m", 900.0, 0, now - 10),
+            )
+            db._connect().execute(
+                "INSERT INTO duration_history (source, model, duration, exit_code, recorded_at) VALUES (?,?,?,?,?)",
+                ("short-src", "m", 120.0, 0, now - 10),
+            )
+        db._connect().commit()
+
+        pending = db.get_pending_jobs()
+        estimates = db.estimate_duration_bulk([j["source"] for j in pending])
+        result = daemon._dequeue_next_job(pending, estimates, now)
+        assert result is not None
+        assert result["id"] == job_short
+
+    def test_sjf_priority_still_primary_sort_key(self, db):
+        """Priority 1 job is dequeued before priority 5, even if longer."""
+        import time
+
+        from ollama_queue.daemon import Daemon
+
+        daemon = Daemon(db)
+
+        now = time.time()
+        job_p1 = db.submit_job("echo p1 long", "m", 1, 600, "p1-src")
+        job_p5 = db.submit_job("echo p5 short", "m", 5, 600, "p5-src")
+
+        for _ in range(3):
+            db._connect().execute(
+                "INSERT INTO duration_history (source, model, duration, exit_code, recorded_at) VALUES (?,?,?,?,?)",
+                ("p1-src", "m", 900.0, 0, now - 10),
+            )
+            db._connect().execute(
+                "INSERT INTO duration_history (source, model, duration, exit_code, recorded_at) VALUES (?,?,?,?,?)",
+                ("p5-src", "m", 60.0, 0, now - 10),
+            )
+        db._connect().commit()
+
+        pending = db.get_pending_jobs()
+        estimates = db.estimate_duration_bulk([j["source"] for j in pending])
+        result = daemon._dequeue_next_job(pending, estimates, now)
+        assert result is not None
+        assert result["id"] == job_p1
+
+    def test_aging_promotes_long_waiting_job(self, db):
+        """Long-waiting job effective duration decreases over time (prevents starvation)."""
+        import time
+
+        from ollama_queue.daemon import Daemon
+
+        daemon = Daemon(db)
+        db.set_setting("sjf_aging_factor", 3600)
+
+        now = time.time()
+        job_waited = db.submit_job("echo waited", "m", 5, 600, "slow-src")
+        db._connect().execute(
+            "UPDATE jobs SET submitted_at = ? WHERE id = ?",
+            (now - 7200, job_waited),  # submitted 2 hours ago
+        )
+        job_fresh = db.submit_job("echo fresh", "m", 5, 600, "fast-src")
+
+        for _ in range(3):
+            db._connect().execute(
+                "INSERT INTO duration_history (source, model, duration, exit_code, recorded_at) VALUES (?,?,?,?,?)",
+                ("slow-src", "m", 600.0, 0, now - 10),  # 600s base
+            )
+            db._connect().execute(
+                "INSERT INTO duration_history (source, model, duration, exit_code, recorded_at) VALUES (?,?,?,?,?)",
+                ("fast-src", "m", 250.0, 0, now - 10),  # 250s base
+            )
+        db._connect().commit()
+
+        pending = db.get_pending_jobs()
+        estimates = db.estimate_duration_bulk([j["source"] for j in pending])
+        result = daemon._dequeue_next_job(pending, estimates, now)
+        # With aging: slow-src effective = 600/(1+7200/3600) = 200s < 250s
+        assert result is not None
+        assert result["id"] == job_waited
+
+    def test_dequeue_returns_none_when_no_jobs(self, db):
+        """Returns None when pending list is empty."""
+        import time
+
+        from ollama_queue.daemon import Daemon
+
+        daemon = Daemon(db)
+        result = daemon._dequeue_next_job([], {}, time.time())
+        assert result is None
