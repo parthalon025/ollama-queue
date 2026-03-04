@@ -4,6 +4,7 @@ import concurrent.futures
 import logging
 import signal as _signal
 import time
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -626,6 +627,14 @@ class TestComputeMaxWorkers:
             _drain(d)
         assert d._executor is not None
         assert d._executor._max_workers == 7
+
+    def test_shutdown_clears_executor(self, db):
+        """shutdown() sets _executor to None, releasing thread resources."""
+        d = Daemon(db)
+        # Trigger lazy executor creation manually
+        d._executor = ThreadPoolExecutor(max_workers=2)
+        d.shutdown()
+        assert d._executor is None
 
 
 # --- T8: Bayesian stall detection ---
