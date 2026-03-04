@@ -833,3 +833,53 @@ def test_no_max_runs_no_decrement(daemon):
 
     rj = daemon.db.get_recurring_job(rj_id)
     assert rj["max_runs"] is None
+
+
+class TestEntropyComputation:
+    def test_empty_queue_entropy_is_zero(self, db):
+        """Empty pending list gives entropy 0."""
+        from ollama_queue.daemon import Daemon
+
+        daemon = Daemon(db)
+        import time
+
+        result = daemon._compute_queue_entropy([], time.time())
+        assert result == 0.0
+
+    def test_uniform_priority_queue_has_high_entropy(self, db):
+        """Queue with equal mix of priorities has maximum entropy."""
+        import time
+
+        from ollama_queue.daemon import Daemon
+
+        daemon = Daemon(db)
+        now = time.time()
+        # 5 distinct priorities — mix
+        jobs = [{"id": i, "priority": i, "submitted_at": now - 100} for i in range(1, 6)]
+        entropy = daemon._compute_queue_entropy(jobs, now)
+        assert entropy > 1.0  # high entropy for diverse queue
+
+    def test_single_priority_queue_has_low_entropy(self, db):
+        """Queue with all same priority has entropy near 0."""
+        import time
+
+        from ollama_queue.daemon import Daemon
+
+        daemon = Daemon(db)
+        now = time.time()
+        jobs = [{"id": i, "priority": 1, "submitted_at": now - 100} for i in range(10)]
+        entropy = daemon._compute_queue_entropy(jobs, now)
+        assert entropy < 0.01  # near-zero: all same priority
+
+    def test_entropy_history_accumulates(self, db):
+        """_check_entropy() accumulates entropy readings over time."""
+        import time
+
+        from ollama_queue.daemon import Daemon
+
+        daemon = Daemon(db)
+        now = time.time()
+        jobs = [{"id": i, "priority": 5, "submitted_at": now - 100} for i in range(5)]
+        for _ in range(5):
+            daemon._check_entropy(jobs, now)
+        assert len(daemon._entropy_history) == 5
