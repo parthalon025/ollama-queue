@@ -41,11 +41,11 @@ class DLQManager:
         # Breaks synchronization between retrying jobs (prevents thundering herd)
         job = self.db.get_job(job_id)
         prev_delay = job.get("last_retry_delay") or base
-        delay = min(cap, random.uniform(base, prev_delay * 3))  # noqa: S311
+        hi = max(base, prev_delay * 3)  # guard: ensure upper bound >= base
+        delay = min(cap, random.uniform(base, hi))  # noqa: S311
 
         retry_after = time.time() + delay
-        self.db._set_job_retry_after(job_id, retry_after)
-        self.db._set_job_retry_delay(job_id, delay)
+        self.db._set_job_retry(job_id, retry_after, delay)
         self.db.log_schedule_event(
             "retried",
             job_id=job_id,

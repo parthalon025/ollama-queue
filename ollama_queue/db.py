@@ -435,9 +435,10 @@ class Database:
             conn.commit()
 
     def get_all_settings(self) -> dict:
-        conn = self._connect()
-        rows = conn.execute("SELECT key, value FROM settings").fetchall()
-        return {row["key"]: json.loads(row["value"]) for row in rows}
+        with self._lock:
+            conn = self._connect()
+            rows = conn.execute("SELECT key, value FROM settings").fetchall()
+            return {row["key"]: json.loads(row["value"]) for row in rows}
 
     def set_stall_detected(self, job_id: int, now: float, signals: dict) -> None:
         """Record stall detection timestamp and signal breakdown for a job."""
@@ -880,6 +881,16 @@ class Database:
         with self._lock:
             conn = self._connect()
             conn.execute("UPDATE jobs SET last_retry_delay = ? WHERE id = ?", (delay, job_id))
+            conn.commit()
+
+    def _set_job_retry(self, job_id: int, retry_after: float, delay: float) -> None:
+        """Atomically set retry_after and last_retry_delay in a single transaction."""
+        with self._lock:
+            conn = self._connect()
+            conn.execute(
+                "UPDATE jobs SET retry_after = ?, last_retry_delay = ? WHERE id = ?",
+                (retry_after, delay, job_id),
+            )
             conn.commit()
 
     # --- DLQ ---

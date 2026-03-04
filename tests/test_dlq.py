@@ -107,9 +107,6 @@ class TestDLQRouting:
 
     def test_retry_delays_vary_across_calls(self, db):
         """Decorrelated jitter produces non-deterministic delays (statistical test)."""
-        import random
-
-        random.seed(None)  # ensure randomness
         delays = []
         for _ in range(20):
             job_id = db.submit_job("echo test", "qwen2.5:7b", 5, 60, "test", max_retries=5)
