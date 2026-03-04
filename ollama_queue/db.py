@@ -52,6 +52,8 @@ DEFAULTS = {
     "cb_max_cooldown": 600,  # maximum cooldown seconds (10 min)
     "max_queue_depth": 50,  # HTTP 429 when pending count exceeds this
     "min_model_vram_mb": 2000,  # minimum VRAM estimate when model is unknown
+    "sjf_aging_factor": 3600,  # PR3: seconds of wait to halve effective duration; 0=pure SJF
+    "aoi_weight": 0.3,  # PR3: fraction of scheduling score from information staleness (0=pure priority, 1=pure AoI)
 }
 
 
@@ -306,6 +308,13 @@ class Database:
         return dict(row) if row else None
 
     def get_next_job(self) -> dict | None:
+        """Return the highest-priority pending job for execution.
+
+        .. deprecated::
+            No longer used by the daemon (replaced by Daemon._dequeue_next_job()
+            which implements SJF + aging). Retained for the proxy/embed path and
+            backwards compatibility with callers outside the daemon.
+        """
         conn = self._connect()
         now = time.time()
         row = conn.execute(
@@ -513,6 +522,48 @@ class Database:
         if row is None or row["avg_dur"] is None:
             return None
         return row["avg_dur"]
+
+    def estimate_duration_bulk(self, sources: list[str]) -> dict[str, float]:
+        """Return mean duration per source in a single query.
+
+        Only counts successful runs (exit_code=0). Used by SJF sort to avoid
+        N separate DB queries per dequeue cycle.
+        """
+        if not sources:
+            return {}
+        conn = self._connect()
+        placeholders = ",".join("?" * len(sources))
+        rows = conn.execute(
+            f"""SELECT source, AVG(duration) as avg_dur
+                FROM duration_history
+                WHERE source IN ({placeholders}) AND exit_code = 0
+                GROUP BY source""",
+            sources,
+        ).fetchall()
+        return {row["source"]: row["avg_dur"] for row in rows if row["avg_dur"] is not None}
+
+    def estimate_duration_stats(self, source: str) -> tuple[float, float] | None:
+        """Return (mean, variance) from last 10 successful runs for a source.
+
+        Uses the computational formula: Var = E[X^2] - E[X]^2
+        Returns None if no history exists.
+        Used by estimate_with_variance() for risk-adjusted SJF sort.
+        """
+        conn = self._connect()
+        row = conn.execute(
+            """SELECT AVG(duration) as mean_dur,
+                      AVG(duration * duration) - AVG(duration) * AVG(duration) as variance
+               FROM (
+                   SELECT duration FROM duration_history
+                   WHERE source = ? AND exit_code = 0
+                   ORDER BY recorded_at DESC
+                   LIMIT 10
+               )""",
+            (source,),
+        ).fetchone()
+        if row is None or row["mean_dur"] is None:
+            return None
+        return float(row["mean_dur"]), max(0.0, float(row["variance"]) if row["variance"] is not None else 0.0)
 
     # --- Health Log ---
 
@@ -879,6 +930,23 @@ class Database:
             (recurring_job_id,),
         ).fetchone()
         return row is not None
+
+    def get_last_successful_run_time(self, recurring_job_id: int) -> float | None:
+        """Return timestamp of most recent successful (exit_code=0) job for a recurring job.
+
+        Uses exit_code=0 (not last_run which includes failures) for AoI accuracy.
+        Returns None if the recurring job has never completed successfully.
+        """
+        conn = self._connect()
+        row = conn.execute(
+            """SELECT MAX(completed_at) as last_success
+               FROM jobs
+               WHERE recurring_job_id = ? AND exit_code = 0""",
+            (recurring_job_id,),
+        ).fetchone()
+        if row is None or row["last_success"] is None:
+            return None
+        return float(row["last_success"])
 
     def _set_recurring_next_run(self, rj_id: int, next_run: float) -> None:
         """Update next_run for a recurring job. Single-purpose DB API — no direct _connect() outside this class."""

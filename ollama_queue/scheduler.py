@@ -34,6 +34,9 @@ class Scheduler:
         if now is None:
             now = time.time()
         due = self.db.get_due_recurring_jobs(now)
+        # AoI sort: lower score = higher urgency. Ensures stale jobs promoted first
+        # when multiple become due simultaneously.
+        due.sort(key=lambda rj: self._aoi_sort_key(rj, now))
         new_ids = []
         for rj in due:
             if self.db.has_pending_or_running_recurring(rj["id"]):
@@ -81,6 +84,33 @@ class Scheduler:
             new_ids.append(job_id)
             _log.info("Promoted recurring job %r → job #%d", rj["name"], job_id)
         return new_ids
+
+    def _aoi_sort_key(self, rj: dict, now: float) -> float:
+        """Compute AoI-weighted scheduling urgency score. Lower = higher priority.
+
+        Score = priority_norm * (1 - aoi_weight) + (1 - staleness_norm) * aoi_weight
+
+        priority_norm: 0=critical(p1), 1=background(p10), normalized to [0,1]
+        staleness_norm: 0=fresh, 1=maximally stale (>=5 intervals), normalized to [0,1]
+        aoi_weight=0.3 means exactly 30% of score from information staleness.
+        """
+        aoi_weight = float(self.db.get_setting("aoi_weight") or 0.3)
+
+        priority = max(1, min(10, int(rj.get("priority") or 5)))
+        priority_norm = (priority - 1) / 9.0  # 0 = p1 (critical), 1 = p10 (background)
+
+        last_success = self.db.get_last_successful_run_time(rj["id"])
+        if last_success is not None:
+            interval = float(rj.get("interval_seconds") or 3600)
+            # Note: cron jobs (interval_seconds=None) use 3600s fallback.
+            # This means cron jobs tend toward staleness_norm=1.0 quickly;
+            # AoI tiebreaker degrades to pure priority for cron vs cron comparisons.
+            staleness_ratio = (now - last_success) / max(interval, 1.0)
+            staleness_norm = min(1.0, staleness_ratio / 5.0)
+        else:
+            staleness_norm = 1.0  # never completed → maximum urgency
+
+        return priority_norm * (1.0 - aoi_weight) + (1.0 - staleness_norm) * aoi_weight
 
     def update_next_run(self, recurring_job_id: int, completed_at: float, job_id: int | None = None) -> None:
         """Update next_run after job completion. Anchors to completed_at."""

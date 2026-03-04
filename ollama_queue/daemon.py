@@ -482,8 +482,9 @@ class Daemon:
             _log.debug("Circuit breaker OPEN — skipping dequeue")
             return
 
-        # 4. Get next pending job
-        job = self.db.get_next_job()
+        # 4. Get next pending job — SJF + aging sort
+        estimates = self.db.estimate_duration_bulk([j["source"] for j in pending_jobs])
+        job = self._dequeue_next_job(pending_jobs, estimates, now)
 
         # 5. If no job -> set idle, return
         if job is None:
@@ -805,6 +806,49 @@ class Daemon:
                 (now,),
             )
             conn.commit()
+
+    def _dequeue_next_job(
+        self,
+        pending: list[dict],
+        estimates: dict[str, float],
+        now: float,
+    ) -> dict | None:
+        """Return the highest-priority pending job using SJF + aging sort.
+
+        Sort key: (priority, effective_duration) where:
+          effective_duration = risk_adjusted / (1 + wait/aging_factor)
+          risk_adjusted = mean + 0.5 * std_dev  (penalizes high-variance estimates)
+          aging_factor from settings (default 3600s = 1 hour)
+
+        Only returns jobs whose retry_after has elapsed (or is NULL).
+        """
+        if not pending:
+            return None
+
+        aging_factor = float(self.db.get_setting("sjf_aging_factor") or 3600)
+
+        def sort_key(j: dict) -> tuple:
+            duration, cv_sq = self.estimator.estimate_with_variance(
+                j["source"],
+                model=j.get("model"),
+                cached=estimates,
+            )
+            std_dev = duration * (cv_sq**0.5)
+            risk_adjusted = duration + 0.5 * std_dev
+
+            submitted = j.get("submitted_at")
+            wait = now - submitted if submitted is not None else 0
+            effective = risk_adjusted / (1.0 + wait / aging_factor) if aging_factor > 0 and wait > 0 else risk_adjusted
+
+            return (j["priority"], effective)
+
+        # Filter out jobs still in backoff
+        eligible = [j for j in pending if j.get("retry_after") is None or j["retry_after"] <= now]
+        if not eligible:
+            return None
+
+        eligible.sort(key=sort_key)
+        return eligible[0]
 
     def _run_check_command(self, job: dict, recurring_job: dict) -> str:
         """Run check_command for a recurring job before the main command.
