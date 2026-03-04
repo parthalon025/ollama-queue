@@ -768,6 +768,12 @@ class Daemon:
             )
             return "proceed"
 
+    def shutdown(self) -> None:
+        """Shut down the thread pool executor, releasing worker threads."""
+        if self._executor is not None:
+            self._executor.shutdown(wait=False)
+            self._executor = None
+
     def run(self, poll_interval: int | None = None) -> None:
         """Main loop: poll_once() every N seconds. Prunes old data daily."""
         if poll_interval is None:
@@ -776,24 +782,27 @@ class Daemon:
         self._recover_orphans()
         self.db.update_daemon_state(state="idle", uptime_since=time.time())
 
-        while True:
-            try:
-                self.poll_once()
-            except Exception:
-                _log.exception("Unexpected error in poll_once(); attempting state recovery")
+        try:
+            while True:
                 try:
-                    self.db.update_daemon_state(state="idle", current_job_id=None, last_poll_at=time.time())
+                    self.poll_once()
                 except Exception:
-                    _log.exception("State recovery also failed; daemon loop continues")
+                    _log.exception("Unexpected error in poll_once(); attempting state recovery")
+                    try:
+                        self.db.update_daemon_state(state="idle", current_job_id=None, last_poll_at=time.time())
+                    except Exception:
+                        _log.exception("State recovery also failed; daemon loop continues")
 
-            # Prune once per day + reset daily counters
-            now = time.time()
-            if now - self._last_prune > 86400:
-                try:
-                    self.db.prune_old_data()
-                    self.db.update_daemon_state(jobs_completed_today=0, jobs_failed_today=0)
-                    self._last_prune = now
-                except Exception:
-                    _log.exception("Daily prune failed; will retry next cycle")
+                # Prune once per day + reset daily counters
+                now = time.time()
+                if now - self._last_prune > 86400:
+                    try:
+                        self.db.prune_old_data()
+                        self.db.update_daemon_state(jobs_completed_today=0, jobs_failed_today=0)
+                        self._last_prune = now
+                    except Exception:
+                        _log.exception("Daily prune failed; will retry next cycle")
 
-            time.sleep(poll_interval)
+                time.sleep(poll_interval)
+        finally:
+            self.shutdown()
