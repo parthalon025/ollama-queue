@@ -20,20 +20,22 @@ export default function SubmitJobModal({ onJobSubmitted }) {
     const [command, setCommand] = useState('');
     const [source, setSource] = useState('dashboard');
     const [model, setModel] = useState('');
-    const [priority, setPriority] = useState(settings.value?.default_priority ?? 5);
-    const [timeout, setTimeout_] = useState(settings.value?.default_timeout_seconds ?? 120);
+    const [priority, setPriority] = useState(5);
+    const [timeout, setTimeout_] = useState(120);
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState(null);
     const dialogRef = useRef(null);
 
-    // Sync defaults from settings signal when it updates
+    // Sync form defaults when settings signal updates
     useEffect(() => {
-        const s = settings.value;
-        if (s) {
-            setPriority(prev => prev === (settings.value?.default_priority ?? 5) ? (s.default_priority ?? 5) : prev);
-            setTimeout_(prev => prev === (settings.value?.default_timeout_seconds ?? 120) ? (s.default_timeout_seconds ?? 120) : prev);
-        }
-    }, [settings.value]);
+        const unsubscribe = settings.subscribe((s) => {
+            if (s) {
+                setPriority(prev => prev === 5 ? (s.default_priority ?? 5) : prev);
+                setTimeout_(prev => prev === 120 ? (s.default_timeout_seconds ?? 120) : prev);
+            }
+        });
+        return unsubscribe;
+    }, []);
 
     // Open/close the native dialog via ref
     useEffect(() => {
@@ -41,7 +43,7 @@ export default function SubmitJobModal({ onJobSubmitted }) {
         if (!dialog) return;
         if (open) {
             dialog.showModal();
-        } else {
+        } else if (dialog.open) {
             dialog.close();
         }
     }, [open]);
