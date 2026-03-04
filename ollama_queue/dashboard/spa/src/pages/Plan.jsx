@@ -4,10 +4,12 @@ import {
     status, scheduleJobs, scheduleEvents, models, loadMap,
     fetchSchedule, fetchLoadMap, toggleScheduleJob, triggerRebalance, runScheduleJobNow,
     updateScheduleJob, fetchModels, batchToggleJobs, batchRunJobs,
-    fetchJobRuns, deleteScheduleJob, fetchSuggestTime,
+    fetchJobRuns, deleteScheduleJob, fetchSuggestTime, enableJobByName,
 } from '../store';
 import { GanttChart } from '../components/GanttChart';
 import { ModelBadge } from '../components/ModelBadge';
+import LoadMapStrip from '../components/LoadMapStrip.jsx';
+import AddRecurringJobModal from '../components/AddRecurringJobModal.jsx';
 
 // Note: local vars named 'hrs'/'mins' to avoid shadowing the injected 'h' JSX factory.
 function formatCountdown(next_run) {
@@ -373,6 +375,14 @@ export default function Plan() {
         }
     }
 
+    async function handleReenableJob(name) {
+        try {
+            await enableJobByName(name);
+        } catch (e) {
+            setRunError(`Re-enable failed: ${e.message}`);
+        }
+    }
+
     // --- Derived data ---
 
     // Reference tick for per-second countdown updates
@@ -577,9 +587,28 @@ export default function Plan() {
                     </button>
                 </td>
                 <td style={{ textAlign: 'center' }}>
-                    <input type="checkbox" checked={!!rj.enabled}
-                           style={{ accentColor: 'var(--accent)', width: 16, height: 16 }}
-                           onChange={ev => toggleScheduleJob(rj.id, ev.target.checked)} />
+                    {rj.outcome_reason && !rj.enabled ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', alignItems: 'center' }}>
+                            <span class="t-status t-status-warning" style={{ fontSize: '9px', whiteSpace: 'normal', maxWidth: '8rem' }}>
+                                {rj.outcome_reason}
+                            </span>
+                            <button
+                                onClick={() => handleReenableJob(rj.name)}
+                                style={{
+                                    fontFamily: 'var(--font-mono)', fontSize: '9px',
+                                    background: 'transparent', border: '1px solid var(--status-warning)',
+                                    color: 'var(--status-warning)', padding: '0.1rem 0.3rem',
+                                    borderRadius: 'var(--radius)', cursor: 'pointer',
+                                }}
+                            >
+                                Re-enable
+                            </button>
+                        </div>
+                    ) : (
+                        <input type="checkbox" checked={!!rj.enabled}
+                               style={{ accentColor: 'var(--accent)', width: 16, height: 16 }}
+                               onChange={ev => toggleScheduleJob(rj.id, ev.target.checked)} />
+                    )}
                 </td>
                 <td style={{ textAlign: 'center', padding: '0.25rem 0.5rem' }}>
                     <button
@@ -796,6 +825,7 @@ export default function Plan() {
                     Schedule
                 </h2>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <AddRecurringJobModal onAdded={() => { fetchSchedule(); fetchLoadMap(); }} />
                     {rebalanceFlash === 'error' && (
                         <span style={{ color: 'var(--status-error)', fontSize: 'var(--type-label)',
                                        fontFamily: 'var(--font-mono)' }}>
@@ -926,7 +956,10 @@ export default function Plan() {
                 );
             })()}
 
-            <GanttChart jobs={jobs} tick={tick} windowHours={24} loadMapSlots={loadMap.value} suggestSlots={suggestSlots || []} />
+            {/* Load map density strip — 48-slot daily load visualization */}
+            <LoadMapStrip data={loadMap.value} />
+
+            <GanttChart jobs={jobs} tick={tick} windowHours={24} loadMapSlots={loadMap.value?.slots || []} suggestSlots={suggestSlots || []} />
 
             {jobs.length === 0 ? (
                 <div class="t-frame" style={{ textAlign: 'center', padding: '2rem',
