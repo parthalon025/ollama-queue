@@ -1000,6 +1000,16 @@ def test_half_open_failure_reopens_circuit(daemon):
     assert daemon._cb_state == "OPEN"
 
 
+def test_daemon_has_burst_detector(db):
+    """Daemon initializes with a BurstDetector instance."""
+    from ollama_queue.burst import BurstDetector
+    from ollama_queue.daemon import Daemon
+
+    daemon = Daemon(db)
+    assert hasattr(daemon, "_burst_detector")
+    assert isinstance(daemon._burst_detector, BurstDetector)
+
+
 class TestSJFDequeue:
     def test_sjf_shorter_job_dequeued_first_at_same_priority(self, db):
         """Shorter estimated job is dequeued before longer at same priority."""
@@ -1008,7 +1018,6 @@ class TestSJFDequeue:
         from ollama_queue.daemon import Daemon
 
         daemon = Daemon(db)
-<<<<<<< HEAD
 
         now = time.time()
         job_long = db.submit_job("echo long", "m", 5, 600, "long-src")
@@ -1038,7 +1047,6 @@ class TestSJFDequeue:
         from ollama_queue.daemon import Daemon
 
         daemon = Daemon(db)
-<<<<<<< HEAD
 
         now = time.time()
         job_p1 = db.submit_job("echo p1 long", "m", 1, 600, "p1-src")
@@ -1068,7 +1076,6 @@ class TestSJFDequeue:
         from ollama_queue.daemon import Daemon
 
         daemon = Daemon(db)
-<<<<<<< HEAD
         db.set_setting("sjf_aging_factor", 3600)
 
         now = time.time()

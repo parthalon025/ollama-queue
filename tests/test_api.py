@@ -105,6 +105,15 @@ def test_get_health(client):
     assert resp.status_code == 200
 
 
+def test_health_includes_burst_regime(client):
+    """GET /api/health includes burst_regime field."""
+    resp = client.get("/api/health")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "burst_regime" in data
+    assert data["burst_regime"] in {"unknown", "subcritical", "moderate", "warning", "critical"}
+
+
 def test_get_durations(client):
     resp = client.get("/api/durations")
     assert resp.status_code == 200

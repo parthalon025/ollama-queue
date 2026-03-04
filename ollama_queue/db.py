@@ -173,7 +173,8 @@ class Database:
                 last_poll_at REAL,
                 jobs_completed_today INTEGER DEFAULT 0,
                 jobs_failed_today INTEGER DEFAULT 0,
-                uptime_since REAL
+                uptime_since REAL,
+                burst_regime TEXT DEFAULT 'unknown'
             );
 
             CREATE TABLE IF NOT EXISTS settings (
@@ -638,6 +639,7 @@ class Database:
             "jobs_completed_today",
             "jobs_failed_today",
             "uptime_since",
+            "burst_regime",
         }
     )
 

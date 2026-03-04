@@ -24,6 +24,7 @@ from pydantic import BaseModel
 _catalog_cache: dict[str, tuple[list, float]] = {}  # query -> (results, expires_at)
 _CATALOG_CACHE_TTL = 300.0  # 5 minutes
 
+from ollama_queue.burst import _default_detector as _burst_detector
 from ollama_queue.db import DEFAULTS, Database
 from ollama_queue.estimator import DurationEstimator
 from ollama_queue.models import OllamaModels
@@ -260,6 +261,7 @@ def create_app(db: Database) -> FastAPI:
             timeout=timeout,
             source=req.source,
         )
+        _burst_detector.record_submission(time.time())
         return {"job_id": job_id}
 
     @app.post("/api/queue/cancel/{job_id}")
@@ -287,7 +289,9 @@ def create_app(db: Database) -> FastAPI:
 
     @app.get("/api/health")
     def get_health(hours: int = 24):
-        return db.get_health_log(hours=hours)
+        daemon_state = db.get_daemon_state()
+        burst_regime = daemon_state.get("burst_regime") or "unknown"
+        return {"log": db.get_health_log(hours=hours), "burst_regime": burst_regime}
 
     # --- Durations ---
 
