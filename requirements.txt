@@ -1,0 +1,7 @@
+# Runtime dependencies — mirrors [project.dependencies] in pyproject.toml
+# Install: pip install -r requirements.txt
+# Or: pip install .
+click>=8.1.0
+croniter>=1.4.0
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0

@@ -2,7 +2,7 @@
 
 Ollama job queue scheduler with priority, health monitoring, and web dashboard. Serializes all Ollama-using systemd tasks to prevent model loading contention.
 
-**Repo:** https://github.com/parthalon025/ollama-queue (private)
+**Repo:** https://github.com/parthalon025/ollama-queue
 
 ## Structure
 
@@ -123,8 +123,7 @@ Route IDs: `now` | `plan` | `history` | `models` | `settings`. Sidebar: 200px de
 
 ## Design Doc
 
-Full design: `~/Documents/docs/plans/2026-02-14-ollama-queue-scheduler-design.md`
-Implementation plan: `~/Documents/docs/plans/2026-02-14-ollama-queue-implementation.md`
+See `docs/` for implementation notes and design decisions.
 
 ## Design System Usage
 
