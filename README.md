@@ -79,6 +79,12 @@ Pass priority metadata in the JSON body (stripped before forwarding to Ollama):
 {"model": "qwen2.5:7b", "prompt": "...", "_priority": 5, "_source": "myapp", "_timeout": 300}
 ```
 
+`/api/embed` accepts both single-string and array input and sets `resource_profile=embed` for proper concurrency handling (4 concurrent slots, no VRAM gate):
+```json
+{"model": "nomic-embed-text", "input": "text string"}
+{"model": "nomic-embed-text", "input": ["text1", "text2"]}
+```
+
 ### Systemd integration
 
 ```ini
@@ -96,7 +102,7 @@ ExecStart=/bin/bash -c '. ~/.env && ollama-queue submit --source %n --model qwen
 | Retry + DLQ | Exponential backoff retries; failed jobs move to dead-letter queue with configurable max_retries |
 | Duration estimates | Rolling average + model-based defaults; predicts queue drain time |
 | Stall detection | Bayesian detection of jobs that started but stopped producing output |
-| Ollama proxy | `/api/generate` and `/api/embed` endpoints with priority injection |
+| Ollama proxy | `/api/generate` and `/api/embed` endpoints with priority injection; scheduler prefers embed-profile jobs at equal priority to keep embed models warm |
 | REST API | 38 endpoints covering queue management, scheduling, health, settings |
 | Web dashboard | 5-view Preact SPA: Now, Plan (24h Gantt), History, Models, Settings |
 
@@ -117,7 +123,7 @@ systemd timers / apps
 │       ↓                                     │
 │  promote recurring jobs due now             │
 │       ↓                                     │
-│  dequeue by priority                        │
+│  dequeue by priority + model affinity       │
 │       ↓                                     │
 │  subprocess.Popen → capture stdout/stderr   │
 │       ↓                                     │
