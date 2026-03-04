@@ -16,7 +16,7 @@ import time as _time
 
 import httpx
 from fastapi import Body, FastAPI, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -221,6 +221,36 @@ def create_app(db: Database) -> FastAPI:
 
     @app.post("/api/queue/submit")
     def submit_job(req: SubmitJobRequest):
+        # Admission gate: reject with 429 when queue depth exceeds max_queue_depth
+        max_depth = int(db.get_setting("max_queue_depth") or 50)
+        pending = db.count_pending_jobs()
+        # count_pending_jobs() excludes retry_after-deferred jobs (not actionable yet).
+        # get_pending_jobs() returns all pending — the inline filter below must be preserved
+        # to keep ETA computation consistent with this count.
+        if pending >= max_depth:
+            # Estimate drain time from current queue ETAs.
+            # Filter to actionable jobs only (matching count_pending_jobs semantics)
+            # so deferred retry_after jobs don't inflate the Retry-After header.
+            try:
+                _now = time.time()
+                jobs = [j for j in db.get_pending_jobs() if not j["retry_after"] or j["retry_after"] <= _now]
+                etas = DurationEstimator(db).queue_etas(jobs)
+                if etas:
+                    drain_seconds = max(
+                        1,
+                        int(max(e["estimated_start_offset"] + e["estimated_duration"] for e in etas)),
+                    )
+                else:
+                    drain_seconds = max(1, pending * 60)
+            except Exception:
+                _log.warning("ETA calculation failed for 429 response; using fallback", exc_info=True)
+                drain_seconds = max(1, pending * 60)  # fallback: 1 min per pending job
+
+            return JSONResponse(
+                status_code=429,
+                content={"error": "queue_full", "pending": pending, "max_queue_depth": max_depth},
+                headers={"Retry-After": str(drain_seconds)},
+            )
         priority: int = req.priority if req.priority is not None else cast(int, DEFAULTS["default_priority"])
         timeout: int = req.timeout if req.timeout is not None else cast(int, DEFAULTS["default_timeout_seconds"])
         job_id = db.submit_job(

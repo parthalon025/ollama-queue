@@ -613,3 +613,36 @@ class TestDatabase:
         job = db.get_job(job_id)
         assert "last_retry_delay" in job
         assert job["last_retry_delay"] is None  # NULL by default
+
+
+class TestPR2Admission:
+    def test_count_pending_jobs_empty(self, db):
+        """count_pending_jobs returns 0 when queue is empty."""
+        assert db.count_pending_jobs() == 0
+
+    def test_count_pending_jobs_counts_pending_only(self, db):
+        """count_pending_jobs counts only pending jobs, not running/completed/failed."""
+        db.submit_job("echo a", "qwen2.5:7b", 5, 60, "test")
+        db.submit_job("echo b", "qwen2.5:7b", 5, 60, "test")
+        assert db.count_pending_jobs() == 2
+        # Claim one job — start_job() transitions it to 'running', should not be counted
+        job = db.get_next_job()
+        db.start_job(job["id"])
+        assert db.count_pending_jobs() == 1
+
+    def test_count_pending_jobs_excludes_future_retry_after(self, db):
+        """Jobs with retry_after in the future are pending but not yet actionable — excluded."""
+        job_id = db.submit_job("echo c", "qwen2.5:7b", 5, 60, "test")
+        conn = db._connect()
+        conn.execute("UPDATE jobs SET retry_after = ? WHERE id = ?", (time.time() + 3600, job_id))
+        conn.commit()
+        assert db.count_pending_jobs() == 0
+
+    def test_pr2_defaults_available(self, db):
+        """All PR2 DEFAULTS are seeded by initialize() and accessible via get_setting()."""
+        assert db.get_setting("cpu_offload_efficiency") == 0.3
+        assert db.get_setting("cb_failure_threshold") == 3
+        assert db.get_setting("cb_base_cooldown") == 30
+        assert db.get_setting("cb_max_cooldown") == 600
+        assert db.get_setting("max_queue_depth") == 50
+        assert db.get_setting("min_model_vram_mb") == 2000

@@ -122,6 +122,13 @@ class Daemon:
         self._concurrent_enabled_at: float | None = None  # for shadow mode
         self._ollama_models = OllamaModels()
         self.stall_detector = StallDetector()
+        # Circuit breaker state
+        self._cb_failures: int = 0  # consecutive Ollama failures
+        self._cb_state: str = "CLOSED"  # CLOSED | OPEN | HALF_OPEN
+        self._cb_opened_at: float | None = None  # timestamp when circuit opened
+        self._cb_open_attempts: int = 0  # how many times circuit has opened (for exponential cooldown)
+        self._cb_probe_in_flight: bool = False  # True while a HALF_OPEN probe is dispatched
+        self._cb_lock: threading.Lock = threading.Lock()  # protects all _cb_* state
 
     # --- Concurrency helpers ---
 
@@ -139,6 +146,30 @@ class Daemon:
             return True
         elapsed_hours = (time.time() - self._concurrent_enabled_at) / 3600
         return elapsed_hours < self._shadow_hours()
+
+    def _compute_max_workers(self) -> int:
+        """Compute max ThreadPoolExecutor workers based on available hardware resources.
+
+        Formula: floor((vram_available + ram_available * cpu_offload_efficiency) / min_model_vram) + 3
+        The +3 reserves slots for CPU-bound/embedding jobs that don't compete for GPU.
+        Falls back to 4 if resource metrics are unavailable.
+
+        Uses _free_vram_mb() and _free_ram_mb() (same sources as _can_admit) so the
+        executor ceiling is grounded in actual hardware state at startup time.
+        """
+        vram_available = self._free_vram_mb() or 0.0
+        ram_available = self._free_ram_mb()
+
+        cpu_efficiency = float(self.db.get_setting("cpu_offload_efficiency") or 0.3)
+        fallback_mb = int(self.db.get_setting("min_model_vram_mb") or 2000)
+        min_model_vram = self._ollama_models.min_estimated_vram_mb(self.db, fallback_mb=fallback_mb)
+
+        if min_model_vram <= 0:
+            return 4
+
+        effective_vram = vram_available + ram_available * cpu_efficiency
+        workers = max(1, int(effective_vram / min_model_vram) + 3)
+        return workers
 
     def _committed_vram_mb(self) -> float:
         """Estimate VRAM already committed to running jobs.
@@ -300,6 +331,87 @@ class Daemon:
             self.db.reset_job_to_pending(job["id"])
             _log.warning("Reset orphaned job #%d to pending", job["id"])
 
+    # --- Circuit breaker ---
+
+    def _compute_cb_cooldown(self, attempt: int) -> float:
+        """Exponential cooldown: base * 2^attempt, capped at max."""
+        base = float(self.db.get_setting("cb_base_cooldown") or 30)
+        cap = float(self.db.get_setting("cb_max_cooldown") or 600)
+        return min(cap, base * (2**attempt))
+
+    def _record_ollama_failure(self) -> None:
+        """Record a consecutive Ollama failure; open circuit if threshold reached."""
+        # Read DB setting BEFORE acquiring _cb_lock to avoid lock-order inversion.
+        # Call sites hold db._lock; acquiring _cb_lock inside would give db._lock -> _cb_lock,
+        # while _is_circuit_open() would give _cb_lock -> db._lock — deadlock.
+        threshold = int(self.db.get_setting("cb_failure_threshold") or 3)
+        with self._cb_lock:
+            self._cb_probe_in_flight = False
+            self._cb_failures += 1
+            if self._cb_failures >= threshold and self._cb_state in ("CLOSED", "HALF_OPEN"):
+                self._cb_state = "OPEN"
+                self._cb_opened_at = time.time()
+                self._cb_open_attempts += 1
+                _log.warning(
+                    "Circuit breaker OPENED after %d consecutive Ollama failures",
+                    self._cb_failures,
+                )
+
+    def _record_ollama_success(self) -> None:
+        """Record a successful Ollama job; reset failure count and close circuit."""
+        with self._cb_lock:
+            self._cb_probe_in_flight = False
+            self._cb_failures = 0
+            self._cb_state = "CLOSED"
+            if self._cb_open_attempts > 0:
+                _log.info("Circuit breaker CLOSED after successful probe")
+
+    def _is_circuit_open(self) -> bool:
+        """Return True if the circuit breaker should block new jobs.
+
+        CLOSED -> False (normal operation)
+        OPEN + cooldown not elapsed -> True (blocking)
+        OPEN + cooldown elapsed -> transition to HALF_OPEN, return False (allow one probe)
+        HALF_OPEN + no probe in flight -> False (allow this probe through, mark in-flight)
+        HALF_OPEN + probe in flight -> True (block subsequent polls until probe resolves)
+
+        Lock ordering: _cb_lock must never be held while calling db methods (db._lock).
+        Split into three phases: read state (lock), compute cooldown (no lock, reads DB),
+        transition state (lock again with re-check for TOCTOU).
+        """
+        # Phase 1: read current state under lock
+        with self._cb_lock:
+            if self._cb_state == "CLOSED":
+                return False
+            if self._cb_state == "HALF_OPEN":
+                if self._cb_probe_in_flight:
+                    return True  # probe already dispatched, block further jobs
+                self._cb_probe_in_flight = True  # mark probe as in-flight
+                return False  # allow this one probe through
+            # OPEN state — capture values needed for cooldown check
+            attempt = self._cb_open_attempts
+            opened_at = self._cb_opened_at or 0.0
+
+        # Phase 2: compute cooldown OUTSIDE lock (calls db.get_setting -> db._lock).
+        # Holding _cb_lock here while db._lock is acquired elsewhere causes deadlock.
+        cooldown = self._compute_cb_cooldown(attempt)
+        elapsed = time.time() - opened_at
+
+        if elapsed < cooldown:
+            return True  # still in cooldown period
+
+        # Phase 3: transition to HALF_OPEN under lock with re-check.
+        # Another thread may have already transitioned during Phase 2 — double-checked
+        # locking prevents two polls both seeing an expired cooldown and both transitioning.
+        with self._cb_lock:
+            if self._cb_state != "OPEN":
+                # Already transitioned (CLOSED or HALF_OPEN) — reflect current state
+                return self._cb_state == "OPEN"  # always False here
+            self._cb_state = "HALF_OPEN"
+            self._cb_probe_in_flight = True  # first probe dispatched immediately on transition
+            _log.info("Circuit breaker entering HALF_OPEN state for probe job")
+            return False  # allow probe through
+
     def poll_once(self) -> None:
         """Single poll cycle.
 
@@ -365,6 +477,11 @@ class Daemon:
             daemon_state=current_state,
         )
 
+        # 3b. Circuit breaker check — skip dequeue if Ollama is unreachable
+        if self._is_circuit_open():
+            _log.debug("Circuit breaker OPEN — skipping dequeue")
+            return
+
         # 4. Get next pending job
         job = self.db.get_next_job()
 
@@ -418,10 +535,13 @@ class Daemon:
 
         if self._executor is None:
             # max_workers is a ceiling; actual concurrency is governed entirely by
-            # _can_admit, which reads the live max_concurrent_jobs setting.  Using a
-            # fixed large value means changing the setting at runtime is reflected
-            # immediately without recreating the executor.  (#4)
-            self._executor = ThreadPoolExecutor(max_workers=32, thread_name_prefix="ollama-worker")
+            # _can_admit, which reads the live max_concurrent_jobs setting.  The ceiling
+            # is computed from real hardware resources at first-job startup so the thread
+            # pool isn't arbitrarily oversized on memory-constrained hosts.
+            self._executor = ThreadPoolExecutor(
+                max_workers=self._compute_max_workers(),
+                thread_name_prefix="ollama-worker",
+            )
 
         self.db.start_job(job["id"])
         with self.db._lock:
@@ -497,6 +617,7 @@ class Daemon:
                             stdout_tail=out[-500:].decode("utf-8", errors="replace"),
                             stderr_tail=err[-500:].decode("utf-8", errors="replace"),
                         )
+                        self._record_ollama_failure()
                         try:
                             self.dlq.handle_failure(job["id"], f"timeout after {job['timeout']}s")
                         except Exception:
@@ -524,10 +645,13 @@ class Daemon:
                     outcome_reason=outcome_reason,
                 )
                 if exit_code != 0:
+                    self._record_ollama_failure()
                     try:
                         self.dlq.handle_failure(job["id"], f"exit code {exit_code}")
                     except Exception:
                         _log.exception("DLQ routing failed for job #%d", job["id"])
+                else:
+                    self._record_ollama_success()
 
             # Increment daily counters atomically
             counter_field = "jobs_completed_today" if exit_code == 0 else "jobs_failed_today"
@@ -596,6 +720,7 @@ class Daemon:
                     )
                 except Exception:
                     _log.exception("Failed to mark job #%d failed after worker exception", job["id"])
+                self._record_ollama_failure()
                 try:
                     self.dlq.handle_failure(
                         job["id"],
@@ -758,6 +883,12 @@ class Daemon:
             )
             return "proceed"
 
+    def shutdown(self) -> None:
+        """Shut down the thread pool executor, releasing worker threads."""
+        if self._executor is not None:
+            self._executor.shutdown(wait=False)
+            self._executor = None
+
     def run(self, poll_interval: int | None = None) -> None:
         """Main loop: poll_once() every N seconds. Prunes old data daily."""
         if poll_interval is None:
@@ -766,24 +897,27 @@ class Daemon:
         self._recover_orphans()
         self.db.update_daemon_state(state="idle", uptime_since=time.time())
 
-        while True:
-            try:
-                self.poll_once()
-            except Exception:
-                _log.exception("Unexpected error in poll_once(); attempting state recovery")
+        try:
+            while True:
                 try:
-                    self.db.update_daemon_state(state="idle", current_job_id=None, last_poll_at=time.time())
+                    self.poll_once()
                 except Exception:
-                    _log.exception("State recovery also failed; daemon loop continues")
+                    _log.exception("Unexpected error in poll_once(); attempting state recovery")
+                    try:
+                        self.db.update_daemon_state(state="idle", current_job_id=None, last_poll_at=time.time())
+                    except Exception:
+                        _log.exception("State recovery also failed; daemon loop continues")
 
-            # Prune once per day + reset daily counters
-            now = time.time()
-            if now - self._last_prune > 86400:
-                try:
-                    self.db.prune_old_data()
-                    self.db.update_daemon_state(jobs_completed_today=0, jobs_failed_today=0)
-                    self._last_prune = now
-                except Exception:
-                    _log.exception("Daily prune failed; will retry next cycle")
+                # Prune once per day + reset daily counters
+                now = time.time()
+                if now - self._last_prune > 86400:
+                    try:
+                        self.db.prune_old_data()
+                        self.db.update_daemon_state(jobs_completed_today=0, jobs_failed_today=0)
+                        self._last_prune = now
+                    except Exception:
+                        _log.exception("Daily prune failed; will retry next cycle")
 
-            time.sleep(poll_interval)
+                time.sleep(poll_interval)
+        finally:
+            self.shutdown()

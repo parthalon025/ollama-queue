@@ -4,6 +4,7 @@ import concurrent.futures
 import logging
 import signal as _signal
 import time
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -550,6 +551,92 @@ def test_stall_detection_checks_all_running_jobs(db):
     assert db.get_job(j2)["stall_detected_at"] is not None
 
 
+# --- T8: _compute_max_workers ---
+
+
+class TestComputeMaxWorkers:
+    def test_compute_max_workers_returns_positive_int(self, db, monkeypatch):
+        """_compute_max_workers returns a positive int based on available resources."""
+        d = Daemon(db)
+        monkeypatch.setattr(d, "_free_vram_mb", lambda: 8000.0)
+        monkeypatch.setattr(d, "_free_ram_mb", lambda: 16000.0)
+        workers = d._compute_max_workers()
+        assert isinstance(workers, int)
+        assert workers >= 1
+
+    def test_compute_max_workers_minimum_is_one(self, db, monkeypatch):
+        """_compute_max_workers always returns at least 1, even when resources are exhausted."""
+        d = Daemon(db)
+        monkeypatch.setattr(d, "_free_vram_mb", lambda: 0.0)
+        monkeypatch.setattr(d, "_free_ram_mb", lambda: 0.0)
+        workers = d._compute_max_workers()
+        assert workers >= 1
+
+    def test_compute_max_workers_scales_with_resources(self, db, monkeypatch):
+        """More free VRAM+RAM yields more workers than minimal resources."""
+        d = Daemon(db)
+        monkeypatch.setattr(d, "_free_vram_mb", lambda: 32000.0)
+        monkeypatch.setattr(d, "_free_ram_mb", lambda: 64000.0)
+        workers_high = d._compute_max_workers()
+
+        monkeypatch.setattr(d, "_free_vram_mb", lambda: 500.0)
+        monkeypatch.setattr(d, "_free_ram_mb", lambda: 1000.0)
+        workers_low = d._compute_max_workers()
+
+        assert workers_high >= workers_low
+
+    def test_compute_max_workers_none_vram_falls_back(self, db, monkeypatch):
+        """When nvidia-smi is unavailable (_free_vram_mb returns None), still returns >= 1."""
+        d = Daemon(db)
+        monkeypatch.setattr(d, "_free_vram_mb", lambda: None)
+        monkeypatch.setattr(d, "_free_ram_mb", lambda: 16000.0)
+        workers = d._compute_max_workers()
+        assert isinstance(workers, int)
+        assert workers >= 1
+
+    def test_compute_max_workers_used_in_executor(self, db, monkeypatch):
+        """ThreadPoolExecutor is created with _compute_max_workers(), not hardcoded 32."""
+        d = Daemon(db)
+        # Force a known return value
+        monkeypatch.setattr(d, "_compute_max_workers", lambda: 7)
+        monkeypatch.setattr(d, "_free_vram_mb", lambda: 8000.0)
+        monkeypatch.setattr(d, "_free_ram_mb", lambda: 16000.0)
+        monkeypatch.setattr(d, "_can_admit", lambda job: True)
+        db.submit_job("echo hi", "qwen2.5:7b", 5, 60, "test")
+        with (
+            patch.object(
+                d.health,
+                "check",
+                return_value={
+                    "ram_pct": 10.0,
+                    "swap_pct": 5.0,
+                    "load_avg": 0.1,
+                    "cpu_count": 4,
+                    "vram_pct": 10.0,
+                    "ollama_model": None,
+                },
+            ),
+            patch("ollama_queue.daemon.subprocess") as mock_sub,
+            patch("ollama_queue.daemon._drain_pipes_with_tracking", return_value=(b"hi", b"")),
+        ):
+            proc = MagicMock()
+            proc.pid = 1234
+            proc.returncode = 0
+            mock_sub.Popen.return_value = proc
+            d.poll_once()
+            _drain(d)
+        assert d._executor is not None
+        assert d._executor._max_workers == 7
+
+    def test_shutdown_clears_executor(self, db):
+        """shutdown() sets _executor to None, releasing thread resources."""
+        d = Daemon(db)
+        # Trigger lazy executor creation manually
+        d._executor = ThreadPoolExecutor(max_workers=2)
+        d.shutdown()
+        assert d._executor is None
+
+
 # --- T8: Bayesian stall detection ---
 
 
@@ -833,3 +920,81 @@ def test_no_max_runs_no_decrement(daemon):
 
     rj = daemon.db.get_recurring_job(rj_id)
     assert rj["max_runs"] is None
+
+
+# --- T10: Circuit breaker ---
+
+
+def test_circuit_breaker_opens_after_threshold(daemon):
+    """Circuit opens after cb_failure_threshold consecutive failures."""
+    threshold = daemon.db.get_setting("cb_failure_threshold")
+    for _ in range(threshold):
+        daemon._record_ollama_failure()
+    assert daemon._cb_state == "OPEN"
+
+
+def test_circuit_breaker_resets_on_success(daemon):
+    """A success resets failure count and closes the circuit."""
+    daemon._cb_failures = 2
+    daemon._cb_state = "HALF_OPEN"
+    daemon._record_ollama_success()
+    assert daemon._cb_failures == 0
+    assert daemon._cb_state == "CLOSED"
+
+
+def test_circuit_is_open_returns_false_when_closed(daemon):
+    """_is_circuit_open returns False when circuit is CLOSED."""
+    daemon._cb_state = "CLOSED"
+    assert daemon._is_circuit_open() is False
+
+
+def test_circuit_is_open_returns_true_when_open(daemon):
+    """_is_circuit_open returns True when circuit is OPEN and cooldown not elapsed."""
+    daemon._cb_state = "OPEN"
+    daemon._cb_opened_at = time.time()  # just opened — cooldown not elapsed
+    daemon._cb_open_attempts = 0
+    assert daemon._is_circuit_open() is True
+
+
+def test_circuit_transitions_to_half_open_after_cooldown(daemon):
+    """Circuit transitions to HALF_OPEN after cooldown expires."""
+    daemon._cb_state = "OPEN"
+    daemon._cb_opened_at = time.time() - 999  # way past any cooldown
+    daemon._cb_open_attempts = 0
+    result = daemon._is_circuit_open()
+    assert result is False  # HALF_OPEN allows one probe job through
+    assert daemon._cb_state == "HALF_OPEN"
+
+
+def test_compute_cb_cooldown_exponential(daemon):
+    """Cooldown doubles with each open attempt, capped at cb_max_cooldown."""
+    base = daemon.db.get_setting("cb_base_cooldown")
+    max_cd = daemon.db.get_setting("cb_max_cooldown")
+    assert daemon._compute_cb_cooldown(0) == base
+    assert daemon._compute_cb_cooldown(1) == min(max_cd, base * 2)
+    assert daemon._compute_cb_cooldown(10) == max_cd  # capped
+
+
+def test_half_open_probe_blocks_subsequent_polls(daemon):
+    """Second call to _is_circuit_open() while HALF_OPEN blocks (probe in flight)."""
+    import time
+
+    daemon._cb_state = "OPEN"
+    daemon._cb_opened_at = time.time() - 9999
+    daemon._cb_open_attempts = 0
+    first = daemon._is_circuit_open()  # transitions to HALF_OPEN, allows probe
+    second = daemon._is_circuit_open()  # probe in flight, should block
+    assert first is False  # probe allowed through
+    assert second is True  # subsequent polls blocked
+    assert daemon._cb_state == "HALF_OPEN"
+
+
+def test_half_open_failure_reopens_circuit(daemon):
+    """A failure during HALF_OPEN re-opens the circuit, not leaves it stuck."""
+    daemon._cb_state = "HALF_OPEN"
+    daemon._cb_failures = 0
+    # Drive failures to threshold
+    threshold = daemon.db.get_setting("cb_failure_threshold")
+    for _ in range(threshold):
+        daemon._record_ollama_failure()
+    assert daemon._cb_state == "OPEN"
