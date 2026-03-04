@@ -1,12 +1,14 @@
 import { h } from 'preact';
+import { useState } from 'preact/hooks';
 import {
     status, queue, history, healthData, durationData, settings,
-    dlqCount, connectionStatus, currentTab,
+    dlqCount, connectionStatus, currentTab, refreshQueue,
 } from '../store';
 import CurrentJob from '../components/CurrentJob.jsx';
 import QueueList from '../components/QueueList.jsx';
 import HeroCard from '../components/HeroCard.jsx';
 import ResourceGauges from '../components/ResourceGauges.jsx';
+import SubmitJobModal from '../components/SubmitJobModal.jsx';
 
 // NOTE: all .map() callbacks use descriptive names — never 'h' (shadows JSX factory)
 
@@ -30,6 +32,24 @@ export default function Now() {
         job => (job.status === 'failed' || job.status === 'killed') && (job.completed_at ?? 0) >= oneDayAgo
     ).length;
     const showAlerts = dlqCnt > 0 || recentFailures > 0;
+
+    const [toast, setToast] = useState(null);
+
+    // Proxy mini-stat: count proxy calls in last 24h from history signal
+    // (reuse the oneDayAgo already computed above for the alert strip)
+    const proxyGenerate = (hist || []).filter(
+        job => job.source === 'proxy:/api/generate' && (job.completed_at ?? 0) >= oneDayAgo
+    ).length;
+    const proxyEmbed = (hist || []).filter(
+        job => job.source === 'proxy:/api/embed' && (job.completed_at ?? 0) >= oneDayAgo
+    ).length;
+    const showProxyStat = proxyGenerate > 0 || proxyEmbed > 0;
+
+    function handleJobSubmitted(jobId) {
+        setToast(`Job #${jobId} queued`);
+        setTimeout(() => setToast(null), 2000);
+        refreshQueue();
+    }
 
     return (
         <div class="flex flex-col gap-4 animate-page-enter">
@@ -166,8 +186,44 @@ export default function Now() {
                             delta={kpis ? buildSuccessRateDelta(kpis, hist) : null}
                         />
                     </div>
+
+                    {/* Proxy mini-stat — shown only when proxy calls exist in history */}
+                    {showProxyStat && (
+                        <div style={{
+                            fontFamily: 'var(--font-mono)',
+                            fontSize: 'var(--type-label)',
+                            color: 'var(--text-tertiary)',
+                            paddingTop: '0.25rem',
+                        }}>
+                            proxy{' '}
+                            {proxyGenerate > 0 && `${proxyGenerate} generate`}
+                            {proxyGenerate > 0 && proxyEmbed > 0 && ' · '}
+                            {proxyEmbed > 0 && `${proxyEmbed} embed`}
+                            {' '}(last 24h)
+                        </div>
+                    )}
                 </div>
             </div>
+
+            {/* Toast notification after job submit */}
+            {toast && (
+                <div style={{
+                    position: 'fixed',
+                    bottom: '6rem',
+                    right: '4.5rem',
+                    background: 'var(--bg-surface-raised)',
+                    border: '1px solid var(--status-healthy)',
+                    color: 'var(--status-healthy)',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: 'var(--type-label)',
+                    padding: '0.4rem 0.75rem',
+                    borderRadius: 'var(--radius)',
+                    zIndex: 60,
+                }}>
+                    ✓ {toast}
+                </div>
+            )}
+            <SubmitJobModal onJobSubmitted={handleJobSubmitted} />
         </div>
     );
 }
