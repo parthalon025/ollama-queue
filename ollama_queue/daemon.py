@@ -114,6 +114,11 @@ class Daemon:
         self._concurrent_enabled_at: float | None = None  # for shadow mode
         self._ollama_models = OllamaModels()
         self.stall_detector = StallDetector()
+        # Circuit breaker state
+        self._cb_failures: int = 0  # consecutive Ollama failures
+        self._cb_state: str = "CLOSED"  # CLOSED | OPEN | HALF_OPEN
+        self._cb_opened_at: float | None = None  # timestamp when circuit opened
+        self._cb_open_attempts: int = 0  # how many times circuit has opened (for exponential cooldown)
 
     # --- Concurrency helpers ---
 
@@ -307,6 +312,52 @@ class Daemon:
             self.db.reset_job_to_pending(job["id"])
             _log.warning("Reset orphaned job #%d to pending", job["id"])
 
+    # --- Circuit breaker ---
+
+    def _compute_cb_cooldown(self, attempt: int) -> float:
+        """Exponential cooldown: base * 2^attempt, capped at max."""
+        base = float(self.db.get_setting("cb_base_cooldown") or 30)
+        cap = float(self.db.get_setting("cb_max_cooldown") or 600)
+        return min(cap, base * (2**attempt))
+
+    def _record_ollama_failure(self) -> None:
+        """Record a consecutive Ollama failure; open circuit if threshold reached."""
+        self._cb_failures += 1
+        threshold = int(self.db.get_setting("cb_failure_threshold") or 3)
+        if self._cb_failures >= threshold and self._cb_state == "CLOSED":
+            self._cb_state = "OPEN"
+            self._cb_opened_at = time.time()
+            _log.warning("Circuit breaker OPENED after %d consecutive Ollama failures", self._cb_failures)
+
+    def _record_ollama_success(self) -> None:
+        """Record a successful Ollama job; reset failure count and close circuit."""
+        self._cb_failures = 0
+        self._cb_state = "CLOSED"
+        if self._cb_open_attempts > 0:
+            _log.info("Circuit breaker CLOSED after successful probe")
+
+    def _is_circuit_open(self) -> bool:
+        """Return True if the circuit breaker should block new jobs.
+
+        CLOSED -> False (normal operation)
+        OPEN + cooldown not elapsed -> True (blocking)
+        OPEN + cooldown elapsed -> transition to HALF_OPEN, return False (allow probe)
+        HALF_OPEN -> False (probe in flight)
+        """
+        if self._cb_state == "CLOSED":
+            return False
+        if self._cb_state == "HALF_OPEN":
+            return False
+        # OPEN state — check cooldown
+        cooldown = self._compute_cb_cooldown(self._cb_open_attempts)
+        elapsed = time.time() - (self._cb_opened_at or 0)
+        if elapsed >= cooldown:
+            self._cb_state = "HALF_OPEN"
+            self._cb_open_attempts += 1
+            _log.info("Circuit breaker entering HALF_OPEN state for probe job")
+            return False
+        return True
+
     def poll_once(self) -> None:
         """Single poll cycle.
 
@@ -371,6 +422,11 @@ class Daemon:
             queue_depth=queue_depth,
             daemon_state=current_state,
         )
+
+        # 3b. Circuit breaker check — skip dequeue if Ollama is unreachable
+        if self._is_circuit_open():
+            _log.debug("Circuit breaker OPEN — skipping dequeue")
+            return
 
         # 4. Get next pending job
         job = self.db.get_next_job()
@@ -507,6 +563,7 @@ class Daemon:
                             stdout_tail=out[-500:].decode("utf-8", errors="replace"),
                             stderr_tail=err[-500:].decode("utf-8", errors="replace"),
                         )
+                        self._record_ollama_failure()
                         try:
                             self.dlq.handle_failure(job["id"], f"timeout after {job['timeout']}s")
                         except Exception:
@@ -534,10 +591,13 @@ class Daemon:
                     outcome_reason=outcome_reason,
                 )
                 if exit_code != 0:
+                    self._record_ollama_failure()
                     try:
                         self.dlq.handle_failure(job["id"], f"exit code {exit_code}")
                     except Exception:
                         _log.exception("DLQ routing failed for job #%d", job["id"])
+                else:
+                    self._record_ollama_success()
 
             # Increment daily counters atomically
             counter_field = "jobs_completed_today" if exit_code == 0 else "jobs_failed_today"
@@ -606,6 +666,7 @@ class Daemon:
                     )
                 except Exception:
                     _log.exception("Failed to mark job #%d failed after worker exception", job["id"])
+                self._record_ollama_failure()
                 try:
                     self.dlq.handle_failure(
                         job["id"],
