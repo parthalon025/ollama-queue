@@ -755,3 +755,25 @@ class TestLastSuccessfulRunTime:
 
         result = db.get_last_successful_run_time(rj_id)
         assert result is None
+
+    def test_returns_latest_of_multiple_successful_runs(self, db):
+        """MAX(completed_at) returns the most recent success when multiple exist."""
+        import time
+
+        rj_id = db.add_recurring_job("test-job4", "echo test", interval_seconds=3600)
+        now = time.time()
+
+        job1 = db.submit_job("echo 1", "m", 5, 60, "s", recurring_job_id=rj_id)
+        db.start_job(job1)
+        db.complete_job(job1, exit_code=0, stdout_tail="", stderr_tail="")
+        db._connect().execute("UPDATE jobs SET completed_at=? WHERE id=?", (now - 200, job1))
+
+        job2 = db.submit_job("echo 2", "m", 5, 60, "s", recurring_job_id=rj_id)
+        db.start_job(job2)
+        db.complete_job(job2, exit_code=0, stdout_tail="", stderr_tail="")
+        db._connect().execute("UPDATE jobs SET completed_at=? WHERE id=?", (now - 50, job2))
+        db._connect().commit()
+
+        result = db.get_last_successful_run_time(rj_id)
+        assert result is not None
+        assert abs(result - (now - 50)) < 1.0  # must be the later one
