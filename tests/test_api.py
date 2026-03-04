@@ -601,3 +601,88 @@ def test_enable_job_by_name(client):
     jobs = client.get("/api/schedule").json()
     rj = next(j for j in jobs if j["name"] == "disable-me")
     assert rj["enabled"] in (True, 1)
+
+
+class TestAdmissionGate:
+    """Tests for HTTP 429 admission gate on POST /api/queue/submit."""
+
+    def test_submit_returns_429_when_queue_full(self, client_and_db):
+        """POST /api/queue/submit returns 429 when pending job count >= max_queue_depth."""
+        client, db = client_and_db
+        # Set max_queue_depth to 2
+        db.set_setting("max_queue_depth", 2)
+        # Fill the queue
+        db.submit_job("echo a", "qwen2.5:7b", 5, 60, "test")
+        db.submit_job("echo b", "qwen2.5:7b", 5, 60, "test")
+        # Third submission should be rejected
+        resp = client.post(
+            "/api/queue/submit",
+            json={
+                "command": "echo c",
+                "model": "qwen2.5:7b",
+                "priority": 5,
+                "timeout": 60,
+                "source": "test",
+            },
+        )
+        assert resp.status_code == 429
+
+    def test_submit_429_includes_retry_after_header(self, client_and_db):
+        """HTTP 429 response includes Retry-After header with positive integer seconds."""
+        client, db = client_and_db
+        db.set_setting("max_queue_depth", 1)
+        db.submit_job("echo a", "qwen2.5:7b", 5, 60, "test")
+        resp = client.post(
+            "/api/queue/submit",
+            json={
+                "command": "echo c",
+                "model": "qwen2.5:7b",
+                "priority": 5,
+                "timeout": 60,
+                "source": "test",
+            },
+        )
+        assert resp.status_code == 429
+        assert "Retry-After" in resp.headers
+        retry_after = int(resp.headers["Retry-After"])
+        assert retry_after >= 1
+
+    def test_submit_succeeds_when_below_limit(self, client_and_db):
+        """POST /api/queue/submit succeeds when pending count < max_queue_depth."""
+        client, db = client_and_db
+        db.set_setting("max_queue_depth", 3)
+        db.submit_job("echo a", "qwen2.5:7b", 5, 60, "test")
+        db.submit_job("echo b", "qwen2.5:7b", 5, 60, "test")
+        resp = client.post(
+            "/api/queue/submit",
+            json={
+                "command": "echo c",
+                "model": "qwen2.5:7b",
+                "priority": 5,
+                "timeout": 60,
+                "source": "test",
+            },
+        )
+        assert resp.status_code == 200
+        assert "job_id" in resp.json()
+
+    def test_submit_429_body_contains_error_info(self, client_and_db):
+        """HTTP 429 body contains error key and queue metadata."""
+        client, db = client_and_db
+        db.set_setting("max_queue_depth", 1)
+        db.submit_job("echo a", "qwen2.5:7b", 5, 60, "test")
+        resp = client.post(
+            "/api/queue/submit",
+            json={
+                "command": "echo c",
+                "model": "qwen2.5:7b",
+                "priority": 5,
+                "timeout": 60,
+                "source": "test",
+            },
+        )
+        assert resp.status_code == 429
+        data = resp.json()
+        assert data["error"] == "queue_full"
+        assert data["pending"] == 1
+        assert data["max_queue_depth"] == 1
