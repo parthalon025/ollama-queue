@@ -14,13 +14,17 @@ import contextlib
 import logging
 import os
 import signal as _signal
+import statistics
 import subprocess
 import subprocess as _subprocess  # real module — not replaced by test mocks targeting 'subprocess'
 import threading
 import time
+from collections import defaultdict, deque
 from concurrent.futures import Future, ThreadPoolExecutor
+from math import log, log2
 from subprocess import TimeoutExpired as _TimeoutExpired
 
+from ollama_queue.burst import _default_detector as _burst_singleton
 from ollama_queue.db import Database
 from ollama_queue.dlq import DLQManager
 from ollama_queue.estimator import DurationEstimator
@@ -129,6 +133,13 @@ class Daemon:
         self._cb_open_attempts: int = 0  # how many times circuit has opened (for exponential cooldown)
         self._cb_probe_in_flight: bool = False  # True while a HALF_OPEN probe is dispatched
         self._cb_lock: threading.Lock = threading.Lock()  # protects all _cb_* state
+        # Adaptive entropy tracking (in-memory rolling baseline)
+        self._entropy_history: deque[float] = deque(maxlen=30)
+        self._entropy_suspend_until: float = 0.0
+        # Burst detection — use the module-level singleton so the API's record_submission()
+        # calls (on /api/queue/submit) feed into the same detector the daemon reads.
+        self._burst_detector = _burst_singleton
+        self._burst_regime: str = "unknown"  # cached for /api/health
 
     # --- Concurrency helpers ---
 
@@ -318,6 +329,65 @@ class Daemon:
 
         return True
 
+    def _compute_queue_entropy(self, pending_jobs: list[dict], now: float) -> float:
+        """Compute age-weighted Shannon entropy of the pending queue's priority distribution.
+
+        Age-weighted: older jobs count more (log(1 + wait_seconds)).
+        Higher entropy = diverse priority mix = healthy queue.
+        Lower entropy = priority collapse = backlog or flood.
+        Returns 0.0 for empty queue.
+        """
+        if not pending_jobs:
+            return 0.0
+
+        weights = {j["id"]: log(1.0 + max(0.0, now - (j.get("submitted_at") or now))) for j in pending_jobs}
+        total_w = sum(weights.values()) or 1.0
+
+        priority_weights: dict[int, float] = defaultdict(float)
+        for j in pending_jobs:
+            priority_weights[j["priority"]] += weights[j["id"]] / total_w
+
+        return -sum(w * log2(w) for w in priority_weights.values() if w > 0)
+
+    def _check_entropy(self, pending_jobs: list[dict], now: float) -> None:
+        """Compute entropy, update rolling baseline, log anomalies, set suspension."""
+        entropy = self._compute_queue_entropy(pending_jobs, now)
+        self._entropy_history.append(entropy)
+
+        # Need at least 10 samples for a meaningful baseline
+        if len(self._entropy_history) < 10:
+            return
+
+        sigma = float(self.db.get_setting("entropy_alert_sigma") or 2.0)
+        mean_entropy = statistics.mean(self._entropy_history)
+        std_entropy = statistics.stdev(self._entropy_history) if len(self._entropy_history) > 1 else 0.1
+        if std_entropy == 0:
+            std_entropy = 0.1
+
+        if entropy < mean_entropy - sigma * std_entropy:
+            # Determine anomaly type
+            high_priority_count = sum(1 for j in pending_jobs if j["priority"] <= 4)
+            if high_priority_count / max(len(pending_jobs), 1) > 0.7:
+                alert_type = "critical_backlog"
+            else:
+                alert_type = "background_flood"
+
+            self.db.log_schedule_event(
+                "entropy_alert",
+                details={"entropy": entropy, "mean_entropy": mean_entropy, "sigma": sigma, "type": alert_type},
+            )
+            _log.warning(
+                "Queue entropy anomaly detected: entropy=%.2f mean=%.2f type=%s",
+                entropy,
+                mean_entropy,
+                alert_type,
+            )
+
+            suspend_enabled = self.db.get_setting("entropy_suspend_low_priority")
+            if alert_type == "critical_backlog" and suspend_enabled:
+                self._entropy_suspend_until = now + 60.0  # suspend p8-10 for 60s
+                _log.info("Suspended low-priority (p8-10) promotion for 60s due to critical_backlog")
+
     def _recover_orphans(self) -> None:
         """Reset jobs stuck in 'running' on daemon startup (no live subprocess)."""
         orphans = self.db.get_running_jobs()
@@ -428,7 +498,8 @@ class Daemon:
 
         # 0. Promote due recurring jobs (runs even while a job is running)
         try:
-            self.scheduler.promote_due_jobs(now)
+            suspend_low_priority = now < self._entropy_suspend_until
+            self.scheduler.promote_due_jobs(now, suspend_low_priority=suspend_low_priority)
         except Exception:
             _log.exception("Scheduler promotion failed; continuing")
 
@@ -482,6 +553,21 @@ class Daemon:
             _log.debug("Circuit breaker OPEN — skipping dequeue")
             return
 
+        # 3c. Entropy anomaly detection
+        try:
+            self._check_entropy(pending_jobs, now)
+        except Exception:
+            _log.exception("Entropy check failed; continuing")
+
+        # 3d. Update burst regime every poll (BurstDetector is cheap to query)
+        try:
+            self._burst_regime = self._burst_detector.regime(now)
+            if self._burst_regime in ("warning", "critical"):
+                _log.info("Burst regime: %s", self._burst_regime)
+            self.db.update_daemon_state(burst_regime=self._burst_regime)
+        except Exception:
+            _log.exception("Burst regime check failed; continuing")
+
         # 4. Get next pending job — SJF + aging sort
         estimates = self.db.estimate_duration_bulk([j["source"] for j in pending_jobs])
         job = self._dequeue_next_job(pending_jobs, estimates, now)
@@ -533,6 +619,12 @@ class Daemon:
         if not self._can_admit(job):
             self.db.update_daemon_state(state="idle", last_poll_at=now, current_job_id=None)
             return
+
+        # Preemption: if new job is priority 1-2, check if we should preempt a running job
+        preempt_id = self._check_preemption(job, now)
+        if preempt_id is not None:
+            self._preempt_job(preempt_id)
+            # Continue — now there's a free slot for the new job
 
         if self._executor is None:
             # max_workers is a ceiling; actual concurrency is governed entirely by
@@ -849,6 +941,89 @@ class Daemon:
 
         eligible.sort(key=sort_key)
         return eligible[0]
+
+    def _check_preemption(self, new_job: dict, now: float) -> int | None:
+        """Find a running job to preempt for new_job. Returns job_id or None.
+
+        Preemption only occurs when:
+        1. preemption_enabled=True (opt-in)
+        2. new_job priority is 1 or 2
+        3. A running job has run < preemption_window_seconds
+        4. That running job has < max_preemptions_per_job preemptions
+        5. Running job has been silent > 30s (likely not near completion)
+        6. Running job's VRAM >= new_job's VRAM (would free enough headroom)
+        7. Running job has more estimated time remaining than new_job's total duration
+        """
+        if int(new_job.get("priority") or 10) > 2:
+            return None
+        if not self.db.get_setting("preemption_enabled"):
+            return None
+
+        preempt_window = float(self.db.get_setting("preemption_window_seconds") or 120)
+        max_preemptions = int(self.db.get_setting("max_preemptions_per_job") or 2)
+        new_duration = self.estimator.estimate(new_job.get("source") or "", new_job.get("model"))
+        new_vram = self._ollama_models.estimate_vram_mb(new_job.get("model") or "", self.db)
+
+        with self._running_lock:
+            candidates = list(self._running.keys())
+
+        for jid in candidates:
+            job = self.db.get_job(jid)
+            if job is None:
+                continue
+            if (job.get("preemption_count") or 0) >= max_preemptions:
+                continue  # immune
+
+            _sa = job.get("started_at")
+            started_at = _sa if _sa is not None else now
+            elapsed = now - started_at
+            if elapsed >= preempt_window:
+                continue  # too far into execution
+
+            # Skip recently active jobs (stdout in last 30s = likely near completion)
+            silence = self.stall_detector.get_stdout_silence(jid, now)
+            if silence is not None and silence < 30.0:
+                continue
+
+            running_vram = self._ollama_models.estimate_vram_mb(self._running_models.get(jid) or "", self.db)
+            if running_vram < new_vram:
+                continue  # wouldn't free enough VRAM
+
+            estimated_duration = job.get("estimated_duration") or self.estimator.estimate(
+                job.get("source") or "", job.get("model")
+            )
+            remaining = estimated_duration - elapsed
+            if remaining <= new_duration:
+                continue  # running job nearly done; not worth preempting
+
+            return jid  # found a candidate
+
+        return None
+
+    def _preempt_job(self, job_id: int) -> None:
+        """SIGTERM the running job and requeue as pending.
+
+        NEVER sends to DLQ. Preempted jobs are healthy work interrupted deliberately.
+        DLQ is for permanent failures requiring human review.
+        """
+        job = self.db.get_job(job_id)
+        pid = job.get("pid") if job else None
+        if pid and pid > 0:
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.kill(pid, _signal.SIGTERM)
+                _log.info("Sent SIGTERM to job #%d pid=%d for preemption", job_id, pid)
+
+        self.db.requeue_preempted_job(job_id)
+        self.db.log_schedule_event(
+            "preempted",
+            job_id=job_id,
+            details={"job_id": job_id, "reason": "priority_preemption"},
+        )
+        _log.warning("Preempted job #%d — requeued as pending", job_id)
+
+        with self._running_lock:
+            self._running.pop(job_id, None)
+            self._running_models.pop(job_id, None)
 
     def _run_check_command(self, job: dict, recurring_job: dict) -> str:
         """Run check_command for a recurring job before the main command.

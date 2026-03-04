@@ -26,8 +26,16 @@ class Scheduler:
     def __init__(self, db: Database):
         self.db = db
 
-    def promote_due_jobs(self, now: float | None = None) -> list[int]:
+    def promote_due_jobs(
+        self,
+        now: float | None = None,
+        suspend_low_priority: bool = False,
+    ) -> list[int]:
         """Promote due recurring jobs to pending. Coalesces duplicates.
+
+        Args:
+            suspend_low_priority: If True, skip promotion of priority 8-10 jobs.
+                Set by daemon when entropy anomaly indicates critical_backlog.
 
         Returns list of new job IDs created.
         """
@@ -39,6 +47,14 @@ class Scheduler:
         due.sort(key=lambda rj: self._aoi_sort_key(rj, now))
         new_ids = []
         for rj in due:
+            # Entropy suspension: skip low-priority promotion during backlog
+            if suspend_low_priority and int(rj.get("priority") or 5) >= 8:
+                _log.debug(
+                    "Skipping promotion of %r (priority=%d) — entropy suspension active",
+                    rj["name"],
+                    rj.get("priority"),
+                )
+                continue
             if self.db.has_pending_or_running_recurring(rj["id"]):
                 self.db.log_schedule_event(
                     "skipped_duplicate",

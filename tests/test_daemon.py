@@ -1000,6 +1000,114 @@ def test_half_open_failure_reopens_circuit(daemon):
     assert daemon._cb_state == "OPEN"
 
 
+class TestPreemption:
+    def _setup_running_job(self, db, daemon, model="qwen2.5:7b", priority=5):
+        """Helper: submit a job, mark it running with a fake PID."""
+        job_id = db.submit_job("echo run", model, priority, 600, "test")
+        db.start_job(job_id)
+        with db._lock:
+            conn = db._connect()
+            conn.execute("UPDATE jobs SET pid=99999 WHERE id=?", (job_id,))
+            conn.commit()
+        return job_id
+
+    def test_preemption_disabled_by_default(self, db):
+        """No preemption when preemption_enabled=False."""
+        import time
+
+        from ollama_queue.daemon import Daemon
+
+        daemon = Daemon(db)
+        p1_job = {"id": 99, "priority": 1, "model": "qwen2.5:7b", "source": "test"}
+        result = daemon._check_preemption(p1_job, time.time())
+        assert result is None
+
+    def test_preemption_skips_high_priority_requester(self, db):
+        """Only priority 1-2 jobs can trigger preemption."""
+        import time
+
+        from ollama_queue.daemon import Daemon
+
+        daemon = Daemon(db)
+        db.set_setting("preemption_enabled", True)
+        p5_job = {"id": 99, "priority": 5, "model": "qwen2.5:7b", "source": "test"}
+        result = daemon._check_preemption(p5_job, time.time())
+        assert result is None  # priority 5 cannot preempt
+
+    def test_preempt_job_sends_to_pending_not_dlq(self, db):
+        """_preempt_job() sets status=pending and leaves DLQ empty."""
+        from unittest.mock import patch
+
+        from ollama_queue.daemon import Daemon
+
+        daemon = Daemon(db)
+        db.set_setting("preemption_enabled", True)
+        job_id = db.submit_job("echo low", "qwen2.5:7b", 5, 600, "test")
+        db.start_job(job_id)
+        with db._lock:
+            conn = db._connect()
+            conn.execute("UPDATE jobs SET pid=99999 WHERE id=?", (job_id,))
+            conn.commit()
+        with patch("ollama_queue.daemon.os.kill", return_value=None):
+            daemon._preempt_job(job_id)
+        job = db.get_job(job_id)
+        assert job["status"] == "pending", f"Expected pending, got {job['status']}"
+        assert db.list_dlq() == [], "DLQ must be empty after preemption"
+
+    def test_preempt_increments_preemption_count(self, db):
+        """preemption_count is incremented after preemption."""
+        from unittest.mock import patch
+
+        from ollama_queue.daemon import Daemon
+
+        daemon = Daemon(db)
+        job_id = db.submit_job("echo low", "qwen2.5:7b", 5, 600, "test")
+        db.start_job(job_id)
+        with db._lock:
+            conn = db._connect()
+            conn.execute("UPDATE jobs SET pid=99999 WHERE id=?", (job_id,))
+            conn.commit()
+        with patch("ollama_queue.daemon.os.kill", return_value=None):
+            daemon._preempt_job(job_id)
+        job = db.get_job(job_id)
+        assert job["preemption_count"] == 1
+
+    def test_job_at_max_preemptions_is_immune(self, db):
+        """Job with preemption_count >= max_preemptions_per_job cannot be preempted again."""
+        import time
+        from concurrent.futures import Future
+
+        from ollama_queue.daemon import Daemon
+
+        daemon = Daemon(db)
+        db.set_setting("preemption_enabled", True)
+        db.set_setting("max_preemptions_per_job", 2)
+        job_id = db.submit_job("echo low", "qwen2.5:7b", 5, 600, "test")
+        db.start_job(job_id)
+        with db._lock:
+            conn = db._connect()
+            conn.execute("UPDATE jobs SET pid=99999, preemption_count=2 WHERE id=?", (job_id,))
+            conn.commit()
+        now = time.time()
+        fake_future = Future()
+        with daemon._running_lock:
+            daemon._running[job_id] = fake_future
+            daemon._running_models[job_id] = "qwen2.5:7b"
+        p1_job = {"id": 999, "priority": 1, "model": "qwen2.5:7b", "source": "test", "submitted_at": now}
+        result = daemon._check_preemption(p1_job, now)
+        assert result is None  # immune due to max preemptions
+
+
+def test_daemon_has_burst_detector(db):
+    """Daemon initializes with a BurstDetector instance."""
+    from ollama_queue.burst import BurstDetector
+    from ollama_queue.daemon import Daemon
+
+    daemon = Daemon(db)
+    assert hasattr(daemon, "_burst_detector")
+    assert isinstance(daemon._burst_detector, BurstDetector)
+
+
 class TestSJFDequeue:
     def test_sjf_shorter_job_dequeued_first_at_same_priority(self, db):
         """Shorter estimated job is dequeued before longer at same priority."""
@@ -1103,3 +1211,59 @@ class TestSJFDequeue:
         daemon = Daemon(db)
         result = daemon._dequeue_next_job([], {}, time.time())
         assert result is None
+
+
+class TestEntropyComputation:
+    def test_empty_queue_entropy_is_zero(self, db):
+        """Empty pending list gives entropy 0."""
+        import time
+
+        from ollama_queue.daemon import Daemon
+
+        daemon = Daemon(db)
+        result = daemon._compute_queue_entropy([], time.time())
+        assert result == 0.0
+
+    def test_uniform_priority_queue_has_high_entropy(self, db):
+        """Queue with equal mix of 5 priorities approaches theoretical max = log2(5) ≈ 2.32."""
+        import time
+        from math import log2
+
+        from ollama_queue.daemon import Daemon
+
+        daemon = Daemon(db)
+        now = time.time()
+        # 5 distinct priorities — equal age → equal weight → max entropy
+        jobs = [{"id": i, "priority": i, "submitted_at": now - 100} for i in range(1, 6)]
+        entropy = daemon._compute_queue_entropy(jobs, now)
+        import pytest
+
+        assert entropy == pytest.approx(log2(5), abs=0.05)
+
+    def test_single_priority_queue_has_low_entropy(self, db):
+        """Queue with all same priority has entropy near 0."""
+        import time
+
+        from ollama_queue.daemon import Daemon
+
+        daemon = Daemon(db)
+        now = time.time()
+        jobs = [{"id": i, "priority": 1, "submitted_at": now - 100} for i in range(10)]
+        entropy = daemon._compute_queue_entropy(jobs, now)
+        assert entropy < 0.01  # near-zero: all same priority
+
+    def test_entropy_history_accumulates(self, db):
+        """_check_entropy() accumulates entropy readings over time."""
+        import time
+
+        from ollama_queue.daemon import Daemon
+
+        daemon = Daemon(db)
+        now = time.time()
+        jobs = [{"id": i, "priority": 5, "submitted_at": now - 100} for i in range(5)]
+        for _ in range(5):
+            daemon._check_entropy(jobs, now)
+        assert len(daemon._entropy_history) == 5
+        import math
+
+        assert all(v >= 0.0 and math.isfinite(v) for v in daemon._entropy_history)
