@@ -24,6 +24,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from math import log, log2
 from subprocess import TimeoutExpired as _TimeoutExpired
 
+from ollama_queue.burst import _default_detector as _burst_singleton
 from ollama_queue.db import Database
 from ollama_queue.dlq import DLQManager
 from ollama_queue.estimator import DurationEstimator
@@ -128,6 +129,10 @@ class Daemon:
         # Adaptive entropy tracking (in-memory rolling baseline)
         self._entropy_history: deque[float] = deque(maxlen=30)
         self._entropy_suspend_until: float = 0.0
+        # Burst detection — use the module-level singleton so the API's record_submission()
+        # calls (on /api/queue/submit) feed into the same detector the daemon reads.
+        self._burst_detector = _burst_singleton
+        self._burst_regime: str = "unknown"  # cached for /api/health
 
     # --- Concurrency helpers ---
 
@@ -436,6 +441,15 @@ class Daemon:
             self._check_entropy(pending_jobs, now)
         except Exception:
             _log.exception("Entropy check failed; continuing")
+
+        # 3c. Update burst regime every poll (BurstDetector is cheap to query)
+        try:
+            self._burst_regime = self._burst_detector.regime(now)
+            if self._burst_regime in ("warning", "critical"):
+                _log.info("Burst regime: %s", self._burst_regime)
+            self.db.update_daemon_state(burst_regime=self._burst_regime)
+        except Exception:
+            _log.exception("Burst regime check failed; continuing")
 
         # 4. Get next pending job
         job = self.db.get_next_job()

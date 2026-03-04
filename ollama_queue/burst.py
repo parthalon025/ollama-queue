@@ -103,3 +103,9 @@ class BurstDetector:
             if low <= ratio < high:
                 return name
         return "subcritical"
+
+
+# Module-level singleton shared between daemon and API.
+# Daemon writes via record_submission(); API reads via regime().
+# Both modules import this instance directly.
+_default_detector = BurstDetector()

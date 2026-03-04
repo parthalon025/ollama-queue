@@ -835,6 +835,16 @@ def test_no_max_runs_no_decrement(daemon):
     assert rj["max_runs"] is None
 
 
+def test_daemon_has_burst_detector(db):
+    """Daemon initializes with a BurstDetector instance."""
+    from ollama_queue.burst import BurstDetector
+    from ollama_queue.daemon import Daemon
+
+    daemon = Daemon(db)
+    assert hasattr(daemon, "_burst_detector")
+    assert isinstance(daemon._burst_detector, BurstDetector)
+
+
 class TestEntropyComputation:
     def test_empty_queue_entropy_is_zero(self, db):
         """Empty pending list gives entropy 0."""
