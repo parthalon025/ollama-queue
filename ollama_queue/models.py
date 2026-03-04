@@ -167,6 +167,29 @@ class OllamaModels:
 
         return {"resource_profile": resource_profile, "type_tag": type_tag}
 
+    def min_estimated_vram_mb(self, db: Database, fallback_mb: int = 0) -> int:
+        """Return the minimum VRAM estimate (MB) across all models known to model_registry.
+
+        Queries model_registry for all rows, then calls estimate_vram_mb() on each name.
+        This gives us the smallest model footprint we're likely to schedule, useful for
+        computing how many concurrent workers can fit in available VRAM.
+
+        Args:
+            db: Database instance to query model_registry and settings.
+            fallback_mb: If greater than the catalog minimum, this value is returned instead.
+                         Use to enforce a floor (e.g., from a min_model_vram_mb setting).
+
+        Returns:
+            Minimum estimated VRAM in MB as int. Falls back to 2000 if registry is empty.
+        """
+        with db._lock:
+            rows = db._connect().execute("SELECT name FROM model_registry").fetchall()
+        names = [row["name"] for row in rows]
+        if not names:
+            return max(fallback_mb, 2000)
+        min_vram = int(min(self.estimate_vram_mb(name, db) for name in names))
+        return max(min_vram, fallback_mb)
+
     def estimate_vram_mb(self, model_name: str, db: Database) -> float:
         """Return estimated VRAM in MB.
 

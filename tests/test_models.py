@@ -125,6 +125,69 @@ class TestEstimateVram:
         assert vram == pytest.approx(4000.0)
 
 
+class TestMinEstimatedVram:
+    def test_min_estimated_vram_mb_returns_minimum(self, tmp_path):
+        """min_estimated_vram_mb returns the smallest VRAM estimate across all known models."""
+        from ollama_queue.db import Database
+        from ollama_queue.models import OllamaModels
+
+        db = Database(str(tmp_path / "q.db"))
+        db.initialize()
+        # Seed model_registry with observed VRAM values
+        with db._lock:
+            conn = db._connect()
+            conn.execute(
+                "INSERT INTO model_registry (name, vram_observed_mb) VALUES (?, ?)",
+                ("small-model:7b", 4096.0),
+            )
+            conn.execute(
+                "INSERT INTO model_registry (name, vram_observed_mb) VALUES (?, ?)",
+                ("large-model:70b", 40000.0),
+            )
+            conn.commit()
+        min_vram = OllamaModels().min_estimated_vram_mb(db)
+        # Should be a positive integer
+        assert min_vram > 0
+        # Should be <= either model's estimate
+        assert min_vram <= OllamaModels().estimate_vram_mb("small-model:7b", db)
+        assert min_vram <= OllamaModels().estimate_vram_mb("large-model:70b", db)
+
+    def test_min_estimated_vram_mb_with_fallback(self, tmp_path):
+        """When fallback_mb is larger than the catalog minimum, returns fallback_mb."""
+        from ollama_queue.db import Database
+        from ollama_queue.models import OllamaModels
+
+        db = Database(str(tmp_path / "q.db"))
+        db.initialize()
+        with db._lock:
+            conn = db._connect()
+            conn.execute(
+                "INSERT INTO model_registry (name, vram_observed_mb) VALUES (?, ?)",
+                ("small-model:7b", 4096.0),
+            )
+            conn.commit()
+        # fallback larger than any catalog minimum should be returned
+        result = OllamaModels().min_estimated_vram_mb(db, fallback_mb=99999)
+        assert result == 99999
+
+    def test_min_estimated_vram_mb_empty_registry_returns_fallback(self, tmp_path):
+        """When model_registry is empty and ollama list fails, returns fallback or default."""
+        from unittest.mock import MagicMock, patch
+
+        from ollama_queue.db import Database
+        from ollama_queue.models import OllamaModels
+
+        db = Database(str(tmp_path / "q.db"))
+        db.initialize()
+        mock = MagicMock()
+        mock.returncode = 1
+        mock.stdout = ""
+        with patch("subprocess.run", return_value=mock):
+            result = OllamaModels().min_estimated_vram_mb(db)
+        # Empty registry with no list_local data → default fallback
+        assert result > 0
+
+
 # --- Pull lifecycle tests (Task 3) ---
 
 
