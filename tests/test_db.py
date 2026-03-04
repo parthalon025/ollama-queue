@@ -562,3 +562,25 @@ def test_recurring_job_schema_has_outcome_reason(db):
     rj_id = db.add_recurring_job(name="schema-test", command="echo hi", interval_seconds=3600)
     rj = db.get_recurring_job(rj_id)
     assert "outcome_reason" in rj
+
+
+class TestPR2Admission:
+    def test_count_pending_jobs_empty(self, db):
+        """count_pending_jobs returns 0 when queue is empty."""
+        assert db.count_pending_jobs() == 0
+
+    def test_count_pending_jobs_counts_pending_only(self, db):
+        """count_pending_jobs counts only pending jobs, not running/completed/failed."""
+        db.submit_job("echo a", "qwen2.5:7b", 5, 60, "test")
+        db.submit_job("echo b", "qwen2.5:7b", 5, 60, "test")
+        assert db.count_pending_jobs() == 2
+        # Claim one job — start_job() transitions it to 'running', should not be counted
+        job = db.get_next_job()
+        db.start_job(job["id"])
+        assert db.count_pending_jobs() == 1
+
+    def test_pr2_defaults_available(self, db):
+        """PR2 DEFAULTS are accessible via get_setting()."""
+        assert db.get_setting("cb_failure_threshold") == 3
+        assert db.get_setting("max_queue_depth") == 50
+        assert db.get_setting("cpu_offload_efficiency") == 0.3

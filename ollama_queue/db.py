@@ -36,6 +36,13 @@ DEFAULTS = {
     "max_concurrent_jobs": 1,
     "concurrent_shadow_hours": 24,
     "vram_safety_factor": 1.3,
+    # PR2: Admission & Reliability
+    "cpu_offload_efficiency": 0.3,  # fraction of CPU RAM usable as VRAM substitute
+    "cb_failure_threshold": 3,  # consecutive Ollama failures before circuit opens
+    "cb_base_cooldown": 30,  # initial cooldown seconds when circuit opens
+    "cb_max_cooldown": 600,  # maximum cooldown seconds (10 min)
+    "max_queue_depth": 50,  # HTTP 429 when pending count exceeds this
+    "min_model_vram_mb": 2000,  # minimum VRAM estimate when model is unknown
 }
 
 
@@ -383,6 +390,15 @@ class Database:
                ORDER BY priority ASC, submitted_at ASC"""
         ).fetchall()
         return [dict(r) for r in rows]
+
+    def count_pending_jobs(self) -> int:
+        """Return count of jobs currently waiting in the queue (status='pending')."""
+        conn = self._connect()
+        row = conn.execute(
+            "SELECT COUNT(*) FROM jobs WHERE status = 'pending' AND (retry_after IS NULL OR retry_after <= ?)",
+            (time.time(),),
+        ).fetchone()
+        return row[0]
 
     def get_history(self, limit: int = 20, offset: int = 0, source: str | None = None) -> list[dict]:
         conn = self._connect()
