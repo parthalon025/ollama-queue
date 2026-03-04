@@ -146,11 +146,8 @@ class TestMinEstimatedVram:
             )
             conn.commit()
         min_vram = OllamaModels().min_estimated_vram_mb(db)
-        # Should be a positive integer
-        assert min_vram > 0
-        # Should be <= either model's estimate
-        assert min_vram <= OllamaModels().estimate_vram_mb("small-model:7b", db)
-        assert min_vram <= OllamaModels().estimate_vram_mb("large-model:70b", db)
+        # small-model:7b was seeded with vram_observed_mb=4096 — that is the exact minimum
+        assert min_vram == 4096
 
     def test_min_estimated_vram_mb_with_fallback(self, tmp_path):
         """When fallback_mb is larger than the catalog minimum, returns fallback_mb."""
@@ -184,8 +181,8 @@ class TestMinEstimatedVram:
         mock.stdout = ""
         with patch("subprocess.run", return_value=mock):
             result = OllamaModels().min_estimated_vram_mb(db)
-        # Empty registry with no list_local data → default fallback
-        assert result > 0
+        # Empty registry with no list_local data → hardcoded 2000 MB floor
+        assert result == 2000
 
 
 # --- Pull lifecycle tests (Task 3) ---

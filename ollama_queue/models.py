@@ -159,11 +159,14 @@ class OllamaModels:
         return {"resource_profile": resource_profile, "type_tag": type_tag}
 
     def min_estimated_vram_mb(self, db: Database, fallback_mb: int = 0) -> int:
-        """Return the minimum VRAM estimate (MB) across all models known to model_registry.
+        """Return the minimum VRAM estimate (MB) across all models in model_registry.
 
-        Queries model_registry for all rows, then calls estimate_vram_mb() on each name.
-        This gives us the smallest model footprint we're likely to schedule, useful for
-        computing how many concurrent workers can fit in available VRAM.
+        Issues a single batch query for all registry rows instead of calling
+        estimate_vram_mb() N times (which would issue N separate DB + settings queries).
+        VRAM estimation logic mirrors estimate_vram_mb() exactly:
+          1. vram_observed_mb if present
+          2. size_bytes / 1_000_000 * vram_safety_factor
+          3. 2000 MB hardcoded floor for unknown models
 
         Args:
             db: Database instance to query model_registry and settings.
@@ -174,12 +177,25 @@ class OllamaModels:
             Minimum estimated VRAM in MB as int. Falls back to 2000 if registry is empty.
         """
         with db._lock:
-            rows = db._connect().execute("SELECT name FROM model_registry").fetchall()
-        names = [row["name"] for row in rows]
-        if not names:
+            conn = db._connect()
+            rows = conn.execute("SELECT vram_observed_mb, size_bytes FROM model_registry").fetchall()
+            setting_row = conn.execute("SELECT value FROM settings WHERE key = 'vram_safety_factor'").fetchone()
+
+        if not rows:
             return max(fallback_mb, 2000)
-        min_vram = int(min(self.estimate_vram_mb(name, db) for name in names))
-        return max(min_vram, fallback_mb)
+
+        safety = float(setting_row["value"]) if setting_row else 1.3
+
+        estimates = []
+        for row in rows:
+            if row["vram_observed_mb"]:
+                estimates.append(int(row["vram_observed_mb"]))
+            elif row["size_bytes"]:
+                estimates.append(int((row["size_bytes"] / 1_000_000) * safety))
+            else:
+                estimates.append(2000)
+
+        return max(int(min(estimates)), fallback_mb)
 
     def estimate_vram_mb(self, model_name: str, db: Database) -> float:
         """Return estimated VRAM in MB.
