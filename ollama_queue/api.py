@@ -156,6 +156,30 @@ def create_app(db: Database) -> FastAPI:
 
     @app.post("/api/queue/submit")
     def submit_job(req: SubmitJobRequest):
+        # Admission gate: reject with 429 when queue depth exceeds max_queue_depth
+        max_depth = int(db.get_setting("max_queue_depth") or 50)
+        pending = db.count_pending_jobs()
+        if pending >= max_depth:
+            # Estimate drain time from current queue ETAs
+            try:
+                jobs = db.get_pending_jobs()
+                etas = DurationEstimator(db).queue_etas(jobs)
+                if etas:
+                    drain_seconds = max(
+                        1,
+                        int(max(e["estimated_start_offset"] + e["estimated_duration"] for e in etas)),
+                    )
+                else:
+                    drain_seconds = max(1, pending * 60)
+            except Exception:
+                drain_seconds = max(1, pending * 60)  # fallback: 1 min per pending job
+            from fastapi.responses import JSONResponse
+
+            return JSONResponse(
+                status_code=429,
+                content={"error": "queue_full", "pending": pending, "max_queue_depth": max_depth},
+                headers={"Retry-After": str(drain_seconds)},
+            )
         priority: int = req.priority if req.priority is not None else cast(int, DEFAULTS["default_priority"])
         timeout: int = req.timeout if req.timeout is not None else cast(int, DEFAULTS["default_timeout_seconds"])
         job_id = db.submit_job(
