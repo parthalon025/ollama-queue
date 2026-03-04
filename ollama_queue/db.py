@@ -46,6 +46,7 @@ DEFAULTS = {
     "concurrent_shadow_hours": 24,
     "vram_safety_factor": 1.3,
     "sjf_aging_factor": 3600,  # PR3: seconds of wait to halve effective duration; 0=pure SJF
+    "aoi_weight": 0.3,  # PR3: fraction of scheduling score from information staleness (0=pure priority, 1=pure AoI)
 }
 
 
@@ -909,6 +910,23 @@ class Database:
             (recurring_job_id,),
         ).fetchone()
         return row is not None
+
+    def get_last_successful_run_time(self, recurring_job_id: int) -> float | None:
+        """Return timestamp of most recent successful (exit_code=0) job for a recurring job.
+
+        Uses exit_code=0 (not last_run which includes failures) for AoI accuracy.
+        Returns None if the recurring job has never completed successfully.
+        """
+        conn = self._connect()
+        row = conn.execute(
+            """SELECT MAX(completed_at) as last_success
+               FROM jobs
+               WHERE recurring_job_id = ? AND exit_code = 0""",
+            (recurring_job_id,),
+        ).fetchone()
+        if row is None or row["last_success"] is None:
+            return None
+        return float(row["last_success"])
 
     def _set_recurring_next_run(self, rj_id: int, next_run: float) -> None:
         """Update next_run for a recurring job. Single-purpose DB API — no direct _connect() outside this class."""

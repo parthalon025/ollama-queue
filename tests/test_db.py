@@ -678,3 +678,47 @@ class TestDurationBulkAndStats:
         """Returns None when no history exists for source."""
         result = db.estimate_duration_stats("nonexistent-source")
         assert result is None
+
+
+class TestLastSuccessfulRunTime:
+    def test_returns_none_for_no_history(self, db):
+        """Returns None when recurring job has never completed successfully."""
+        rj_id = db.add_recurring_job("test-job", "echo test", interval_seconds=3600)
+        result = db.get_last_successful_run_time(rj_id)
+        assert result is None
+
+    def test_returns_max_completed_at_for_successful_runs(self, db):
+        """Returns timestamp of most recent successful completion."""
+        import time
+
+        rj_id = db.add_recurring_job("test-job2", "echo test", interval_seconds=3600)
+        now = time.time()
+        job1 = db.submit_job("echo 1", "m", 5, 60, "s", recurring_job_id=rj_id)
+        db.start_job(job1)
+        db.complete_job(job1, exit_code=1, stdout_tail="", stderr_tail="")
+        db._connect().execute("UPDATE jobs SET completed_at=? WHERE id=?", (now - 100, job1))
+
+        job2 = db.submit_job("echo 2", "m", 5, 60, "s", recurring_job_id=rj_id)
+        db.start_job(job2)
+        db.complete_job(job2, exit_code=0, stdout_tail="", stderr_tail="")
+        db._connect().execute("UPDATE jobs SET completed_at=? WHERE id=?", (now - 10, job2))
+        db._connect().commit()
+
+        result = db.get_last_successful_run_time(rj_id)
+        assert result is not None
+        assert abs(result - (now - 10)) < 1.0
+
+    def test_ignores_failed_runs(self, db):
+        """exit_code != 0 runs do not count as last successful run."""
+        import time
+
+        rj_id = db.add_recurring_job("test-job3", "echo test", interval_seconds=3600)
+        now = time.time()
+        job1 = db.submit_job("echo 1", "m", 5, 60, "s", recurring_job_id=rj_id)
+        db.start_job(job1)
+        db.complete_job(job1, exit_code=1, stdout_tail="", stderr_tail="")
+        db._connect().execute("UPDATE jobs SET completed_at=? WHERE id=?", (now - 5, job1))
+        db._connect().commit()
+
+        result = db.get_last_successful_run_time(rj_id)
+        assert result is None

@@ -312,3 +312,60 @@ class TestRebalancePinEnforcement:
         # Should not raise — just place as best as possible
         changes = scheduler.rebalance(now)
         assert isinstance(changes, list)
+
+
+class TestAoISorting:
+    def test_stale_recurring_job_promoted_before_fresh_at_same_priority(self, db):
+        """A stale (long-overdue) recurring job is promoted before a fresh one."""
+        scheduler = Scheduler(db)
+        now = time.time()
+
+        rj_stale = db.add_recurring_job("stale-job", "echo stale", interval_seconds=3600, priority=5, source="stale")
+        rj_fresh = db.add_recurring_job("fresh-job", "echo fresh", interval_seconds=3600, priority=5, source="fresh")
+
+        # Stale job: last successful run 5 intervals ago
+        job_old = db.submit_job("echo old", "m", 5, 60, "stale", recurring_job_id=rj_stale)
+        db.start_job(job_old)
+        db.complete_job(job_old, exit_code=0, stdout_tail="", stderr_tail="")
+        db._connect().execute("UPDATE jobs SET completed_at=? WHERE id=?", (now - 5 * 3600, job_old))
+
+        # Fresh job: last successful run 0.5 intervals ago
+        job_recent = db.submit_job("echo recent", "m", 5, 60, "fresh", recurring_job_id=rj_fresh)
+        db.start_job(job_recent)
+        db.complete_job(job_recent, exit_code=0, stdout_tail="", stderr_tail="")
+        db._connect().execute("UPDATE jobs SET completed_at=? WHERE id=?", (now - 0.5 * 3600, job_recent))
+
+        # Set both due now
+        db._connect().execute("UPDATE recurring_jobs SET next_run=? WHERE id=?", (now - 1, rj_stale))
+        db._connect().execute("UPDATE recurring_jobs SET next_run=? WHERE id=?", (now - 1, rj_fresh))
+        db._connect().commit()
+
+        promoted = scheduler.promote_due_jobs(now)
+        assert len(promoted) == 2
+
+        jobs = [db.get_job(jid) for jid in promoted]
+        first_source = jobs[0]["source"]
+        assert first_source == "stale", f"Expected stale to be first, got {first_source}"
+
+    def test_never_run_job_has_maximum_aoi_urgency(self, db):
+        """A recurring job that never ran gets maximum urgency (staleness_norm=1.0)."""
+        scheduler = Scheduler(db)
+        now = time.time()
+
+        rj_never = db.add_recurring_job("never-run", "echo x", interval_seconds=3600, priority=5, source="never")
+        rj_ran = db.add_recurring_job("ran-once", "echo x", interval_seconds=3600, priority=5, source="ran")
+
+        job_ran = db.submit_job("echo ran", "m", 5, 60, "ran", recurring_job_id=rj_ran)
+        db.start_job(job_ran)
+        db.complete_job(job_ran, exit_code=0, stdout_tail="", stderr_tail="")
+        db._connect().execute("UPDATE jobs SET completed_at=? WHERE id=?", (now - 0.1 * 3600, job_ran))
+
+        db._connect().execute("UPDATE recurring_jobs SET next_run=? WHERE id=?", (now - 1, rj_never))
+        db._connect().execute("UPDATE recurring_jobs SET next_run=? WHERE id=?", (now - 1, rj_ran))
+        db._connect().commit()
+
+        promoted = scheduler.promote_due_jobs(now)
+        assert len(promoted) == 2
+        jobs = [db.get_job(jid) for jid in promoted]
+        first_source = jobs[0]["source"]
+        assert first_source == "never"
