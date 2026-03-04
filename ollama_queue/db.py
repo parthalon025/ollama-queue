@@ -884,11 +884,16 @@ class Database:
             conn.commit()
 
     def _set_job_retry(self, job_id: int, retry_after: float, delay: float) -> None:
-        """Atomically set retry_after and last_retry_delay in a single transaction."""
+        """Atomically increment retry_count, reset status, and set retry timing."""
         with self._lock:
             conn = self._connect()
             conn.execute(
-                "UPDATE jobs SET retry_after = ?, last_retry_delay = ? WHERE id = ?",
+                """UPDATE jobs
+                   SET retry_count = retry_count + 1,
+                       retry_after = ?,
+                       last_retry_delay = ?,
+                       status = 'pending'
+                   WHERE id = ?""",
                 (retry_after, delay, job_id),
             )
             conn.commit()

@@ -117,3 +117,19 @@ class TestDLQRouting:
 
         # Standard deviation should be meaningful — not all the same value
         assert statistics.stdev(delays) > 1.0, "Jitter should produce varied delays"
+
+    def test_schedule_retry_resets_status_and_increments_count(self, db):
+        """After _schedule_retry, job must be pending and retry_count incremented."""
+        job_id = db.submit_job("echo test", "qwen2.5:7b", 5, 60, "test", max_retries=3)
+        # Simulate failure state: mark job as failed, retry_count=1
+        db._conn.execute("UPDATE jobs SET status='failed', retry_count=1 WHERE id=?", (job_id,))
+        db._conn.commit()
+
+        dlq = DLQManager(db)
+        dlq._schedule_retry(job_id, 1)
+
+        job = db.get_job(job_id)
+        assert job["status"] == "pending", f"Expected pending, got {job['status']}"
+        assert job["retry_count"] == 2, f"Expected retry_count=2, got {job['retry_count']}"
+        assert job["last_retry_delay"] is not None
+        assert job["retry_after"] is not None
