@@ -550,6 +550,84 @@ def test_stall_detection_checks_all_running_jobs(db):
     assert db.get_job(j2)["stall_detected_at"] is not None
 
 
+# --- T8: _compute_max_workers ---
+
+
+class TestComputeMaxWorkers:
+    def test_compute_max_workers_returns_positive_int(self, db, monkeypatch):
+        """_compute_max_workers returns a positive int based on available resources."""
+        d = Daemon(db)
+        monkeypatch.setattr(d, "_free_vram_mb", lambda: 8000.0)
+        monkeypatch.setattr(d, "_free_ram_mb", lambda: 16000.0)
+        workers = d._compute_max_workers()
+        assert isinstance(workers, int)
+        assert workers >= 1
+
+    def test_compute_max_workers_minimum_is_one(self, db, monkeypatch):
+        """_compute_max_workers always returns at least 1, even when resources are exhausted."""
+        d = Daemon(db)
+        monkeypatch.setattr(d, "_free_vram_mb", lambda: 0.0)
+        monkeypatch.setattr(d, "_free_ram_mb", lambda: 0.0)
+        workers = d._compute_max_workers()
+        assert workers >= 1
+
+    def test_compute_max_workers_scales_with_resources(self, db, monkeypatch):
+        """More free VRAM+RAM yields more workers than minimal resources."""
+        d = Daemon(db)
+        monkeypatch.setattr(d, "_free_vram_mb", lambda: 32000.0)
+        monkeypatch.setattr(d, "_free_ram_mb", lambda: 64000.0)
+        workers_high = d._compute_max_workers()
+
+        monkeypatch.setattr(d, "_free_vram_mb", lambda: 500.0)
+        monkeypatch.setattr(d, "_free_ram_mb", lambda: 1000.0)
+        workers_low = d._compute_max_workers()
+
+        assert workers_high >= workers_low
+
+    def test_compute_max_workers_none_vram_falls_back(self, db, monkeypatch):
+        """When nvidia-smi is unavailable (_free_vram_mb returns None), still returns >= 1."""
+        d = Daemon(db)
+        monkeypatch.setattr(d, "_free_vram_mb", lambda: None)
+        monkeypatch.setattr(d, "_free_ram_mb", lambda: 16000.0)
+        workers = d._compute_max_workers()
+        assert isinstance(workers, int)
+        assert workers >= 1
+
+    def test_compute_max_workers_used_in_executor(self, db, monkeypatch):
+        """ThreadPoolExecutor is created with _compute_max_workers(), not hardcoded 32."""
+        d = Daemon(db)
+        # Force a known return value
+        monkeypatch.setattr(d, "_compute_max_workers", lambda: 7)
+        monkeypatch.setattr(d, "_free_vram_mb", lambda: 8000.0)
+        monkeypatch.setattr(d, "_free_ram_mb", lambda: 16000.0)
+        monkeypatch.setattr(d, "_can_admit", lambda job: True)
+        db.submit_job("echo hi", "qwen2.5:7b", 5, 60, "test")
+        with (
+            patch.object(
+                d.health,
+                "check",
+                return_value={
+                    "ram_pct": 10.0,
+                    "swap_pct": 5.0,
+                    "load_avg": 0.1,
+                    "cpu_count": 4,
+                    "vram_pct": 10.0,
+                    "ollama_model": None,
+                },
+            ),
+            patch("ollama_queue.daemon.subprocess") as mock_sub,
+            patch("ollama_queue.daemon._drain_pipes_with_tracking", return_value=(b"hi", b"")),
+        ):
+            proc = MagicMock()
+            proc.pid = 1234
+            proc.returncode = 0
+            mock_sub.Popen.return_value = proc
+            d.poll_once()
+            _drain(d)
+        assert d._executor is not None
+        assert d._executor._max_workers == 7
+
+
 # --- T8: Bayesian stall detection ---
 
 
