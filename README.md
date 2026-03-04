@@ -102,7 +102,7 @@ ollama-queue resume
 ## Services
 
 - `ollama-queue.service` (user systemd, MemoryMax=512M)
-- **Tailscale Serve:** `https://justin-linux.tail828051.ts.net/queue/` -> `http://127.0.0.1:7683`
+- **Tailscale Serve:** `https://<your-machine>.<your-tailnet>.ts.net/queue/` -> `http://127.0.0.1:7683`
 - **Dashboard:** `/queue/ui/`
 
 ## Dependencies
