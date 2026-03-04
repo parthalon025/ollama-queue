@@ -4,7 +4,7 @@ import {
     status, scheduleJobs, scheduleEvents, models, loadMap,
     fetchSchedule, fetchLoadMap, toggleScheduleJob, triggerRebalance, runScheduleJobNow,
     updateScheduleJob, fetchModels, batchToggleJobs, batchRunJobs,
-    fetchJobRuns, deleteScheduleJob,
+    fetchJobRuns, deleteScheduleJob, fetchSuggestTime,
 } from '../store';
 import { GanttChart } from '../components/GanttChart';
 import { ModelBadge } from '../components/ModelBadge';
@@ -186,6 +186,8 @@ export default function Plan() {
     const [saving, setSaving] = useState(false);
     const [deleting, setDeleting] = useState(false);
     const [batchRunningTags, setBatchRunningTags] = useState(new Set());
+    const [suggestSlots, setSuggestSlots] = useState(null); // null=never fetched, []=fetched empty, [...]= results
+    const [suggestLoading, setSuggestLoading] = useState(false);
 
     const refreshingRef = useRef(false);
     const rebalanceTimerRef = useRef(null);
@@ -897,11 +899,34 @@ export default function Plan() {
                         >
                             {'\u03c1'} {rho.toFixed(2)} {label}
                         </span>
+                        <button
+                            class="t-btn t-btn--ghost"
+                            style={{ marginLeft: 'auto', fontSize: 'var(--type-label)', padding: '1px 8px' }}
+                            disabled={suggestLoading}
+                            onClick={async () => {
+                                if (suggestSlots !== null) { setSuggestSlots(null); return; }
+                                setSuggestLoading(true);
+                                try {
+                                    const data = await fetchSuggestTime(5, 3);
+                                    setSuggestSlots(data.suggestions || []);
+                                } catch (e) {
+                                    console.error('fetchSuggestTime failed:', e);
+                                } finally {
+                                    setSuggestLoading(false);
+                                }
+                            }}
+                            title="Show top-3 low-load slots for a new job"
+                        >
+                            {suggestLoading ? '…'
+                                : suggestSlots === null ? 'Suggest slot'
+                                : suggestSlots.length === 0 ? 'No slots found'
+                                : 'Clear'}
+                        </button>
                     </div>
                 );
             })()}
 
-            <GanttChart jobs={jobs} tick={tick} windowHours={24} loadMapSlots={loadMap.value} />
+            <GanttChart jobs={jobs} tick={tick} windowHours={24} loadMapSlots={loadMap.value} suggestSlots={suggestSlots || []} />
 
             {jobs.length === 0 ? (
                 <div class="t-frame" style={{ textAlign: 'center', padding: '2rem',

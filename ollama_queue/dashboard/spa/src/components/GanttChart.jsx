@@ -139,7 +139,7 @@ export function loadMapSlotColor(score) {
     return `rgba(99,179,237,${opacity.toFixed(2)})`;
 }
 
-export function GanttChart({ jobs, tick, windowHours = 24, loadMapSlots = [] }) {
+export function GanttChart({ jobs, tick, windowHours = 24, loadMapSlots = [], suggestSlots = [] }) {
     void tick;
     const now = Date.now() / 1000;
     const windowSecs = windowHours * 3600;
@@ -161,6 +161,18 @@ export function GanttChart({ jobs, tick, windowHours = 24, loadMapSlots = [] }) 
         ? alignLoadMapToNow(loadMapSlots, now).slice(0, bucketCount)
         : buildDensityBuckets(jobs.filter(job => job.next_run < windowEnd), now, windowSecs);
 
+    // Convert midnight-anchored absolute slot indices to now-aligned display indices.
+    // Include seconds so slot boundary matches alignLoadMapToNow exactly.
+    const _nowDate = new Date(now * 1000);
+    const nowSlot = Math.floor(
+        (_nowDate.getHours() * 3600 + _nowDate.getMinutes() * 60 + _nowDate.getSeconds()) / DENSITY_BUCKET_SECS
+    );
+    const suggestDisplayIndices = new Set(
+        suggestSlots
+            .map(s => (s.slot - nowSlot + 48) % 48)
+            .filter(idx => idx < bucketCount)
+    );
+
     return (
         <div style={{ position: 'relative', width: '100%' }}>
             {/* Load density strip — priority-weighted load_map or job-count fallback */}
@@ -180,27 +192,35 @@ export function GanttChart({ jobs, tick, windowHours = 24, loadMapSlots = [] }) 
                             ? `Priority-weighted load per 30 min${hasPinned ? ' — amber = pinned/blocked slot' : ''}`
                             : 'Job density per 30 min — darker = more jobs active'}
                     >
-                        {densityBuckets.map((score, bucketIdx) => (
-                            <div
-                                key={bucketIdx}
-                                style={{
-                                    flex: 1,
-                                    background: useLoadMap
-                                        ? loadMapSlotColor(score)
-                                        : (score === 0
-                                            ? 'var(--bg-inset)'
-                                            : score === 1
-                                                ? 'rgba(99,179,237,0.25)'
-                                                : score === 2
-                                                    ? 'rgba(99,179,237,0.55)'
-                                                    : 'rgba(99,179,237,0.9)'),
-                                    borderRight: bucketIdx < densityBuckets.length - 1 ? '1px solid var(--border-subtle)' : 'none',
-                                }}
-                                title={useLoadMap && score > 0
-                                    ? (score >= LOAD_MAP_PIN_SCORE ? 'Pinned slot — rebalancer avoids scheduling here' : `Load score: ${score}`)
-                                    : (score > 0 ? `${score} job${score > 1 ? 's' : ''} active` : undefined)}
-                            />
-                        ))}
+                        {densityBuckets.map((score, bucketIdx) => {
+                            const isSuggested = suggestDisplayIndices.has(bucketIdx);
+                            return (
+                                <div
+                                    key={bucketIdx}
+                                    style={{
+                                        flex: 1,
+                                        position: 'relative',
+                                        background: useLoadMap
+                                            ? loadMapSlotColor(score)
+                                            : (score === 0
+                                                ? 'var(--bg-inset)'
+                                                : score === 1
+                                                    ? 'rgba(99,179,237,0.25)'
+                                                    : score === 2
+                                                        ? 'rgba(99,179,237,0.55)'
+                                                        : 'rgba(99,179,237,0.9)'),
+                                        borderRight: bucketIdx < densityBuckets.length - 1 ? '1px solid var(--border-subtle)' : 'none',
+                                        outline: isSuggested ? '2px solid rgba(52,211,153,0.9)' : 'none',
+                                        outlineOffset: '-2px',
+                                    }}
+                                    title={isSuggested
+                                        ? `Suggested slot — low load, good time for a new job`
+                                        : useLoadMap && score > 0
+                                            ? (score >= LOAD_MAP_PIN_SCORE ? 'Pinned slot — rebalancer avoids scheduling here' : `Load score: ${score}`)
+                                            : (score > 0 ? `${score} job${score > 1 ? 's' : ''} active` : undefined)}
+                                />
+                            );
+                        })}
                     </div>
                 );
             })()}

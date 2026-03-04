@@ -110,6 +110,12 @@ export async function fetchLoadMap() {
     }
 }
 
+export async function fetchSuggestTime(priority = 5, topN = 3) {
+    const resp = await fetch(`${API}/schedule/suggest?priority=${priority}&top_n=${topN}`);
+    if (!resp.ok) throw new Error(`fetchSuggestTime failed: ${resp.status}`);
+    return resp.json(); // { suggestions: [{cron, score, slot}] }
+}
+
 export async function updateScheduleJob(id, fields) {
     const resp = await fetch(`${API}/schedule/${id}`, {
         method: 'PUT',
