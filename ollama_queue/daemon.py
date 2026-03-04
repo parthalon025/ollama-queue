@@ -324,14 +324,21 @@ class Daemon:
 
     def _record_ollama_failure(self) -> None:
         """Record a consecutive Ollama failure; open circuit if threshold reached."""
+        # Read DB setting BEFORE acquiring _cb_lock to avoid lock-order inversion.
+        # Call sites hold db._lock; acquiring _cb_lock inside would give db._lock -> _cb_lock,
+        # while _is_circuit_open() would give _cb_lock -> db._lock — deadlock.
+        threshold = int(self.db.get_setting("cb_failure_threshold") or 3)
         with self._cb_lock:
             self._cb_probe_in_flight = False
             self._cb_failures += 1
-            threshold = int(self.db.get_setting("cb_failure_threshold") or 3)
             if self._cb_failures >= threshold and self._cb_state in ("CLOSED", "HALF_OPEN"):
                 self._cb_state = "OPEN"
                 self._cb_opened_at = time.time()
-                _log.warning("Circuit breaker OPENED after %d consecutive Ollama failures", self._cb_failures)
+                self._cb_open_attempts += 1
+                _log.warning(
+                    "Circuit breaker OPENED after %d consecutive Ollama failures",
+                    self._cb_failures,
+                )
 
     def _record_ollama_success(self) -> None:
         """Record a successful Ollama job; reset failure count and close circuit."""
@@ -350,7 +357,12 @@ class Daemon:
         OPEN + cooldown elapsed -> transition to HALF_OPEN, return False (allow one probe)
         HALF_OPEN + no probe in flight -> False (allow this probe through, mark in-flight)
         HALF_OPEN + probe in flight -> True (block subsequent polls until probe resolves)
+
+        Lock ordering: _cb_lock must never be held while calling db methods (db._lock).
+        Split into three phases: read state (lock), compute cooldown (no lock, reads DB),
+        transition state (lock again with re-check for TOCTOU).
         """
+        # Phase 1: read current state under lock
         with self._cb_lock:
             if self._cb_state == "CLOSED":
                 return False
@@ -359,16 +371,29 @@ class Daemon:
                     return True  # probe already dispatched, block further jobs
                 self._cb_probe_in_flight = True  # mark probe as in-flight
                 return False  # allow this one probe through
-            # OPEN state — check cooldown
-            cooldown = self._compute_cb_cooldown(self._cb_open_attempts)
-            elapsed = time.time() - (self._cb_opened_at or 0)
-            if elapsed >= cooldown:
-                self._cb_state = "HALF_OPEN"
-                self._cb_open_attempts += 1
-                self._cb_probe_in_flight = True  # first probe dispatched immediately on transition
-                _log.info("Circuit breaker entering HALF_OPEN state for probe job")
-                return False
-            return True
+            # OPEN state — capture values needed for cooldown check
+            attempt = self._cb_open_attempts
+            opened_at = self._cb_opened_at or 0.0
+
+        # Phase 2: compute cooldown OUTSIDE lock (calls db.get_setting -> db._lock).
+        # Holding _cb_lock here while db._lock is acquired elsewhere causes deadlock.
+        cooldown = self._compute_cb_cooldown(attempt)
+        elapsed = time.time() - opened_at
+
+        if elapsed < cooldown:
+            return True  # still in cooldown period
+
+        # Phase 3: transition to HALF_OPEN under lock with re-check.
+        # Another thread may have already transitioned during Phase 2 — double-checked
+        # locking prevents two polls both seeing an expired cooldown and both transitioning.
+        with self._cb_lock:
+            if self._cb_state != "OPEN":
+                # Already transitioned (CLOSED or HALF_OPEN) — reflect current state
+                return self._cb_state == "OPEN"  # always False here
+            self._cb_state = "HALF_OPEN"
+            self._cb_probe_in_flight = True  # first probe dispatched immediately on transition
+            _log.info("Circuit breaker entering HALF_OPEN state for probe job")
+            return False  # allow probe through
 
     def poll_once(self) -> None:
         """Single poll cycle.
