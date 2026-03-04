@@ -659,7 +659,7 @@ def _make_recurring_and_job(db, check_command=None, max_runs=None):
 
 def test_check_command_exit0_proceeds(daemon):
     """check_command exit 0 → main job runs normally."""
-    rj_id, job_id = _make_recurring_and_job(daemon.db, check_command="exit 0")
+    _rj_id, job_id = _make_recurring_and_job(daemon.db, check_command="exit 0")
     job = daemon.db.get_job(job_id)
 
     with patch("ollama_queue.daemon.subprocess") as mock_sub:
@@ -713,7 +713,7 @@ def test_check_command_exit2_disables(daemon):
 
 def test_check_command_unknown_exit_failopen(daemon):
     """check_command exit 99 → warning logged, main job proceeds (fail-open)."""
-    rj_id, job_id = _make_recurring_and_job(daemon.db, check_command="exit 99")
+    _rj_id, job_id = _make_recurring_and_job(daemon.db, check_command="exit 99")
     job = daemon.db.get_job(job_id)
 
     with patch("ollama_queue.daemon.subprocess") as mock_sub:
@@ -732,7 +732,7 @@ def test_check_command_unknown_exit_failopen(daemon):
 
 def test_check_command_timeout_failopen(daemon):
     """check_command TimeoutExpired → warning logged, main job proceeds."""
-    rj_id, job_id = _make_recurring_and_job(daemon.db, check_command="sleep 999")
+    _rj_id, job_id = _make_recurring_and_job(daemon.db, check_command="sleep 999")
     job = daemon.db.get_job(job_id)
 
     with patch("ollama_queue.daemon.subprocess") as mock_sub:
@@ -751,7 +751,7 @@ def test_check_command_timeout_failopen(daemon):
 
 def test_no_check_command_skips_check(daemon):
     """Job with no check_command skips check, runs normally."""
-    rj_id, job_id = _make_recurring_and_job(daemon.db, check_command=None)
+    _rj_id, job_id = _make_recurring_and_job(daemon.db, check_command=None)
     job = daemon.db.get_job(job_id)
 
     with patch("ollama_queue.daemon.subprocess") as mock_sub:
