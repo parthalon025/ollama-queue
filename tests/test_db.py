@@ -630,8 +630,19 @@ class TestPR2Admission:
         db.start_job(job["id"])
         assert db.count_pending_jobs() == 1
 
+    def test_count_pending_jobs_excludes_future_retry_after(self, db):
+        """Jobs with retry_after in the future are pending but not yet actionable — excluded."""
+        job_id = db.submit_job("echo c", "qwen2.5:7b", 5, 60, "test")
+        conn = db._connect()
+        conn.execute("UPDATE jobs SET retry_after = ? WHERE id = ?", (time.time() + 3600, job_id))
+        conn.commit()
+        assert db.count_pending_jobs() == 0
+
     def test_pr2_defaults_available(self, db):
-        """PR2 DEFAULTS are accessible via get_setting()."""
-        assert db.get_setting("cb_failure_threshold") == 3
-        assert db.get_setting("max_queue_depth") == 50
+        """All PR2 DEFAULTS are seeded by initialize() and accessible via get_setting()."""
         assert db.get_setting("cpu_offload_efficiency") == 0.3
+        assert db.get_setting("cb_failure_threshold") == 3
+        assert db.get_setting("cb_base_cooldown") == 30
+        assert db.get_setting("cb_max_cooldown") == 600
+        assert db.get_setting("max_queue_depth") == 50
+        assert db.get_setting("min_model_vram_mb") == 2000
