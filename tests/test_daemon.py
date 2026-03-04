@@ -1000,6 +1000,104 @@ def test_half_open_failure_reopens_circuit(daemon):
     assert daemon._cb_state == "OPEN"
 
 
+class TestPreemption:
+    def _setup_running_job(self, db, daemon, model="qwen2.5:7b", priority=5):
+        """Helper: submit a job, mark it running with a fake PID."""
+        job_id = db.submit_job("echo run", model, priority, 600, "test")
+        db.start_job(job_id)
+        with db._lock:
+            conn = db._connect()
+            conn.execute("UPDATE jobs SET pid=99999 WHERE id=?", (job_id,))
+            conn.commit()
+        return job_id
+
+    def test_preemption_disabled_by_default(self, db):
+        """No preemption when preemption_enabled=False."""
+        import time
+
+        from ollama_queue.daemon import Daemon
+
+        daemon = Daemon(db)
+        p1_job = {"id": 99, "priority": 1, "model": "qwen2.5:7b", "source": "test"}
+        result = daemon._check_preemption(p1_job, time.time())
+        assert result is None
+
+    def test_preemption_skips_high_priority_requester(self, db):
+        """Only priority 1-2 jobs can trigger preemption."""
+        import time
+
+        from ollama_queue.daemon import Daemon
+
+        daemon = Daemon(db)
+        db.set_setting("preemption_enabled", True)
+        p5_job = {"id": 99, "priority": 5, "model": "qwen2.5:7b", "source": "test"}
+        result = daemon._check_preemption(p5_job, time.time())
+        assert result is None  # priority 5 cannot preempt
+
+    def test_preempt_job_sends_to_pending_not_dlq(self, db):
+        """_preempt_job() sets status=pending and leaves DLQ empty."""
+        from unittest.mock import patch
+
+        from ollama_queue.daemon import Daemon
+
+        daemon = Daemon(db)
+        db.set_setting("preemption_enabled", True)
+        job_id = db.submit_job("echo low", "qwen2.5:7b", 5, 600, "test")
+        db.start_job(job_id)
+        with db._lock:
+            conn = db._connect()
+            conn.execute("UPDATE jobs SET pid=99999 WHERE id=?", (job_id,))
+            conn.commit()
+        with patch("ollama_queue.daemon.os.kill", return_value=None):
+            daemon._preempt_job(job_id)
+        job = db.get_job(job_id)
+        assert job["status"] == "pending", f"Expected pending, got {job['status']}"
+        assert db.list_dlq() == [], "DLQ must be empty after preemption"
+
+    def test_preempt_increments_preemption_count(self, db):
+        """preemption_count is incremented after preemption."""
+        from unittest.mock import patch
+
+        from ollama_queue.daemon import Daemon
+
+        daemon = Daemon(db)
+        job_id = db.submit_job("echo low", "qwen2.5:7b", 5, 600, "test")
+        db.start_job(job_id)
+        with db._lock:
+            conn = db._connect()
+            conn.execute("UPDATE jobs SET pid=99999 WHERE id=?", (job_id,))
+            conn.commit()
+        with patch("ollama_queue.daemon.os.kill", return_value=None):
+            daemon._preempt_job(job_id)
+        job = db.get_job(job_id)
+        assert job["preemption_count"] == 1
+
+    def test_job_at_max_preemptions_is_immune(self, db):
+        """Job with preemption_count >= max_preemptions_per_job cannot be preempted again."""
+        import time
+        from concurrent.futures import Future
+
+        from ollama_queue.daemon import Daemon
+
+        daemon = Daemon(db)
+        db.set_setting("preemption_enabled", True)
+        db.set_setting("max_preemptions_per_job", 2)
+        job_id = db.submit_job("echo low", "qwen2.5:7b", 5, 600, "test")
+        db.start_job(job_id)
+        with db._lock:
+            conn = db._connect()
+            conn.execute("UPDATE jobs SET pid=99999, preemption_count=2 WHERE id=?", (job_id,))
+            conn.commit()
+        now = time.time()
+        fake_future = Future()
+        with daemon._running_lock:
+            daemon._running[job_id] = fake_future
+            daemon._running_models[job_id] = "qwen2.5:7b"
+        p1_job = {"id": 999, "priority": 1, "model": "qwen2.5:7b", "source": "test", "submitted_at": now}
+        result = daemon._check_preemption(p1_job, now)
+        assert result is None  # immune due to max preemptions
+
+
 def test_daemon_has_burst_detector(db):
     """Daemon initializes with a BurstDetector instance."""
     from ollama_queue.burst import BurstDetector

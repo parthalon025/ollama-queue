@@ -620,6 +620,12 @@ class Daemon:
             self.db.update_daemon_state(state="idle", last_poll_at=now, current_job_id=None)
             return
 
+        # Preemption: if new job is priority 1-2, check if we should preempt a running job
+        preempt_id = self._check_preemption(job, now)
+        if preempt_id is not None:
+            self._preempt_job(preempt_id)
+            # Continue — now there's a free slot for the new job
+
         if self._executor is None:
             # max_workers is a ceiling; actual concurrency is governed entirely by
             # _can_admit, which reads the live max_concurrent_jobs setting.  The ceiling
@@ -935,6 +941,89 @@ class Daemon:
 
         eligible.sort(key=sort_key)
         return eligible[0]
+
+    def _check_preemption(self, new_job: dict, now: float) -> int | None:
+        """Find a running job to preempt for new_job. Returns job_id or None.
+
+        Preemption only occurs when:
+        1. preemption_enabled=True (opt-in)
+        2. new_job priority is 1 or 2
+        3. A running job has run < preemption_window_seconds
+        4. That running job has < max_preemptions_per_job preemptions
+        5. Running job has been silent > 30s (likely not near completion)
+        6. Running job's VRAM >= new_job's VRAM (would free enough headroom)
+        7. Running job has more estimated time remaining than new_job's total duration
+        """
+        if int(new_job.get("priority") or 10) > 2:
+            return None
+        if not self.db.get_setting("preemption_enabled"):
+            return None
+
+        preempt_window = float(self.db.get_setting("preemption_window_seconds") or 120)
+        max_preemptions = int(self.db.get_setting("max_preemptions_per_job") or 2)
+        new_duration = self.estimator.estimate(new_job.get("source") or "", new_job.get("model"))
+        new_vram = self._ollama_models.estimate_vram_mb(new_job.get("model") or "", self.db)
+
+        with self._running_lock:
+            candidates = list(self._running.keys())
+
+        for jid in candidates:
+            job = self.db.get_job(jid)
+            if job is None:
+                continue
+            if (job.get("preemption_count") or 0) >= max_preemptions:
+                continue  # immune
+
+            _sa = job.get("started_at")
+            started_at = _sa if _sa is not None else now
+            elapsed = now - started_at
+            if elapsed >= preempt_window:
+                continue  # too far into execution
+
+            # Skip recently active jobs (stdout in last 30s = likely near completion)
+            silence = self.stall_detector.get_stdout_silence(jid, now)
+            if silence is not None and silence < 30.0:
+                continue
+
+            running_vram = self._ollama_models.estimate_vram_mb(self._running_models.get(jid) or "", self.db)
+            if running_vram < new_vram:
+                continue  # wouldn't free enough VRAM
+
+            estimated_duration = job.get("estimated_duration") or self.estimator.estimate(
+                job.get("source") or "", job.get("model")
+            )
+            remaining = estimated_duration - elapsed
+            if remaining <= new_duration:
+                continue  # running job nearly done; not worth preempting
+
+            return jid  # found a candidate
+
+        return None
+
+    def _preempt_job(self, job_id: int) -> None:
+        """SIGTERM the running job and requeue as pending.
+
+        NEVER sends to DLQ. Preempted jobs are healthy work interrupted deliberately.
+        DLQ is for permanent failures requiring human review.
+        """
+        job = self.db.get_job(job_id)
+        pid = job.get("pid") if job else None
+        if pid and pid > 0:
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.kill(pid, _signal.SIGTERM)
+                _log.info("Sent SIGTERM to job #%d pid=%d for preemption", job_id, pid)
+
+        self.db.requeue_preempted_job(job_id)
+        self.db.log_schedule_event(
+            "preempted",
+            job_id=job_id,
+            details={"job_id": job_id, "reason": "priority_preemption"},
+        )
+        _log.warning("Preempted job #%d — requeued as pending", job_id)
+
+        with self._running_lock:
+            self._running.pop(job_id, None)
+            self._running_models.pop(job_id, None)
 
     def _run_check_command(self, job: dict, recurring_job: dict) -> str:
         """Run check_command for a recurring job before the main command.
