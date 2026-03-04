@@ -111,6 +111,54 @@ class TestJobs:
         nxt = db.get_next_job()
         assert nxt["command"] == "first"
 
+    def test_next_job_embed_affinity_nomic(self, db):
+        """Embed models (nomic) are preferred over LLM jobs at equal priority."""
+        db.submit_job("llm-job", "qwen2.5:7b", priority=5, timeout=600, source="a")
+        time.sleep(0.01)
+        db.submit_job("embed-job", "nomic-embed-text", priority=5, timeout=600, source="b")
+        nxt = db.get_next_job()
+        assert nxt["command"] == "embed-job"
+
+    def test_next_job_embed_affinity_bge(self, db):
+        """Embed models (bge) are preferred over LLM jobs at equal priority."""
+        db.submit_job("llm-job", "llama3.2:3b", priority=5, timeout=600, source="a")
+        time.sleep(0.01)
+        db.submit_job("embed-job", "bge-m3", priority=5, timeout=600, source="b")
+        nxt = db.get_next_job()
+        assert nxt["command"] == "embed-job"
+
+    def test_next_job_embed_affinity_mxbai(self, db):
+        """Embed models (mxbai) are preferred over LLM jobs at equal priority."""
+        db.submit_job("llm-job", "deepseek-r1:8b", priority=5, timeout=600, source="a")
+        time.sleep(0.01)
+        db.submit_job("embed-job", "mxbai-embed-large", priority=5, timeout=600, source="b")
+        nxt = db.get_next_job()
+        assert nxt["command"] == "embed-job"
+
+    def test_next_job_embed_affinity_all_minilm(self, db):
+        """Embed models (all-minilm) are preferred over LLM jobs at equal priority."""
+        db.submit_job("llm-job", "qwen2.5-coder:14b", priority=5, timeout=600, source="a")
+        time.sleep(0.01)
+        db.submit_job("embed-job", "all-minilm", priority=5, timeout=600, source="b")
+        nxt = db.get_next_job()
+        assert nxt["command"] == "embed-job"
+
+    def test_next_job_priority_beats_embed_affinity(self, db):
+        """A higher-priority LLM job (lower number) still beats a lower-priority embed job."""
+        db.submit_job("llm-high-priority", "qwen2.5:7b", priority=1, timeout=600, source="a")
+        time.sleep(0.01)
+        db.submit_job("embed-low-priority", "nomic-embed-text", priority=5, timeout=600, source="b")
+        nxt = db.get_next_job()
+        assert nxt["command"] == "llm-high-priority"
+
+    def test_next_job_embed_fifo_among_embeds(self, db):
+        """Among embed jobs at equal priority, FIFO still applies."""
+        db.submit_job("embed-first", "nomic-embed-text", priority=5, timeout=600, source="a")
+        time.sleep(0.01)
+        db.submit_job("embed-second", "bge-m3", priority=5, timeout=600, source="b")
+        nxt = db.get_next_job()
+        assert nxt["command"] == "embed-first"
+
     def test_start_job(self, db):
         job_id = db.submit_job("cmd", "m1", 5, 600, "test")
         db.start_job(job_id)

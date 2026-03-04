@@ -285,7 +285,11 @@ class Database:
             """SELECT * FROM jobs
                WHERE status = 'pending'
                AND (retry_after IS NULL OR retry_after <= ?)
-               ORDER BY priority ASC, submitted_at ASC
+               ORDER BY priority ASC,
+                        CASE WHEN model LIKE '%embed%' OR model LIKE '%nomic%' OR model LIKE '%bge%'
+                                  OR model LIKE '%mxbai%' OR model LIKE '%all-minilm%'
+                             THEN 0 ELSE 1 END ASC,
+                        submitted_at ASC
                LIMIT 1""",
             (now,),
         ).fetchone()

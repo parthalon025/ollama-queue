@@ -334,6 +334,85 @@ def create_app(db: Database) -> FastAPI:
             except Exception:
                 _log.exception("release_proxy_claim failed — daemon may be stuck at sentinel job_id")
 
+    @app.post("/api/embed")
+    async def proxy_embed(body: dict = Body(...)):
+        """Forward an embed request to Ollama, serializing through the queue.
+
+        Queue-specific fields (extracted from body, not forwarded to Ollama):
+          _priority: int (default 0) — job priority (lower = higher priority)
+          _source: str (default "proxy") — caller identifier for history/debugging
+          _timeout: int (default 120) — request timeout in seconds
+
+        Supports both single-string and array input:
+          {"model": "nomic-embed-text", "input": "text"}
+          {"model": "nomic-embed-text", "input": ["text1", "text2"]}
+        """
+        state = db.get_daemon_state()
+        if state and state.get("state") == "paused_manual":
+            raise HTTPException(status_code=503, detail="Queue is manually paused")
+
+        # Extract queue-specific fields before forwarding to Ollama
+        priority = body.pop("_priority", 0)
+        source = body.pop("_source", "proxy")
+        req_timeout = body.pop("_timeout", 120)
+
+        model = body.get("model", "")
+
+        waited = 0.0
+        claimed = False
+        while waited < PROXY_WAIT_TIMEOUT:
+            claimed = db.try_claim_for_proxy()
+            if claimed:
+                break
+            await asyncio.sleep(PROXY_POLL_INTERVAL)
+            waited += PROXY_POLL_INTERVAL
+
+        if not claimed:
+            raise HTTPException(status_code=504, detail="Timed out waiting for queue turn")
+
+        # Log proxy request in the jobs table
+        job_id = db.submit_job(
+            command="proxy:/api/embed",
+            model=model,
+            priority=priority,
+            timeout=req_timeout,
+            source=source,
+        )
+        db.start_job(job_id)
+
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(float(req_timeout))) as client:
+                resp = await client.post(f"{OLLAMA_URL}/api/embed", json=body)
+                result = resp.json()
+
+            # Mark job completed
+            embeddings = result.get("embeddings", [])
+            stdout_summary = f"embeddings: {len(embeddings)} vectors"
+            db.complete_job(
+                job_id=job_id,
+                exit_code=0,
+                stdout_tail=stdout_summary[:500],
+                stderr_tail="",
+                outcome_reason=None,
+            )
+            return result
+        except Exception as e:
+            _log.error("proxy_embed failed for job %d: %s", job_id, e, exc_info=True)
+            # Mark job failed
+            db.complete_job(
+                job_id=job_id,
+                exit_code=1,
+                stdout_tail="",
+                stderr_tail=str(e)[:500],
+                outcome_reason=f"proxy error: {e}",
+            )
+            raise HTTPException(status_code=502, detail=f"Ollama embed request failed: {e}") from e
+        finally:
+            try:
+                db.release_proxy_claim()
+            except Exception:
+                _log.exception("release_proxy_claim failed — daemon may be stuck at sentinel job_id")
+
     # --- Schedule (recurring jobs) ---
     # NOTE: fixed routes (/rebalance, /events) must come before parameterized /{rj_id}
 
@@ -589,6 +668,8 @@ def create_app(db: Database) -> FastAPI:
 
         @app.get("/ui/{path:path}")
         async def spa_static(path: str):
+            if path and "\x00" in path:
+                return HTMLResponse("Not found", status_code=404)
             real = (spa_dir / path).resolve() if path else None
             if real and real.is_file() and real.is_relative_to(spa_dir.resolve()):
                 return FileResponse(real, headers=_no_store)
