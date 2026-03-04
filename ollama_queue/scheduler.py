@@ -1,4 +1,14 @@
-"""Scheduler: recurring job promotion and schedule rebalancing."""
+"""Scheduler: recurring job promotion and schedule rebalancing.
+
+Plain English: The calendar manager. Knows which recurring jobs (daily syncs,
+hourly scripts) are due to fire, and promotes them into the active queue. Also
+spreads out jobs that share an interval so they don't pile up simultaneously
+(e.g. three hourly jobs fire at :00, :20, :40 instead of all at :00). Cron
+jobs with pinned times are protected so rebalancing doesn't move them.
+
+Decision it drives: When should the next run of a recurring job fire, and if a
+new job is being added, which time slot has the lightest existing load?
+"""
 
 from __future__ import annotations
 

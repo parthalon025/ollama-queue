@@ -1,4 +1,12 @@
-"""Health monitoring for system resources and Ollama state."""
+"""Health monitoring for system resources and Ollama state.
+
+Plain English: The queue's doctor. Before starting any job, the daemon asks this
+module: "Is the computer too stressed right now?" It reads RAM, swap, CPU load,
+and GPU memory, then compares them to configurable thresholds.
+
+Decision it drives: Should the queue pause (system overloaded), resume (system
+recovered), or yield (a human is actively using Ollama right now)?
+"""
 
 from __future__ import annotations
 
@@ -121,6 +129,13 @@ class HealthMonitor:
         recent_job_models: set[str] | None = None,
     ) -> dict:
         """Evaluate a health snapshot against threshold settings.
+
+        Plain English: The go/no-go call. Given current RAM/CPU/VRAM readings,
+        should the daemon start the next job, keep waiting, or step aside?
+        Uses hysteresis (different pause vs resume thresholds) to prevent the
+        queue from rapidly cycling on/off when a metric hovers near the limit.
+        Also checks whether a human is interactively using Ollama right now —
+        if so, yields politely rather than competing for the GPU.
 
         Returns:
             {

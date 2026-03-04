@@ -1,4 +1,12 @@
-"""DLQ manager: routes failed jobs to retry queue or dead letter queue."""
+"""DLQ manager: routes failed jobs to retry queue or dead letter queue.
+
+Plain English: The failure triage desk. When a job fails, this module asks:
+"Has it used up all its retry attempts?" If not, it schedules another try with
+exponential backoff (wait 1 min, then 2, then 4…). If retries are exhausted,
+the job goes to the Dead Letter Queue — a holding area for manual review.
+
+Decision it drives: Retry this job (and how long to wait) or declare it dead?
+"""
 
 from __future__ import annotations
 

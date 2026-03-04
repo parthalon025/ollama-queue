@@ -10,6 +10,12 @@ import TimeChart from '../components/TimeChart.jsx';
 
 // NOTE: all .map() callbacks use descriptive names — never 'h' (shadows JSX factory)
 
+// What it shows: The past — completed/failed job list, Dead Letter Queue (jobs that exhausted
+//   all retries and need manual intervention), GPU activity heatmap (7d × 24h), and duration
+//   trend sparkline.
+// Decision it drives: Are there failed jobs that need retrying or dismissing? Is there a
+//   time-of-day pattern to failures (visible in the heatmap)? Are jobs getting slower over
+//   time (visible in the duration chart)?
 export default function History() {
     const dlq = dlqEntries.value;
     const dlqCnt = dlqCount.value;

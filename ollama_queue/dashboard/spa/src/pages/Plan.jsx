@@ -9,6 +9,13 @@ import {
 import { GanttChart } from '../components/GanttChart';
 import { ModelBadge } from '../components/ModelBadge';
 
+// What it shows: The scheduling view — the Gantt timeline of upcoming jobs, the 24h load-map
+//   density strip showing which half-hour slots are already busy, and the full list of
+//   recurring jobs grouped by tag with enable/disable/run-now/edit controls.
+// Decision it drives: When should I add a new recurring job so it doesn't pile on top of
+//   existing ones? Which recurring jobs are enabled or disabled? Is the schedule evenly
+//   spread across the day, or are all jobs firing at the same time?
+
 // Note: local vars named 'hrs'/'mins' to avoid shadowing the injected 'h' JSX factory.
 function formatCountdown(next_run) {
     const diff = next_run - Date.now() / 1000;

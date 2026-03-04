@@ -2,8 +2,14 @@ import { h } from 'preact';
 import { useState, useRef, useCallback } from 'preact/hooks';
 
 /**
- * Settings form with four sections: Health Thresholds, Defaults, Retention, Daemon Controls.
- * Each input saves on blur via onSave(key, value).
+ * What it shows: All queue configuration in four sections: Health Thresholds (when to pause
+ *   for high RAM/VRAM/load/swap), Defaults (timeout, priority, retry backoff), Retention
+ *   (how long to keep health logs, job history, duration stats), and Daemon Controls
+ *   (manual pause/resume buttons + stall detection settings).
+ * Decision it drives: Tune the queue's behavior. Lower the pause thresholds if the system
+ *   is being hammered; raise them if the queue pauses too aggressively. Increase default
+ *   timeout if long-running jobs are being killed prematurely. Each field saves on blur —
+ *   no Save button needed; changes take effect on the next poll cycle.
  *
  * @param {{ settings: object, daemonState: string, onSave: (key: string, value: any) => Promise<boolean>, onPause: () => void, onResume: () => void }} props
  */

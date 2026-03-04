@@ -1,8 +1,12 @@
 import { h } from 'preact';
 
 /**
- * Compact horizontal resource bars for RAM, VRAM, Load, Swap.
- * Bar color shifts through accent → warning → error based on thresholds.
+ * What it shows: RAM, VRAM, CPU load, and swap — the four metrics the health monitor watches
+ *   before deciding to pause the queue. Bar color: blue=healthy, orange=approaching the pause
+ *   threshold, red=past the pause threshold (queue will stall if a new job tries to start).
+ *   The dashed vertical marker on each bar shows exactly where the pause threshold sits.
+ * Decision it drives: Is the system healthy enough to start the next job? If bars are orange
+ *   or red, the queue is about to auto-pause — check Settings to adjust thresholds.
  *
  * @param {{ ram: number, vram: number, load: number, swap: number, settings: object }} props
  *   settings shape: { ram_pause_pct, ram_resume_pct, vram_pause_pct, vram_resume_pct, ... }

@@ -1,4 +1,13 @@
-"""Ollama model registry: list, classify, VRAM estimation, pull lifecycle."""
+"""Ollama model registry: list, classify, VRAM estimation, pull lifecycle.
+
+Plain English: The model catalog. Knows which AI models are installed locally,
+how big they are, and how GPU-hungry each one is. Uses name-matching rules to
+classify models into resource profiles (embed = lightweight, heavy = needs sole
+access, ollama = standard) so the scheduler knows how many can run at once.
+
+Decision it drives: How much VRAM will this job need, and can it run alongside
+other jobs or does it need to run alone?
+"""
 
 from __future__ import annotations
 

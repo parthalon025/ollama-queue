@@ -1,3 +1,9 @@
+// What it does: Central data layer — reactive signals (auto-updating state) + all API fetch
+//   functions. Every component reads from signals; when a signal changes, only the components
+//   that use it re-render. No component fetches data directly — all API calls live here.
+// Decision it drives: Keeps the whole UI in sync with the backend without each component
+//   needing its own fetch logic or prop drilling.
+
 import { signal } from '@preact/signals';
 
 export const status = signal(null);       // /api/status response
@@ -30,6 +36,11 @@ let _pollFailures = 0;
 let _pollCount = 0;
 let _backoffMs = 5000;
 
+// ── Polling loop ────────────────────────────────────────────────────────────
+// Keeps status + queue signals fresh every 5s. Non-realtime data (health charts,
+// history) refreshes every 60s (every 12 status polls) to reduce API load.
+// Backs off exponentially on repeated failures and sets connectionStatus='disconnected'
+// after 3 consecutive failures so the banner appears.
 export function startPolling() {
     fetchAll();
     pollTimer = setTimeout(fetchStatus, POLL_INTERVAL);
@@ -84,6 +95,8 @@ async function _fetchNonRealtime() {
     }
 }
 
+// ── Schedule / recurring jobs ────────────────────────────────────────────────
+// Fetched when the Plan tab loads, and after any mutation (toggle, run-now, etc.).
 export async function fetchSchedule() {
     try {
         const [jobsResp, eventsResp] = await Promise.all([
@@ -175,6 +188,8 @@ export async function deleteScheduleJob(rjId) {
     await fetchSchedule();
 }
 
+// ── Dead Letter Queue ────────────────────────────────────────────────────────
+// Fetched on initial load + after any retry/dismiss. dlqCount drives the alert badge.
 export async function fetchDLQ() {
     try {
         const resp = await fetch(`${API}/dlq`);
@@ -224,6 +239,9 @@ export async function clearDLQ() {
     }
 }
 
+// ── Model management ─────────────────────────────────────────────────────────
+// Lists installed models and searches the downloadable catalog.
+// Pull lifecycle: startModelPull → poll /api/models/pull/{id} → cancelModelPull.
 export async function fetchModels() {
     try {
         const resp = await fetch(`${API}/models`);
@@ -277,6 +295,8 @@ export async function assignModelToJob(rjId, modelName) {
     return updateScheduleJob(rjId, { model: modelName });
 }
 
+// ── One-off job submission ────────────────────────────────────────────────────
+// Called by SubmitJobModal. Returns { job_id } on success.
 export async function submitJob(body) {
     const resp = await fetch(`${API}/queue/submit`, {
         method: 'POST',

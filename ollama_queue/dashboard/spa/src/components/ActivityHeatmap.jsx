@@ -4,7 +4,12 @@ const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
 
 /**
- * 7-row × 24-column CSS grid heatmap of GPU activity.
+ * What it shows: 7 days × 24 hours of GPU activity. Each cell's brightness represents
+ *   how many minutes the GPU was busy in that slot. Hover for the exact GPU-minutes.
+ *   Brighter = heavier use. Max value shown bottom-right for scale reference.
+ * Decision it drives: When does the queue run heaviest? Are there recurring spikes that
+ *   suggest overloading at certain times? Useful for deciding where NOT to schedule new
+ *   heavy jobs, and for spotting runaway overnight jobs.
  *
  * @param {{ data: Array<{ dow: string, hour: string, gpu_minutes: number }> }} props
  *   dow: strftime('%w') → '0'=Sun through '6'=Sat

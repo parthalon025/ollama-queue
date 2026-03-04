@@ -16,6 +16,11 @@ function useDebounce(value, delay) {
     return debounced;
 }
 
+// What it shows: The model inventory — every AI model installed locally with its disk size
+//   and resource profile (embed/heavy/ollama), plus a searchable catalog of downloadable
+//   models. Active downloads show live progress bars.
+// Decision it drives: Which models are installed and how much space do they use? Is a model
+//   missing that I need for a job? Should I start a pull or cancel one in progress?
 export default function ModelsTab() {
     const [searchQuery, setSearchQuery] = useState('');
     const [activePulls, setActivePulls] = useState({});

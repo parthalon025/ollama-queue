@@ -1,4 +1,14 @@
-"""Bayesian multi-signal stall detector for LLM jobs."""
+"""Bayesian multi-signal stall detector for LLM jobs.
+
+Plain English: The "is this job frozen?" detector. LLM jobs can't use a simple
+timeout because some prompts legitimately take 30+ minutes. Instead, this module
+watches four signals — process state (D=disk-wait, Z=zombie), CPU activity,
+whether stdout has gone quiet, and whether Ollama still has the model loaded —
+and combines them into a single probability score P(stuck) using Bayes' theorem.
+
+Decision it drives: Is this running job actually making progress, or is it
+frozen and should be killed?
+"""
 
 from __future__ import annotations
 
@@ -141,7 +151,15 @@ class StallDetector:
         now: float,
         ps_models: set[str],
     ) -> tuple[float, dict[str, object]]:
-        """Compute P(stuck) and return (posterior, signal_breakdown_dict)."""
+        """Compute P(stuck) and return (posterior, signal_breakdown_dict).
+
+        Plain English: Combines four independent clues into one probability.
+        Each clue adds or subtracts log-odds weight: process in D-state adds
+        weight (bad sign), active CPU subtracts weight (good sign), 5+ minutes
+        of stdout silence adds weight, model absent from Ollama /api/ps adds
+        weight. The result is a 0-1 probability: >= 0.8 means "probably stuck."
+        The breakdown dict shows exactly which signals drove that conclusion.
+        """
         state = self.get_process_state(pid)
         cpu_pct = self.get_cpu_pct(pid, job_id, now)
         silence = self.get_stdout_silence(job_id, now)

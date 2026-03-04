@@ -3,7 +3,12 @@ import { useState, useMemo } from 'preact/hooks';
 import { queue, API } from '../store';
 
 /**
- * Priority-sorted list of pending jobs with drag-to-reorder.
+ * What it shows: Every job waiting to run, priority-ordered, with estimated duration.
+ *   The colored left border shows priority tier (red=critical → grey=background).
+ *   Total wait estimate in the footer shows how backed-up the queue is.
+ * Decision it drives: Is my job running soon or buried deep? Drag a row up to promote
+ *   it, or hit × to cancel. Click a row to expand and see the full command.
+ *   Tag filter chips let you focus on a specific job group.
  *
  * Drag a row to a new position to reprioritize. On drop, priorities are
  * renumbered 1..N and persisted via PUT /api/queue/{id}/priority.
