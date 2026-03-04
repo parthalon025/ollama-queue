@@ -199,6 +199,34 @@ export function GanttChart({ jobs, tick, windowHours = 24 }) {
                     }} />
                 ))}
 
+                {/* "Now" cursor needle */}
+                <div
+                    aria-hidden="true"
+                    style={{
+                        position: 'absolute',
+                        left: 0,
+                        top: 0,
+                        bottom: 0,
+                        width: 2,
+                        background: 'var(--accent)',
+                        opacity: 0.7,
+                        zIndex: 5,
+                        pointerEvents: 'none',
+                    }}
+                >
+                    {/* Downward triangle tick at top */}
+                    <div style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: -4,
+                        width: 0,
+                        height: 0,
+                        borderLeft: '4px solid transparent',
+                        borderRight: '4px solid transparent',
+                        borderTop: '5px solid var(--accent)',
+                    }} />
+                </div>
+
                 {/* Job blocks */}
                 {/* Heavy conflict badges */}
                 {conflictIds.size > 0 && (() => {
