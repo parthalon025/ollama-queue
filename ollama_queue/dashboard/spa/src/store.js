@@ -17,7 +17,7 @@ export const modelPulls = signal([]);
 export const modelCatalog = signal({ curated: [], search_results: [] });
 export const queueEtas = signal([]);
 export const connectionStatus = signal('ok'); // 'ok' | 'disconnected'
-export const loadMap = signal([]);             // /api/schedule/load-map — 48-slot priority scores
+export const loadMap = signal(null);  // /api/schedule/load-map response
 
 // Derive API base from current URL so it works behind Tailscale Serve path prefix.
 // /ui/ → /api, /queue/ui/ → /queue/api
@@ -101,10 +101,7 @@ export async function fetchSchedule() {
 export async function fetchLoadMap() {
     try {
         const resp = await fetch(`${API}/schedule/load-map`);
-        if (resp.ok) {
-            const data = await resp.json();
-            loadMap.value = data.slots || [];
-        }
+        if (resp.ok) loadMap.value = await resp.json();
     } catch (e) {
         console.error('fetchLoadMap failed:', e);
     }
@@ -278,6 +275,57 @@ export async function fetchQueueEtas() {
 
 export async function assignModelToJob(rjId, modelName) {
     return updateScheduleJob(rjId, { model: modelName });
+}
+
+export async function submitJob(body) {
+    const resp = await fetch(`${API}/queue/submit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    });
+    if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(text || `Submit failed: ${resp.status}`);
+    }
+    return resp.json(); // { job_id: N }
+}
+
+export async function addRecurringJob(body) {
+    const resp = await fetch(`${API}/schedule`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    });
+    if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(text || `Add job failed: ${resp.status}`);
+    }
+    return resp.json();
+}
+
+export async function enableJobByName(name) {
+    const resp = await fetch(`${API}/schedule/jobs/${encodeURIComponent(name)}/enable`, {
+        method: 'POST',
+    });
+    if (!resp.ok) throw new Error(`Enable failed: ${resp.status}`);
+    await fetchSchedule();
+}
+
+export async function refreshQueue() {
+    try {
+        const [statusResp, queueResp] = await Promise.all([
+            fetch(`${API}/status`),
+            fetch(`${API}/queue`),
+        ]);
+        if (statusResp.ok) {
+            const data = await statusResp.json();
+            status.value = data;
+            if (Array.isArray(data.queue)) queue.value = data.queue;
+        }
+        if (queueResp.ok) queue.value = await queueResp.json();
+    } catch (e) {
+        console.error('refreshQueue failed:', e);
+    }
 }
 
 async function fetchAll() {
