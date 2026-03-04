@@ -3,9 +3,11 @@ import { useCallback } from 'preact/hooks';
 import { settings, status, API } from '../store';
 import SettingsForm from '../components/SettingsForm.jsx';
 
-/**
- * Settings page — reads signals from store, delegates to SettingsForm.
- */
+// What it shows: All queue configuration — health thresholds that trigger automatic pausing,
+//   job defaults (timeout, priority), data retention periods, and daemon manual controls
+//   (pause/resume).
+// Decision it drives: At what RAM/VRAM/load level should the queue stop starting new jobs?
+//   How long before a non-LLM job is killed for timeout? How many days of job history to keep?
 export default function Settings() {
   const sett = settings.value;
   const st = status.value;

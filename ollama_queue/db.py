@@ -1,4 +1,12 @@
-"""SQLite database layer for ollama-queue."""
+"""SQLite database layer for ollama-queue.
+
+Plain English: The queue's filing cabinet. Every job, setting, health reading,
+and schedule lives in a single SQLite file (~/.local/share/ollama-queue/queue.db).
+All other modules read and write through this one — nothing talks to disk directly
+except here.
+
+Decision it drives: What data persists across restarts, and how long is it kept?
+"""
 
 import json
 import logging

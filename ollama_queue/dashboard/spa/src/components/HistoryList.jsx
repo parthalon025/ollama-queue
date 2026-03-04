@@ -9,7 +9,12 @@ const STATUS_CONFIG = {
 };
 
 /**
- * Recent jobs history list with expandable failed rows.
+ * What it shows: The last N completed jobs in reverse-chronological order, filterable by tag.
+ *   Each row shows status icon, source name, model, and duration. Failed/killed rows are
+ *   expandable to reveal the full command, error output, and failure reason.
+ * Decision it drives: What failed and why? Is there a pattern (same source, same model, same
+ *   time of day)? Which jobs run clean vs consistently crash? Expand a failed row to see the
+ *   exact command output before deciding whether to retry or fix the underlying job.
  *
  * @param {{ jobs: Array<object> }} props
  *   Each job: { id, status, source, model, completed_at, started_at, outcome_reason }

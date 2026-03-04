@@ -1,4 +1,12 @@
-"""Daemon polling loop and job runner for ollama-queue."""
+"""Daemon polling loop and job runner for ollama-queue.
+
+Plain English: The heartbeat. Every 5 seconds it wakes up, asks "is the system
+healthy, is anyone else using Ollama, and do we have capacity?" — then either
+grabs the next job and runs it as a subprocess, or goes back to sleep with a
+reason logged (paused_health, paused_interactive, idle).
+
+Decision it drives: Should a job start right now, or should we wait — and why?
+"""
 
 from __future__ import annotations
 
@@ -192,6 +200,15 @@ class Daemon:
 
     def _can_admit(self, job: dict) -> bool:
         """Three-factor admission gate. Returns True if job can start now.
+
+        Plain English: The bouncer. Before a job gets a worker thread, it must
+        pass three checks in order:
+          1. Concurrency type — embed jobs get up to 4 slots; heavy models
+             (70B+) must run alone; standard models serialize per-model.
+          2. Resource budget — does adding this job's estimated VRAM push us
+             over the configured ceiling? (Uses committed-model math, not a
+             live GPU read, so two simultaneous checks can't both pass.)
+          3. System health — is health.evaluate() currently telling us to pause?
 
         INVARIANT: must only be called from the poll_once main thread.
         The running_count snapshot taken inside the lock is used outside it —

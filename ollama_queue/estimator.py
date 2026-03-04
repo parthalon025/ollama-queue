@@ -1,6 +1,12 @@
 """Duration estimator for queue jobs.
 
-Uses rolling average from DB history, with model-based and generic fallbacks.
+Plain English: The time-predictor. When you submit a job, the dashboard shows
+"estimated wait: X minutes." This module figures out that estimate by checking
+historical run times for the same source/model, falling back to known defaults
+for popular models, then a generic 10-minute guess if nothing better exists.
+
+Decision it drives: How long should we tell the user this job will take, and
+what ETA do we show for each item in the queue?
 """
 
 from typing import ClassVar

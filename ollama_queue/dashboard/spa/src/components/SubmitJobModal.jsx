@@ -15,6 +15,11 @@ const labelStyle = {
     marginBottom: '0.2rem', display: 'block',
 };
 
+// What it shows: A + floating action button (fixed bottom-right). Tapping it opens a form
+//   to submit a one-off job directly from the dashboard without using the CLI.
+// Decision it drives: Run a command through the queue right now with a chosen priority and
+//   timeout. Pre-fills defaults from Settings so usually only the command field needs typing.
+//   After submit, a toast confirms the job_id and the queue list refreshes.
 export default function SubmitJobModal({ onJobSubmitted }) {
     const [open, setOpen] = useState(false);
     const [command, setCommand] = useState('');

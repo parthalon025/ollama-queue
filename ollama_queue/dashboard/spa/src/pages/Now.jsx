@@ -12,6 +12,12 @@ import SubmitJobModal from '../components/SubmitJobModal.jsx';
 
 // NOTE: all .map() callbacks use descriptive names — never 'h' (shadows JSX factory)
 
+// What it shows: The live command center — what's running right now, what's waiting in the
+//   queue, how healthy the system is, and whether anything needs attention (DLQ entries,
+//   recent failures). KPI cards summarize the last 24h/7d at a glance.
+// Decision it drives: Is the queue healthy and progressing? Should I submit more work, cancel
+//   something, or go investigate a problem in History? The alert strip makes issues impossible
+//   to miss. The + FAB opens SubmitJobModal to queue a one-off job immediately.
 export default function Now() {
     const st = status.value;
     const q = queue.value;

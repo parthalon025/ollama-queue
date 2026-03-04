@@ -1,7 +1,12 @@
 import { h } from 'preact';
 
 /**
- * 48-bar density strip visualizing the 48×30-min daily load slots.
+ * What it shows: A 48-bar histogram of the next 24 hours split into 30-min slots.
+ *   Each bar's opacity represents how many recurring jobs are scheduled to fire in that
+ *   window — dark = congested, light = open. Hover a bar for the exact count and time.
+ * Decision it drives: When is the queue lightest? This is the same data the backend uses
+ *   when you click "Suggest slot" — the top-3 lowest-load windows become candidate cron times.
+ *
  * Opacity encoding (Treisman preattentive): dark = busy, light = free.
  *
  * Props:

@@ -3,7 +3,12 @@ import StatusBadge from './StatusBadge.jsx';
 import ResourceGauges from './ResourceGauges.jsx';
 
 /**
- * Shows current running job or daemon idle/paused status.
+ * What it shows: What the daemon is doing RIGHT NOW — running job name/model/elapsed time
+ *   with a progress bar against the estimated duration, paused state with reason, or idle.
+ *   The orange "stalled" badge appears when the stall detector has flagged the job as frozen.
+ * Decision it drives: Is the queue working? Is the current job taking too long or frozen?
+ *   Should I cancel it and investigate? The progress bar turns orange when the job exceeds
+ *   its estimated duration so you can decide whether to wait or kill it.
  *
  * @param {{ daemon: object, currentJob: object|null, latestHealth: object|null, settings: object }} props
  *   daemon: daemon_state row (state, current_job_id, paused_reason, ...)

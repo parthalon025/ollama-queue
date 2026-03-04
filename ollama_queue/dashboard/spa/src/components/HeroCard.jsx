@@ -1,8 +1,12 @@
 import TimeChart from './TimeChart.jsx';
 
 /**
- * Hero metric card — the single most important number on the page.
- * Large monospace value with cursor state indicator.
+ * What it shows: A single KPI number in large type — jobs in 24h, average wait time, pause
+ *   minutes, or 7-day success rate. Includes a sparkline trend and a plain-English delta line
+ *   explaining what the number means (e.g. "3 jobs failed today").
+ * Decision it drives: Is this metric healthy or does it need action? Orange border + text
+ *   flags when a threshold has been crossed — e.g. success rate below 90% or long wait times.
+ *   The delta line suggests what to do next (e.g. "lower thresholds in Settings").
  *
  * @param {Object} props
  * @param {*} props.value - Primary metric value

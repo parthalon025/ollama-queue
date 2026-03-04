@@ -100,6 +100,21 @@ Sidebar nav (desktop) + bottom tab bar (mobile). 5 views: **Now** (2-column comm
 
 Route IDs: `now` | `plan` | `history` | `models` | `settings`. Sidebar: 200px desktop, 64px icon-only (768–1023px), hidden on mobile. CSS classes: `layout-root`, `layout-sidebar`, `layout-main`, `now-grid`, `history-top-grid`, `mobile-bottom-nav`.
 
+### UI Layman Comments (always required)
+
+Every JSX component and every significant data transformation in the SPA **must** include a brief comment block in plain English explaining:
+1. **What it shows** — what data/state this component displays to the user
+2. **What decision/action it drives** — what the user can do or understand because of it
+
+Format (JSX file-level or component-level):
+```jsx
+// What it shows: The currently-running job's name, model, elapsed time, and stdout tail.
+// Decision it drives: Lets the user know whether the queue is working and what it's doing,
+//   so they can decide to cancel, wait, or submit more work.
+```
+
+This applies to: component files, store transformations in `store.js`, computed values, and any non-obvious data shaping. Skip for pure layout/styling helpers with self-evident names.
+
 ## Pipeline Verification
 
 **Horizontal:** All 39 API endpoints + static files (includes `/api/generate` and `/api/embed` proxies). **Vertical:** `ollama-queue submit` → DB row → daemon dequeue → subprocess → DB completed → API endpoints reflect → dashboard renders. Recurring: `schedule add` → `promote_due_jobs` → queue → run → `update_next_run`. DLQ: job fails max_retries → `move_to_dlq` → `dlq list` reflects. Full method: `projects/CLAUDE.md` § Pipeline Verification.
