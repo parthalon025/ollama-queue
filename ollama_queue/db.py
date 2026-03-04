@@ -54,6 +54,13 @@ class Database:
                 self._conn.row_factory = sqlite3.Row
                 self._conn.execute("PRAGMA journal_mode=WAL")
                 self._conn.execute("PRAGMA foreign_keys=ON")
+                # Performance hardening
+                self._conn.execute("PRAGMA synchronous = NORMAL")
+                self._conn.execute("PRAGMA temp_store = MEMORY")
+                self._conn.execute("PRAGMA mmap_size = 536870912")  # 512MB
+                self._conn.execute("PRAGMA cache_size = -64000")  # 64MB page cache
+                self._conn.execute("PRAGMA wal_autocheckpoint = 1000")
+                self._conn.execute("PRAGMA busy_timeout = 5000")
         return self._conn
 
     def _add_column_if_missing(self, conn: sqlite3.Connection, table: str, col: str, defn: str) -> None:

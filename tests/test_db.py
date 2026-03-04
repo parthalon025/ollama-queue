@@ -562,3 +562,29 @@ def test_recurring_job_schema_has_outcome_reason(db):
     rj_id = db.add_recurring_job(name="schema-test", command="echo hi", interval_seconds=3600)
     rj = db.get_recurring_job(rj_id)
     assert "outcome_reason" in rj
+
+
+class TestDatabase:
+    def test_pragma_synchronous_normal(self, db):
+        """PRAGMA synchronous should be NORMAL (1), not FULL (2)."""
+        conn = db._connect()
+        result = conn.execute("PRAGMA synchronous").fetchone()[0]
+        assert result == 1  # 0=OFF, 1=NORMAL, 2=FULL, 3=EXTRA
+
+    def test_pragma_temp_store_memory(self, db):
+        """PRAGMA temp_store should be MEMORY (2)."""
+        conn = db._connect()
+        result = conn.execute("PRAGMA temp_store").fetchone()[0]
+        assert result == 2  # 0=DEFAULT, 1=FILE, 2=MEMORY
+
+    def test_pragma_busy_timeout(self, db):
+        """PRAGMA busy_timeout should be 5000ms."""
+        conn = db._connect()
+        result = conn.execute("PRAGMA busy_timeout").fetchone()[0]
+        assert result == 5000
+
+    def test_pragma_wal_autocheckpoint(self, db):
+        """PRAGMA wal_autocheckpoint should be 1000 pages."""
+        conn = db._connect()
+        result = conn.execute("PRAGMA wal_autocheckpoint").fetchone()[0]
+        assert result == 1000
