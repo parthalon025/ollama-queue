@@ -45,6 +45,7 @@ DEFAULTS = {
     "max_concurrent_jobs": 1,
     "concurrent_shadow_hours": 24,
     "vram_safety_factor": 1.3,
+    "sjf_aging_factor": 3600,  # PR3: seconds of wait to halve effective duration; 0=pure SJF
 }
 
 
