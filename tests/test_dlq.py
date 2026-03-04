@@ -80,6 +80,17 @@ class TestDLQRouting:
         assert all(d > 0 for d in delays)
         # Delays should be stored as last_retry_delay
         assert all(d is not None for d in delays)
+        base = db.get_setting("retry_backoff_base_seconds")
+        cap = db.get_setting("retry_backoff_cap_seconds")
+        # All delays must be within [base, cap]
+        assert all(d >= base for d in delays), f"Delay below base: {delays}"
+        assert all(d <= cap for d in delays), f"Delay above cap: {delays}"
+        # Verify the prev_delay chain: delay[i] must be <= prev_delay[i-1] * 3
+        # (prev_delay[0] = base since last_retry_delay was NULL before first retry)
+        prev = base
+        for d in delays:
+            assert d <= prev * 3, f"Delay {d} exceeded prev_delay*3 bound ({prev * 3})"
+            prev = d
 
     def test_retry_delay_bounded_by_cap(self, db):
         """Retry delay must never exceed retry_backoff_cap_seconds."""
