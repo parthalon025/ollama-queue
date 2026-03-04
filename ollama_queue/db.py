@@ -862,27 +862,6 @@ class Database:
             )
             conn.commit()
 
-    def _set_job_retry_after(self, job_id: int, retry_after: float) -> None:
-        """Increment retry_count and set retry_after timestamp, keeping status pending."""
-        with self._lock:
-            conn = self._connect()
-            conn.execute(
-                """UPDATE jobs
-                   SET retry_count = retry_count + 1,
-                       retry_after = ?,
-                       status = 'pending'
-                   WHERE id = ?""",
-                (retry_after, job_id),
-            )
-            conn.commit()
-
-    def _set_job_retry_delay(self, job_id: int, delay: float) -> None:
-        """Store the most recent retry delay for decorrelated jitter computation."""
-        with self._lock:
-            conn = self._connect()
-            conn.execute("UPDATE jobs SET last_retry_delay = ? WHERE id = ?", (delay, job_id))
-            conn.commit()
-
     def _set_job_retry(self, job_id: int, retry_after: float, delay: float) -> None:
         """Atomically increment retry_count, reset status, and set retry timing."""
         with self._lock:
