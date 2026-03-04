@@ -188,6 +188,15 @@ export async function deleteScheduleJob(rjId) {
     await fetchSchedule();
 }
 
+// What it does: Calls the backend to ask Ollama to write a plain-English description
+//   for the given recurring job. The call blocks until Ollama responds (~5-10s).
+// Decision it drives: Returns {ok, description} so the UI can update the text immediately.
+export async function generateJobDescription(rjId) {
+    const resp = await fetch(`${API}/schedule/${rjId}/generate-description`, { method: 'POST' });
+    if (!resp.ok) throw new Error(`generateJobDescription failed: ${resp.status}`);
+    return resp.json(); // { ok: true, description: "..." }
+}
+
 // ── Dead Letter Queue ────────────────────────────────────────────────────────
 // Fetched on initial load + after any retry/dismiss. dlqCount drives the alert badge.
 export async function fetchDLQ() {
