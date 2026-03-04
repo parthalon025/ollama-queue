@@ -2,7 +2,7 @@
 
 Ollama job queue scheduler with priority, health monitoring, and web dashboard.
 
-**Repository:** https://github.com/parthalon025/ollama-queue (private)
+**Repository:** https://github.com/parthalon025/ollama-queue
 
 ## In Plain English
 
