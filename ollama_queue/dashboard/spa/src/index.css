@@ -578,13 +578,6 @@ body {
   outline-offset: -2px;
 }
 
-/* Collapsed sidebar: icon-only (768px–1023px) */
-@media (min-width: 768px) and (max-width: 1023px) {
-  .layout-sidebar { width: var(--sidebar-width-sm); }
-  .layout-main { margin-left: var(--sidebar-width-sm); }
-  .sidebar-label { display: none; }
-}
-
 /* Mobile: hide sidebar, show bottom nav, restore full-width main */
 @media (max-width: 767px) {
   .layout-sidebar { display: none; }
