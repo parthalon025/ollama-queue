@@ -53,6 +53,25 @@ function formatDuration(secs) {
     return `${hrs}h ${mins % 60}m`;
 }
 
+// Traffic intensity ρ = sum(estimated_duration) / 86400.
+// Research threshold: keep ρ < 0.80 (Kingman's formula diverges as ρ → 1).
+// Includes ALL jobs (enabled + disabled) — represents maximum scheduled load.
+// Heavy-model fallback: 1800s; others: 600s (10m default for LLM tasks).
+function computeRho(jobList) {
+    if (jobList.length === 0) return 0;
+    const totalSecs = jobList.reduce((sum, j) => {
+        const fallback = j.model_profile === 'heavy' ? 1800 : 600;
+        return sum + (j.estimated_duration || fallback);
+    }, 0);
+    return totalSecs / 86400;
+}
+
+function rhoStatus(rho) {
+    if (rho < 0.60) return { label: 'safe', color: 'var(--status-healthy)' };
+    if (rho < 0.80) return { label: 'moderate', color: 'var(--status-warning)' };
+    return { label: 'dense', color: 'var(--status-error)' };
+}
+
 // Priority design token colors (theme-aware)
 const CATEGORY_COLORS = {
     critical:   'var(--status-error)',
@@ -846,6 +865,39 @@ export default function Plan() {
                     </span>
                 </div>
             )}
+
+            {/* ρ traffic intensity indicator */}
+            {jobs.length > 0 && (() => {
+                const rho = computeRho(jobs);
+                const { label, color } = rhoStatus(rho);
+                return (
+                    <div style={{
+                        display: 'flex', alignItems: 'center', gap: '0.5rem',
+                        marginBottom: '0.4rem',
+                    }}>
+                        <span style={{
+                            fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)',
+                            color: 'var(--text-tertiary)',
+                        }}>
+                            24h load
+                        </span>
+                        <span style={{
+                            fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)',
+                            fontWeight: 700, color,
+                            background: 'var(--bg-surface-raised)',
+                            border: `1px solid ${color}`,
+                            borderRadius: 'var(--radius)',
+                            padding: '1px 6px',
+                            letterSpacing: '0.02em',
+                        }}
+                            title={`Traffic intensity: ${rho.toFixed(2)}. Keep below 0.80 to avoid job queueing delays. Dense schedules (≥0.80) may cause jobs to wait for slots.`}
+                            aria-label={`Traffic intensity: ${rho.toFixed(2)}, status: ${label}`}
+                        >
+                            {'\u03c1'} {rho.toFixed(2)} {label}
+                        </span>
+                    </div>
+                );
+            })()}
 
             <GanttChart jobs={jobs} tick={tick} windowHours={24} />
 
