@@ -436,6 +436,19 @@ def create_app(db: Database) -> FastAPI:
         slots = Scheduler(db).load_map()
         return {"slots": slots, "slot_minutes": 30, "count": len(slots)}
 
+    @app.get("/api/schedule/suggest")
+    def suggest_schedule_time(priority: int = 5, top_n: int = 3):
+        from ollama_queue.scheduler import Scheduler
+
+        suggestions = Scheduler(db).suggest_time(priority=priority, top_n=top_n)
+        results = []
+        for cron_expr, score in suggestions:
+            parts = cron_expr.split()
+            minute, hour = int(parts[0]), int(parts[1])
+            slot = (hour * 60 + minute) // 30
+            results.append({"cron": cron_expr, "score": score, "slot": slot})
+        return {"suggestions": results}
+
     @app.post("/api/schedule/batch-toggle")
     def batch_toggle_schedule(body: dict = Body(...)):
         tag = body.get("tag")
