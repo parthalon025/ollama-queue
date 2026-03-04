@@ -178,6 +178,19 @@ source .venv/bin/activate
 pytest  # 262 tests, parallel by default
 ```
 
+## Design Docs
+
+Implementation plans and design decisions are in [`docs/plans/`](docs/plans/):
+
+| Doc | Topic |
+|-----|-------|
+| [v2 design](docs/plans/archive/2026-02-27-ollama-queue-v2-design.md) | Recurring jobs, DLQ, retry architecture |
+| [Smart scheduling](docs/plans/archive/2026-02-27-smart-scheduling-design.md) | Cron pin slots, load balancing, rebalancer |
+| [Bayesian stall detection](docs/plans/2026-02-28-bayesian-stall-detection-design.md) | Stall detection algorithm design |
+| [Model concurrency](docs/plans/2026-02-28-model-concurrency-ui-design.md) | Multi-model scheduling + affinity |
+| [Dashboard redesign](docs/plans/2026-03-01-dashboard-sidebar-redesign-design.md) | Layout, navigation, UX decisions |
+| [LLM design system guide](docs/llm-guide-design-system.md) | Full reference for the dashboard design language |
+
 ## License
 
 MIT
