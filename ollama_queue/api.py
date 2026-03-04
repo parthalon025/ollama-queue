@@ -225,9 +225,12 @@ def create_app(db: Database) -> FastAPI:
         max_depth = int(db.get_setting("max_queue_depth") or 50)
         pending = db.count_pending_jobs()
         if pending >= max_depth:
-            # Estimate drain time from current queue ETAs
+            # Estimate drain time from current queue ETAs.
+            # Filter to actionable jobs only (matching count_pending_jobs semantics)
+            # so deferred retry_after jobs don't inflate the Retry-After header.
             try:
-                jobs = db.get_pending_jobs()
+                _now = time.time()
+                jobs = [j for j in db.get_pending_jobs() if not j["retry_after"] or j["retry_after"] <= _now]
                 etas = DurationEstimator(db).queue_etas(jobs)
                 if etas:
                     drain_seconds = max(
