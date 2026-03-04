@@ -49,6 +49,47 @@ class DurationEstimator:
 
         return self.GENERIC_DEFAULT
 
+    def estimate_with_variance(
+        self,
+        source: str,
+        model: str | None = None,
+        cached: dict | None = None,
+    ) -> tuple[float, float]:
+        """Return (mean_seconds, cv_squared) for a source.
+
+        cv_squared = Var(S) / Mean(S)^2
+
+        Interpretation guide:
+          cv_squared < 0.5:  highly predictable (same model, consistent workload)
+          cv_squared 0.5-1.5: normal variance
+          cv_squared > 1.5:  unreliable estimate (mixed workloads, treat skeptically)
+
+        Falls back to cached bulk mean, then model default, then GENERIC_DEFAULT.
+        Returns cv_squared=1.5 (conservative) when no variance data available.
+        """
+        stats = self.db.estimate_duration_stats(source)
+        if stats is not None:
+            mean, variance = stats
+            if mean > 0:
+                cv_sq = variance / (mean**2)
+                return mean, max(0.0, cv_sq)
+
+        # No variance data — fall back to mean only
+        mean = None
+        if cached:
+            mean = cached.get(source)
+        if mean is None:
+            mean = self.db.estimate_duration(source)
+        if mean is None and model:
+            for key, default in self.MODEL_DEFAULTS.items():
+                if key in model:
+                    mean = float(default)
+                    break
+        if mean is None:
+            mean = float(self.GENERIC_DEFAULT)
+
+        return mean, 1.5  # unknown variance → conservative default
+
     def queue_etas(self, queue_jobs: list[dict]) -> list[dict]:
         """Given list of pending jobs, return ETAs for each, concurrency-aware.
 
