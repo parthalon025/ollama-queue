@@ -78,7 +78,7 @@ async function _fetchNonRealtime() {
         if (durResp.ok) durationData.value = await durResp.json();
         if (heatResp.ok) heatmapData.value = await heatResp.json();
         if (histResp.ok) history.value = await histResp.json();
-        if (lmResp.ok) { const d = await lmResp.json(); loadMap.value = d.slots || []; }
+        if (lmResp.ok) loadMap.value = await lmResp.json();
     } catch (e) {
         console.error('Non-realtime refresh failed:', e);
     }
@@ -313,16 +313,12 @@ export async function enableJobByName(name) {
 
 export async function refreshQueue() {
     try {
-        const [statusResp, queueResp] = await Promise.all([
-            fetch(`${API}/status`),
-            fetch(`${API}/queue`),
-        ]);
-        if (statusResp.ok) {
-            const data = await statusResp.json();
+        const resp = await fetch(`${API}/status`);
+        if (resp.ok) {
+            const data = await resp.json();
             status.value = data;
             if (Array.isArray(data.queue)) queue.value = data.queue;
         }
-        if (queueResp.ok) queue.value = await queueResp.json();
     } catch (e) {
         console.error('refreshQueue failed:', e);
     }
