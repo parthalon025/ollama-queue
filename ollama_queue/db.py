@@ -62,6 +62,21 @@ DEFAULTS = {
     "entropy_suspend_low_priority": True,  # PR4: suspend p8-10 promotion on critical_backlog
 }
 
+EVAL_SETTINGS_DEFAULTS = {
+    "eval.data_source_url": "http://127.0.0.1:7685",
+    "eval.data_source_token": "",
+    "eval.per_cluster": "4",
+    "eval.same_cluster_targets": "2",
+    "eval.diff_cluster_targets": "2",
+    "eval.judge_model": "deepseek-r1:8b",
+    "eval.judge_backend": "ollama",
+    "eval.judge_temperature": "0.1",
+    "eval.f1_threshold": "0.75",
+    "eval.stability_window": "3",
+    "eval.error_budget": "0.30",
+    "eval.setup_complete": "false",
+}
+
 
 class Database:
     """Synchronous SQLite database for the ollama-queue daemon."""
@@ -255,6 +270,91 @@ class Database:
                 completed_at REAL,
                 error        TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS eval_prompt_templates (
+                id           TEXT PRIMARY KEY,
+                label        TEXT NOT NULL,
+                instruction  TEXT NOT NULL,
+                format_spec  TEXT,
+                examples     TEXT,
+                is_chunked   INTEGER DEFAULT 0,
+                is_system    INTEGER DEFAULT 1,
+                created_at   TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS eval_variants (
+                id                  TEXT PRIMARY KEY,
+                label               TEXT NOT NULL,
+                prompt_template_id  TEXT NOT NULL REFERENCES eval_prompt_templates(id),
+                model               TEXT NOT NULL,
+                temperature         REAL NOT NULL DEFAULT 0.6,
+                num_ctx             INTEGER NOT NULL DEFAULT 8192,
+                is_recommended      INTEGER DEFAULT 0,
+                is_production       INTEGER DEFAULT 0,
+                is_system           INTEGER DEFAULT 0,
+                is_active           INTEGER DEFAULT 1,
+                created_at          TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS eval_runs (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                data_source_url TEXT NOT NULL,
+                variants        TEXT NOT NULL,
+                per_cluster     INTEGER NOT NULL,
+                status     TEXT NOT NULL CHECK (
+                    status IN ('pending','generating','judging','complete','failed','cancelled')
+                ),
+                stage      TEXT,
+                run_mode   TEXT NOT NULL DEFAULT 'batch' CHECK (
+                    run_mode IN ('batch','opportunistic','fill-open-slots','scheduled')
+                ),
+                item_count      INTEGER,
+                item_ids        TEXT,
+                seed            INTEGER,
+                judge_model     TEXT,
+                judge_backend   TEXT CHECK (judge_backend IN ('ollama','openai')),
+                error_budget    REAL DEFAULT 0.30,
+                metrics         TEXT,
+                winner_variant  TEXT,
+                report_md       TEXT,
+                error           TEXT,
+                started_at      TEXT NOT NULL,
+                completed_at    TEXT,
+                max_runs        INTEGER,
+                max_time_s      INTEGER,
+                runs_completed  INTEGER DEFAULT 0
+            );
+
+            CREATE TABLE IF NOT EXISTS eval_results (
+                id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id                   INTEGER NOT NULL REFERENCES eval_runs(id) ON DELETE CASCADE,
+                variant                  TEXT NOT NULL,
+                source_item_id           TEXT NOT NULL,
+                principle                TEXT,
+                judge_reasoning          TEXT,
+                target_item_id           TEXT NOT NULL,
+                is_same_cluster          INTEGER NOT NULL,
+                score_transfer           INTEGER,
+                score_precision          INTEGER,
+                score_action             INTEGER,
+                override_score_transfer  INTEGER,
+                override_score_precision INTEGER,
+                override_score_action    INTEGER,
+                override_reason          TEXT,
+                generation_time_s        REAL,
+                queue_job_id             INTEGER,
+                error                    TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS judge_attempts (
+                id            TEXT PRIMARY KEY,
+                run_id        INTEGER NOT NULL REFERENCES eval_runs(id),
+                judge_model   TEXT NOT NULL,
+                judge_backend TEXT NOT NULL,
+                judge_temp    REAL,
+                metrics       TEXT,
+                created_at    TEXT NOT NULL
+            );
         """)
 
             self._run_migrations(conn)
@@ -267,10 +367,85 @@ class Database:
                     (key, json.dumps(value), now),
                 )
 
+            # Seed eval settings defaults (JSON-encoded, consistent with DEFAULTS)
+            for key, value in EVAL_SETTINGS_DEFAULTS.items():
+                conn.execute(
+                    "INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES (?, ?, ?)",
+                    (key, json.dumps(value), now),
+                )
+
             # Seed daemon_state singleton
             conn.execute("INSERT OR IGNORE INTO daemon_state (id, state) VALUES (1, 'idle')")
 
             conn.commit()
+
+            self.seed_eval_defaults(conn)
+
+    def seed_eval_defaults(self, conn: sqlite3.Connection | None = None) -> None:
+        """Seed system eval prompt templates and variants (idempotent via INSERT OR IGNORE)."""
+        import datetime as _dt
+
+        created_at = _dt.datetime.now(_dt.UTC).isoformat()
+
+        if conn is None:
+            with self._lock:
+                conn = self._connect()
+                self._do_seed_eval_defaults(conn, created_at)
+                conn.commit()
+        else:
+            self._do_seed_eval_defaults(conn, created_at)
+            conn.commit()
+
+    def _do_seed_eval_defaults(self, conn: sqlite3.Connection, created_at: str) -> None:
+        """Insert system eval prompt templates and variants (called inside an existing lock)."""
+        # 3 system prompt templates
+        templates = [
+            (
+                "fewshot",
+                "Learn from examples first",
+                "You are extracting transferable principles. Review these examples first, then extract a principle from the source lesson.",  # noqa: E501
+                0,
+                1,
+            ),
+            (
+                "zero-shot-causal",
+                "Figure it out",
+                "You are extracting transferable principles. Reason from cause to effect: what went wrong, why, and what rule prevents it?",  # noqa: E501
+                0,
+                1,
+            ),
+            (
+                "chunked",
+                "Show examples in groups",
+                "You are extracting transferable principles. You will receive grouped examples from the same cluster. Extract a principle that captures the shared pattern.",  # noqa: E501
+                1,
+                1,
+            ),
+        ]
+        for tmpl_id, label, instruction, is_chunked, is_system in templates:
+            conn.execute(
+                """INSERT OR IGNORE INTO eval_prompt_templates
+                   (id, label, instruction, is_chunked, is_system, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (tmpl_id, label, instruction, is_chunked, is_system, created_at),
+            )
+
+        # 5 system variants A-E
+        variants = [
+            ("A", "Baseline", "fewshot", "deepseek-r1:8b", 0.7, 4096, 0, 1),
+            ("B", "Causal reasoning", "zero-shot-causal", "deepseek-r1:8b", 0.6, 8192, 0, 1),
+            ("C", "Grouped context", "chunked", "deepseek-r1:8b", 0.6, 8192, 0, 1),
+            ("D", "Causal + large model", "zero-shot-causal", "qwen3:14b", 0.6, 8192, 1, 1),
+            ("E", "Grouped + large model", "chunked", "qwen3:14b", 0.6, 8192, 1, 1),
+        ]
+        for var_id, label, tmpl_id, model, temperature, num_ctx, is_recommended, is_system in variants:
+            conn.execute(
+                """INSERT OR IGNORE INTO eval_variants
+                   (id, label, prompt_template_id, model, temperature, num_ctx,
+                    is_recommended, is_system, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (var_id, label, tmpl_id, model, temperature, num_ctx, is_recommended, is_system, created_at),
+            )
 
     # --- Jobs ---
 

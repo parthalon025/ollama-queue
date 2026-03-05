@@ -1,6 +1,7 @@
 """Tests for the SQLite database layer."""
 
 import time
+from typing import ClassVar
 from unittest.mock import patch
 
 import pytest
@@ -25,6 +26,11 @@ class TestInitialize:
             "dlq",
             "model_registry",
             "model_pulls",
+            "eval_prompt_templates",
+            "eval_variants",
+            "eval_runs",
+            "eval_results",
+            "judge_attempts",
         }
         assert expected == set(tables)
 
@@ -814,3 +820,143 @@ class TestPreemptionSupport:
         db.start_job(job_id)
         db.requeue_preempted_job(job_id)
         assert db.list_dlq() == []  # DLQ must remain empty
+
+
+class TestEvalSchema:
+    """Tests for the 5 eval tables and their seeded defaults."""
+
+    EVAL_TABLES: ClassVar[set] = {
+        "eval_prompt_templates",
+        "eval_variants",
+        "eval_runs",
+        "eval_results",
+        "judge_attempts",
+    }
+
+    def test_initialize_creates_all_eval_tables(self, db):
+        """initialize() must create all 5 eval tables."""
+        tables = set(db.list_tables())
+        assert self.EVAL_TABLES.issubset(tables)
+
+    def test_seed_eval_defaults_inserts_3_templates(self, db):
+        """seed_eval_defaults() inserts exactly 3 system prompt templates."""
+        conn = db._connect()
+        count = conn.execute("SELECT COUNT(*) FROM eval_prompt_templates").fetchone()[0]
+        assert count == 3
+
+    def test_seed_eval_defaults_inserts_5_variants(self, db):
+        """seed_eval_defaults() inserts exactly 5 system variants (A-E)."""
+        conn = db._connect()
+        count = conn.execute("SELECT COUNT(*) FROM eval_variants").fetchone()[0]
+        assert count == 5
+
+    def test_seed_eval_defaults_idempotent(self, db):
+        """Running seed_eval_defaults() twice produces no duplicates and no errors."""
+        db.seed_eval_defaults()
+        db.seed_eval_defaults()
+        conn = db._connect()
+        assert conn.execute("SELECT COUNT(*) FROM eval_prompt_templates").fetchone()[0] == 3
+        assert conn.execute("SELECT COUNT(*) FROM eval_variants").fetchone()[0] == 5
+
+    def test_eval_settings_all_seeded(self, db):
+        """All 12 eval.* settings keys are present after initialize()."""
+        settings = db.get_all_settings()
+        expected_keys = [
+            "eval.data_source_url",
+            "eval.data_source_token",
+            "eval.per_cluster",
+            "eval.same_cluster_targets",
+            "eval.diff_cluster_targets",
+            "eval.judge_model",
+            "eval.judge_backend",
+            "eval.judge_temperature",
+            "eval.f1_threshold",
+            "eval.stability_window",
+            "eval.error_budget",
+            "eval.setup_complete",
+        ]
+        for key in expected_keys:
+            assert key in settings, f"Missing eval setting: {key}"
+
+    def test_eval_runs_status_check_rejects_invalid(self, db):
+        """eval_runs.status CHECK constraint rejects values not in the allowed set."""
+        import sqlite3 as _sqlite3
+
+        conn = db._connect()
+        with pytest.raises(_sqlite3.IntegrityError):
+            conn.execute(
+                """INSERT INTO eval_runs
+                   (data_source_url, variants, per_cluster, status, started_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                ("http://localhost", '["A"]', 4, "invalid_status", "2026-03-05T00:00:00"),
+            )
+            conn.commit()
+
+    def test_eval_runs_run_mode_check_rejects_invalid(self, db):
+        """eval_runs.run_mode CHECK constraint rejects values not in the allowed set."""
+        import sqlite3 as _sqlite3
+
+        conn = db._connect()
+        with pytest.raises(_sqlite3.IntegrityError):
+            conn.execute(
+                """INSERT INTO eval_runs
+                   (data_source_url, variants, per_cluster, status, run_mode, started_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                ("http://localhost", '["A"]', 4, "pending", "not-a-mode", "2026-03-05T00:00:00"),
+            )
+            conn.commit()
+
+    def test_eval_results_cascade_delete(self, db):
+        """Deleting an eval_run cascades to delete its eval_results."""
+        conn = db._connect()
+        # Insert a run
+        conn.execute(
+            """INSERT INTO eval_runs
+               (data_source_url, variants, per_cluster, status, started_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            ("http://localhost", '["A"]', 4, "pending", "2026-03-05T00:00:00"),
+        )
+        conn.commit()
+        run_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+        # Insert a result referencing that run
+        conn.execute(
+            """INSERT INTO eval_results
+               (run_id, variant, source_item_id, target_item_id, is_same_cluster)
+               VALUES (?, ?, ?, ?, ?)""",
+            (run_id, "A", "src-1", "tgt-1", 1),
+        )
+        conn.commit()
+        assert conn.execute("SELECT COUNT(*) FROM eval_results WHERE run_id = ?", (run_id,)).fetchone()[0] == 1
+
+        # Delete the run — results should cascade-delete
+        conn.execute("DELETE FROM eval_runs WHERE id = ?", (run_id,))
+        conn.commit()
+        assert conn.execute("SELECT COUNT(*) FROM eval_results WHERE run_id = ?", (run_id,)).fetchone()[0] == 0
+
+    def test_template_ids_match_expected(self, db):
+        """The 3 seeded templates have IDs: fewshot, zero-shot-causal, chunked."""
+        conn = db._connect()
+        rows = conn.execute("SELECT id FROM eval_prompt_templates ORDER BY id").fetchall()
+        ids = {r[0] for r in rows}
+        assert ids == {"fewshot", "zero-shot-causal", "chunked"}
+
+    def test_variant_ids_match_expected(self, db):
+        """The 5 seeded variants have IDs: A, B, C, D, E."""
+        conn = db._connect()
+        rows = conn.execute("SELECT id FROM eval_variants ORDER BY id").fetchall()
+        ids = {r[0] for r in rows}
+        assert ids == {"A", "B", "C", "D", "E"}
+
+    def test_recommended_variants_are_d_and_e(self, db):
+        """Variants D and E are the only ones marked is_recommended=1."""
+        conn = db._connect()
+        rows = conn.execute("SELECT id FROM eval_variants WHERE is_recommended = 1 ORDER BY id").fetchall()
+        assert [r[0] for r in rows] == ["D", "E"]
+
+    def test_variant_a_uses_fewshot_template(self, db):
+        """Variant A must reference the fewshot prompt template."""
+        conn = db._connect()
+        row = conn.execute("SELECT prompt_template_id FROM eval_variants WHERE id = 'A'").fetchone()
+        assert row is not None
+        assert row[0] == "fewshot"
