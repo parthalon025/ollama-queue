@@ -25,6 +25,63 @@ export const queueEtas = signal([]);
 export const connectionStatus = signal('ok'); // 'ok' | 'disconnected'
 export const loadMap = signal(null);  // /api/schedule/load-map response
 
+// ── Eval pipeline signals ─────────────────────────────────────────────────────
+
+// What it shows: Current sub-tab within the Eval page (Runs / Configurations / Trends / Settings)
+// Decision it drives: Which eval view is displayed
+export const evalSubTab = signal('runs');
+
+// What it shows: List of all eval runs (summary)
+// Decision it drives: Run history table and active run tracking
+export const evalRuns = signal([]);
+
+// What it shows: All eval variant configs (system defaults + user-created)
+// Decision it drives: Variant selection in run trigger panel, config management
+export const evalVariants = signal([]);
+
+// What it shows: All eval prompt templates
+// Decision it drives: Template selection when creating/editing variants
+export const evalTemplates = signal([]);
+
+// What it shows: F1 trend data per variant across completed runs
+// Decision it drives: Trend chart and stability indicators
+export const evalTrends = signal(null);
+
+// What it shows: The currently-active eval run being monitored (persisted to sessionStorage)
+// Decision it drives: Whether to show the live progress panel; resumes after page refresh
+export const evalActiveRun = signal(
+  (() => { try { const v = sessionStorage.getItem('evalActiveRun'); return v ? JSON.parse(v) : null; } catch { return null; } })()
+);
+
+// What it shows: All eval.* settings (data source URL, judge config, etc.)
+// Decision it drives: Settings form state and setup checklist progress
+export const evalSettings = signal({});
+
+// Polling interval ID for active run progress
+let _evalPollId = null;
+
+// What it shows: nothing — controls live progress polling
+// Decision it drives: Starts 5s polling of /api/eval/runs/{id}/progress, stops when run completes
+export function startEvalPoll(runId) {
+  stopEvalPoll();
+  _evalPollId = setInterval(async () => {
+    try {
+      const res = await fetch(`/api/eval/runs/${runId}/progress`);
+      if (!res.ok) return;
+      const data = await res.json();
+      evalActiveRun.value = data;
+      sessionStorage.setItem('evalActiveRun', JSON.stringify(data));
+      if (['complete', 'failed', 'cancelled'].includes(data.status)) {
+        stopEvalPoll();
+      }
+    } catch {}
+  }, 5000);
+}
+
+export function stopEvalPoll() {
+  if (_evalPollId !== null) { clearInterval(_evalPollId); _evalPollId = null; }
+}
+
 // Derive API base from current URL so it works behind Tailscale Serve path prefix.
 // /ui/ → /api, /queue/ui/ → /queue/api
 const pathBase = window.location.pathname.replace(/\/ui\/.*$/, '').replace(/\/ui$/, '');

@@ -11,6 +11,7 @@ import Plan from './pages/Plan.jsx';
 import History from './pages/History.jsx';
 import ModelsTab from './pages/ModelsTab.jsx';
 import Settings from './pages/Settings.jsx';
+import Eval from './pages/Eval.jsx';
 
 export function App() {
     useEffect(() => {
@@ -30,6 +31,7 @@ export function App() {
             case 'history':  return <History />;
             case 'models':   return <ModelsTab />;
             case 'settings': return <Settings />;
+            case 'eval':     return <Eval />;
             default:         return <Now />;
         }
     }

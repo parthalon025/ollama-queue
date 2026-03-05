@@ -7,6 +7,7 @@ const NAV_ITEMS = [
     { id: 'history',  icon: '◷', label: 'History' },
     { id: 'models',   icon: '⊞', label: 'Models' },
     { id: 'settings', icon: '⚙', label: 'Settings' },
+    { id: 'eval',     icon: '⊡', label: 'Eval' },
 ];
 
 export default function BottomNav({ active, onNavigate, dlqCount }) {

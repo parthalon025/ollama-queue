@@ -600,6 +600,51 @@ body {
   .now-grid { grid-template-columns: 1fr; }
 }
 
+/* ── Eval page layout ── */
+
+.eval-subnav {
+  display: flex;
+  gap: var(--spacing, 8px);
+  padding: var(--spacing-3, 12px);
+  border-bottom: 1px solid var(--border-subtle, #333);
+  flex-wrap: wrap;
+}
+
+.eval-subnav-btn {
+  padding: 4px 12px;
+  background: transparent;
+  border: 1px solid var(--border-subtle, #333);
+  border-radius: var(--radius, 4px);
+  cursor: pointer;
+  color: var(--text-secondary, #ccc);
+  font-size: var(--type-body);
+  font-family: var(--font-mono);
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.eval-subnav-btn.active {
+  background: var(--accent-glow);
+  color: var(--accent);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.eval-subnav-btn:not(.active):hover {
+  border-color: var(--border-primary, #555);
+  color: var(--text-primary);
+}
+
+.eval-content {
+  padding: 1rem 0;
+}
+
+.eval-stub {
+  padding: 1rem;
+  color: var(--text-tertiary, #888);
+  font-family: var(--font-mono);
+  font-size: var(--type-body);
+}
+
 /* History view: 2-column top → 1-column on mobile */
 .history-top-grid {
   display: grid;
