@@ -580,7 +580,7 @@ def _call_proxy(
             text = (data.get("response") or "").strip()
             text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
             text = text.strip("\"'").strip()
-            queue_job_id = data.get("job_id")
+            queue_job_id = data.get("_queue_job_id")
             return (text if text else None, queue_job_id)
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code in _RETRYABLE_CODES and attempt < _MAX_RETRIES:
@@ -812,7 +812,14 @@ def run_eval_generate(
         return
 
     data_source_url = run["data_source_url"]
-    variant_ids: list[str] = json.loads(run["variants"])
+    _raw_variants = run["variants"]
+    try:
+        variant_ids: list[str] = json.loads(_raw_variants)
+        if not isinstance(variant_ids, list):
+            variant_ids = [str(variant_ids)]
+    except (json.JSONDecodeError, TypeError):
+        # variants stored as a plain string (single variant ID) rather than JSON array
+        variant_ids = [str(_raw_variants)]
     error_budget: float = run.get("error_budget") or 0.30
     data_source_token: str = _get_eval_setting(db, "eval.data_source_token", "")
 

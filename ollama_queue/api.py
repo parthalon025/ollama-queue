@@ -427,6 +427,7 @@ def create_app(db: Database) -> FastAPI:
                 stderr_tail="",
                 outcome_reason=None,
             )
+            result["_queue_job_id"] = job_id
             return result
         except Exception as e:
             _log.error("%s failed for job %d: %s", command, job_id, e, exc_info=True)
@@ -1551,18 +1552,21 @@ def create_app(db: Database) -> FastAPI:
             scheduled_by="api",
         )
 
-        # Submit a background job to the queue
-        try:
-            db.submit_job(
-                command=f"ollama-queue eval-run --run-id {run_id} --variant {variant_id}",
-                model="",
-                priority=5,
-                timeout=3600,
-                source="eval-api",
-                tag="eval",
-            )
-        except Exception:
-            _log.warning("trigger_eval_run: failed to submit background job for run %d", run_id, exc_info=True)
+        # Run the session in a background thread — NOT as a queued job.
+        # Running as a queued job would deadlock: the daemon sets current_job_id while
+        # the subprocess runs, which blocks try_claim_for_proxy() when the engine
+        # calls /api/generate. Background thread avoids that contention.
+        import threading as _threading
+
+        _captured_run_id = run_id
+
+        def _run_session_in_background() -> None:
+            try:
+                _ee.run_eval_session(_captured_run_id, db)
+            except Exception:
+                _log.exception("run_eval_session failed for run_id=%d", _captured_run_id)
+
+        _threading.Thread(target=_run_session_in_background, daemon=True).start()
 
         return JSONResponse(content={"run_id": run_id}, status_code=201)
 

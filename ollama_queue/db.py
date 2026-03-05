@@ -638,6 +638,7 @@ class Database:
         rows = conn.execute(
             """SELECT * FROM jobs
                WHERE status = 'pending'
+                 AND command NOT LIKE 'proxy:%'
                ORDER BY priority ASC, submitted_at ASC"""
         ).fetchall()
         return [dict(r) for r in rows]
