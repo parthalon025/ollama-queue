@@ -8,15 +8,17 @@ import { signal } from '@preact/signals';
 
 // NOTE: All .map() callbacks use descriptive parameter names — never 'h' (shadows JSX factory)
 
+// Sub-field signals declared at module level so they survive parent re-renders.
+// Creating signal() inside a render body creates a new object every call,
+// silently discarding any user input when the parent re-renders.
+const fillLimitType = signal('time');  // 'time' | 'count' | 'both'
+const fillHours = signal(2);
+const fillRuns = signal(5);
+const scheduledAt = signal('');
+
 export default function SchedulingModeSelector({ value, onChange }) {
   // value: 'batch' | 'opportunistic' | 'fill-open-slots' | 'scheduled'
   // onChange: (mode, subFields) => void
-
-  // Sub-field signals (local — only read when the mode that owns them is active)
-  const fillLimitType = signal('time');  // 'time' | 'count' | 'both'
-  const fillHours = signal(2);
-  const fillRuns = signal(5);
-  const scheduledAt = signal('');
 
   function handleModeChange(mode) {
     const sub = buildSubFields(mode);

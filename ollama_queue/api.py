@@ -1320,6 +1320,7 @@ def create_app(db: Database) -> FastAPI:
                 "error": f"HTTP {resp.status_code}",
             }
         except Exception as exc:
+            _log.warning("eval datasource check failed: %s", exc)
             response_ms = int((_time.time() - t0) * 1000)
             return {
                 "ok": False,
@@ -1348,10 +1349,29 @@ def create_app(db: Database) -> FastAPI:
         What it shows: N/A — write-only; returns updated settings dict on success.
         Decision it drives: Lets the user configure the eval pipeline without editing the DB directly.
         """
+        # Allowlist of known eval settings (bare keys without "eval." prefix)
+        _known_eval_keys = {
+            "data_source_url",
+            "data_source_token",
+            "per_cluster",
+            "same_cluster_targets",
+            "diff_cluster_targets",
+            "judge_model",
+            "judge_backend",
+            "judge_temperature",
+            "f1_threshold",
+            "stability_window",
+            "error_budget",
+            "setup_complete",
+        }
+
         # Validation rules — validate ALL before writing any
         validation_errors = []
         for key, value in body.items():
             bare_key = key.removeprefix("eval.")
+            if bare_key not in _known_eval_keys:
+                validation_errors.append(f"unknown eval setting: {key!r}")
+                continue
             if bare_key == "judge_backend":
                 if value not in ("ollama", "openai"):
                     validation_errors.append(f"judge_backend must be 'ollama' or 'openai', got {value!r}")
@@ -1361,9 +1381,12 @@ def create_app(db: Database) -> FastAPI:
             elif bare_key in ("same_cluster_targets", "diff_cluster_targets"):
                 if not isinstance(value, int) or not (1 <= value <= 10):
                     validation_errors.append(f"{bare_key} must be an integer 1-10, got {value!r}")
-            elif bare_key in ("judge_temperature", "f1_threshold", "error_budget"):
+            elif bare_key == "judge_temperature":
                 if not isinstance(value, int | float) or not (0.0 <= float(value) <= 2.0):
                     validation_errors.append(f"{bare_key} must be a float 0.0-2.0, got {value!r}")
+            elif bare_key in ("f1_threshold", "error_budget"):
+                if not isinstance(value, int | float) or not (0.0 <= float(value) <= 1.0):
+                    validation_errors.append(f"{bare_key} must be a float 0.0-1.0, got {value!r}")
             elif bare_key == "data_source_url":
                 if not isinstance(value, str) or not (value.startswith("http://") or value.startswith("https://")):
                     validation_errors.append("data_source_url must start with http:// or https://")
@@ -1393,6 +1416,20 @@ def create_app(db: Database) -> FastAPI:
         per_cluster = body.get("per_cluster", 4)
         run_mode = body.get("run_mode", "batch")
         recurrence = body.get("recurrence", "off")
+
+        # --- Input validation (prevents shell injection via shell=True in daemon) ---
+        import re as _re
+
+        if not isinstance(variants, list) or not all(
+            isinstance(v, str) and _re.fullmatch(r"[A-Za-z0-9_-]+", v) for v in variants
+        ):
+            raise HTTPException(status_code=400, detail="variants must be a list of alphanumeric strings")
+        if not isinstance(per_cluster, int) or not (1 <= per_cluster <= 20):
+            raise HTTPException(status_code=400, detail="per_cluster must be an integer 1-20")
+        if run_mode not in ("batch", "opportunistic", "fill-open-slots", "scheduled"):
+            raise HTTPException(
+                status_code=400, detail="run_mode must be one of: batch, opportunistic, fill-open-slots, scheduled"
+            )
 
         if recurrence == "daily":
             interval_seconds = 86400

@@ -334,6 +334,7 @@ class Database:
                 judge_reasoning          TEXT,
                 target_item_id           TEXT NOT NULL,
                 is_same_cluster          INTEGER NOT NULL,
+                row_type                 TEXT NOT NULL DEFAULT 'judge',
                 score_transfer           INTEGER,
                 score_precision          INTEGER,
                 score_action             INTEGER,
@@ -343,7 +344,8 @@ class Database:
                 override_reason          TEXT,
                 generation_time_s        REAL,
                 queue_job_id             INTEGER,
-                error                    TEXT
+                error                    TEXT,
+                UNIQUE (run_id, variant, source_item_id, target_item_id, row_type)
             );
 
             CREATE TABLE IF NOT EXISTS judge_attempts (

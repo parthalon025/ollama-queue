@@ -69,16 +69,34 @@ def update_eval_run(db: Database, run_id: int, **kwargs: Any) -> None:
 
 
 def insert_eval_result(db: Database, **kwargs: Any) -> int:
-    """INSERT INTO eval_results and return the new row id."""
+    """INSERT OR IGNORE INTO eval_results and return the new (or existing) row id.
+
+    INSERT OR IGNORE handles restarts mid-judge-run: if the UNIQUE constraint on
+    (run_id, variant, source_item_id, target_item_id, row_type) fires, the row
+    already exists and we skip the insert without raising.
+    """
     cols = ", ".join(kwargs.keys())
     placeholders = ", ".join("?" for _ in kwargs)
     vals = list(kwargs.values())
     with db._lock:
         conn = db._connect()
-        cur = conn.execute(f"INSERT INTO eval_results ({cols}) VALUES ({placeholders})", vals)
+        cur = conn.execute(f"INSERT OR IGNORE INTO eval_results ({cols}) VALUES ({placeholders})", vals)
         conn.commit()
-        assert cur.lastrowid is not None
-        return cur.lastrowid
+        if cur.lastrowid:
+            return cur.lastrowid
+        # Row already existed — fetch its id via the unique key
+        row_type = kwargs.get("row_type", "judge")
+        _q = (
+            "SELECT id FROM eval_results"
+            " WHERE run_id=? AND variant=? AND source_item_id=? AND target_item_id=? AND row_type=?"
+        )
+        existing = conn.execute(
+            _q,
+            (kwargs["run_id"], kwargs["variant"], kwargs["source_item_id"], kwargs["target_item_id"], row_type),
+        ).fetchone()
+        if existing is None:
+            raise RuntimeError("insert_eval_result: row not found after INSERT OR IGNORE")
+        return existing[0]
 
 
 def update_eval_result(db: Database, result_id: int, **kwargs: Any) -> None:
@@ -294,9 +312,13 @@ def parse_judge_response(raw: str) -> dict:
     judge_reasoning = think_match.group(1).strip() if think_match else ""
     cleaned = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
 
-    # Find JSON object in the cleaned response
-    json_match = re.search(r"\{[^}]+\}", cleaned)
-    if not json_match:
+    # Find the outermost JSON object: from the first '{' to the last '}'.
+    # Using rfind('}') handles reasoning strings that contain '}' characters
+    # (e.g. "reasoning": "violates {pattern}") which would truncate a [^}]+ regex.
+    _start = cleaned.find("{")
+    _end = cleaned.rfind("}")
+    _json_text = cleaned[_start : _end + 1] if _start >= 0 and _end > _start else None
+    if not _json_text:
         return {
             "transfer": 1,
             "precision": 1,
@@ -307,7 +329,7 @@ def parse_judge_response(raw: str) -> dict:
         }
 
     try:
-        data = json.loads(json_match.group())
+        data = json.loads(_json_text)
     except json.JSONDecodeError:
         return {
             "transfer": 1,
@@ -617,7 +639,8 @@ def _generate_one(
         variant=variant_id,
         source_item_id=str(source_item["id"]),
         target_item_id=str(source_item["id"]),
-        is_same_cluster=0,  # placeholder — judge phase populates real targets
+        is_same_cluster=0,
+        row_type="generation",  # distinguishes from judge rows in queries
         principle=text,
         generation_time_s=generation_time_s,
         queue_job_id=queue_job_id,
@@ -727,14 +750,23 @@ def _select_judge_targets(
     diff_count: int,
 ) -> tuple[list[dict], list[dict]]:
     """Return (same_targets, diff_targets) for one gen_result, deterministically."""
-    same_pool = [it for it in items_by_cluster.get(source_cid, []) if str(it["id"]) != source_item_id]
+    # Sort by id before slicing/shuffling so selection is stable regardless of
+    # the order items arrive from the remote data source endpoint.
+    same_pool = sorted(
+        (it for it in items_by_cluster.get(source_cid, []) if str(it["id"]) != source_item_id),
+        key=lambda it: str(it["id"]),
+    )
     same_targets = same_pool[:same_count]
 
-    diff_pool = [
-        it
-        for it in items
-        if str(it.get("cluster_id") or it.get("cluster_seed") or "") != source_cid and str(it["id"]) != source_item_id
-    ]
+    diff_pool = sorted(
+        (
+            it
+            for it in items
+            if str(it.get("cluster_id") or it.get("cluster_seed") or "") != source_cid
+            and str(it["id"]) != source_item_id
+        ),
+        key=lambda it: str(it["id"]),
+    )
     rng_copy = random.Random(rng.random())  # noqa: S311 — not crypto, deterministic eval selection
     rng_copy.shuffle(diff_pool)
     diff_targets = diff_pool[:diff_count]
@@ -785,6 +817,7 @@ def _judge_one_target(
         source_item_id=source_item_id,
         target_item_id=str(target["id"]),
         is_same_cluster=1 if is_same else 0,
+        row_type="judge",
         principle=principle,
         judge_reasoning=scores.get("judge_reasoning"),
         score_transfer=scores["transfer"],
@@ -808,6 +841,7 @@ def _fetch_scored_rows(db: Database, run_id: int) -> list[dict]:
                           COALESCE(override_score_action, score_action) AS effective_score_action
                    FROM eval_results
                    WHERE run_id = ?
+                     AND row_type = 'judge'
                      AND score_transfer IS NOT NULL
                      AND error IS NULL""",
                 (run_id,),

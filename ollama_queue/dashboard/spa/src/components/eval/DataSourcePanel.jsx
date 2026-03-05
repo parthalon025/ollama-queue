@@ -41,7 +41,8 @@ export default function DataSourcePanel() {
     try {
       const result = await testDataSource();
       setTestResult(result);
-    } catch {
+    } catch (err) {
+      console.error('handleTest failed:', err);
       setTestResult({ ok: false });
     } finally {
       setTesting(false);

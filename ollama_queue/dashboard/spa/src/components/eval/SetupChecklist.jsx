@@ -77,7 +77,8 @@ export default function SetupChecklist() {
           setStep1Status('fail');
           setStep1Detail('Connection failed — check data source URL in settings below.');
         }
-      } catch {
+      } catch (err) {
+        console.error('autoTest failed:', err);
         setStep1Status('fail');
         setStep1Detail('Could not reach data source — check URL and try again.');
       }
@@ -104,7 +105,8 @@ export default function SetupChecklist() {
         setStep1Status('fail');
         setStep1Detail('Connection failed — check URL in settings below.');
       }
-    } catch {
+    } catch (err) {
+      console.error('handleStep1Action failed:', err);
       setStep1Status('fail');
       setStep1Detail('Could not reach data source.');
     }

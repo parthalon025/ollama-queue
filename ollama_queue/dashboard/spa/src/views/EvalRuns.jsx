@@ -1,6 +1,6 @@
 import { h } from 'preact';
 import { useEffect } from 'preact/hooks';
-import { evalActiveRun, fetchEvalRuns, fetchEvalVariants, fetchEvalSettings } from '../store.js';
+import { evalActiveRun, fetchEvalRuns, fetchEvalVariants, fetchEvalSettings, startEvalPoll } from '../store.js';
 import ActiveRunProgress from '../components/eval/ActiveRunProgress.jsx';
 import RunTriggerPanel from '../components/eval/RunTriggerPanel.jsx';
 import RunHistoryTable from '../components/eval/RunHistoryTable.jsx';
@@ -23,6 +23,9 @@ export default function EvalRuns() {
     fetchEvalRuns();
     fetchEvalVariants();
     fetchEvalSettings();
+    // If an active run was restored from sessionStorage, restart polling so the
+    // progress bar continues updating after a page reload.
+    if (hasActiveRun) startEvalPoll(activeRun.run_id);
   }, []);
 
   return (
