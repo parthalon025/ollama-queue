@@ -1524,19 +1524,28 @@ def create_app(db: Database) -> FastAPI:
         """
         from ollama_queue import eval_engine as _ee
 
+        # Accept either variants (list, from SPA) or variant_id (single, legacy/API)
+        variants_list = body.get("variants")
         variant_id = body.get("variant_id")
         cluster_id = body.get("cluster_id")
         run_mode = body.get("run_mode", "batch")
         label = body.get("label")
+        per_cluster = body.get("per_cluster", 4)
+
+        # Normalise: convert list → primary variant_id + variants list
+        if variants_list and isinstance(variants_list, list) and not variant_id:
+            variant_id = variants_list[0]
 
         if not variant_id:
-            raise HTTPException(status_code=400, detail="variant_id is required")
+            raise HTTPException(status_code=400, detail="variant_id or variants list is required")
 
-        # Validate variant exists
+        # Validate all requested variants exist
         conn = db._connect()
-        row = conn.execute("SELECT id FROM eval_variants WHERE id = ?", (variant_id,)).fetchone()
-        if row is None:
-            raise HTTPException(status_code=404, detail=f"Variant '{variant_id}' not found")
+        all_ids = variants_list if variants_list else [variant_id]
+        for vid in all_ids:
+            row = conn.execute("SELECT id FROM eval_variants WHERE id = ?", (vid,)).fetchone()
+            if row is None:
+                raise HTTPException(status_code=404, detail=f"Variant '{vid}' not found")
 
         valid_modes = ("batch", "opportunistic", "fill-open-slots", "scheduled")
         if run_mode not in valid_modes:
@@ -1550,6 +1559,8 @@ def create_app(db: Database) -> FastAPI:
             label=label,
             cluster_id=cluster_id,
             scheduled_by="api",
+            variants=variants_list,
+            per_cluster=int(per_cluster) if per_cluster else 4,
         )
 
         # Run the session in a background thread — NOT as a queued job.

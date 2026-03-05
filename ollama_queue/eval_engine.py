@@ -51,18 +51,25 @@ def create_eval_run(
     data_source_token: str | None = None,
     seed: int | None = None,
     item_ids: str | None = None,
+    variants: list[str] | None = None,
+    per_cluster: int = 4,
 ) -> int:
     """Insert a new eval_runs row with status='queued' and return the new id.
 
     Uses db._lock + db._connect() directly — do NOT modify db.py for this helper.
     data_source_url defaults to the 'eval.data_source_url' setting when not provided.
+
+    variants: if provided, overrides the variants column with a JSON array so
+    run_eval_generate iterates all of them. variant_id is the primary/first variant.
     """
+    import json as _json
     from datetime import UTC
     from datetime import datetime as _dt
 
     now = _dt.now(UTC).isoformat()
     resolved_url = data_source_url or db.get_setting("eval.data_source_url") or "http://127.0.0.1:7685"
-    # variants field (legacy TEXT NOT NULL) stores the single variant_id for backward compat
+    # variants column: JSON array when multiple variants supplied, plain id otherwise
+    variants_value = _json.dumps(variants) if variants and len(variants) > 1 else variant_id
     with db._lock:
         conn = db._connect()
         cur = conn.execute(
@@ -70,10 +77,10 @@ def create_eval_run(
                (variant_id, variants, run_mode, label, cluster_id, scheduled_by,
                 data_source_url, data_source_token, seed, item_ids, status,
                 per_cluster, created_at, started_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 4, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?)""",
             (
                 variant_id,
-                variant_id,  # legacy variants field
+                variants_value,
                 run_mode,
                 label,
                 cluster_id,
@@ -82,6 +89,7 @@ def create_eval_run(
                 data_source_token,
                 seed,
                 item_ids,
+                per_cluster,
                 now,
                 now,  # started_at = created_at for compatibility (NOT NULL constraint)
             ),
