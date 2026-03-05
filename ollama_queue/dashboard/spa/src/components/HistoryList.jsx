@@ -68,6 +68,9 @@ function HistoryRow({ job }) {
   const hasStall = !!job.stall_detected_at;
   const isExpandable = hasReason || hasStall;
   const duration = job.started_at && job.completed_at ? job.completed_at - job.started_at : null;
+  // preemption_count: how many times this job was paused mid-run for a higher-priority job.
+  // Shows as ↺N when > 0 so the user knows the job was interrupted before finishing.
+  const preempted = job.preemption_count > 0;
 
   let stallSignals = null;
   if (hasStall && job.stall_signals) {
@@ -96,6 +99,14 @@ function HistoryRow({ job }) {
             <span style="color: #f97316; margin-left: 4px;">⚠</span>
           )}
         </span>
+        {/* Preemption badge — only shown when job.preemption_count > 0.
+            Shows ↺N to indicate the job was interrupted N times by a higher-priority job. */}
+        {preempted && (
+          <span class="data-mono" title={`Preempted ${job.preemption_count}×`}
+                style="font-size: var(--type-micro); color: #f97316; white-space: nowrap;">
+            ↺{job.preemption_count}
+          </span>
+        )}
         {/* Model */}
         <span class="data-mono" style="font-size: var(--type-label); color: var(--text-secondary); max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
           {job.model || '--'}

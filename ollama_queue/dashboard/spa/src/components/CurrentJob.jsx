@@ -39,6 +39,7 @@ export default function CurrentJob({ daemon, currentJob, latestHealth, settings 
 
   const hp = latestHealth || {};
   const isStalled = isRunning && currentJob && !!currentJob.stall_detected_at;
+  const burstRegime = daemon.burst_regime || 'unknown';
 
   return (
     <div class="t-frame" data-label="Current"
@@ -64,6 +65,10 @@ export default function CurrentJob({ daemon, currentJob, latestHealth, settings 
                   ⚠ stalled
                 </span>
               )}
+              {/* Burst regime badge — shows traffic pattern detected by burst detector.
+               *  steady=normal, burst=high-activity surge, trough=quiet window, unknown=no data yet.
+               *  Helps decide whether to hold off submitting more work (burst) or pile it on (trough). */}
+              <BurstBadge regime={burstRegime} />
             </div>
             <div class="flex items-center gap-2 flex-wrap">
               <span class="data-mono" style="font-size: var(--type-label); color: var(--text-secondary);">
@@ -114,6 +119,34 @@ export default function CurrentJob({ daemon, currentJob, latestHealth, settings 
         </div>
       )}
     </div>
+  );
+}
+
+// What it shows: A small colored label for the current traffic burst regime:
+//   burst (orange), trough (blue), steady (muted green), unknown (grey).
+// Decision it drives: Quick visual cue — burst means the queue is under pressure,
+//   trough means it's a good time to submit batch work.
+const REGIME_STYLE = {
+  burst:   { color: '#f97316', border: '#f97316', bg: 'rgba(249,115,22,0.1)' },
+  trough:  { color: '#60a5fa', border: '#60a5fa', bg: 'rgba(96,165,250,0.1)' },
+  steady:  { color: 'var(--status-healthy)', border: 'var(--status-healthy)', bg: 'rgba(74,222,128,0.08)' },
+  unknown: { color: 'var(--text-tertiary)', border: 'var(--border-subtle)', bg: 'transparent' },
+};
+
+function BurstBadge({ regime }) {
+  if (!regime || regime === 'unknown') return null;
+  const style = REGIME_STYLE[regime] || REGIME_STYLE.unknown;
+  return (
+    <span style={{
+      fontSize: 'var(--type-label)',
+      color: style.color,
+      background: style.bg,
+      padding: '1px 6px',
+      borderRadius: '3px',
+      border: `1px solid ${style.border}`,
+    }}>
+      {regime}
+    </span>
   );
 }
 

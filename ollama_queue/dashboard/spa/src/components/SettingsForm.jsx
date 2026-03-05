@@ -136,7 +136,74 @@ export default function SettingsForm({ settings, daemonState, onSave, onPause, o
         </div>
       </div>
 
-      {/* 7. Daemon Controls */}
+      {/* 7. Circuit Breaker */}
+      {/* What it shows: Automatic fault isolation — how many failures trigger the breaker,
+       *   and how long the daemon backs off before retrying. Prevents a broken Ollama
+       *   from causing cascading job failures.
+       * Decision it drives: Tune failure tolerance vs recovery speed. Low threshold = faster
+       *   isolation; long cooldown = more breathing room for Ollama to recover. */}
+      <div class="t-frame" data-label="Circuit Breaker">
+        <div class="flex flex-col gap-3">
+          <NumberRow label="Failure Threshold" settingKey="cb_failure_threshold" min={1} max={20} settings={settings} flashKey={flashKey} onBlur={handleBlur} />
+          <NumberRow label="Base Cooldown" settingKey="cb_base_cooldown" min={5} unit="sec" settings={settings} flashKey={flashKey} onBlur={handleBlur} />
+          <NumberRow label="Max Cooldown" settingKey="cb_max_cooldown" min={30} unit="sec" settings={settings} flashKey={flashKey} onBlur={handleBlur} />
+        </div>
+      </div>
+
+      {/* 8. Admission */}
+      {/* What it shows: Controls on what gets let into the queue — max depth before 429s,
+       *   minimum VRAM requirement per model, and CPU-offload efficiency multiplier.
+       * Decision it drives: Protect the system from queue floods. Raise max_queue_depth
+       *   if legitimate work is being rejected; lower min_model_vram_mb to allow smaller
+       *   models to run without VRAM checks. */}
+      <div class="t-frame" data-label="Admission">
+        <div class="flex flex-col gap-3">
+          <NumberRow label="Max Queue Depth" settingKey="max_queue_depth" min={1} max={500} settings={settings} flashKey={flashKey} onBlur={handleBlur} />
+          <NumberRow label="Min Model VRAM" settingKey="min_model_vram_mb" min={0} unit="MB" settings={settings} flashKey={flashKey} onBlur={handleBlur} />
+          <NumberRow label="CPU Offload Efficiency" settingKey="cpu_offload_efficiency" min={0.0} max={1.0} step="0.05" unit="×" settings={settings} flashKey={flashKey} onBlur={handleBlur} />
+        </div>
+      </div>
+
+      {/* 9. Scheduling */}
+      {/* What it shows: Shortest-Job-First tuning — how fast older jobs age up in priority
+       *   (aging factor) and how much AoI (Age of Information) urgency matters vs raw SJF.
+       * Decision it drives: If old low-priority jobs get stuck behind fast new jobs, reduce
+       *   sjf_aging_factor or increase aoi_weight to give them more urgency. */}
+      <div class="t-frame" data-label="Scheduling">
+        <div class="flex flex-col gap-3">
+          <NumberRow label="SJF Aging Factor" settingKey="sjf_aging_factor" min={60} unit="sec" settings={settings} flashKey={flashKey} onBlur={handleBlur} />
+          <NumberRow label="AoI Weight" settingKey="aoi_weight" min={0.0} max={1.0} step="0.05" settings={settings} flashKey={flashKey} onBlur={handleBlur} />
+        </div>
+      </div>
+
+      {/* 10. Preemption */}
+      {/* What it shows: Whether the daemon is allowed to pause a low-priority running job
+       *   so a critical job can run first, and the guard rails around doing so.
+       * Decision it drives: Enable preemption for latency-sensitive high-priority jobs;
+       *   tune the window and per-job cap to avoid starving any single job. */}
+      <div class="t-frame" data-label="Preemption">
+        <div class="flex flex-col gap-3">
+          <ToggleRow label="Enable Preemption" settingKey="preemption_enabled" settings={settings} flashKey={flashKey} onSave={onSave} flash={flash} />
+          <NumberRow label="Preemption Window" settingKey="preemption_window_seconds" min={10} unit="sec" settings={settings} flashKey={flashKey} onBlur={handleBlur} />
+          <NumberRow label="Max Preemptions / Job" settingKey="max_preemptions_per_job" min={0} max={10} settings={settings} flashKey={flashKey} onBlur={handleBlur} />
+        </div>
+      </div>
+
+      {/* 11. Entropy */}
+      {/* What it shows: Anomaly detection thresholds — the rolling window size and how many
+       *   standard deviations above baseline triggers a "queue entropy spike" alert, plus
+       *   whether low-priority jobs are suspended during a spike.
+       * Decision it drives: Tighten the sigma to catch subtle anomalies earlier; widen it
+       *   to reduce false-alarm noise during normal traffic variance. */}
+      <div class="t-frame" data-label="Entropy">
+        <div class="flex flex-col gap-3">
+          <NumberRow label="Alert Window" settingKey="entropy_alert_window" min={5} max={120} settings={settings} flashKey={flashKey} onBlur={handleBlur} />
+          <NumberRow label="Alert Sigma" settingKey="entropy_alert_sigma" min={0.5} max={5.0} step="0.1" unit="σ" settings={settings} flashKey={flashKey} onBlur={handleBlur} />
+          <ToggleRow label="Suspend Low-Priority on Spike" settingKey="entropy_suspend_low_priority" settings={settings} flashKey={flashKey} onSave={onSave} flash={flash} />
+        </div>
+      </div>
+
+      {/* 12. Daemon Controls */}
       <div class="t-frame" data-label="Daemon Controls">
         <div class="flex items-center gap-3">
           {isPaused ? (
