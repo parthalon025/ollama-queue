@@ -2,6 +2,7 @@
 
 import logging
 import os
+import shlex
 import time
 
 import click
@@ -36,7 +37,7 @@ def main(ctx, db):
 def submit(ctx, source, model, priority, timeout, dedup, tag, max_retries, command):
     """Submit a job to the queue."""
     db = ctx.obj["db"]
-    cmd_str = " ".join(command)
+    cmd_str = " ".join(shlex.quote(tok) for tok in command)
 
     # Dedup: skip if a pending job from the same source already exists
     if dedup:
@@ -335,7 +336,7 @@ def schedule_add(
     )
     rj_id = db.add_recurring_job(
         name=name,
-        command=" ".join(command),
+        command=" ".join(shlex.quote(tok) for tok in command),
         interval_seconds=interval_seconds,
         cron_expression=cron_expression,
         model=model,

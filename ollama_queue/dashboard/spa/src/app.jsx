@@ -2,7 +2,7 @@ import { h } from 'preact';
 import { useEffect } from 'preact/hooks';
 import {
     currentTab, dlqCount, fetchModels, fetchSchedule,
-    startPolling, stopPolling, status,
+    startPolling, stopPolling, stopEvalPoll, status,
 } from './store';
 import Sidebar from './components/Sidebar.jsx';
 import BottomNav from './components/BottomNav.jsx';
@@ -11,6 +11,7 @@ import Plan from './pages/Plan.jsx';
 import History from './pages/History.jsx';
 import ModelsTab from './pages/ModelsTab.jsx';
 import Settings from './pages/Settings.jsx';
+import Eval from './pages/Eval.jsx';
 
 export function App() {
     useEffect(() => {
@@ -19,6 +20,7 @@ export function App() {
     }, []);
 
     function handleNavigate(viewId) {
+        if (viewId !== 'eval') stopEvalPoll();  // stop eval poll when leaving eval tab
         currentTab.value = viewId;
         if (viewId === 'models') fetchModels();
         if (viewId === 'plan') fetchSchedule();
@@ -30,6 +32,7 @@ export function App() {
             case 'history':  return <History />;
             case 'models':   return <ModelsTab />;
             case 'settings': return <Settings />;
+            case 'eval':     return <Eval />;
             default:         return <Now />;
         }
     }

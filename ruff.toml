@@ -32,6 +32,8 @@ ignore = [
 "tests/**/*.py" = ["S101", "S106", "PLR2004", "E501", "SIM115", "B017", "F841"]
 # FastAPI route registration is inherently large/complex; Body() default is the FastAPI idiom
 "ollama_queue/api.py" = ["B008", "B904", "C901", "PLR0912", "PLR0915"]
+# Eval engine orchestrator is a multi-phase state machine with mode dispatch — complexity by design
+"ollama_queue/eval_engine.py" = ["C901", "PLR0912", "PLR0915"]
 # Daemon poll loop is a single long method by design; shell=True is intentional for user commands
 "ollama_queue/daemon.py" = ["C901", "PLR0911", "PLR0912", "PLR0915", "S602", "S603", "S607"]
 # Health checks run known system binaries (nvidia-smi, ollama) — not user input

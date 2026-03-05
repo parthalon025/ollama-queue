@@ -404,6 +404,19 @@ class Daemon:
         """Reset jobs stuck in 'running' on daemon startup (no live subprocess)."""
         orphans = self.db.get_running_jobs()
         for job in orphans:
+            if job.get("command", "").startswith("proxy:"):
+                # Proxy jobs are tracked in the jobs table as sentinels but must never be
+                # re-queued — they have no subprocess and can't be shell-executed.
+                # The HTTP request that owned this slot already timed out; mark it failed.
+                self.db.complete_job(
+                    job_id=job["id"],
+                    exit_code=-1,
+                    stdout_tail="",
+                    stderr_tail="daemon restart: proxy request abandoned",
+                    outcome_reason="daemon restart",
+                )
+                _log.warning("Abandoned proxy sentinel job #%d on daemon restart", job["id"])
+                continue
             if job.get("pid") and job["pid"] > 0:
                 try:
                     os.kill(job["pid"], _signal.SIGTERM)

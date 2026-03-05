@@ -25,6 +25,155 @@ export const queueEtas = signal([]);
 export const connectionStatus = signal('ok'); // 'ok' | 'disconnected'
 export const loadMap = signal(null);  // /api/schedule/load-map response
 
+// ── Eval pipeline signals ─────────────────────────────────────────────────────
+
+// What it shows: Current sub-tab within the Eval page (Runs / Configurations / Trends / Settings)
+// Decision it drives: Which eval view is displayed
+export const evalSubTab = signal('runs');
+
+// What it shows: List of all eval runs (summary)
+// Decision it drives: Run history table and active run tracking
+export const evalRuns = signal([]);
+
+// What it shows: All eval variant configs (system defaults + user-created)
+// Decision it drives: Variant selection in run trigger panel, config management
+export const evalVariants = signal([]);
+
+// What it shows: All eval prompt templates
+// Decision it drives: Template selection when creating/editing variants
+export const evalTemplates = signal([]);
+
+// What it shows: F1 trend data per variant across completed runs
+// Decision it drives: Trend chart and stability indicators
+export const evalTrends = signal(null);
+
+// What it shows: The currently-active eval run being monitored (persisted to sessionStorage)
+// Decision it drives: Whether to show the live progress panel; resumes after page refresh
+export const evalActiveRun = signal(
+  (() => { try { const v = sessionStorage.getItem('evalActiveRun'); return v ? JSON.parse(v) : null; } catch { return null; } })()
+);
+
+// What it shows: All eval.* settings (data source URL, judge config, etc.)
+// Decision it drives: Settings form state and setup checklist progress
+export const evalSettings = signal({});
+
+// Polling interval ID for active run progress
+let _evalPollId = null;
+
+// What it shows: nothing — controls live progress polling
+// Decision it drives: Starts 5s polling of /api/eval/runs/{id}/progress, stops when run completes
+export function startEvalPoll(runId) {
+  stopEvalPoll();
+  _evalPollId = setInterval(async () => {
+    try {
+      const res = await fetch(`/api/eval/runs/${runId}/progress`);
+      if (!res.ok) return;
+      const data = await res.json();
+      evalActiveRun.value = data;
+      sessionStorage.setItem('evalActiveRun', JSON.stringify(data));
+      if (['complete', 'failed', 'cancelled'].includes(data.status)) {
+        stopEvalPoll();
+      }
+    } catch (e) {
+      console.error('evalPoll failed:', e);
+    }
+  }, 5000);
+}
+
+export function stopEvalPoll() {
+  if (_evalPollId !== null) { clearInterval(_evalPollId); _evalPollId = null; }
+}
+
+// ── Eval data fetch functions ─────────────────────────────────────────────────
+
+// What it shows: nothing — fetches and updates eval variants signal
+// Decision it drives: keeps variant list in sync with backend
+export async function fetchEvalVariants() {
+  try {
+    const res = await fetch(`${API}/eval/variants`);
+    if (res.ok) evalVariants.value = await res.json();
+  } catch (e) { console.error('fetchEvalVariants failed:', e); }
+}
+
+// What it shows: nothing — fetches and updates eval templates signal
+// Decision it drives: keeps template list in sync with backend
+export async function fetchEvalTemplates() {
+  try {
+    const res = await fetch(`${API}/eval/templates`);
+    if (res.ok) evalTemplates.value = await res.json();
+  } catch (e) { console.error('fetchEvalTemplates failed:', e); }
+}
+
+// What it shows: nothing — fetches and updates eval runs signal
+// Decision it drives: keeps run history table and active run tracking in sync
+export async function fetchEvalRuns() {
+  try {
+    const res = await fetch(`${API}/eval/runs`);
+    if (res.ok) evalRuns.value = await res.json();
+  } catch (e) { console.error('fetchEvalRuns failed:', e); }
+}
+
+// What it shows: nothing — fetches and updates eval settings signal
+// Decision it drives: keeps settings form and defaults in sync with backend
+export async function fetchEvalSettings() {
+  try {
+    const res = await fetch(`${API}/eval/settings`);
+    if (res.ok) evalSettings.value = await res.json();
+  } catch (e) { console.error('fetchEvalSettings failed:', e); }
+}
+
+// What it shows: nothing — fetches F1 trend data per variant across completed runs
+// Decision it drives: keeps trend chart and stability table in sync with backend
+export async function fetchEvalTrends() {
+  try {
+    const res = await fetch(`${API}/eval/trends`);
+    if (res.ok) evalTrends.value = await res.json();
+  } catch (e) { console.error('fetchEvalTrends failed:', e); }
+}
+
+// What it shows: nothing — tests the configured data source connection
+// Decision it drives: returns {ok, item_count, cluster_count, response_ms} for setup checklist + status display
+export async function testDataSource() {
+  const res = await fetch(`${API}/eval/datasource/test`);
+  return res.json();
+}
+
+// What it shows: nothing — saves eval settings to the backend
+// Decision it drives: updates evalSettings signal on success; throws on validation or server error
+export async function saveEvalSettings(updates) {
+  const res = await fetch(`${API}/eval/settings`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updates),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || 'Settings save failed');
+  }
+  const updated = await res.json();
+  evalSettings.value = updated;
+  return updated;
+}
+
+// What it shows: nothing — submits a new eval run
+// Decision it drives: returns { run_id } so caller can start polling progress
+export async function triggerEvalRun(body) {
+  const res = await fetch(`${API}/eval/runs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`Trigger failed: ${res.status}`);
+  return res.json(); // { run_id }
+}
+
+// What it shows: nothing — cancels an active eval run
+// Decision it drives: stops live progress polling and refreshes run history
+export async function cancelEvalRun(runId) {
+  await fetch(`${API}/eval/runs/${runId}`, { method: 'DELETE' });
+  await fetchEvalRuns();
+}
+
 // Derive API base from current URL so it works behind Tailscale Serve path prefix.
 // /ui/ → /api, /queue/ui/ → /queue/api
 const pathBase = window.location.pathname.replace(/\/ui\/.*$/, '').replace(/\/ui$/, '');

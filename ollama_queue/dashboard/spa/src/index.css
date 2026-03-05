@@ -600,6 +600,51 @@ body {
   .now-grid { grid-template-columns: 1fr; }
 }
 
+/* ── Eval page layout ── */
+
+.eval-subnav {
+  display: flex;
+  gap: var(--spacing, 8px);
+  padding: var(--spacing-3, 12px);
+  border-bottom: 1px solid var(--border-subtle, #333);
+  flex-wrap: wrap;
+}
+
+.eval-subnav-btn {
+  padding: 4px 12px;
+  background: transparent;
+  border: 1px solid var(--border-subtle, #333);
+  border-radius: var(--radius, 4px);
+  cursor: pointer;
+  color: var(--text-secondary, #ccc);
+  font-size: var(--type-body);
+  font-family: var(--font-mono);
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.eval-subnav-btn.active {
+  background: var(--accent-glow);
+  color: var(--accent);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.eval-subnav-btn:not(.active):hover {
+  border-color: var(--border-primary, #555);
+  color: var(--text-primary);
+}
+
+.eval-content {
+  padding: 1rem 0;
+}
+
+.eval-stub {
+  padding: 1rem;
+  color: var(--text-tertiary, #888);
+  font-family: var(--font-mono);
+  font-size: var(--type-body);
+}
+
 /* History view: 2-column top → 1-column on mobile */
 .history-top-grid {
   display: grid;
@@ -608,4 +653,461 @@ body {
 }
 @media (max-width: 767px) {
   .history-top-grid { grid-template-columns: 1fr; }
+}
+
+/* ── Eval: shared status dot ── */
+/* Used by TrendSummaryBar, DataSourcePanel. Colour set via --dot-color CSS var on same element. */
+.eval-status-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--dot-color, var(--text-tertiary));
+  flex-shrink: 0;
+}
+
+/* ── EvalTrends page ── */
+.eval-trends-page {
+  padding: 0 0 24px;
+}
+
+/* Trend summary bar — one-line status at top of Trends view */
+.eval-trend-summary-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+  font-size: var(--type-body);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.eval-trend-summary-bar--empty {
+  color: var(--text-tertiary);
+  font-weight: 400;
+}
+.eval-trend-summary-bar__label {
+  color: var(--text-primary);
+}
+
+/* F1 line chart wrapper */
+.eval-f1-chart {
+  min-height: 80px;
+}
+.eval-f1-chart-empty {
+  color: var(--text-tertiary);
+  font-size: var(--type-body);
+  min-height: 80px;
+  display: flex;
+  align-items: center;
+}
+
+/* Variant stability table */
+.eval-stability-table {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.eval-stability-row {
+  border-bottom: 1px solid var(--border-subtle);
+}
+.eval-stability-row:last-child {
+  border-bottom: none;
+}
+.eval-stability-row__header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text-primary);
+  font-size: var(--type-body);
+  flex-wrap: wrap;
+}
+.eval-stability-row__header:hover {
+  color: var(--accent);
+}
+.eval-stability-row__id {
+  font-size: var(--type-headline);
+  font-weight: 700;
+  min-width: 24px;
+}
+.eval-stability-row__quality {
+  color: var(--text-secondary);
+}
+.eval-stability-row__delta {
+  color: var(--text-secondary);
+  font-size: var(--type-label);
+}
+.eval-stability-row__direction {
+  font-size: var(--type-label);
+  font-weight: 600;
+}
+.eval-stability-row__toggle {
+  margin-left: auto;
+  color: var(--text-tertiary);
+  font-size: var(--type-label);
+}
+.eval-stability-row__detail {
+  padding: 8px 0 12px 36px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: var(--type-label);
+  color: var(--text-secondary);
+}
+.eval-stability-row__empty {
+  color: var(--text-tertiary);
+}
+
+/* Signal quality panel */
+.eval-signal-quality__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+}
+.eval-signal-quality__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: var(--type-body);
+}
+.eval-signal-quality__row:last-child {
+  border-bottom: none;
+}
+.eval-signal-quality__row dt {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.eval-signal-quality__row dd {
+  margin: 0;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* ── EvalSettings page ── */
+.eval-settings-page {
+  padding: 0 0 24px;
+}
+
+/* Setup checklist */
+.setup-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.setup-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.setup-step:last-child {
+  border-bottom: none;
+}
+.setup-step.complete {
+  opacity: 0.7;
+}
+.setup-step.disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+.setup-step__check {
+  font-size: 1.1rem;
+  margin-top: 1px;
+  color: var(--status-healthy);
+  flex-shrink: 0;
+}
+.setup-step.disabled .setup-step__check,
+.setup-step:not(.complete) .setup-step__check {
+  color: var(--text-tertiary);
+}
+.setup-step__body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+.setup-step__title {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: var(--type-body);
+  margin: 0;
+}
+.setup-step__detail {
+  color: var(--text-secondary);
+  font-size: var(--type-label);
+  margin: 0;
+}
+.setup-step__action {
+  align-self: flex-start;
+  margin-top: 6px;
+  padding: 4px 12px;
+  font-size: var(--type-label);
+}
+
+/* Data source panel */
+.eval-datasource-panel__header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text-primary);
+  font-size: var(--type-body);
+  padding: 0;
+}
+.eval-datasource-panel__header:hover {
+  color: var(--accent);
+}
+.eval-datasource-panel__name {
+  font-weight: 700;
+  font-family: var(--font-mono);
+}
+.eval-datasource-panel__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.eval-token-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.eval-token-row .eval-settings-input {
+  flex: 1;
+}
+
+/* Shared settings form styles */
+.eval-settings-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--type-body);
+  color: var(--text-secondary);
+  font-weight: 500;
+  margin-bottom: 10px;
+}
+.eval-settings-input {
+  padding: 6px 10px;
+  font-size: var(--type-body);
+  width: 100%;
+  box-sizing: border-box;
+}
+.eval-settings-error {
+  color: var(--status-error);
+  font-size: var(--type-label);
+  margin-top: 2px;
+}
+.eval-settings-form__footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-top: 4px;
+}
+
+/* Tooltip trigger */
+.eval-tooltip-trigger {
+  cursor: help;
+  color: var(--text-tertiary);
+  font-size: var(--type-label);
+  font-family: var(--font-mono);
+  padding: 0 2px;
+}
+
+/* ── EvalRuns / EvalVariants shared row layout ── */
+
+/* L1 row — clickable summary line */
+.eval-run-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 10px 0;
+  flex-wrap: wrap;
+}
+.eval-run-row:hover {
+  background: var(--bg-base);
+  border-radius: var(--radius);
+  padding-left: 4px;
+  padding-right: 4px;
+}
+
+/* L2 — expanded detail panel */
+.eval-run-row-l2 {
+  padding: 0.5rem 0.75rem 0.75rem 0.75rem;
+  background: var(--bg-base);
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+
+/* L3 — paginated results / history */
+.eval-run-row-l3 {
+  padding: 0.5rem 0.75rem 0.75rem 1.25rem;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* Variant row L2 (same padding but variant-specific) */
+.eval-variant-row-l2 {
+  padding: 0.5rem 0.75rem 0.75rem 0.75rem;
+  background: var(--bg-base);
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* Metrics table — per-variant F1/recall/precision/actionability grid */
+.eval-metrics-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: var(--type-label);
+}
+.eval-metrics-table th,
+.eval-metrics-table td {
+  border: 1px solid var(--border-subtle);
+  padding: 4px 8px;
+}
+.eval-metrics-table th {
+  background: var(--bg-surface);
+  color: var(--text-tertiary);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.eval-metrics-table tr:hover td {
+  background: var(--bg-surface);
+}
+
+/* Progress bar track + fill */
+.eval-progress-track {
+  height: 8px;
+  background: var(--bg-surface);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.eval-progress-track-sm {
+  height: 4px;
+}
+.eval-progress-bar {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 4px;
+  transition: width 0.4s ease;
+  min-width: 2px;
+}
+
+/* Active run frame override */
+.eval-active-run-frame {
+  border-left: 3px solid var(--accent);
+}
+
+/* Circuit breaker banner */
+.eval-circuit-breaker-banner {
+  background: var(--status-error-glow, rgba(239,68,68,0.1));
+  border: 1px solid var(--status-error);
+  border-radius: var(--radius);
+  padding: 0.5rem 0.75rem;
+  font-family: var(--font-mono);
+  font-size: var(--type-label);
+  color: var(--status-error);
+  margin-bottom: 0.75rem;
+}
+
+/* Badges: recommended ★ and production */
+.eval-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  flex-shrink: 0;
+}
+.eval-badge-recommended {
+  background: var(--accent-glow);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+}
+.eval-badge-production {
+  background: var(--status-healthy-glow, rgba(34,197,94,0.1));
+  color: var(--status-healthy);
+  border: 1px solid var(--status-healthy);
+}
+
+/* Checkbox row layout for variant multi-select and dry-run toggle */
+.eval-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 3px 0;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: var(--type-label);
+}
+.eval-checkbox-row:hover {
+  color: var(--accent);
+}
+
+/* Scheduling mode option layout */
+.eval-mode-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 5px 0;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: var(--type-label);
+}
+.eval-mode-label {
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+.eval-mode-desc {
+  color: var(--text-tertiary);
+  margin-left: 0.5rem;
+}
+.eval-mode-subfields {
+  margin-left: 1.4rem;
+  margin-bottom: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.eval-mode-sub-option {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-family: var(--font-mono);
+  font-size: var(--type-label);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+/* Small numeric input */
+.eval-num-input {
+  width: 60px;
+  padding: 3px 6px;
+  font-size: var(--type-label);
+  font-family: var(--font-mono);
+  text-align: right;
 }
