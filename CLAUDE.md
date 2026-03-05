@@ -16,7 +16,7 @@ ollama_queue/
   estimator.py        # Duration prediction: rolling avg + model-based defaults
   scheduler.py        # Recurring job promotion: promote_due_jobs, update_next_run, rebalance
   dlq.py              # DLQManager: handle_failure routes to retry (backoff) or DLQ
-  api.py              # FastAPI REST API (39 endpoints including /api/generate + /api/embed proxy) + static SPA serving
+  api.py              # FastAPI REST API (40 endpoints including /api/generate + /api/embed proxy) + static SPA serving
   dashboard/
     spa/              # Preact SPA (built separately, served as static)
       src/            # Source: JSX components, signals store, CSS tokens
@@ -25,17 +25,19 @@ scripts/
   migrate_timers.py            # Migrate 8 of 10 systemd timers to recurring jobs (--dry-run / --execute)
   migrate_dlq_max_retries.py   # Add max_retries column to existing dlq table (idempotent)
 tests/
-  test_db.py          # 56 tests
-  test_api.py         # 49 tests (incl. proxy priority, batch schedule, suggest endpoint)
-  test_scheduler.py   # 26 tests
+  test_db.py          # 87 tests
+  test_api.py         # 58 tests (incl. proxy priority, batch schedule, suggest endpoint)
+  test_daemon.py      # 62 tests
+  test_scheduler.py   # 28 tests
   test_stall.py       # 24 tests
-  test_daemon.py      # 34 tests
   test_cli.py         # 27 tests
   test_health.py      # 18 tests
-  test_models.py      # 13 tests
+  test_models.py      # 16 tests
+  test_estimator.py   # 12 tests
+  test_embed_proxy.py # 12 tests
   test_proxy.py       # 8 tests
-  test_estimator.py   # 6 tests
-  test_dlq.py         # 4 tests
+  test_dlq.py         # 8 tests
+  test_burst.py       # 7 tests
 ```
 
 ## How to Run
@@ -45,7 +47,7 @@ tests/
 cd ~/Documents/projects/ollama-queue
 source .venv/bin/activate
 
-# Run tests (262 total)
+# Run tests (367 total)
 pytest
 
 # Start the server (daemon + API + dashboard)
@@ -117,7 +119,7 @@ This applies to: component files, store transformations in `store.js`, computed 
 
 ## Pipeline Verification
 
-**Horizontal:** All 39 API endpoints + static files (includes `/api/generate` and `/api/embed` proxies). **Vertical:** `ollama-queue submit` → DB row → daemon dequeue → subprocess → DB completed → API endpoints reflect → dashboard renders. Recurring: `schedule add` → `promote_due_jobs` → queue → run → `update_next_run`. DLQ: job fails max_retries → `move_to_dlq` → `dlq list` reflects. Full method: `projects/CLAUDE.md` § Pipeline Verification.
+**Horizontal:** All 40 API endpoints + static files (includes `/api/generate` and `/api/embed` proxies). **Vertical:** `ollama-queue submit` → DB row → daemon dequeue → subprocess → DB completed → API endpoints reflect → dashboard renders. Recurring: `schedule add` → `promote_due_jobs` → queue → run → `update_next_run`. DLQ: job fails max_retries → `move_to_dlq` → `dlq list` reflects. Full method: `projects/CLAUDE.md` § Pipeline Verification.
 
 ## Gotchas
 
