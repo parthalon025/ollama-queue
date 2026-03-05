@@ -40,6 +40,57 @@ def get_eval_run(db: Database, run_id: int) -> dict | None:
         return dict(row) if row else None
 
 
+def create_eval_run(
+    db: Database,
+    variant_id: str,
+    run_mode: str = "batch",
+    label: str | None = None,
+    cluster_id: str | None = None,
+    scheduled_by: str | None = None,
+    data_source_url: str | None = None,
+    data_source_token: str | None = None,
+    seed: int | None = None,
+    item_ids: str | None = None,
+) -> int:
+    """Insert a new eval_runs row with status='queued' and return the new id.
+
+    Uses db._lock + db._connect() directly — do NOT modify db.py for this helper.
+    data_source_url defaults to the 'eval.data_source_url' setting when not provided.
+    """
+    from datetime import UTC
+    from datetime import datetime as _dt
+
+    now = _dt.now(UTC).isoformat()
+    resolved_url = data_source_url or db.get_setting("eval.data_source_url") or "http://127.0.0.1:7685"
+    # variants field (legacy TEXT NOT NULL) stores the single variant_id for backward compat
+    with db._lock:
+        conn = db._connect()
+        cur = conn.execute(
+            """INSERT INTO eval_runs
+               (variant_id, variants, run_mode, label, cluster_id, scheduled_by,
+                data_source_url, data_source_token, seed, item_ids, status,
+                per_cluster, created_at, started_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 4, ?, ?)""",
+            (
+                variant_id,
+                variant_id,  # legacy variants field
+                run_mode,
+                label,
+                cluster_id,
+                scheduled_by,
+                resolved_url,
+                data_source_token,
+                seed,
+                item_ids,
+                now,
+                now,  # started_at = created_at for compatibility (NOT NULL constraint)
+            ),
+        )
+        conn.commit()
+        assert cur.lastrowid is not None
+        return cur.lastrowid
+
+
 def get_eval_variant(db: Database, variant_id: str) -> dict | None:
     """Fetch a single eval_variants row by id."""
     with db._lock:

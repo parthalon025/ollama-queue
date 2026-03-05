@@ -127,6 +127,13 @@ class Database:
         self._add_column_if_missing(conn, "jobs", "last_retry_delay", "REAL")  # PR1: decorrelated jitter
         self._add_column_if_missing(conn, "recurring_jobs", "description", "TEXT")  # layman description
         self._add_column_if_missing(conn, "jobs", "preemption_count", "INTEGER DEFAULT 0")  # PR4: preemption tracking
+        # Task 4: eval_runs lifecycle fields
+        self._add_column_if_missing(conn, "eval_runs", "variant_id", "TEXT")
+        self._add_column_if_missing(conn, "eval_runs", "label", "TEXT")
+        self._add_column_if_missing(conn, "eval_runs", "cluster_id", "TEXT")
+        self._add_column_if_missing(conn, "eval_runs", "scheduled_by", "TEXT")
+        self._add_column_if_missing(conn, "eval_runs", "created_at", "TEXT")
+        self._add_column_if_missing(conn, "eval_runs", "data_source_token", "TEXT")
 
     def initialize(self) -> None:
         """Create all tables and seed defaults."""
@@ -299,10 +306,15 @@ class Database:
             CREATE TABLE IF NOT EXISTS eval_runs (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
                 data_source_url TEXT NOT NULL,
+                data_source_token TEXT,
                 variants        TEXT NOT NULL,
-                per_cluster     INTEGER NOT NULL,
+                variant_id      TEXT REFERENCES eval_variants(id),
+                per_cluster     INTEGER NOT NULL DEFAULT 4,
+                label           TEXT,
+                cluster_id      TEXT,
+                scheduled_by    TEXT,
                 status     TEXT NOT NULL CHECK (
-                    status IN ('pending','generating','judging','complete','failed','cancelled')
+                    status IN ('queued','pending','generating','judging','complete','failed','cancelled')
                 ),
                 stage      TEXT,
                 run_mode   TEXT NOT NULL DEFAULT 'batch' CHECK (
@@ -318,7 +330,8 @@ class Database:
                 winner_variant  TEXT,
                 report_md       TEXT,
                 error           TEXT,
-                started_at      TEXT NOT NULL,
+                created_at      TEXT,
+                started_at      TEXT,
                 completed_at    TEXT,
                 max_runs        INTEGER,
                 max_time_s      INTEGER,

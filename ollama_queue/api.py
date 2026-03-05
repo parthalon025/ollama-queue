@@ -1451,6 +1451,350 @@ def create_app(db: Database) -> FastAPI:
         )
         return {"job_id": rj_id}
 
+    # --- Eval: Runs lifecycle ---
+    # NOTE: fixed-path routes (/runs) must be declared before parameterized routes
+    # (/{run_id} sub-routes) to prevent shadowing.
+
+    @app.get("/api/eval/runs")
+    def list_eval_runs(limit: int = 20, offset: int = 0):
+        """Returns a paginated list of eval runs.
+
+        # What it shows: All eval runs in reverse-creation order with summary metrics.
+        # Decision it drives: Lets the user review run history, spot failures, and pick
+        #   a run to promote or judge-rerun.
+        """
+
+        with db._lock:
+            conn = db._connect()
+            rows = conn.execute(
+                """SELECT id, status, variant_id, created_at, completed_at,
+                          item_count, metrics, error_budget, scheduled_by, label
+                   FROM eval_runs
+                   ORDER BY id DESC
+                   LIMIT ? OFFSET ?""",
+                (limit, offset),
+            ).fetchall()
+        result = []
+        for row in rows:
+            r = dict(row)
+            # Parse metrics to surface scalar fields
+            f1 = recall = precision = error_budget_used = None
+            if r.get("metrics"):
+                try:
+                    m = json.loads(r["metrics"])
+                    # Metrics may be keyed by variant_id or be a flat dict
+                    if r.get("variant_id") and r["variant_id"] in m:
+                        vm = m[r["variant_id"]]
+                    elif isinstance(m, dict) and "f1" in m:
+                        vm = m
+                    else:
+                        vm = {}
+                    f1 = vm.get("f1")
+                    recall = vm.get("recall")
+                    precision = vm.get("precision")
+                    error_budget_used = vm.get("error_budget_used")
+                except (ValueError, TypeError):
+                    _log.warning("list_eval_runs: failed to parse metrics for run %s", r.get("id"))
+            result.append(
+                {
+                    "id": r["id"],
+                    "status": r["status"],
+                    "variant_id": r.get("variant_id"),
+                    "created_at": r.get("created_at"),
+                    "completed_at": r.get("completed_at"),
+                    "item_count": r.get("item_count"),
+                    "f1_score": f1,
+                    "recall": recall,
+                    "precision": precision,
+                    "error_budget_used": error_budget_used,
+                    "scheduled_by": r.get("scheduled_by"),
+                    "label": r.get("label"),
+                }
+            )
+        return result
+
+    @app.post("/api/eval/runs")
+    def trigger_eval_run(body: dict = Body(...)):
+        """Trigger a new eval run for a given variant.
+
+        # What it shows: N/A — write-only; new run appears in GET /api/eval/runs.
+        # Decision it drives: Lets the user kick off a fresh evaluation for any variant
+        #   without touching the CLI.
+        """
+        from ollama_queue import eval_engine as _ee
+
+        variant_id = body.get("variant_id")
+        cluster_id = body.get("cluster_id")
+        run_mode = body.get("run_mode", "batch")
+        label = body.get("label")
+
+        if not variant_id:
+            raise HTTPException(status_code=400, detail="variant_id is required")
+
+        # Validate variant exists
+        conn = db._connect()
+        row = conn.execute("SELECT id FROM eval_variants WHERE id = ?", (variant_id,)).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"Variant '{variant_id}' not found")
+
+        valid_modes = ("batch", "opportunistic", "fill-open-slots", "scheduled")
+        if run_mode not in valid_modes:
+            raise HTTPException(status_code=400, detail=f"run_mode must be one of: {', '.join(valid_modes)}")
+
+        # Create the run row
+        run_id = _ee.create_eval_run(
+            db,
+            variant_id=variant_id,
+            run_mode=run_mode,
+            label=label,
+            cluster_id=cluster_id,
+            scheduled_by="api",
+        )
+
+        # Submit a background job to the queue
+        try:
+            db.submit_job(
+                command=f"ollama-queue eval-run --run-id {run_id} --variant {variant_id}",
+                model="",
+                priority=5,
+                timeout=3600,
+                source="eval-api",
+                tag="eval",
+            )
+        except Exception:
+            _log.warning("trigger_eval_run: failed to submit background job for run %d", run_id, exc_info=True)
+
+        return JSONResponse(content={"run_id": run_id}, status_code=201)
+
+    @app.get("/api/eval/runs/{run_id}")
+    def get_eval_run_detail(run_id: int):
+        """Returns full detail for one eval run, including parsed metrics JSON.
+
+        # What it shows: All fields for a single eval run — status, metrics, error, item list.
+        # Decision it drives: Lets the user inspect an individual run's outcome and decide
+        #   whether to promote, judge-rerun, or investigate failures.
+        """
+        from ollama_queue import eval_engine as _ee
+
+        run = _ee.get_eval_run(db, run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail=f"Eval run {run_id} not found")
+
+        # Parse metrics JSON field
+        if run.get("metrics"):
+            try:
+                run["metrics"] = json.loads(run["metrics"])
+            except (ValueError, TypeError):
+                _log.warning("get_eval_run_detail: failed to parse metrics for run %d", run_id)
+        return run
+
+    @app.delete("/api/eval/runs/{run_id}")
+    def cancel_eval_run(run_id: int):
+        """Cancel a queued or running eval run.
+
+        # What it shows: N/A — state change; updated status visible in GET /api/eval/runs/{id}.
+        # Decision it drives: Lets the user abort a run that is stuck or no longer needed
+        #   without waiting for it to time out.
+        """
+        from ollama_queue import eval_engine as _ee
+
+        run = _ee.get_eval_run(db, run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail=f"Eval run {run_id} not found")
+
+        terminal_statuses = {"complete", "failed", "cancelled"}
+        if run["status"] in terminal_statuses:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot cancel run {run_id}: already in terminal status '{run['status']}'",
+            )
+
+        _ee.update_eval_run(db, run_id, status="cancelled")
+        return {"ok": True, "run_id": run_id}
+
+    @app.get("/api/eval/runs/{run_id}/results")
+    def get_eval_run_results(run_id: int, row_type: str | None = None):
+        """Returns all eval_results rows for an eval run, with optional row_type filter.
+
+        # What it shows: Per-item judge scores for one run — source, target, scores, errors.
+        # Decision it drives: Lets the user drill into which items scored well or poorly
+        #   to identify weak spots in a variant's principle transfer.
+        """
+        from ollama_queue import eval_engine as _ee
+
+        run = _ee.get_eval_run(db, run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail=f"Eval run {run_id} not found")
+
+        with db._lock:
+            conn = db._connect()
+            if row_type:
+                rows = conn.execute(
+                    "SELECT * FROM eval_results WHERE run_id = ? AND row_type = ? ORDER BY id",
+                    (run_id, row_type),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM eval_results WHERE run_id = ? ORDER BY id",
+                    (run_id,),
+                ).fetchall()
+        return [dict(r) for r in rows]
+
+    @app.get("/api/eval/runs/{run_id}/progress")
+    def get_eval_run_progress(run_id: int):
+        """Returns live progress for an active eval run (generated, judged, failed counts).
+
+        # What it shows: How far along a running eval is — useful for frontend polling every 5s.
+        # Decision it drives: Lets the user know if a run is progressing normally or stalled.
+        """
+        from ollama_queue import eval_engine as _ee
+
+        run = _ee.get_eval_run(db, run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail=f"Eval run {run_id} not found")
+
+        with db._lock:
+            conn = db._connect()
+            # Total items expected (from item_count or item_ids JSON length)
+            total = run.get("item_count") or 0
+            if not total and run.get("item_ids"):
+                try:
+                    total = len(json.loads(run["item_ids"]))
+                except (ValueError, TypeError):
+                    _log.warning("get_eval_run_progress: failed to parse item_ids for run %d", run_id)
+
+            # Count rows by row_type
+            count_rows = conn.execute(
+                """SELECT row_type, COUNT(*) as cnt
+                   FROM eval_results WHERE run_id = ? GROUP BY row_type""",
+                (run_id,),
+            ).fetchall()
+            counts = {r["row_type"]: r["cnt"] for r in count_rows}
+
+            # Count errors
+            failed_count = conn.execute(
+                "SELECT COUNT(*) as cnt FROM eval_results WHERE run_id = ? AND error IS NOT NULL",
+                (run_id,),
+            ).fetchone()
+            failed = failed_count["cnt"] if failed_count else 0
+
+        generated = counts.get("generate", 0)
+        judged = counts.get("judge", 0)
+        pct = round(judged / total * 100, 1) if total > 0 else 0.0
+
+        return {
+            "run_id": run_id,
+            "status": run["status"],
+            "generated": generated,
+            "total": total,
+            "judged": judged,
+            "failed": failed,
+            "pct_complete": pct,
+        }
+
+    @app.post("/api/eval/runs/{run_id}/promote")
+    def promote_eval_run(run_id: int, body: dict = Body(...)):
+        """Mark a completed run's variant as the production variant in lessons-db.
+
+        # What it shows: N/A — write action; confirms the best variant is now production.
+        # Decision it drives: Lets the user graduate a variant from evaluation to production
+        #   without manual DB edits.
+        """
+        from ollama_queue import eval_engine as _ee
+
+        run = _ee.get_eval_run(db, run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail=f"Eval run {run_id} not found")
+
+        if run["status"] != "complete":
+            raise HTTPException(status_code=400, detail=f"Run {run_id} is not complete (status: {run['status']})")
+
+        model = body.get("model")
+        prompt_template_id = body.get("prompt_template_id")
+        temperature = body.get("temperature")
+        num_ctx = body.get("num_ctx")
+
+        if not model or not prompt_template_id:
+            raise HTTPException(status_code=400, detail="model and prompt_template_id are required")
+
+        data_source_url = (
+            run.get("data_source_url") or db.get_setting("eval.data_source_url") or "http://127.0.0.1:7685"
+        )
+        promote_url = f"{data_source_url.rstrip('/')}/eval/production-variant"
+
+        payload = {
+            "model": model,
+            "prompt_template_id": prompt_template_id,
+            "temperature": temperature,
+            "num_ctx": num_ctx,
+        }
+
+        try:
+            resp = httpx.post(promote_url, json=payload, timeout=10.0)
+            if resp.status_code not in (200, 201, 204):
+                _log.warning("promote_eval_run: lessons-db returned %d for run %d", resp.status_code, run_id)
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"lessons-db promote endpoint returned HTTP {resp.status_code}",
+                )
+        except httpx.HTTPError as exc:
+            _log.warning("promote_eval_run: HTTP error posting to %s: %s", promote_url, exc)
+            raise HTTPException(status_code=502, detail=f"Failed to reach lessons-db: {exc}") from exc
+
+        return {"ok": True, "run_id": run_id, "promoted_to": promote_url}
+
+    @app.post("/api/eval/runs/{run_id}/judge-rerun")
+    def judge_rerun_eval_run(run_id: int, body: dict = Body(default={})):
+        """Re-run the judge phase on an existing completed run with new judge settings.
+
+        # What it shows: N/A — creates a new run; visible in GET /api/eval/runs.
+        # Decision it drives: Lets the user upgrade the judge model or temperature and
+        #   see whether scores change without re-running generation.
+        """
+        from ollama_queue import eval_engine as _ee
+
+        run = _ee.get_eval_run(db, run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail=f"Eval run {run_id} not found")
+
+        if run["status"] not in ("complete", "failed"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"judge-rerun only allowed on complete or failed runs (current: {run['status']})",
+            )
+
+        # Create a new run copying item_ids and seed from the original, starting at judging
+        new_run_id = _ee.create_eval_run(
+            db,
+            variant_id=run.get("variant_id") or run.get("variants", ""),
+            run_mode=run.get("run_mode") or "batch",
+            label=f"Judge rerun of #{run_id}",
+            cluster_id=run.get("cluster_id"),
+            scheduled_by="judge-rerun",
+            data_source_url=run.get("data_source_url"),
+            data_source_token=run.get("data_source_token"),
+            seed=run.get("seed"),
+            item_ids=run.get("item_ids"),
+        )
+
+        # Set status to 'judging' (override 'queued' set by create_eval_run)
+        _ee.update_eval_run(db, new_run_id, status="judging")
+
+        # Submit a background job for the judge phase
+        try:
+            db.submit_job(
+                command=f"ollama-queue eval-run --run-id {new_run_id} --judge-only",
+                model="",
+                priority=5,
+                timeout=3600,
+                source="eval-judge-rerun",
+                tag="eval",
+            )
+        except Exception:
+            _log.warning("judge_rerun_eval_run: failed to submit background job for run %d", new_run_id, exc_info=True)
+
+        return JSONResponse(content={"run_id": new_run_id}, status_code=201)
+
     # --- Static files for SPA ---
     spa_dir = Path(__file__).parent / "dashboard" / "spa" / "dist"
     if spa_dir.exists():
