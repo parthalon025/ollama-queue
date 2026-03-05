@@ -65,16 +65,16 @@ DEFAULTS = {
 EVAL_SETTINGS_DEFAULTS = {
     "eval.data_source_url": "http://127.0.0.1:7685",
     "eval.data_source_token": "",
-    "eval.per_cluster": "4",
-    "eval.same_cluster_targets": "2",
-    "eval.diff_cluster_targets": "2",
+    "eval.per_cluster": 4,
+    "eval.same_cluster_targets": 2,
+    "eval.diff_cluster_targets": 2,
     "eval.judge_model": "deepseek-r1:8b",
     "eval.judge_backend": "ollama",
-    "eval.judge_temperature": "0.1",
-    "eval.f1_threshold": "0.75",
-    "eval.stability_window": "3",
-    "eval.error_budget": "0.30",
-    "eval.setup_complete": "false",
+    "eval.judge_temperature": 0.1,
+    "eval.f1_threshold": 0.75,
+    "eval.stability_window": 3,
+    "eval.error_budget": 0.30,
+    "eval.setup_complete": False,
 }
 
 
@@ -377,9 +377,12 @@ class Database:
             # Seed daemon_state singleton
             conn.execute("INSERT OR IGNORE INTO daemon_state (id, state) VALUES (1, 'idle')")
 
-            conn.commit()
+            # Seed eval prompt templates and variants (inside lock so all init is atomic)
+            import datetime as _dt
 
-            self.seed_eval_defaults(conn)
+            self._do_seed_eval_defaults(conn, _dt.datetime.now(_dt.UTC).isoformat())
+
+            conn.commit()
 
     def seed_eval_defaults(self, conn: sqlite3.Connection | None = None) -> None:
         """Seed system eval prompt templates and variants (idempotent via INSERT OR IGNORE)."""

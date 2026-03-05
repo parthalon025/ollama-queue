@@ -2,7 +2,7 @@ import { h } from 'preact';
 import { useEffect } from 'preact/hooks';
 import {
     currentTab, dlqCount, fetchModels, fetchSchedule,
-    startPolling, stopPolling, status,
+    startPolling, stopPolling, stopEvalPoll, status,
 } from './store';
 import Sidebar from './components/Sidebar.jsx';
 import BottomNav from './components/BottomNav.jsx';
@@ -20,6 +20,7 @@ export function App() {
     }, []);
 
     function handleNavigate(viewId) {
+        if (viewId !== 'eval') stopEvalPoll();  // stop eval poll when leaving eval tab
         currentTab.value = viewId;
         if (viewId === 'models') fetchModels();
         if (viewId === 'plan') fetchSchedule();

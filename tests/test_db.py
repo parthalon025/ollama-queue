@@ -877,6 +877,17 @@ class TestEvalSchema:
         ]
         for key in expected_keys:
             assert key in settings, f"Missing eval setting: {key}"
+        # Verify types are correct (int/float/bool, not pre-stringified)
+        assert settings["eval.per_cluster"] == 4
+        assert isinstance(settings["eval.per_cluster"], int)
+        assert settings["eval.same_cluster_targets"] == 2
+        assert settings["eval.diff_cluster_targets"] == 2
+        assert settings["eval.judge_temperature"] == pytest.approx(0.1)
+        assert isinstance(settings["eval.judge_temperature"], float)
+        assert settings["eval.f1_threshold"] == pytest.approx(0.75)
+        assert settings["eval.stability_window"] == 3
+        assert settings["eval.error_budget"] == pytest.approx(0.30)
+        assert settings["eval.setup_complete"] is False
 
     def test_eval_runs_status_check_rejects_invalid(self, db):
         """eval_runs.status CHECK constraint rejects values not in the allowed set."""

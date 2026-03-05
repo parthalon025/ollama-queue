@@ -17,13 +17,16 @@ const EVAL_TABS = [
 ];
 
 export default function Eval() {
+  // Read .value at top of render body so Preact subscribes this component to signal changes.
+  // Without this, clicking sub-tabs would update the signal but Eval would not re-render.
+  const subTab = evalSubTab.value;
   return (
     <div class="eval-page">
       <nav class="eval-subnav">
         {EVAL_TABS.map(tab => (
           <button
             key={tab.id}
-            class={`eval-subnav-btn${evalSubTab.value === tab.id ? ' active' : ''}`}
+            class={`eval-subnav-btn${subTab === tab.id ? ' active' : ''}`}
             onClick={() => { evalSubTab.value = tab.id; }}
           >
             {tab.label}
@@ -31,10 +34,10 @@ export default function Eval() {
         ))}
       </nav>
       <div class="eval-content">
-        {evalSubTab.value === 'runs'           && <EvalRuns />}
-        {evalSubTab.value === 'configurations' && <EvalVariants />}
-        {evalSubTab.value === 'trends'         && <EvalTrends />}
-        {evalSubTab.value === 'settings'       && <EvalSettings />}
+        {subTab === 'runs'           && <EvalRuns />}
+        {subTab === 'configurations' && <EvalVariants />}
+        {subTab === 'trends'         && <EvalTrends />}
+        {subTab === 'settings'       && <EvalSettings />}
       </div>
     </div>
   );

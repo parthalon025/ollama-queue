@@ -74,7 +74,9 @@ export function startEvalPoll(runId) {
       if (['complete', 'failed', 'cancelled'].includes(data.status)) {
         stopEvalPoll();
       }
-    } catch {}
+    } catch (e) {
+      console.error('evalPoll failed:', e);
+    }
   }, 5000);
 }
 
