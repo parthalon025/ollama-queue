@@ -278,6 +278,7 @@ class Daemon:
         model = job.get("model") or ""
         with self._running_lock:
             if model and model in self._running_models.values():
+                _log.debug("_can_admit: job #%d blocked — model %s already running", job["id"], model)
                 return False
             running_count = len(self._running)
             # Compute committed VRAM inside the lock so the snapshot is consistent
@@ -286,10 +287,14 @@ class Daemon:
 
         # Pull in progress → block
         if self._model_pull_in_progress(model):
+            _log.debug("_can_admit: job #%d blocked — model pull in progress for %s", job["id"], model)
             return False
 
         # Already at capacity → block
         if running_count >= self._max_slots():
+            _log.debug(
+                "_can_admit: job #%d blocked — at capacity (%d/%d slots)", job["id"], running_count, self._max_slots()
+            )
             return False
 
         # Resource gate: estimate whether the new model fits alongside already-committed
@@ -316,6 +321,13 @@ class Daemon:
         health_eval = self.health.evaluate(snap, settings, currently_paused=False)
 
         if not resource_ok or health_eval["should_pause"]:
+            _log.debug(
+                "_can_admit: job #%d blocked — resource_ok=%s health_pause=%s reason=%s",
+                job["id"],
+                resource_ok,
+                health_eval["should_pause"],
+                health_eval.get("reason", ""),
+            )
             return False
 
         # Shadow mode — log but don't admit second job yet
@@ -595,6 +607,8 @@ class Daemon:
         )
 
         if evaluation["should_pause"]:
+            if not currently_paused:
+                _log.warning("Queue pausing (health): %s", evaluation["reason"])
             self.db.update_daemon_state(
                 state="paused_health",
                 paused_reason=evaluation["reason"],
@@ -606,6 +620,8 @@ class Daemon:
 
         # 7. Evaluate yield -> if interactive user, update state, return
         if evaluation["should_yield"]:
+            if not currently_paused:
+                _log.info("Queue yielding to interactive Ollama user: %s", evaluation["reason"])
             self.db.update_daemon_state(
                 state="paused_interactive",
                 paused_reason=evaluation["reason"],
@@ -614,6 +630,10 @@ class Daemon:
                 current_job_id=None,
             )
             return
+
+        # Log recovery from health/interactive pause
+        if currently_paused:
+            _log.info("Queue resuming from %s", current_state)
 
         # 8. Admit and dispatch
         if not self._can_admit(job):
@@ -661,6 +681,13 @@ class Daemon:
     def _run_job(self, job: dict) -> None:
         """Execute a job in a worker thread. Records result in DB."""
         start_time = time.time()
+        _log.info(
+            "Dispatching job #%d source=%s model=%s priority=%d",
+            job["id"],
+            job.get("source", ""),
+            job.get("model") or "",
+            job.get("priority", 5),
+        )
 
         # Pre-flight check_command: gate job on external signal
         if job.get("recurring_job_id"):
@@ -745,6 +772,22 @@ class Daemon:
                         _log.exception("DLQ routing failed for job #%d", job["id"])
                 else:
                     self._record_ollama_success()
+
+            if exit_code == 0:
+                _log.info(
+                    "Job #%d completed: exit_code=0 duration=%.1fs source=%s",
+                    job["id"],
+                    duration,
+                    job.get("source", ""),
+                )
+            else:
+                _log.warning(
+                    "Job #%d failed: exit_code=%d duration=%.1fs source=%s",
+                    job["id"],
+                    exit_code,
+                    duration,
+                    job.get("source", ""),
+                )
 
             # Increment daily counters atomically
             counter_field = "jobs_completed_today" if exit_code == 0 else "jobs_failed_today"
