@@ -1,6 +1,29 @@
 import { h } from 'preact';
-// What it shows: Stub — will show variant configs and prompt templates
-// Decision it drives: Placeholder until Task 10 implements the full view
+import { useEffect } from 'preact/hooks';
+import { fetchEvalVariants, fetchEvalTemplates } from '../store.js';
+import VariantToolbar from '../components/eval/VariantToolbar.jsx';
+import VariantTable from '../components/eval/VariantTable.jsx';
+import TemplateSection from '../components/eval/TemplateSection.jsx';
+// What it shows: The Configurations view — all variant configs and prompt templates.
+//   Toolbar for creating/generating/exporting configs, the full variant table,
+//   and a collapsible template section below.
+// Decision it drives: User manages which configs exist and selects them for runs.
+//   Cloning and editing allows fine-tuning without losing system defaults.
+
+// NOTE: All .map() callbacks use descriptive parameter names — never 'h' (shadows JSX factory)
+
 export default function EvalVariants() {
-  return <div class="eval-stub">Configurations view — coming soon</div>;
+  useEffect(() => {
+    // Load both when view mounts
+    fetchEvalVariants();
+    fetchEvalTemplates();
+  }, []);
+
+  return (
+    <div class="flex flex-col gap-4 animate-page-enter">
+      <VariantToolbar />
+      <VariantTable />
+      <TemplateSection />
+    </div>
+  );
 }

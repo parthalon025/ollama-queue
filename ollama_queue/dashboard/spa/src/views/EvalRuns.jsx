@@ -1,6 +1,40 @@
 import { h } from 'preact';
-// What it shows: Stub — will show eval run history and a trigger panel
-// Decision it drives: Placeholder until Task 9 implements the full view
+import { useEffect } from 'preact/hooks';
+import { evalActiveRun, fetchEvalRuns, fetchEvalVariants, fetchEvalSettings } from '../store.js';
+import ActiveRunProgress from '../components/eval/ActiveRunProgress.jsx';
+import RunTriggerPanel from '../components/eval/RunTriggerPanel.jsx';
+import RunHistoryTable from '../components/eval/RunHistoryTable.jsx';
+// What it shows: The Eval Runs view — live run progress (if active), a collapsible
+//   trigger panel for starting new runs, and the full run history table.
+// Decision it drives: User sees what's running now, can start new runs, and
+//   reviews past results to track which config is winning over time.
+
+// NOTE: All .map() callbacks use descriptive parameter names — never 'h' (shadows JSX factory)
+
 export default function EvalRuns() {
-  return <div class="eval-stub">Runs view — coming soon</div>;
+  // Read .value at top so Preact subscribes to the signal
+  const activeRun = evalActiveRun.value;
+
+  const terminalStatuses = ['complete', 'failed', 'cancelled'];
+  const hasActiveRun = activeRun && !terminalStatuses.includes(activeRun.status);
+
+  useEffect(() => {
+    // Load data when view mounts
+    fetchEvalRuns();
+    fetchEvalVariants();
+    fetchEvalSettings();
+  }, []);
+
+  return (
+    <div class="flex flex-col gap-4 animate-page-enter">
+      {/* Live progress panel — shown only when a run is active */}
+      {hasActiveRun && <ActiveRunProgress />}
+
+      {/* Trigger panel — auto-collapsed when a run is active */}
+      <RunTriggerPanel defaultCollapsed={hasActiveRun} />
+
+      {/* Run history */}
+      <RunHistoryTable />
+    </div>
+  );
 }

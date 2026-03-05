@@ -931,3 +931,183 @@ body {
   font-family: var(--font-mono);
   padding: 0 2px;
 }
+
+/* ── EvalRuns / EvalVariants shared row layout ── */
+
+/* L1 row — clickable summary line */
+.eval-run-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 10px 0;
+  flex-wrap: wrap;
+}
+.eval-run-row:hover {
+  background: var(--bg-base);
+  border-radius: var(--radius);
+  padding-left: 4px;
+  padding-right: 4px;
+}
+
+/* L2 — expanded detail panel */
+.eval-run-row-l2 {
+  padding: 0.5rem 0.75rem 0.75rem 0.75rem;
+  background: var(--bg-base);
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+
+/* L3 — paginated results / history */
+.eval-run-row-l3 {
+  padding: 0.5rem 0.75rem 0.75rem 1.25rem;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* Variant row L2 (same padding but variant-specific) */
+.eval-variant-row-l2 {
+  padding: 0.5rem 0.75rem 0.75rem 0.75rem;
+  background: var(--bg-base);
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* Metrics table — per-variant F1/recall/precision/actionability grid */
+.eval-metrics-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: var(--type-label);
+}
+.eval-metrics-table th,
+.eval-metrics-table td {
+  border: 1px solid var(--border-subtle);
+  padding: 4px 8px;
+}
+.eval-metrics-table th {
+  background: var(--bg-surface);
+  color: var(--text-tertiary);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.eval-metrics-table tr:hover td {
+  background: var(--bg-surface);
+}
+
+/* Progress bar track + fill */
+.eval-progress-track {
+  height: 8px;
+  background: var(--bg-surface);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.eval-progress-track-sm {
+  height: 4px;
+}
+.eval-progress-bar {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 4px;
+  transition: width 0.4s ease;
+  min-width: 2px;
+}
+
+/* Active run frame override */
+.eval-active-run-frame {
+  border-left: 3px solid var(--accent);
+}
+
+/* Circuit breaker banner */
+.eval-circuit-breaker-banner {
+  background: var(--status-error-glow, rgba(239,68,68,0.1));
+  border: 1px solid var(--status-error);
+  border-radius: var(--radius);
+  padding: 0.5rem 0.75rem;
+  font-family: var(--font-mono);
+  font-size: var(--type-label);
+  color: var(--status-error);
+  margin-bottom: 0.75rem;
+}
+
+/* Badges: recommended ★ and production */
+.eval-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  flex-shrink: 0;
+}
+.eval-badge-recommended {
+  background: var(--accent-glow);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+}
+.eval-badge-production {
+  background: var(--status-healthy-glow, rgba(34,197,94,0.1));
+  color: var(--status-healthy);
+  border: 1px solid var(--status-healthy);
+}
+
+/* Checkbox row layout for variant multi-select and dry-run toggle */
+.eval-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 3px 0;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: var(--type-label);
+}
+.eval-checkbox-row:hover {
+  color: var(--accent);
+}
+
+/* Scheduling mode option layout */
+.eval-mode-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 5px 0;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: var(--type-label);
+}
+.eval-mode-label {
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+.eval-mode-desc {
+  color: var(--text-tertiary);
+  margin-left: 0.5rem;
+}
+.eval-mode-subfields {
+  margin-left: 1.4rem;
+  margin-bottom: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.eval-mode-sub-option {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-family: var(--font-mono);
+  font-size: var(--type-label);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+/* Small numeric input */
+.eval-num-input {
+  width: 60px;
+  padding: 3px 6px;
+  font-size: var(--type-label);
+  font-family: var(--font-mono);
+  text-align: right;
+}
