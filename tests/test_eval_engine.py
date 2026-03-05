@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import json
 import random
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from ollama_queue.eval_engine import (
+    _should_throttle,
     build_generation_prompt,
     build_judge_prompt,
     compute_metrics,
     parse_judge_response,
     render_report,
+    run_eval_generate,
 )
 
 # ---------------------------------------------------------------------------
@@ -519,3 +522,353 @@ class TestRenderReport:
         # Table should have header row
         assert "|" in report
         assert "Variant" in report or "variant" in report.lower()
+
+
+class TestShouldThrottle:
+    def _make_db_with_health(self, health: dict) -> MagicMock:
+        """Return a mock db with get_current_health() returning health."""
+        db = MagicMock()
+        db.get_current_health.return_value = health
+        return db
+
+    def test_returns_true_when_ram_high(self):
+        db = self._make_db_with_health({"ram_pct": 90, "vram_pct": 10, "cpu_pct": 10})
+        assert _should_throttle(db) is True
+
+    def test_returns_true_when_vram_high(self):
+        db = self._make_db_with_health({"ram_pct": 10, "vram_pct": 85, "cpu_pct": 10})
+        assert _should_throttle(db) is True
+
+    def test_returns_true_when_cpu_high(self):
+        db = self._make_db_with_health({"ram_pct": 10, "vram_pct": 10, "cpu_pct": 95})
+        assert _should_throttle(db) is True
+
+    def test_returns_false_when_all_low(self):
+        db = self._make_db_with_health({"ram_pct": 50, "vram_pct": 40, "cpu_pct": 30})
+        assert _should_throttle(db) is False
+
+    def test_returns_false_at_exactly_80(self):
+        # Threshold is strict >80, not >=80
+        db = self._make_db_with_health({"ram_pct": 80, "vram_pct": 80, "cpu_pct": 80})
+        assert _should_throttle(db) is False
+
+    def test_returns_true_just_above_80(self):
+        db = self._make_db_with_health({"ram_pct": 80.1, "vram_pct": 0, "cpu_pct": 0})
+        assert _should_throttle(db) is True
+
+    def test_returns_false_on_exception_fail_open(self):
+        """Health check failure must not stall the eval run — fail open."""
+        db = MagicMock()
+        db.get_current_health.side_effect = RuntimeError("health service down")
+        assert _should_throttle(db) is False
+
+    def test_uses_health_log_fallback_when_no_get_current_health(self):
+        """When db lacks get_current_health, fall back to get_health_log."""
+        db = MagicMock(spec=[])  # spec=[] means no attributes by default
+        # Manually add get_health_log — simulates db without get_current_health
+        db.get_health_log = MagicMock(return_value=[{"ram_pct": 95, "vram_pct": 0}])
+        assert _should_throttle(db) is True
+
+    def test_fallback_no_health_log_rows_returns_false(self):
+        """Empty health log means no data — fail open (don't stall)."""
+        db = MagicMock(spec=[])
+        db.get_health_log = MagicMock(return_value=[])
+        assert _should_throttle(db) is False
+
+    def test_missing_keys_default_to_zero(self):
+        """If health dict is missing keys, treat as 0 (not throttled)."""
+        db = self._make_db_with_health({})
+        assert _should_throttle(db) is False
+
+
+# ---------------------------------------------------------------------------
+# run_eval_generate scheduling modes
+# ---------------------------------------------------------------------------
+#
+# Strategy: mock _fetch_items, _generate_one, and db interactions so no
+# network or subprocess calls occur. Inject a no-op _sleep callable to avoid
+# real sleeps in opportunistic-mode tests.
+# ---------------------------------------------------------------------------
+
+
+def _make_run_record(**overrides) -> dict:
+    """Build a minimal eval_runs dict for use in mock DB lookups."""
+    base = {
+        "id": 1,
+        "data_source_url": "http://test-host/",
+        "variants": json.dumps(["A"]),
+        "error_budget": 0.30,
+        "run_mode": "batch",
+        "item_ids": None,
+        "max_runs": None,
+        "max_time_s": None,
+        "runs_completed": 0,
+    }
+    base.update(overrides)
+    return base
+
+
+def _make_variant() -> dict:
+    return {
+        "id": "A",
+        "label": "Baseline",
+        "prompt_template_id": "fewshot",
+        "model": "test-model",
+        "temperature": 0.7,
+        "num_ctx": 4096,
+    }
+
+
+def _make_template() -> dict:
+    return {
+        "id": "fewshot",
+        "label": "Fewshot",
+        "instruction": "Test instruction",
+        "examples": None,
+        "is_chunked": 0,
+    }
+
+
+def _make_items(n: int = 5) -> list[dict]:
+    return [
+        {
+            "id": str(i),
+            "title": f"Item {i}",
+            "one_liner": f"one liner {i}",
+            "description": "",
+            "cluster_id": "c1",
+        }
+        for i in range(n)
+    ]
+
+
+class TestRunEvalGenerateFillOpenSlots:
+    """Tests for fill-open-slots mode stopping at max_runs or max_time_s."""
+
+    def test_stops_at_max_runs(self):
+        """fill-open-slots with max_runs=2 and 5 items stops after 2 submitted."""
+        run = _make_run_record(run_mode="fill-open-slots", max_runs=2, max_time_s=None)
+        items = _make_items(5)
+        submitted_count = []
+
+        with (
+            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval_engine.get_eval_variant", return_value=_make_variant()),
+            patch("ollama_queue.eval_engine.get_eval_template", return_value=_make_template()),
+            patch("ollama_queue.eval_engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
+            patch("ollama_queue.eval_engine._generate_one", side_effect=lambda **kw: submitted_count.append(1) or True),
+            patch("ollama_queue.eval_engine.update_eval_run") as mock_update,
+            patch("ollama_queue.eval_engine.insert_eval_result"),
+        ):
+            run_eval_generate(1, MagicMock(), _sleep=lambda s: None)
+
+        # Exactly 2 jobs submitted (max_runs=2)
+        assert len(submitted_count) == 2
+        # Final status must be judging (not failed)
+        status_calls = [c for c in mock_update.call_args_list if c.kwargs.get("status") == "judging"]
+        assert len(status_calls) >= 1
+
+    def test_stops_at_max_time_s(self):
+        """fill-open-slots with max_time_s stops when wall-clock budget is exhausted."""
+        run = _make_run_record(run_mode="fill-open-slots", max_runs=None, max_time_s=0)
+        # max_time_s=0 means any elapsed time >= 0 triggers the limit immediately
+        # (checked before the first job after at least 1 iteration would trigger it)
+        items = _make_items(5)
+        submitted_count = []
+
+        with (
+            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval_engine.get_eval_variant", return_value=_make_variant()),
+            patch("ollama_queue.eval_engine.get_eval_template", return_value=_make_template()),
+            patch("ollama_queue.eval_engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
+            patch("ollama_queue.eval_engine._generate_one", side_effect=lambda **kw: submitted_count.append(1) or True),
+            patch("ollama_queue.eval_engine.update_eval_run") as mock_update,
+            patch("ollama_queue.eval_engine.insert_eval_result"),
+        ):
+            run_eval_generate(1, MagicMock(), _sleep=lambda s: None)
+
+        # With max_time_s=0, the time check fires on the first iteration (elapsed >= 0).
+        # Zero jobs are submitted because the time limit is checked BEFORE _generate_one.
+        assert len(submitted_count) == 0
+        status_calls = [c for c in mock_update.call_args_list if c.kwargs.get("status") == "judging"]
+        assert len(status_calls) >= 1
+
+    def test_both_limits_count_wins(self):
+        """fill-open-slots with both limits: count fires first when max_runs < item count."""
+        run = _make_run_record(run_mode="fill-open-slots", max_runs=1, max_time_s=9999)
+        items = _make_items(5)
+        submitted_count = []
+
+        with (
+            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval_engine.get_eval_variant", return_value=_make_variant()),
+            patch("ollama_queue.eval_engine.get_eval_template", return_value=_make_template()),
+            patch("ollama_queue.eval_engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
+            patch("ollama_queue.eval_engine._generate_one", side_effect=lambda **kw: submitted_count.append(1) or True),
+            patch("ollama_queue.eval_engine.update_eval_run"),
+            patch("ollama_queue.eval_engine.insert_eval_result"),
+        ):
+            run_eval_generate(1, MagicMock(), _sleep=lambda s: None)
+
+        # Count cap (max_runs=1) fires before time cap (9999s)
+        assert len(submitted_count) == 1
+
+    def test_no_limits_runs_all_items(self):
+        """fill-open-slots with no limits behaves like batch — all items processed."""
+        run = _make_run_record(run_mode="fill-open-slots", max_runs=None, max_time_s=None)
+        items = _make_items(3)
+        submitted_count = []
+
+        with (
+            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval_engine.get_eval_variant", return_value=_make_variant()),
+            patch("ollama_queue.eval_engine.get_eval_template", return_value=_make_template()),
+            patch("ollama_queue.eval_engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
+            patch("ollama_queue.eval_engine._generate_one", side_effect=lambda **kw: submitted_count.append(1) or True),
+            patch("ollama_queue.eval_engine.update_eval_run"),
+            patch("ollama_queue.eval_engine.insert_eval_result"),
+        ):
+            run_eval_generate(1, MagicMock(), _sleep=lambda s: None)
+
+        assert len(submitted_count) == 3
+
+
+class TestRunEvalGenerateOpportunistic:
+    """Tests for opportunistic mode throttling behaviour."""
+
+    def test_sleeps_when_throttled(self):
+        """opportunistic mode calls sleep when _should_throttle returns True."""
+        run = _make_run_record(run_mode="opportunistic")
+        items = _make_items(2)
+        sleep_calls: list = []
+
+        with (
+            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval_engine.get_eval_variant", return_value=_make_variant()),
+            patch("ollama_queue.eval_engine.get_eval_template", return_value=_make_template()),
+            patch("ollama_queue.eval_engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
+            patch("ollama_queue.eval_engine._generate_one", return_value=True),
+            patch("ollama_queue.eval_engine._should_throttle", return_value=True),
+            patch("ollama_queue.eval_engine.update_eval_run"),
+            patch("ollama_queue.eval_engine.insert_eval_result"),
+        ):
+            run_eval_generate(1, MagicMock(), _sleep=lambda s: sleep_calls.append(s))
+
+        # One sleep per item (2 items)
+        assert len(sleep_calls) == 2
+        assert all(s == 30 for s in sleep_calls)
+
+    def test_no_sleep_when_not_throttled(self):
+        """opportunistic mode does not sleep when resources are low."""
+        run = _make_run_record(run_mode="opportunistic")
+        items = _make_items(3)
+        sleep_calls: list = []
+
+        with (
+            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval_engine.get_eval_variant", return_value=_make_variant()),
+            patch("ollama_queue.eval_engine.get_eval_template", return_value=_make_template()),
+            patch("ollama_queue.eval_engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
+            patch("ollama_queue.eval_engine._generate_one", return_value=True),
+            patch("ollama_queue.eval_engine._should_throttle", return_value=False),
+            patch("ollama_queue.eval_engine.update_eval_run"),
+            patch("ollama_queue.eval_engine.insert_eval_result"),
+        ):
+            run_eval_generate(1, MagicMock(), _sleep=lambda s: sleep_calls.append(s))
+
+        assert len(sleep_calls) == 0
+
+
+class TestRunEvalGenerateScheduled:
+    """Tests for scheduled mode logging."""
+
+    def test_scheduled_mode_sets_status_to_judging(self):
+        """scheduled mode is behaviourally identical to batch — ends with judging."""
+        run = _make_run_record(run_mode="scheduled")
+        items = _make_items(2)
+
+        with (
+            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval_engine.get_eval_variant", return_value=_make_variant()),
+            patch("ollama_queue.eval_engine.get_eval_template", return_value=_make_template()),
+            patch("ollama_queue.eval_engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
+            patch("ollama_queue.eval_engine._generate_one", return_value=True),
+            patch("ollama_queue.eval_engine.update_eval_run") as mock_update,
+            patch("ollama_queue.eval_engine.insert_eval_result"),
+        ):
+            run_eval_generate(1, MagicMock(), _sleep=lambda s: None)
+
+        status_calls = [c for c in mock_update.call_args_list if c.kwargs.get("status") == "judging"]
+        assert len(status_calls) >= 1
+
+    def test_scheduled_mode_does_not_sleep(self):
+        """scheduled mode never throttles — no sleep calls."""
+        run = _make_run_record(run_mode="scheduled")
+        items = _make_items(2)
+        sleep_calls: list = []
+
+        with (
+            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval_engine.get_eval_variant", return_value=_make_variant()),
+            patch("ollama_queue.eval_engine.get_eval_template", return_value=_make_template()),
+            patch("ollama_queue.eval_engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
+            patch("ollama_queue.eval_engine._generate_one", return_value=True),
+            patch("ollama_queue.eval_engine.update_eval_run"),
+            patch("ollama_queue.eval_engine.insert_eval_result"),
+        ):
+            run_eval_generate(1, MagicMock(), _sleep=lambda s: sleep_calls.append(s))
+
+        assert len(sleep_calls) == 0
+
+
+class TestRunEvalGenerateBatchDefault:
+    """Verify batch (default) mode is unaffected by the mode dispatch code."""
+
+    def test_batch_mode_processes_all_items(self):
+        """batch mode submits every item regardless of resources."""
+        run = _make_run_record(run_mode="batch")
+        items = _make_items(4)
+        submitted_count = []
+
+        with (
+            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval_engine.get_eval_variant", return_value=_make_variant()),
+            patch("ollama_queue.eval_engine.get_eval_template", return_value=_make_template()),
+            patch("ollama_queue.eval_engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
+            patch("ollama_queue.eval_engine._generate_one", side_effect=lambda **kw: submitted_count.append(1) or True),
+            patch("ollama_queue.eval_engine.update_eval_run"),
+            patch("ollama_queue.eval_engine.insert_eval_result"),
+        ):
+            run_eval_generate(1, MagicMock(), _sleep=lambda s: None)
+
+        assert len(submitted_count) == 4
+
+    def test_default_mode_when_run_mode_missing(self):
+        """run_mode absent in run record defaults to batch behaviour."""
+        run = _make_run_record()
+        del run["run_mode"]  # simulate missing column
+        items = _make_items(2)
+        submitted_count = []
+
+        with (
+            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval_engine.get_eval_variant", return_value=_make_variant()),
+            patch("ollama_queue.eval_engine.get_eval_template", return_value=_make_template()),
+            patch("ollama_queue.eval_engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
+            patch("ollama_queue.eval_engine._generate_one", side_effect=lambda **kw: submitted_count.append(1) or True),
+            patch("ollama_queue.eval_engine.update_eval_run"),
+            patch("ollama_queue.eval_engine.insert_eval_result"),
+        ):
+            run_eval_generate(1, MagicMock(), _sleep=lambda s: None)
+
+        assert len(submitted_count) == 2

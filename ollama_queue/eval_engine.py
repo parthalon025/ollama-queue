@@ -700,21 +700,100 @@ def _generate_one(
     return text is not None
 
 
+_OPPORTUNISTIC_THROTTLE_SLEEP_S = 30  # seconds to sleep when resources are high
+_RESOURCE_HIGH_THRESHOLD = 80  # percent threshold for opportunistic throttling
+
+
+def _should_throttle(db: Database) -> bool:
+    """Return True if system resources are too high for opportunistic scheduling.
+
+    Checks ram_pct, vram_pct, and cpu_pct from db.get_current_health().
+    Falls open on any failure — a health check error should not stall the eval run.
+    Uses the most recent health_log row as a fallback when get_current_health()
+    is not available on the Database instance.
+    """
+    try:
+        if hasattr(db, "get_current_health"):
+            health = db.get_current_health()
+        else:
+            rows = db.get_health_log(hours=1)
+            if not rows:
+                return False
+            health = rows[0]
+
+        return (
+            health.get("ram_pct", 0) > _RESOURCE_HIGH_THRESHOLD
+            or health.get("vram_pct", 0) > _RESOURCE_HIGH_THRESHOLD
+            or health.get("cpu_pct", 0) > _RESOURCE_HIGH_THRESHOLD
+        )
+    except Exception as exc:
+        _log.warning("health check failed during throttle check: %s", exc)
+        return False  # fail open — don't stall on health check failure
+
+
+def _check_fill_open_slots_limit(
+    run_id: int,
+    submitted: int,
+    max_runs: int | None,
+    max_time_s: int | None,
+    fill_start_time: float,
+) -> bool:
+    """Return True if a fill-open-slots limit has been reached.
+
+    Checks count limit (max_runs) before time limit (max_time_s) so that when
+    both are set, the count cap is evaluated first.
+    """
+    if max_runs is not None and submitted >= max_runs:
+        _log.info(
+            "fill-open-slots run %d: max_runs=%d reached after %d submitted — stopping",
+            run_id,
+            max_runs,
+            submitted,
+        )
+        return True
+    if max_time_s is not None:
+        elapsed = time.monotonic() - fill_start_time
+        if elapsed >= max_time_s:
+            _log.info(
+                "fill-open-slots run %d: max_time_s=%d reached (elapsed=%.1fs) after %d submitted — stopping",
+                run_id,
+                max_time_s,
+                elapsed,
+                submitted,
+            )
+            return True
+    return False
+
+
 def run_eval_generate(
     run_id: int,
     db: Database,
     http_base: str = "http://127.0.0.1:7683",
+    _sleep: Any = None,
 ) -> None:
-    """Main generation loop. Runs in batch mode (Task 6 adds other modes).
+    """Main generation loop. Supports batch, opportunistic, fill-open-slots, and scheduled modes.
+
+    Scheduling modes (read from run["run_mode"], default "batch"):
+
+    - batch: Submit all jobs immediately; circuit-break on error_budget.
+    - opportunistic: Submit one job at a time; between jobs, poll system health and
+      sleep 30s if any resource (ram_pct, vram_pct, cpu_pct) exceeds 80%.
+    - fill-open-slots: Like batch but with a concurrency cap. Reads max_runs (count
+      cap) and max_time_s (wall-clock cap) from the run record. Stops at whichever
+      limit is reached first when both are set.
+    - scheduled: Behaviorally identical to batch; logs trigger time.
 
     1. Fetch run config from DB.
     2. Fetch variant configs and templates.
     3. Fetch items from data source.
-    4. For each (variant, source_item) pair: build prompt → submit to proxy →
-       store result in eval_results.
+    4. For each (variant, source_item) pair: apply mode-specific pre-job logic →
+       build prompt → submit to proxy → store result in eval_results.
     5. Circuit breaker: if failure rate > error_budget and submitted >= 10, abort.
     6. On completion: set status='judging'.
     """
+    # Allow callers (and tests) to inject a sleep function; default is time.sleep.
+    _sleep_fn = _sleep if _sleep is not None else time.sleep
+
     run = get_eval_run(db, run_id)
     if run is None:
         _log.error("run_eval_generate: run_id=%d not found", run_id)
@@ -724,6 +803,18 @@ def run_eval_generate(
     variant_ids: list[str] = json.loads(run["variants"])
     error_budget: float = run.get("error_budget") or 0.30
     data_source_token: str = _get_eval_setting(db, "eval.data_source_token", "")
+
+    # --- Mode dispatch setup ---
+    run_mode: str = run.get("run_mode") or "batch"
+    _log.info("eval run %d starting in %s mode", run_id, run_mode)
+
+    if run_mode == "scheduled":
+        _log.info("scheduled run %d triggered at %s", run_id, datetime.now(UTC).isoformat())
+
+    # fill-open-slots limits — read from run record
+    max_runs: int | None = run.get("max_runs")
+    max_time_s: int | None = run.get("max_time_s")
+    fill_start_time: float = time.monotonic()
 
     update_eval_run(db, run_id, status="generating", stage="fetch_items")
 
@@ -757,6 +848,7 @@ def run_eval_generate(
             continue
 
         for source_item in items:
+            # --- Circuit breaker (all modes) ---
             if submitted >= 10 and failed / submitted > error_budget:
                 _log.error(
                     "circuit breaker triggered: %d/%d failed (%.0f%% > %.0f%%)",
@@ -767,6 +859,22 @@ def run_eval_generate(
                 )
                 update_eval_run(db, run_id, status="failed", error=f"circuit_breaker: {failed}/{submitted} failed")
                 return
+
+            # --- fill-open-slots: check limits before each job ---
+            if run_mode == "fill-open-slots" and _check_fill_open_slots_limit(
+                run_id, submitted, max_runs, max_time_s, fill_start_time
+            ):
+                update_eval_run(db, run_id, status="judging", stage="judging")
+                return
+
+            # --- opportunistic: throttle before each job ---
+            if run_mode == "opportunistic" and _should_throttle(db):
+                _log.info(
+                    "opportunistic run %d: resources high — sleeping %ds before next job",
+                    run_id,
+                    _OPPORTUNISTIC_THROTTLE_SLEEP_S,
+                )
+                _sleep_fn(_OPPORTUNISTIC_THROTTLE_SLEEP_S)
 
             ok = _generate_one(
                 db=db,
