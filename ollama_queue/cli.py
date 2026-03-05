@@ -1,5 +1,6 @@
 """Click CLI entry point for ollama-queue."""
 
+import logging
 import os
 import time
 
@@ -184,6 +185,15 @@ def serve(ctx, port):
     import threading
 
     import uvicorn
+
+    # Scope INFO to our package only — root stays at WARNING so third-party
+    # libraries (uvicorn internals, urllib3, etc.) don't flood the journal.
+    # Lesson #246: set package logger level, not root logger level.
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+    logging.getLogger().addHandler(_handler)
+    logging.getLogger().setLevel(logging.WARNING)
+    logging.getLogger("ollama_queue").setLevel(logging.INFO)
 
     from ollama_queue.api import create_app
     from ollama_queue.daemon import Daemon
