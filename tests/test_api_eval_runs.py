@@ -508,3 +508,140 @@ def test_judge_rerun_allowed_on_failed_run(client_and_db):
 
     resp = client.post(f"/api/eval/runs/{run_id}/judge-rerun")
     assert resp.status_code == 201
+
+
+# ---------------------------------------------------------------------------
+# POST /api/eval/runs/{run_id}/repeat  (Task 13 — reproducibility)
+# ---------------------------------------------------------------------------
+
+
+def _insert_reproducible_run(db: Database, *, item_ids=None, seed=None, status="complete") -> int:
+    """Insert a minimal eval_runs row with reproducibility fields and return its id."""
+    import datetime
+
+    with db._lock:
+        conn = db._connect()
+        cur = conn.execute(
+            """INSERT INTO eval_runs
+               (data_source_url, variants, per_cluster, status, run_mode,
+                item_ids, seed, started_at)
+               VALUES (?, ?, ?, ?, 'batch',
+                       ?, ?, ?)""",
+            (
+                "http://127.0.0.1:7685",
+                json.dumps(["A", "B"]),
+                4,
+                status,
+                json.dumps(item_ids) if item_ids is not None else None,
+                seed,
+                datetime.datetime.now(datetime.UTC).isoformat(),
+            ),
+        )
+        conn.commit()
+        return cur.lastrowid
+
+
+def test_repeat_run_returns_new_run_id(client_and_db):
+    """POST /api/eval/runs/{id}/repeat creates a new run and returns its run_id."""
+
+    client, db = client_and_db
+    pairs = [["101", "202"], ["101", "303"]]
+    orig_id = _insert_reproducible_run(db, item_ids=pairs, seed=1234)
+
+    resp = client.post(f"/api/eval/runs/{orig_id}/repeat")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "run_id" in data
+    new_id = data["run_id"]
+    assert isinstance(new_id, int)
+    assert new_id != orig_id
+
+
+def test_repeat_run_copies_seed_and_item_ids(client_and_db):
+    """Repeated run inherits the original run's seed and item_ids verbatim."""
+    client, db = client_and_db
+    pairs = [["10", "20"], ["10", "30"]]
+    orig_id = _insert_reproducible_run(db, item_ids=pairs, seed=555)
+
+    resp = client.post(f"/api/eval/runs/{orig_id}/repeat")
+    assert resp.status_code == 200
+    new_id = resp.json()["run_id"]
+
+    with db._lock:
+        conn = db._connect()
+        row = conn.execute("SELECT * FROM eval_runs WHERE id = ?", (new_id,)).fetchone()
+    assert row is not None
+    new_run = dict(row)
+
+    assert new_run["seed"] == 555
+    assert json.loads(new_run["item_ids"]) == pairs
+    assert new_run["status"] == "pending"
+
+
+def test_repeat_run_422_when_no_item_ids(client_and_db):
+    """POST repeat returns 422 when the original run has no item_ids."""
+    client, db = client_and_db
+    orig_id = _insert_reproducible_run(db, item_ids=None, seed=42)
+
+    resp = client.post(f"/api/eval/runs/{orig_id}/repeat")
+    assert resp.status_code == 422
+    assert "reproducibility" in resp.json()["detail"]
+
+
+def test_repeat_run_422_when_no_seed(client_and_db):
+    """POST repeat returns 422 when the original run has no seed."""
+    client, db = client_and_db
+    orig_id = _insert_reproducible_run(db, item_ids=[["1", "2"]], seed=None)
+
+    resp = client.post(f"/api/eval/runs/{orig_id}/repeat")
+    assert resp.status_code == 422
+    assert "reproducibility" in resp.json()["detail"]
+
+
+def test_repeat_run_404_for_missing_original(client):
+    """POST repeat returns 404 when the original run does not exist."""
+    resp = client.post("/api/eval/runs/9999/repeat")
+    assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Seed persistence — run_eval_generate() writes seed when none present
+# ---------------------------------------------------------------------------
+
+
+def test_run_eval_generate_persists_seed_when_none(tmp_path):
+    """run_eval_generate() generates and writes a seed when the run has no seed."""
+    import datetime
+    from unittest.mock import patch
+
+    from ollama_queue.eval_engine import get_eval_run, run_eval_generate
+
+    db = Database(str(tmp_path / "test.db"))
+    db.initialize()
+
+    with db._lock:
+        conn = db._connect()
+        cur = conn.execute(
+            """INSERT INTO eval_runs
+               (data_source_url, variants, per_cluster, status, run_mode,
+                seed, started_at)
+               VALUES (?, ?, ?, 'pending', ?, NULL, ?)""",
+            (
+                "http://127.0.0.1:7685",
+                json.dumps(["A"]),
+                4,
+                "batch",
+                datetime.datetime.now(datetime.UTC).isoformat(),
+            ),
+        )
+        conn.commit()
+        run_id = cur.lastrowid
+
+    # Patch _fetch_items to return empty so the function exits early after seeding
+    with patch("ollama_queue.eval_engine._fetch_items", return_value=[]):
+        run_eval_generate(run_id, db, http_base="http://127.0.0.1:7683")
+
+    run = get_eval_run(db, run_id)
+    assert run is not None
+    assert run["seed"] is not None
+    assert isinstance(run["seed"], int)

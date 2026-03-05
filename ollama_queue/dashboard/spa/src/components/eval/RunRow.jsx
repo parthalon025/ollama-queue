@@ -2,6 +2,7 @@ import { h } from 'preact';
 import { useState } from 'preact/hooks';
 import { EVAL_TRANSLATIONS } from './translations.js';
 import ResultsTable from './ResultsTable.jsx';
+import { evalActiveRun, evalSubTab, fetchEvalRuns } from '../../store.js';
 // What it shows: A single eval run row with 3-level progressive disclosure.
 //   L1: status dot, winner config, quality score, date, item count.
 //   L2: per-variant metric table, scorer info, action buttons.
@@ -48,6 +49,8 @@ function fmtPct(val) {
 
 export default function RunRow({ run }) {
   const [level, setLevel] = useState(1); // 1 | 2 | 3
+  const [repeatError, setRepeatError] = useState(null);
+  const [repeating, setRepeating] = useState(false);
 
   const {
     id,
@@ -57,7 +60,34 @@ export default function RunRow({ run }) {
     item_count,
     started_at,
     judge_model,
+    item_ids,
   } = run;
+
+  // Only show Repeat button for runs that have reproducibility data persisted
+  const canRepeat = Boolean(item_ids);
+
+  async function handleRepeat(evt) {
+    evt.stopPropagation();
+    setRepeatError(null);
+    setRepeating(true);
+    try {
+      const res = await fetch(`/api/eval/runs/${id}/repeat`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) {
+        setRepeatError(data.detail || 'Repeat failed');
+        return;
+      }
+      // Switch to runs sub-tab and set the new run as the active run
+      evalSubTab.value = 'runs';
+      evalActiveRun.value = { run_id: data.run_id, status: 'pending' };
+      // Refresh run list so the new run appears immediately
+      await fetchEvalRuns();
+    } catch (exc) {
+      setRepeatError(String(exc));
+    } finally {
+      setRepeating(false);
+    }
+  }
 
   // Parse metrics JSON if it came as string
   let parsedMetrics = {};
@@ -202,6 +232,22 @@ export default function RunRow({ run }) {
             <button class="t-btn t-btn-secondary" style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }}>
               Export
             </button>
+            {canRepeat && (
+              <button
+                class="t-btn t-btn-secondary"
+                style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }}
+                disabled={repeating}
+                onClick={handleRepeat}
+                title="Re-run this eval with the same items and seed"
+              >
+                {repeating ? 'Starting…' : '↺ Repeat'}
+              </button>
+            )}
+            {repeatError && (
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--status-error)' }}>
+                {repeatError}
+              </span>
+            )}
             <button
               class="t-btn t-btn-secondary"
               style={{ fontSize: 'var(--type-label)', padding: '3px 10px', marginLeft: 'auto' }}

@@ -765,6 +765,18 @@ def _check_fill_open_slots_limit(
     return False
 
 
+def _ensure_seed(db: Database, run_id: int, run: dict) -> None:
+    """Generate and persist a random seed if the run has none.
+
+    Called before the generation loop so that run_eval_judge() can use the
+    same seed for deterministic target selection on the first run.
+    """
+    if run.get("seed") is None:
+        generated_seed = random.randint(0, 2**31 - 1)  # noqa: S311 — not crypto
+        update_eval_run(db, run_id, seed=generated_seed)
+        _log.info("_ensure_seed: generated seed=%d for run_id=%d", generated_seed, run_id)
+
+
 def run_eval_generate(
     run_id: int,
     db: Database,
@@ -815,6 +827,10 @@ def run_eval_generate(
     max_runs: int | None = run.get("max_runs")
     max_time_s: int | None = run.get("max_time_s")
     fill_start_time: float = time.monotonic()
+
+    # Ensure a seed exists before generation starts — required for reproducibility.
+    # Delegated to _ensure_seed to keep run_eval_generate's cyclomatic complexity in check.
+    _ensure_seed(db, run_id, run)
 
     update_eval_run(db, run_id, status="generating", stage="fetch_items")
 
@@ -1064,6 +1080,10 @@ def run_eval_judge(
     source_tag = f"eval-run-{run_id}-judge"
     update_eval_run(db, run_id, stage="judging")
 
+    # Collect all (source_item_id, target_item_id) pairs so they can be persisted
+    # for exact replay via the repeat endpoint.
+    judge_pairs: list[list[str]] = []
+
     for gen_result in gen_results:
         source_item_id = str(gen_result["source_item_id"])
         principle = gen_result["principle"]
@@ -1085,6 +1105,7 @@ def run_eval_judge(
 
         for is_same, target_list in [(True, same_targets), (False, diff_targets)]:
             for target in target_list:
+                judge_pairs.append([source_item_id, str(target["id"])])
                 _judge_one_target(
                     db=db,
                     run_id=run_id,
@@ -1099,11 +1120,19 @@ def run_eval_judge(
                     http_base=http_base,
                 )
 
+    # Persist exact (source_item_id, target_item_id) pairs for reproducibility.
+    # This overwrites the coarse source-only item_ids stored during generation.
+    if judge_pairs:
+        update_eval_run(db, run_id, item_ids=json.dumps(judge_pairs))
+        _log.info("run_eval_judge: persisted %d judge pairs for run_id=%d", len(judge_pairs), run_id)
+
     scored_rows = _fetch_scored_rows(db, run_id)
     metrics = compute_metrics(scored_rows)
     winner = max(metrics.keys(), key=lambda v: metrics[v]["f1"]) if metrics else None
     report_md = render_report(run_id, metrics, db)
 
+    # Persist full metrics snapshot and completion timestamp for trend analysis
+    # and the repeat endpoint to verify reproducibility data is present.
     update_eval_run(
         db,
         run_id,

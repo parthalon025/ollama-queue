@@ -1692,6 +1692,66 @@ def create_app(db: Database) -> FastAPI:
             "pct_complete": pct,
         }
 
+    @app.post("/api/eval/runs/{run_id}/repeat")
+    def repeat_eval_run(run_id: int):
+        """Create a new eval run that exactly replicates a completed run's item set and seed.
+
+        # What it shows: N/A — write-only; the new run appears in GET /api/eval/runs.
+        # Decision it drives: Lets the user re-run an identical eval to verify result stability
+        #   or compare against a configuration change while holding all other variables constant.
+        """
+        import datetime as _dt
+
+        with db._lock:
+            conn = db._connect()
+            orig_row = conn.execute("SELECT * FROM eval_runs WHERE id = ?", (run_id,)).fetchone()
+        if orig_row is None:
+            raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+
+        orig = dict(orig_row)
+
+        # Require reproducibility data — item_ids and seed must both be present.
+        if not orig.get("item_ids") or orig.get("seed") is None:
+            raise HTTPException(
+                status_code=422,
+                detail="original run has no reproducibility data",
+            )
+
+        started_at = _dt.datetime.now(_dt.UTC).isoformat()
+        with db._lock:
+            conn = db._connect()
+            cur = conn.execute(
+                """INSERT INTO eval_runs
+                   (data_source_url, variants, per_cluster, status, run_mode,
+                    item_ids, seed, judge_model, judge_backend, error_budget,
+                    started_at)
+                   VALUES (?, ?, ?, 'pending', ?,
+                           ?, ?, ?, ?, ?,
+                           ?)""",
+                (
+                    orig["data_source_url"],
+                    orig["variants"],
+                    orig["per_cluster"],
+                    orig.get("run_mode") or "batch",
+                    orig["item_ids"],
+                    orig["seed"],
+                    orig.get("judge_model"),
+                    orig.get("judge_backend"),
+                    orig.get("error_budget") or 0.30,
+                    started_at,
+                ),
+            )
+            conn.commit()
+            new_run_id = cur.lastrowid
+
+        _log.info(
+            "repeat_eval_run: created run_id=%d as repeat of run_id=%d (seed=%d)",
+            new_run_id,
+            run_id,
+            orig["seed"],
+        )
+        return {"run_id": new_run_id}
+
     @app.post("/api/eval/runs/{run_id}/promote")
     def promote_eval_run(run_id: int, body: dict = Body(...)):
         """Mark a completed run's variant as the production variant in lessons-db.
