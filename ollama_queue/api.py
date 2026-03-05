@@ -780,6 +780,640 @@ def create_app(db: Database) -> FastAPI:
         jobs = db.get_pending_jobs()
         return DurationEstimator(db).queue_etas(jobs)
 
+    # --- Eval: helpers ---
+
+    def _get_eval_variant(conn, variant_id: str) -> dict:
+        """Fetch a single eval_variant row; raise 404 if missing."""
+        row = conn.execute("SELECT * FROM eval_variants WHERE id = ?", (variant_id,)).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"Variant '{variant_id}' not found")
+        return dict(row)
+
+    def _get_eval_template(conn, template_id: str) -> dict:
+        """Fetch a single eval_prompt_templates row; raise 404 if missing."""
+        row = conn.execute("SELECT * FROM eval_prompt_templates WHERE id = ?", (template_id,)).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"Template '{template_id}' not found")
+        return dict(row)
+
+    # --- Eval: Variants ---
+    # NOTE: fixed-path routes (/generate, /generate/preview, /export, /import)
+    # must come before parameterized routes (/{variant_id}) to avoid shadowing.
+
+    @app.get("/api/eval/variants")
+    def list_eval_variants():
+        """Returns all eval_variants rows with latest_f1 from the most recent complete run."""
+        conn = db._connect()
+        variants = [dict(r) for r in conn.execute("SELECT * FROM eval_variants ORDER BY created_at").fetchall()]
+        # Compute latest_f1 per variant from eval_runs.metrics (JSON column)
+        runs = conn.execute("SELECT metrics FROM eval_runs WHERE status = 'complete' ORDER BY id ASC").fetchall()
+        latest_f1: dict[str, float | None] = {}
+        for run_row in runs:
+            if not run_row["metrics"]:
+                continue
+            try:
+                metrics = json.loads(run_row["metrics"])
+            except (ValueError, TypeError):
+                continue
+            for var_id, var_metrics in metrics.items():
+                if isinstance(var_metrics, dict) and "f1" in var_metrics:
+                    latest_f1[var_id] = var_metrics["f1"]
+        for v in variants:
+            v["latest_f1"] = latest_f1.get(v["id"])
+        return variants
+
+    @app.get("/api/eval/variants/generate/preview")
+    def preview_eval_variants_generate(models: str = "", template_id: str | None = None):
+        """Returns proposed variant labels and count WITHOUT creating anything.
+
+        What it shows: What would be bulk-created if the user triggers /generate.
+        Decision it drives: Lets the user confirm the count and names before committing.
+        """
+        model_list = [m.strip() for m in models.split(",") if m.strip()]
+        tmpl_id = template_id or "zero-shot-causal"
+        names = [f"Auto: {m} ({tmpl_id})" for m in model_list]
+        return {"would_create": len(names), "names": names}
+
+    @app.get("/api/eval/variants/export")
+    def export_eval_variants():
+        """Returns all user (is_system=0) variants and their templates as JSON.
+
+        What it shows: Portable variant config for backup or cross-machine transfer.
+        Decision it drives: Enables cloning a tuned variant set to another setup.
+        """
+        import datetime as _dt
+
+        conn = db._connect()
+        variants = [dict(r) for r in conn.execute("SELECT * FROM eval_variants WHERE is_system = 0").fetchall()]
+        # Collect only the templates referenced by user variants
+        tmpl_ids = {v["prompt_template_id"] for v in variants}
+        templates = []
+        if tmpl_ids:
+            placeholders = ",".join("?" * len(tmpl_ids))
+            templates = [
+                dict(r)
+                for r in conn.execute(
+                    f"SELECT * FROM eval_prompt_templates WHERE id IN ({placeholders})",
+                    list(tmpl_ids),
+                ).fetchall()
+            ]
+        return JSONResponse(
+            content={
+                "variants": variants,
+                "templates": templates,
+                "exported_at": _dt.datetime.now(_dt.UTC).isoformat(),
+            }
+        )
+
+    @app.post("/api/eval/variants/import")
+    def import_eval_variants(body: dict = Body(...)):
+        """Bulk-import variants and templates (non-destructive, skips existing IDs).
+
+        What it shows: N/A — write-only endpoint.
+        Decision it drives: Enables restoring or copying variant configs without manual re-entry.
+        """
+        import datetime as _dt
+
+        variants = body.get("variants", [])
+        templates = body.get("templates", [])
+        conn = db._connect()
+        now = _dt.datetime.now(_dt.UTC).isoformat()
+        variants_imported = 0
+        templates_imported = 0
+        with db._lock:
+            for tmpl in templates:
+                cur = conn.execute(
+                    """INSERT OR IGNORE INTO eval_prompt_templates
+                       (id, label, instruction, format_spec, examples, is_chunked, is_system, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        tmpl.get("id"),
+                        tmpl.get("label"),
+                        tmpl.get("instruction"),
+                        tmpl.get("format_spec"),
+                        tmpl.get("examples"),
+                        tmpl.get("is_chunked", 0),
+                        0,  # imported = user-owned
+                        tmpl.get("created_at") or now,
+                    ),
+                )
+                templates_imported += cur.rowcount
+            for var in variants:
+                cur = conn.execute(
+                    """INSERT OR IGNORE INTO eval_variants
+                       (id, label, prompt_template_id, model, temperature, num_ctx,
+                        is_recommended, is_system, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        var.get("id"),
+                        var.get("label"),
+                        var.get("prompt_template_id"),
+                        var.get("model"),
+                        var.get("temperature", 0.6),
+                        var.get("num_ctx", 8192),
+                        var.get("is_recommended", 0),
+                        0,  # imported = user-owned
+                        var.get("created_at") or now,
+                    ),
+                )
+                variants_imported += cur.rowcount
+            conn.commit()
+        return {"variants_imported": variants_imported, "templates_imported": templates_imported}
+
+    @app.post("/api/eval/variants/generate")
+    def generate_eval_variants(body: dict = Body(...)):
+        """Bulk-create one user variant per model in the provided list.
+
+        What it shows: N/A — write-only; created variants appear in GET /api/eval/variants.
+        Decision it drives: Lets the user quickly populate variant configs for all installed models.
+        """
+        import datetime as _dt
+        import uuid
+
+        models_list = body.get("models", [])
+        tmpl_id = body.get("template_id") or "zero-shot-causal"
+        if not models_list:
+            raise HTTPException(status_code=400, detail="models list is required")
+        conn = db._connect()
+        # Validate template exists
+        _get_eval_template(conn, tmpl_id)
+        now = _dt.datetime.now(_dt.UTC).isoformat()
+        created = []
+        with db._lock:
+            for model_name in models_list:
+                new_id = str(uuid.uuid4())[:8]
+                label = f"Auto: {model_name} ({tmpl_id})"
+                conn.execute(
+                    """INSERT INTO eval_variants
+                       (id, label, prompt_template_id, model, temperature, num_ctx,
+                        is_recommended, is_system, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (new_id, label, tmpl_id, model_name, 0.6, 8192, 0, 0, now),
+                )
+                created.append(
+                    {
+                        "id": new_id,
+                        "label": label,
+                        "prompt_template_id": tmpl_id,
+                        "model": model_name,
+                        "temperature": 0.6,
+                        "num_ctx": 8192,
+                        "is_recommended": 0,
+                        "is_system": 0,
+                        "created_at": now,
+                    }
+                )
+            conn.commit()
+        return {"created": len(created), "variants": created}
+
+    @app.post("/api/eval/variants")
+    def create_eval_variant(body: dict = Body(...)):
+        """Create a new user eval variant.
+
+        What it shows: N/A — write-only; created variant appears in GET /api/eval/variants.
+        Decision it drives: Lets the user test a custom model x template x parameter combination.
+        """
+        import datetime as _dt
+        import uuid
+
+        label = body.get("label")
+        tmpl_id = body.get("prompt_template_id")
+        model = body.get("model")
+        if not label or not tmpl_id or not model:
+            raise HTTPException(status_code=400, detail="label, prompt_template_id, and model are required")
+        conn = db._connect()
+        _get_eval_template(conn, tmpl_id)
+        now = _dt.datetime.now(_dt.UTC).isoformat()
+        new_id = str(uuid.uuid4())[:8]
+        with db._lock:
+            conn.execute(
+                """INSERT INTO eval_variants
+                   (id, label, prompt_template_id, model, temperature, num_ctx,
+                    is_recommended, is_system, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    new_id,
+                    label,
+                    tmpl_id,
+                    model,
+                    body.get("temperature", 0.6),
+                    body.get("num_ctx", 8192),
+                    1 if body.get("is_recommended") else 0,
+                    0,  # user-created
+                    now,
+                ),
+            )
+            conn.commit()
+        row = _get_eval_variant(conn, new_id)
+        return JSONResponse(content=row, status_code=201)
+
+    @app.get("/api/eval/variants/{variant_id}/history")
+    def eval_variant_history(variant_id: str):
+        """Returns F1/recall/precision history across completed eval_runs for one variant.
+
+        What it shows: Per-run quality scores for a single variant over time.
+        Decision it drives: Lets the user see whether a variant is improving, stable, or regressing.
+        """
+        conn = db._connect()
+        _get_eval_variant(conn, variant_id)
+        runs = conn.execute(
+            "SELECT id, started_at, metrics FROM eval_runs WHERE status = 'complete' ORDER BY id ASC"
+        ).fetchall()
+        history = []
+        for run_row in runs:
+            if not run_row["metrics"]:
+                continue
+            try:
+                metrics = json.loads(run_row["metrics"])
+            except (ValueError, TypeError):
+                continue
+            var_metrics = metrics.get(variant_id)
+            if not var_metrics or not isinstance(var_metrics, dict):
+                continue
+            history.append(
+                {
+                    "run_id": run_row["id"],
+                    "started_at": run_row["started_at"],
+                    "f1": var_metrics.get("f1"),
+                    "recall": var_metrics.get("recall"),
+                    "precision": var_metrics.get("precision"),
+                }
+            )
+        return history
+
+    @app.post("/api/eval/variants/{variant_id}/clone")
+    def clone_eval_variant(variant_id: str, body: dict = Body(default={})):
+        """Clone any variant (system or user) into a new user variant.
+
+        What it shows: N/A — write-only; the new variant appears in GET /api/eval/variants.
+        Decision it drives: Lets the user safely experiment by copying a baseline without losing the original.
+        """
+        import datetime as _dt
+        import uuid
+
+        conn = db._connect()
+        original = _get_eval_variant(conn, variant_id)
+        now = _dt.datetime.now(_dt.UTC).isoformat()
+        new_id = str(uuid.uuid4())[:8]
+        label = body.get("label") or f"{original['label']} (copy)"
+        with db._lock:
+            conn.execute(
+                """INSERT INTO eval_variants
+                   (id, label, prompt_template_id, model, temperature, num_ctx,
+                    is_recommended, is_system, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    new_id,
+                    label,
+                    original["prompt_template_id"],
+                    original["model"],
+                    original["temperature"],
+                    original["num_ctx"],
+                    0,
+                    0,  # always user-owned
+                    now,
+                ),
+            )
+            conn.commit()
+        row = _get_eval_variant(conn, new_id)
+        return JSONResponse(content=row, status_code=201)
+
+    @app.put("/api/eval/variants/{variant_id}")
+    def update_eval_variant(variant_id: str, body: dict = Body(...)):
+        """Update a user variant (partial update OK). Rejects system variants.
+
+        What it shows: N/A — write-only; updated row returned.
+        Decision it drives: Lets the user tune parameters without creating a new variant.
+        """
+        conn = db._connect()
+        variant = _get_eval_variant(conn, variant_id)
+        if variant["is_system"]:
+            raise HTTPException(status_code=422, detail="Cannot modify system variant — clone it first.")
+        updatable_fields = {"label", "prompt_template_id", "model", "temperature", "num_ctx", "is_recommended"}
+        updates = {k: v for k, v in body.items() if k in updatable_fields}
+        if not updates:
+            return dict(variant)
+        # Validate prompt_template_id if provided
+        if "prompt_template_id" in updates:
+            _get_eval_template(conn, updates["prompt_template_id"])
+        set_clause = ", ".join(f"{k} = ?" for k in updates)
+        values = [*list(updates.values()), variant_id]
+        with db._lock:
+            conn.execute(f"UPDATE eval_variants SET {set_clause} WHERE id = ?", values)
+            conn.commit()
+        return _get_eval_variant(conn, variant_id)
+
+    @app.delete("/api/eval/variants/{variant_id}")
+    def delete_eval_variant(variant_id: str):
+        """Delete a user variant. Rejects system variants.
+
+        What it shows: N/A — delete operation; variant disappears from GET /api/eval/variants.
+        Decision it drives: Lets the user remove experiments they no longer need.
+        """
+        conn = db._connect()
+        variant = _get_eval_variant(conn, variant_id)
+        if variant["is_system"]:
+            raise HTTPException(status_code=422, detail="Cannot modify system variant — clone it first.")
+        with db._lock:
+            conn.execute("DELETE FROM eval_variants WHERE id = ?", (variant_id,))
+            conn.commit()
+        return JSONResponse(content=None, status_code=204)
+
+    # --- Eval: Templates ---
+
+    @app.get("/api/eval/templates")
+    def list_eval_templates():
+        """Returns all eval_prompt_templates rows.
+
+        What it shows: All available prompt templates (system + user).
+        Decision it drives: Lets the user pick or clone a template when creating variants.
+        """
+        conn = db._connect()
+        return [dict(r) for r in conn.execute("SELECT * FROM eval_prompt_templates ORDER BY created_at").fetchall()]
+
+    @app.put("/api/eval/templates/{template_id}")
+    def update_eval_template(template_id: str, body: dict = Body(...)):
+        """Update a user template (partial update OK). Rejects system templates.
+
+        What it shows: N/A — write-only; updated row returned.
+        Decision it drives: Lets the user refine prompt instructions without losing the system originals.
+        """
+        conn = db._connect()
+        template = _get_eval_template(conn, template_id)
+        if template["is_system"]:
+            raise HTTPException(status_code=422, detail="Cannot modify system template — clone it first.")
+        updatable_fields = {"label", "instruction", "format_spec", "examples", "is_chunked"}
+        updates = {k: v for k, v in body.items() if k in updatable_fields}
+        if not updates:
+            return dict(template)
+        set_clause = ", ".join(f"{k} = ?" for k in updates)
+        values = [*list(updates.values()), template_id]
+        with db._lock:
+            conn.execute(f"UPDATE eval_prompt_templates SET {set_clause} WHERE id = ?", values)
+            conn.commit()
+        return _get_eval_template(conn, template_id)
+
+    @app.post("/api/eval/templates/{template_id}/clone")
+    def clone_eval_template(template_id: str, body: dict = Body(default={})):
+        """Clone any template (system or user) into a new user template.
+
+        What it shows: N/A — write-only; new template appears in GET /api/eval/templates.
+        Decision it drives: Lets the user safely customize a prompt without altering system defaults.
+        """
+        import datetime as _dt
+        import uuid
+
+        conn = db._connect()
+        original = _get_eval_template(conn, template_id)
+        now = _dt.datetime.now(_dt.UTC).isoformat()
+        new_id = str(uuid.uuid4())[:8]
+        label = body.get("label") or f"{original['label']} (copy)"
+        with db._lock:
+            conn.execute(
+                """INSERT INTO eval_prompt_templates
+                   (id, label, instruction, format_spec, examples, is_chunked, is_system, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    new_id,
+                    label,
+                    original["instruction"],
+                    original.get("format_spec"),
+                    original.get("examples"),
+                    original["is_chunked"],
+                    0,  # always user-owned
+                    now,
+                ),
+            )
+            conn.commit()
+        row = _get_eval_template(conn, new_id)
+        return JSONResponse(content=row, status_code=201)
+
+    # --- Eval: Trends ---
+
+    @app.get("/api/eval/trends")
+    def get_eval_trends():
+        """Returns per-variant trend data: run history, stability, trend direction, judge agreement.
+
+        What it shows: How each variant's F1 quality score has changed across recent completed runs.
+        Decision it drives: Lets the user identify improving vs. regressing variants and when to promote.
+        """
+        import statistics
+
+        conn = db._connect()
+        runs = conn.execute(
+            """SELECT id, started_at, metrics, item_ids, item_count
+               FROM eval_runs WHERE status = 'complete' ORDER BY id ASC"""
+        ).fetchall()
+
+        # Build per-variant run list
+        variant_runs: dict[str, list[dict]] = {}
+        item_id_sets: list[str] = []
+
+        for run_row in runs:
+            if not run_row["metrics"]:
+                continue
+            try:
+                metrics = json.loads(run_row["metrics"])
+            except (ValueError, TypeError):
+                continue
+            item_ids_str = run_row["item_ids"] or ""
+            item_id_sets.append(item_ids_str)
+            for var_id, var_metrics in metrics.items():
+                if not isinstance(var_metrics, dict):
+                    continue
+                variant_runs.setdefault(var_id, [])
+                variant_runs[var_id].append(
+                    {
+                        "run_id": run_row["id"],
+                        "started_at": run_row["started_at"],
+                        "f1": var_metrics.get("f1"),
+                        "recall": var_metrics.get("recall"),
+                        "precision": var_metrics.get("precision"),
+                        "item_count": run_row["item_count"],
+                    }
+                )
+
+        # Judge agreement: fraction of eval_results where score_transfer > 1
+        agreement_rows = conn.execute(
+            """SELECT variant, COUNT(*) as total,
+                      SUM(CASE WHEN COALESCE(override_score_transfer, score_transfer) > 1 THEN 1 ELSE 0 END) as agreed
+               FROM eval_results GROUP BY variant"""
+        ).fetchall()
+        agreement_by_variant: dict[str, float] = {}
+        for ar in agreement_rows:
+            total = ar["total"] or 0
+            agreed = ar["agreed"] or 0
+            agreement_by_variant[ar["variant"]] = round(agreed / total, 4) if total > 0 else 0.0
+
+        result: dict[str, dict] = {}
+        for var_id, run_list in variant_runs.items():
+            # Limit to last 10 runs
+            recent = run_list[-10:]
+            f1_values = [r["f1"] for r in recent if r["f1"] is not None]
+            latest_f1 = f1_values[-1] if f1_values else None
+
+            # Stability: 1 - stddev(last 3 F1s) if >= 3 runs
+            stability = None
+            if len(f1_values) >= 3:
+                last3 = f1_values[-3:]
+                try:
+                    stability = round(max(0.0, 1.0 - statistics.stdev(last3)), 4)
+                except statistics.StatisticsError:
+                    stability = None
+
+            # Trend direction: slope of F1 values
+            trend_direction = "stable"
+            if len(f1_values) >= 2:
+                n = len(f1_values)
+                x_mean = (n - 1) / 2
+                y_mean = sum(f1_values) / n
+                numerator = sum((i - x_mean) * (f1_values[i] - y_mean) for i in range(n))
+                denominator = sum((i - x_mean) ** 2 for i in range(n))
+                slope = numerator / denominator if denominator != 0 else 0.0
+                if slope > 0.02:
+                    trend_direction = "improving"
+                elif slope < -0.02:
+                    trend_direction = "regressing"
+
+            result[var_id] = {
+                "runs": recent,
+                "stability": stability,
+                "trend_direction": trend_direction,
+                "latest_f1": latest_f1,
+                "judge_agreement_rate": agreement_by_variant.get(var_id),
+            }
+
+        # item_sets_differ: true if not all completed runs share the same item_ids JSON
+        item_sets_differ = len(set(item_id_sets)) > 1 if item_id_sets else False
+
+        return {"variants": result, "item_sets_differ": item_sets_differ}
+
+    # --- Eval: Datasource test ---
+
+    @app.get("/api/eval/datasource/test")
+    def test_eval_datasource():
+        """Makes a live HTTP GET to the configured data source health endpoint.
+
+        What it shows: Whether the external data source is reachable and how many items it has.
+        Decision it drives: Confirms setup is correct before triggering an eval run.
+        """
+        data_source_url = db.get_setting("eval.data_source_url") or "http://127.0.0.1:7685"
+        url = f"{data_source_url}/eval/health"
+        t0 = _time.time()
+        try:
+            resp = httpx.get(url, timeout=5.0)
+            response_ms = int((_time.time() - t0) * 1000)
+            if resp.status_code == 200:
+                data = resp.json()
+                return {
+                    "ok": True,
+                    "item_count": data.get("item_count"),
+                    "cluster_count": data.get("cluster_count"),
+                    "response_ms": response_ms,
+                    "error": None,
+                }
+            return {
+                "ok": False,
+                "item_count": None,
+                "cluster_count": None,
+                "response_ms": response_ms,
+                "error": f"HTTP {resp.status_code}",
+            }
+        except Exception as exc:
+            response_ms = int((_time.time() - t0) * 1000)
+            return {
+                "ok": False,
+                "item_count": None,
+                "cluster_count": None,
+                "response_ms": response_ms,
+                "error": str(exc)[:200],
+            }
+
+    # --- Eval: Settings ---
+
+    @app.get("/api/eval/settings")
+    def get_eval_settings():
+        """Returns all settings where key starts with 'eval.'.
+
+        What it shows: Current eval pipeline configuration (data source, judge model, thresholds).
+        Decision it drives: Lets the user review and adjust settings before running an eval.
+        """
+        all_settings = db.get_all_settings()
+        return {k: v for k, v in all_settings.items() if k.startswith("eval.")}
+
+    @app.put("/api/eval/settings")
+    def put_eval_settings(body: dict = Body(...)):
+        """Bulk-update eval.* settings (validated, all-or-nothing).
+
+        What it shows: N/A — write-only; returns updated settings dict on success.
+        Decision it drives: Lets the user configure the eval pipeline without editing the DB directly.
+        """
+        # Validation rules — validate ALL before writing any
+        validation_errors = []
+        for key, value in body.items():
+            bare_key = key.removeprefix("eval.")
+            if bare_key == "judge_backend":
+                if value not in ("ollama", "openai"):
+                    validation_errors.append(f"judge_backend must be 'ollama' or 'openai', got {value!r}")
+            elif bare_key == "per_cluster":
+                if not isinstance(value, int) or not (1 <= value <= 20):
+                    validation_errors.append(f"per_cluster must be an integer 1-20, got {value!r}")
+            elif bare_key in ("same_cluster_targets", "diff_cluster_targets"):
+                if not isinstance(value, int) or not (1 <= value <= 10):
+                    validation_errors.append(f"{bare_key} must be an integer 1-10, got {value!r}")
+            elif bare_key in ("judge_temperature", "f1_threshold", "error_budget"):
+                if not isinstance(value, int | float) or not (0.0 <= float(value) <= 2.0):
+                    validation_errors.append(f"{bare_key} must be a float 0.0-2.0, got {value!r}")
+            elif bare_key == "data_source_url":
+                if not isinstance(value, str) or not (value.startswith("http://") or value.startswith("https://")):
+                    validation_errors.append("data_source_url must start with http:// or https://")
+            elif bare_key == "stability_window" and not (isinstance(value, int) and (1 <= value <= 20)):
+                validation_errors.append(f"stability_window must be an integer 1-20, got {value!r}")
+
+        if validation_errors:
+            raise HTTPException(status_code=422, detail=validation_errors)
+
+        # All-or-nothing write: only update keys prefixed with 'eval.'
+        for key, value in body.items():
+            full_key = key if key.startswith("eval.") else f"eval.{key}"
+            db.set_setting(full_key, value)
+
+        return get_eval_settings()
+
+    # --- Eval: Schedule ---
+
+    @app.post("/api/eval/schedule")
+    def create_eval_schedule(body: dict = Body(...)):
+        """Create a recurring eval job.
+
+        What it shows: N/A — write-only; job appears in GET /api/schedule after creation.
+        Decision it drives: Lets the user schedule regular eval runs to accumulate trend data automatically.
+        """
+        variants = body.get("variants", [])
+        per_cluster = body.get("per_cluster", 4)
+        run_mode = body.get("run_mode", "batch")
+        recurrence = body.get("recurrence", "off")
+
+        if recurrence == "daily":
+            interval_seconds = 86400
+        elif recurrence == "weekly":
+            interval_seconds = 7 * 86400
+        else:
+            raise HTTPException(status_code=400, detail="recurrence must be 'daily' or 'weekly'")
+
+        command = (
+            f"ollama-queue eval-run --variants {','.join(variants)} "
+            f"--per-cluster {per_cluster} --run-mode {run_mode}"
+        )
+        rj_id = db.add_recurring_job(
+            name=f"eval-session-{recurrence}",
+            command=command,
+            interval_seconds=interval_seconds,
+            tag="eval",
+            source="eval-schedule",
+        )
+        return {"job_id": rj_id}
+
     # --- Static files for SPA ---
     spa_dir = Path(__file__).parent / "dashboard" / "spa" / "dist"
     if spa_dir.exists():
