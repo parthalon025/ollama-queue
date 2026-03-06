@@ -1,6 +1,8 @@
-// What it shows: A horizontal pipeline with four nodes — Fetch, Generate, Judge, Done —
+// What it shows: A horizontal pipeline with four nodes — Queue, Generate, Score, Done —
 //   where the current stage is highlighted, completed stages get a checkmark, and
 //   a one-line summary below shows which model is working and how far through the phase it is.
+//   Internal fetch stages (fetch_items, fetch_targets) are collapsed into adjacent nodes
+//   so the user always sees meaningful, model-centric progress — never a "Fetching…" spinner.
 // Decision it drives: User knows exactly where in the eval pipeline the run is,
 //   which AI model is active, and how many items remain in the current phase.
 
@@ -8,21 +10,29 @@ import { h } from 'preact';
 
 // NOTE: .map() callbacks use descriptive param names — never 'h' (shadows JSX factory).
 
+// Four user-facing stages. Instantaneous backend stages (fetch_items, fetch_targets)
+// are collapsed into these nodes by normalizeStage below.
 const STAGES = [
-  { id: 'fetch_items', label: 'Fetch' },
-  { id: 'generating',  label: 'Generate' },
-  { id: 'judging',     label: 'Judge' },
-  { id: 'done',        label: 'Done' },
+  { id: 'queued',     label: 'Queue' },
+  { id: 'generating', label: 'Generate' },
+  { id: 'judging',    label: 'Score' },
+  { id: 'done',       label: 'Done' },
 ];
 
 // Ordered list used to determine "is this stage before/at/after current"
-const STAGE_ORDER = ['fetch_items', 'generating', 'judging', 'done'];
+const STAGE_ORDER = ['queued', 'generating', 'judging', 'done'];
 
-// Map raw stage/status values to the 4 display nodes
+// Map raw stage/status values to the 4 display nodes.
+// fetch_items and fetch_targets are instantaneous backend steps — collapse them
+// into the adjacent user-visible node so the pipeline starts on Generate, not Fetch.
 function normalizeStage(stage, status) {
   if (status === 'complete') return 'done';
-  if (stage === 'fetch_targets') return 'judging'; // instantaneous — collapse into judging
-  return stage || 'fetch_items';
+  if (status === 'queued' && !stage) return 'queued';
+  if (!stage || stage === 'fetch_items') return 'generating'; // fetching items is pre-generate setup
+  if (stage === 'fetch_targets') return 'judging';            // fetching targets is pre-score setup
+  if (stage === 'generating') return 'generating';
+  if (stage === 'judging') return 'judging';
+  return 'queued';
 }
 
 // Returns 'done' | 'active' | 'pending' for a node given the current pipeline position
@@ -40,8 +50,8 @@ export default function EvalPipelineSwimline({ stage, status, generated, judged,
   const isJudging = current === 'judging';
   const model = isJudging ? judge_model : gen_model;
   const count = isJudging ? (judged ?? 0) : (generated ?? 0);
-  const phaseLabel = isJudging ? 'Scoring' : 'Writing';
-  const showInfo = current !== 'fetch_items' && current !== 'done';
+  const phaseLabel = isJudging ? 'Scoring' : 'Generating';
+  const showInfo = current === 'generating' || current === 'judging';
 
   return (
     <div class="eval-swimlane-wrap">
