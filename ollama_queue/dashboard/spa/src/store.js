@@ -191,6 +191,7 @@ if (evalActiveRun.value) {
   fetch(`${API}/eval/runs/${_storedId}/progress`)
     .then(r => r.ok ? r.json() : null)
     .then(data => {
+      if (evalActiveRun.value?.run_id !== _storedId) return; // user started a new run
       if (!data || ['complete', 'failed', 'cancelled'].includes(data.status)) {
         evalActiveRun.value = null;
         sessionStorage.removeItem('evalActiveRun');
