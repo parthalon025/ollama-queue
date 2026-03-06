@@ -1111,3 +1111,9 @@ body {
   font-family: var(--font-mono);
   text-align: right;
 }
+
+/* Action feedback inline status */
+.action-fb { font-size: var(--type-label); margin-top: 4px; min-height: 1.2em; }
+.action-fb--loading { color: var(--text-muted, #888); }
+.action-fb--success { color: var(--status-ok, #4caf50); }
+.action-fb--error   { color: var(--status-error, #f44336); white-space: pre-wrap; }
