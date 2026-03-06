@@ -39,9 +39,12 @@ export default function ActiveRunProgress() {
     failure_rate = 0,
   } = activeRun;
 
-  const stageLabel = stage === 'generate'
+  // DB stage values: 'generating', 'judging', 'fetch_items', 'fetch_targets'
+  // Fall back to status when stage is null (e.g. run just started)
+  const stageContext = stage || status;
+  const stageLabel = (stageContext === 'generating' || stageContext === 'generate')
     ? EVAL_TRANSLATIONS.generating?.label ?? 'Writing principles…'
-    : stage === 'judge'
+    : (stageContext === 'judging' || stageContext === 'judge' || stageContext === 'fetch_targets')
     ? EVAL_TRANSLATIONS.judging?.label ?? 'Scoring results…'
     : 'Working…';
 
