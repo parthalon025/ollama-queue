@@ -30,7 +30,7 @@ tests/
   test_eval_engine.py      # 69 tests
   test_api.py              # 58 tests (incl. proxy priority, batch schedule, suggest endpoint)
   test_daemon.py           # 62 tests
-  test_api_eval_runs.py    # 39 tests
+  test_api_eval_runs.py    # 42 tests
   test_api_eval_variants.py # 30 tests
   test_scheduler.py        # 28 tests
   test_cli.py              # 27 tests
@@ -52,7 +52,7 @@ tests/
 cd ~/Documents/projects/ollama-queue
 source .venv/bin/activate
 
-# Run tests (535 total)
+# Run tests (538 total)
 pytest
 
 # Start the server (daemon + API + dashboard)
