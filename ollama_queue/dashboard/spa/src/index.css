@@ -1117,3 +1117,79 @@ body {
 .action-fb--loading { color: var(--text-muted, #888); }
 .action-fb--success { color: var(--status-ok, #4caf50); }
 .action-fb--error   { color: var(--status-error, #f44336); white-space: pre-wrap; }
+
+/* ── Eval Pipeline Swimlane ───────────────────────────────────────────────── */
+.eval-swimlane-wrap { margin-bottom: 0.75rem; }
+.eval-swimlane {
+  display: flex;
+  align-items: flex-start;
+  margin-bottom: 0.4rem;
+}
+.eval-swimlane-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+}
+.eval-swimlane-node-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  line-height: 1;
+}
+.eval-swimlane-node--done .eval-swimlane-node-icon {
+  background: var(--surface-raised, #2a2a2a);
+  color: var(--text-tertiary, #666);
+}
+.eval-swimlane-node--active .eval-swimlane-node-icon {
+  background: var(--accent, #4fc3f7);
+  color: var(--bg, #111);
+  animation: eval-node-pulse 1.6s ease-in-out infinite;
+}
+.eval-swimlane-node--pending .eval-swimlane-node-icon {
+  background: transparent;
+  border: 1px solid var(--border, #333);
+  color: var(--text-tertiary, #555);
+}
+.eval-swimlane-node-label {
+  font-size: var(--type-label, 11px);
+  font-family: var(--font-mono, monospace);
+  color: var(--text-tertiary, #666);
+  white-space: nowrap;
+}
+.eval-swimlane-node--active .eval-swimlane-node-label {
+  color: var(--accent, #4fc3f7);
+}
+.eval-swimlane-node--done .eval-swimlane-node-label {
+  color: var(--text-tertiary, #555);
+}
+.eval-swimlane-connector {
+  flex: 1;
+  height: 1px;
+  background: var(--border, #333);
+  margin-top: 13px; /* vertically center with icon (icon is 26px, half = 13px) */
+  min-width: 16px;
+}
+.eval-swimlane-connector--done {
+  background: var(--accent, #4fc3f7);
+  opacity: 0.35;
+}
+@keyframes eval-node-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.65; transform: scale(0.92); }
+}
+.eval-info-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: var(--font-mono, monospace);
+  font-size: var(--type-label, 11px);
+  color: var(--text-secondary, #999);
+  margin-bottom: 0.4rem;
+}
+.eval-model-badge { color: var(--text-tertiary, #666); }
