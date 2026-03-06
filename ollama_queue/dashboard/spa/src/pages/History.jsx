@@ -1,9 +1,10 @@
 import { h } from 'preact';
 import {
     dlqEntries, dlqCount, durationData, heatmapData, history,
-    retryDLQEntry, retryAllDLQ, dismissDLQEntry, clearDLQ, fetchDLQ,
+    fetchDLQ, API,
 } from '../store';
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect } from 'preact/hooks';
+import { useActionFeedback } from '../hooks/useActionFeedback.js';
 import ActivityHeatmap from '../components/ActivityHeatmap.jsx';
 import HistoryList from '../components/HistoryList.jsx';
 import TimeChart from '../components/TimeChart.jsx';
@@ -22,20 +23,51 @@ export default function History() {
     const durations = durationData.value;
     const heatmap = heatmapData.value;
     const hist = history.value;
-    const [retryingAll, setRetryingAll] = useState(false);
+
+    // Hooks must be called before any conditional early returns
+    const [retryAllFb, retryAllAct] = useActionFeedback();
+    const [clearFb, clearAct] = useActionFeedback();
 
     useEffect(() => { fetchDLQ(); }, []);
 
     async function handleRetryAll() {
         if (!window.confirm(`Retry all ${dlq.length} failed jobs?`)) return;
-        setRetryingAll(true);
-        try { await retryAllDLQ(); }
-        finally { setRetryingAll(false); }
+        await retryAllAct(
+            'Retrying all…',
+            async () => {
+                const res = await fetch(`${API}/dlq/retry-all`, { method: 'POST' });
+                if (!res.ok) throw new Error(`Retry all failed: ${res.status}`);
+                const data = await res.json();
+                await fetchDLQ();
+                return data;
+            },
+            data => `${data.retried ?? data.count ?? 'All'} entries requeued`,
+        );
     }
 
     async function handleClearDLQ() {
         if (!window.confirm('Clear all DLQ entries? This cannot be undone.')) return;
-        await clearDLQ();
+        await clearAct(
+            'Clearing DLQ…',
+            async () => {
+                const res = await fetch(`${API}/dlq`, { method: 'DELETE' });
+                if (!res.ok) throw new Error(`Clear failed: ${res.status}`);
+                await fetchDLQ();
+            },
+            'DLQ cleared',
+        );
+    }
+
+    async function handleDLQAction(action, id) {
+        if (action === 'retry') {
+            const res = await fetch(`${API}/dlq/${id}/retry`, { method: 'POST' });
+            if (!res.ok) throw new Error(`Retry failed: ${res.status}`);
+            await fetchDLQ();
+        } else if (action === 'dismiss') {
+            const res = await fetch(`${API}/dlq/${id}/dismiss`, { method: 'POST' });
+            if (!res.ok) throw new Error(`Dismiss failed: ${res.status}`);
+            await fetchDLQ();
+        }
     }
 
     return (
@@ -59,67 +91,37 @@ export default function History() {
                         }}>
                             {dlqCnt} {dlqCnt === 1 ? 'entry' : 'entries'} in dead-letter queue
                         </span>
-                        <div class="flex gap-2">
-                            <button
-                                class="t-btn t-btn-secondary"
-                                style="font-size: var(--type-label); padding: 3px 10px;"
-                                onClick={handleRetryAll}
-                                disabled={retryingAll}
-                            >
-                                {retryingAll ? 'Retrying...' : 'Retry all'}
-                            </button>
-                            <button
-                                class="t-btn t-btn-secondary"
-                                style="font-size: var(--type-label); padding: 3px 10px;"
-                                onClick={handleClearDLQ}
-                            >
-                                Clear
-                            </button>
+                        <div class="flex gap-2" style="align-items: flex-start;">
+                            <div>
+                                <button
+                                    class="t-btn t-btn-secondary"
+                                    style="font-size: var(--type-label); padding: 3px 10px;"
+                                    onClick={handleRetryAll}
+                                    disabled={retryAllFb.phase === 'loading'}
+                                >
+                                    {retryAllFb.phase === 'loading' ? 'Retrying all…' : 'Retry all'}
+                                </button>
+                                {retryAllFb.msg && (
+                                    <div class={`action-fb action-fb--${retryAllFb.phase}`}>{retryAllFb.msg}</div>
+                                )}
+                            </div>
+                            <div>
+                                <button
+                                    class="t-btn t-btn-secondary"
+                                    style="font-size: var(--type-label); padding: 3px 10px;"
+                                    onClick={handleClearDLQ}
+                                    disabled={clearFb.phase === 'loading'}
+                                >
+                                    {clearFb.phase === 'loading' ? 'Clearing…' : 'Clear'}
+                                </button>
+                                {clearFb.msg && (
+                                    <div class={`action-fb action-fb--${clearFb.phase}`}>{clearFb.msg}</div>
+                                )}
+                            </div>
                         </div>
                     </div>
                     {dlq.map(entry => (
-                        <div key={entry.id} style={{
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            padding: '0.4rem 0',
-                            borderBottom: '1px solid var(--border-subtle)',
-                            gap: '0.5rem',
-                            flexWrap: 'wrap',
-                        }}>
-                            <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0;">
-                                <span style={{
-                                    fontSize: 'var(--type-body)',
-                                    color: 'var(--text-primary)',
-                                    fontFamily: 'var(--font-mono)',
-                                }}>
-                                    {entry.source || '—'} #{entry.job_id}
-                                </span>
-                                <span style={{
-                                    fontSize: 'var(--type-label)',
-                                    color: 'var(--text-tertiary)',
-                                }}>
-                                    {entry.failure_reason || 'unknown reason'}
-                                    {entry.retry_count > 0 && ` · ${entry.retry_count} retries`}
-                                </span>
-                            </div>
-                            <div class="flex gap-2" style="flex-shrink: 0;">
-                                <button
-                                    class="t-btn t-btn-secondary"
-                                    style="font-size: var(--type-label); padding: 2px 8px;"
-                                    onClick={() => retryDLQEntry(entry.id)}
-                                >
-                                    Retry
-                                </button>
-                                <button
-                                    class="t-btn t-btn-secondary"
-                                    style="font-size: var(--type-label); padding: 2px 8px;"
-                                    onClick={() => dismissDLQEntry(entry.id)}
-                                >
-                                    Dismiss
-                                </button>
-                            </div>
-                        </div>
+                        <DLQRow key={entry.id} entry={entry} onAction={handleDLQAction} />
                     ))}
                 </div>
             )}
@@ -158,6 +160,82 @@ export default function History() {
 
             {/* HistoryList renders its own t-frame wrapper internally */}
             <HistoryList jobs={hist} />
+        </div>
+    );
+}
+
+// ── DLQ sub-component ──────────────────────────────────────────────────────
+
+// What it shows: A single DLQ entry — job source/id, failure reason, retry count — with
+//   per-row Retry and Dismiss controls and inline feedback for each action.
+// Decision it drives: User can retry a specific failed job (requeues it) or permanently
+//   dismiss it (removes from DLQ), with immediate visual confirmation of the outcome.
+function DLQRow({ entry, onAction }) {
+    const [retryFb, retryAct] = useActionFeedback();
+    const [dismissFb, dismissAct] = useActionFeedback();
+
+    return (
+        <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'flex-start',
+            padding: '0.4rem 0',
+            borderBottom: '1px solid var(--border-subtle)',
+            gap: '0.5rem',
+            flexWrap: 'wrap',
+        }}>
+            <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0;">
+                <span style={{
+                    fontSize: 'var(--type-body)',
+                    color: 'var(--text-primary)',
+                    fontFamily: 'var(--font-mono)',
+                }}>
+                    {entry.source || '—'} #{entry.job_id}
+                </span>
+                <span style={{
+                    fontSize: 'var(--type-label)',
+                    color: 'var(--text-tertiary)',
+                }}>
+                    {entry.failure_reason || 'unknown reason'}
+                    {entry.retry_count > 0 && ` · ${entry.retry_count} retries`}
+                </span>
+            </div>
+            <div class="flex gap-2" style="flex-shrink: 0; align-items: flex-start;">
+                <div>
+                    <button
+                        class="t-btn t-btn-secondary"
+                        style="font-size: var(--type-label); padding: 2px 8px;"
+                        disabled={retryFb.phase === 'loading'}
+                        onClick={() => retryAct(
+                            'Retrying…',
+                            () => onAction('retry', entry.id),
+                            'Queued for retry',
+                        )}
+                    >
+                        {retryFb.phase === 'loading' ? 'Retrying…' : 'Retry'}
+                    </button>
+                    {retryFb.msg && (
+                        <div class={`action-fb action-fb--${retryFb.phase}`}>{retryFb.msg}</div>
+                    )}
+                </div>
+                <div>
+                    <button
+                        class="t-btn t-btn-secondary"
+                        style="font-size: var(--type-label); padding: 2px 8px;"
+                        disabled={dismissFb.phase === 'loading'}
+                        onClick={() => dismissAct(
+                            'Dismissing…',
+                            () => onAction('dismiss', entry.id),
+                            'Dismissed',
+                        )}
+                    >
+                        {dismissFb.phase === 'loading' ? 'Dismissing…' : 'Dismiss'}
+                    </button>
+                    {dismissFb.msg && (
+                        <div class={`action-fb action-fb--${dismissFb.phase}`}>{dismissFb.msg}</div>
+                    )}
+                </div>
+            </div>
         </div>
     );
 }
