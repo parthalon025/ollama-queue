@@ -25,6 +25,10 @@ export default function ActiveRunProgress() {
   // Read .value at top so Preact subscribes to signal — triggers re-render on update
   const activeRun = evalActiveRun.value;
 
+  const [cancelFb, cancelAct] = useActionFeedback();
+  const [resumeFb, resumeAct] = useActionFeedback();
+  const [retryFb, retryAct] = useActionFeedback();
+
   const terminalStatuses = ['complete', 'failed', 'cancelled'];
   if (!activeRun || terminalStatuses.includes(activeRun.status)) return null;
 
@@ -39,10 +43,6 @@ export default function ActiveRunProgress() {
     eta_s,
     failure_rate = 0,
   } = activeRun;
-
-  const [cancelFb, cancelAct] = useActionFeedback();
-  const [resumeFb, resumeAct] = useActionFeedback();
-  const [retryFb, retryAct] = useActionFeedback();
 
   // DB stage values: 'generating', 'judging', 'fetch_items', 'fetch_targets'
   // Fall back to status when stage is null (e.g. run just started)
