@@ -2,7 +2,7 @@ import { h } from 'preact';
 import { useState } from 'preact/hooks';
 import { EVAL_TRANSLATIONS } from './translations.js';
 import ResultsTable from './ResultsTable.jsx';
-import { evalActiveRun, evalSubTab, fetchEvalRuns } from '../../store.js';
+import { evalActiveRun, evalSubTab, fetchEvalRuns, startEvalPoll } from '../../store.js';
 // What it shows: A single eval run row with 3-level progressive disclosure.
 //   L1: status dot, winner config, quality score, date, item count.
 //   L2: per-variant metric table, scorer info, action buttons.
@@ -77,9 +77,12 @@ export default function RunRow({ run }) {
         setRepeatError(data.detail || 'Repeat failed');
         return;
       }
-      // Switch to runs sub-tab and set the new run as the active run
+      // Switch to runs sub-tab, set the new run as active, and start live polling
       evalSubTab.value = 'runs';
-      evalActiveRun.value = { run_id: data.run_id, status: 'pending' };
+      const activeState = { run_id: data.run_id, status: 'pending' };
+      evalActiveRun.value = activeState;
+      sessionStorage.setItem('evalActiveRun', JSON.stringify(activeState));
+      startEvalPoll(data.run_id);
       // Refresh run list so the new run appears immediately
       await fetchEvalRuns();
     } catch (exc) {

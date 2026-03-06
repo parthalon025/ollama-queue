@@ -73,6 +73,7 @@ export function startEvalPoll(runId) {
       sessionStorage.setItem('evalActiveRun', JSON.stringify(data));
       if (['complete', 'failed', 'cancelled'].includes(data.status)) {
         stopEvalPoll();
+        fetchEvalRuns(); // refresh history table so final metrics appear immediately
       }
     } catch (e) {
       console.error('evalPoll failed:', e);
@@ -171,6 +172,9 @@ export async function triggerEvalRun(body) {
 // Decision it drives: stops live progress polling and refreshes run history
 export async function cancelEvalRun(runId) {
   await fetch(`${API}/eval/runs/${runId}`, { method: 'DELETE' });
+  stopEvalPoll();
+  evalActiveRun.value = null;
+  sessionStorage.removeItem('evalActiveRun');
   await fetchEvalRuns();
 }
 

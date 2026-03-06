@@ -1574,6 +1574,11 @@ def create_app(db: Database) -> FastAPI:
             per_cluster=int(per_cluster) if per_cluster else 4,
         )
 
+        # Persist judge_model from request body so run_eval_judge uses it instead of the setting default
+        judge_model = body.get("judge_model")
+        if judge_model and isinstance(judge_model, str):
+            _ee.update_eval_run(db, run_id, judge_model=judge_model)
+
         # Run the session in a background thread — NOT as a queued job.
         # Running as a queued job would deadlock: the daemon sets current_job_id while
         # the subprocess runs, which blocks try_claim_for_proxy() when the engine
@@ -1704,18 +1709,53 @@ def create_app(db: Database) -> FastAPI:
             ).fetchone()
             failed = failed_count["cnt"] if failed_count else 0
 
+            # Per-variant breakdown: generated count = expected judging targets per variant
+            per_variant_rows = conn.execute(
+                """SELECT variant,
+                          SUM(CASE WHEN row_type = 'generate' THEN 1 ELSE 0 END) as gen_cnt,
+                          SUM(CASE WHEN row_type = 'judge'    THEN 1 ELSE 0 END) as judge_cnt,
+                          SUM(CASE WHEN error IS NOT NULL     THEN 1 ELSE 0 END) as error_cnt
+                   FROM eval_results WHERE run_id = ? GROUP BY variant""",
+                (run_id,),
+            ).fetchall()
+
         generated = counts.get("generate", 0)
         judged = counts.get("judge", 0)
         pct = round(judged / total * 100, 1) if total > 0 else 0.0
 
+        # per_variant dict: {variant_id: {completed, total, failed}}
+        # "total" per variant = number of generate rows (each needs a judge call)
+        per_variant: dict = {}
+        for row in per_variant_rows:
+            per_variant[row["variant"]] = {
+                "completed": row["judge_cnt"],
+                "total": row["gen_cnt"],
+                "failed": row["error_cnt"],
+            }
+
+        # Determine which stage we're in to compute the "completed" counter shown in the UI
+        run_status = run["status"]
+        is_judging = run_status in ("judging",) or run.get("stage") in ("judging", "fetch_targets")
+        completed = judged if is_judging else generated
+
+        failure_rate = round(failed / total, 4) if total > 0 else 0.0
+
         return {
-            "run_id": run_id,
-            "status": run["status"],
+            # Legacy fields (keep for API compatibility)
             "generated": generated,
-            "total": total,
             "judged": judged,
-            "failed": failed,
             "pct_complete": pct,
+            # Fields the frontend progress panel reads
+            "run_id": run_id,
+            "status": run_status,
+            "stage": run.get("stage"),
+            "completed": completed,
+            "total": total,
+            "failed": failed,
+            "pct": pct,
+            "failure_rate": failure_rate,
+            "per_variant": per_variant,
+            "eta_s": None,
         }
 
     @app.post("/api/eval/runs/{run_id}/repeat")
