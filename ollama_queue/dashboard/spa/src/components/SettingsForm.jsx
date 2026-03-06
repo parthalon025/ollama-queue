@@ -11,9 +11,9 @@ import { useState, useRef, useCallback } from 'preact/hooks';
  *   timeout if long-running jobs are being killed prematurely. Each field saves on blur —
  *   no Save button needed; changes take effect on the next poll cycle.
  *
- * @param {{ settings: object, daemonState: string, onSave: (key: string, value: any) => Promise<boolean>, onPause: () => void, onResume: () => void }} props
+ * @param {{ settings: object, daemonState: string, onSave: (key: string, value: any) => Promise<boolean>, onPause: () => void, onResume: () => void, pauseFb: object, resumeFb: object }} props
  */
-export default function SettingsForm({ settings, daemonState, onSave, onPause, onResume }) {
+export default function SettingsForm({ settings, daemonState, onSave, onPause, onResume, pauseFb, resumeFb }) {
   const [flashKey, setFlashKey] = useState(null);
 
   const flash = useCallback((key) => {
@@ -205,25 +205,31 @@ export default function SettingsForm({ settings, daemonState, onSave, onPause, o
 
       {/* 12. Daemon Controls */}
       <div class="t-frame" data-label="Daemon Controls">
-        <div class="flex items-center gap-3">
-          {isPaused ? (
-            <button
-              class="t-btn t-btn-primary px-4 py-2 text-sm"
-              onClick={onResume}
-            >
-              Resume Daemon
-            </button>
-          ) : (
-            <button
-              class="t-btn t-btn-secondary px-4 py-2 text-sm"
-              onClick={onPause}
-            >
-              Pause Daemon
-            </button>
-          )}
-          <span class="data-mono" style="font-size: var(--type-label); color: var(--text-secondary);">
-            {daemonState || 'unknown'}
-          </span>
+        <div class="flex flex-col gap-2">
+          <div class="flex items-center gap-3">
+            {isPaused ? (
+              <button
+                class="t-btn t-btn-primary px-4 py-2 text-sm"
+                disabled={resumeFb?.phase === 'loading'}
+                onClick={onResume}
+              >
+                {resumeFb?.phase === 'loading' ? 'Resuming…' : 'Resume Daemon'}
+              </button>
+            ) : (
+              <button
+                class="t-btn t-btn-secondary px-4 py-2 text-sm"
+                disabled={pauseFb?.phase === 'loading'}
+                onClick={onPause}
+              >
+                {pauseFb?.phase === 'loading' ? 'Pausing…' : 'Pause Daemon'}
+              </button>
+            )}
+            <span class="data-mono" style="font-size: var(--type-label); color: var(--text-secondary);">
+              {daemonState || 'unknown'}
+            </span>
+          </div>
+          {pauseFb?.msg && <div class={`action-fb action-fb--${pauseFb.phase}`}>{pauseFb.msg}</div>}
+          {resumeFb?.msg && <div class={`action-fb action-fb--${resumeFb.phase}`}>{resumeFb.msg}</div>}
         </div>
       </div>
     </div>

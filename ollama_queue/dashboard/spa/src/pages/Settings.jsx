@@ -2,6 +2,7 @@ import { h } from 'preact';
 import { useCallback } from 'preact/hooks';
 import { settings, status, API } from '../store';
 import SettingsForm from '../components/SettingsForm.jsx';
+import { useActionFeedback } from '../hooks/useActionFeedback.js';
 
 // What it shows: All queue configuration — health thresholds that trigger automatic pausing,
 //   job defaults (timeout, priority), data retention periods, and daemon manual controls
@@ -12,6 +13,9 @@ export default function Settings() {
   const sett = settings.value;
   const st = status.value;
   const daemonState = st && st.daemon ? st.daemon.state : null;
+
+  const [pauseFb, pauseAct] = useActionFeedback();
+  const [resumeFb, resumeAct] = useActionFeedback();
 
   /** Save a single setting key via PUT /api/settings. Returns true on success. */
   const handleSave = useCallback(async (key, value) => {
@@ -35,20 +39,26 @@ export default function Settings() {
   }, []);
 
   const handlePause = useCallback(async () => {
-    try {
-      await fetch(`${API}/daemon/pause`, { method: 'POST' });
-    } catch (e) {
-      console.error('Pause failed:', e);
-    }
-  }, []);
+    await pauseAct(
+      'Pausing daemon…',
+      async () => {
+        const res = await fetch(`${API}/daemon/pause`, { method: 'POST' });
+        if (!res.ok) throw new Error(`Pause failed: ${res.status}`);
+      },
+      'Daemon paused'
+    );
+  }, [pauseAct]);
 
   const handleResume = useCallback(async () => {
-    try {
-      await fetch(`${API}/daemon/resume`, { method: 'POST' });
-    } catch (e) {
-      console.error('Resume failed:', e);
-    }
-  }, []);
+    await resumeAct(
+      'Resuming daemon…',
+      async () => {
+        const res = await fetch(`${API}/daemon/resume`, { method: 'POST' });
+        if (!res.ok) throw new Error(`Resume failed: ${res.status}`);
+      },
+      'Daemon resumed'
+    );
+  }, [resumeAct]);
 
   return (
     <div class="flex flex-col gap-4 animate-page-enter">
@@ -58,6 +68,8 @@ export default function Settings() {
         onSave={handleSave}
         onPause={handlePause}
         onResume={handleResume}
+        pauseFb={pauseFb}
+        resumeFb={resumeFb}
       />
     </div>
   );
