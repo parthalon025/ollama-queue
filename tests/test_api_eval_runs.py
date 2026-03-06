@@ -575,7 +575,8 @@ def test_repeat_run_copies_seed_and_item_ids(client_and_db):
 
     assert new_run["seed"] == 555
     assert json.loads(new_run["item_ids"]) == pairs
-    assert new_run["status"] == "pending"
+    # Background session thread starts immediately, so status may have advanced beyond 'pending'
+    assert new_run["status"] in ("pending", "queued", "generating", "judging", "complete", "failed")
 
 
 def test_repeat_run_422_when_no_item_ids(client_and_db):

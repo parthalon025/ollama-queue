@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 _log = logging.getLogger(__name__)
 
-_RETRYABLE_CODES = {502, 503}
+_RETRYABLE_CODES = {429, 502, 503, 504}  # 429 = rate-limit; 504 = proxy claim-wait timeout; retry
 _MAX_RETRIES = 2
 _RETRY_BASE_DELAY = 2.0
 
@@ -53,6 +53,8 @@ def create_eval_run(
     item_ids: str | None = None,
     variants: list[str] | None = None,
     per_cluster: int = 4,
+    max_runs: int | None = None,
+    max_time_s: int | None = None,
 ) -> int:
     """Insert a new eval_runs row with status='queued' and return the new id.
 
@@ -61,6 +63,7 @@ def create_eval_run(
 
     variants: if provided, overrides the variants column with a JSON array so
     run_eval_generate iterates all of them. variant_id is the primary/first variant.
+    max_runs/max_time_s: fill-open-slots limits (NULL = unlimited).
     """
     import json as _json
     from datetime import UTC
@@ -76,8 +79,8 @@ def create_eval_run(
             """INSERT INTO eval_runs
                (variant_id, variants, run_mode, label, cluster_id, scheduled_by,
                 data_source_url, data_source_token, seed, item_ids, status,
-                per_cluster, created_at, started_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?)""",
+                per_cluster, max_runs, max_time_s, created_at, started_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?)""",
             (
                 variant_id,
                 variants_value,
@@ -90,6 +93,8 @@ def create_eval_run(
                 seed,
                 item_ids,
                 per_cluster,
+                max_runs,
+                max_time_s,
                 now,
                 now,  # started_at = created_at for compatibility (NOT NULL constraint)
             ),
@@ -851,7 +856,9 @@ def run_eval_generate(
 
     items = _fetch_items(data_source_url, data_source_token)
     if not items:
-        update_eval_run(db, run_id, status="failed", error="no items from data source")
+        update_eval_run(
+            db, run_id, status="failed", error="no items from data source", completed_at=datetime.now(UTC).isoformat()
+        )
         return
 
     items_by_cluster = _build_items_by_cluster(items)
@@ -879,6 +886,17 @@ def run_eval_generate(
             continue
 
         for source_item in items:
+            # --- Cooperative cancellation: abort if run was externally stopped ---
+            # Catches: _recover_orphans on restart, cancel endpoint, or run row deletion.
+            _current = get_eval_run(db, run_id)
+            if _current is None or _current.get("status") in ("failed", "cancelled"):
+                _log.info(
+                    "run_eval_generate: run_id=%d status=%s — aborting generate loop",
+                    run_id,
+                    _current.get("status") if _current else "deleted",
+                )
+                return
+
             # --- Circuit breaker (all modes) ---
             if submitted >= 10 and failed / submitted > error_budget:
                 _log.error(
@@ -888,7 +906,13 @@ def run_eval_generate(
                     100 * failed / submitted,
                     100 * error_budget,
                 )
-                update_eval_run(db, run_id, status="failed", error=f"circuit_breaker: {failed}/{submitted} failed")
+                update_eval_run(
+                    db,
+                    run_id,
+                    status="failed",
+                    error=f"circuit_breaker: {failed}/{submitted} failed",
+                    completed_at=datetime.now(UTC).isoformat(),
+                )
                 return
 
             # --- fill-open-slots: check limits before each job ---
@@ -921,7 +945,7 @@ def run_eval_generate(
             if not ok:
                 failed += 1
 
-    update_eval_run(db, run_id, status="judging", stage="judging")
+    update_eval_run(db, run_id, status="judging", stage="judging", runs_completed=submitted)
 
 
 # ---------------------------------------------------------------------------
@@ -1075,7 +1099,9 @@ def run_eval_judge(
 
     items = _fetch_items(data_source_url, data_source_token)
     if not items:
-        update_eval_run(db, run_id, status="failed", error="no items for judging")
+        update_eval_run(
+            db, run_id, status="failed", error="no items for judging", completed_at=datetime.now(UTC).isoformat()
+        )
         return
 
     item_by_id: dict[str, dict] = {str(it["id"]): it for it in items}
@@ -1100,6 +1126,16 @@ def run_eval_judge(
     judge_pairs: list[list[str]] = []
 
     for gen_result in gen_results:
+        # Cooperative cancellation: stop if run was externally cancelled/failed.
+        _jcurrent = get_eval_run(db, run_id)
+        if _jcurrent is None or _jcurrent.get("status") in ("failed", "cancelled"):
+            _log.info(
+                "run_eval_judge: run_id=%d status=%s — aborting judge loop",
+                run_id,
+                _jcurrent.get("status") if _jcurrent else "deleted",
+            )
+            return
+
         source_item_id = str(gen_result["source_item_id"])
         principle = gen_result["principle"]
         source_item = item_by_id.get(source_item_id)
@@ -1179,12 +1215,12 @@ def run_eval_session(
         run_eval_generate(run_id, db, http_base)
         # Check if generate phase failed
         run = get_eval_run(db, run_id)
-        if run is None or run.get("status") == "failed":
+        if run is None or run.get("status") in ("failed", "cancelled"):
             return
         run_eval_judge(run_id, db, http_base)
     except Exception as exc:
         _log.exception("run_eval_session run_id=%d unhandled error", run_id)
         try:
-            update_eval_run(db, run_id, status="failed", error=str(exc))
+            update_eval_run(db, run_id, status="failed", error=str(exc), completed_at=datetime.now(UTC).isoformat())
         except Exception:
             _log.exception("failed to record error for run_id=%d", run_id)

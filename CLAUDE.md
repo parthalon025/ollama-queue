@@ -20,24 +20,29 @@ ollama_queue/
   dashboard/
     spa/              # Preact SPA (built separately, served as static)
       src/            # Source: JSX components, signals store, CSS tokens
+        hooks/        # Shared Preact hooks (useActionFeedback)
       dist/           # Production build output (gitignored)
 scripts/
   migrate_timers.py            # Migrate 8 of 10 systemd timers to recurring jobs (--dry-run / --execute)
   migrate_dlq_max_retries.py   # Add max_retries column to existing dlq table (idempotent)
 tests/
-  test_db.py          # 87 tests
-  test_api.py         # 58 tests (incl. proxy priority, batch schedule, suggest endpoint)
-  test_daemon.py      # 62 tests
-  test_scheduler.py   # 28 tests
-  test_stall.py       # 24 tests
-  test_cli.py         # 27 tests
-  test_health.py      # 18 tests
-  test_models.py      # 16 tests
-  test_estimator.py   # 12 tests
-  test_embed_proxy.py # 12 tests
-  test_proxy.py       # 8 tests
-  test_dlq.py         # 8 tests
-  test_burst.py       # 7 tests
+  test_db.py               # 99 tests
+  test_eval_engine.py      # 69 tests
+  test_api.py              # 58 tests (incl. proxy priority, batch schedule, suggest endpoint)
+  test_daemon.py           # 62 tests
+  test_api_eval_runs.py    # 39 tests
+  test_api_eval_variants.py # 30 tests
+  test_scheduler.py        # 28 tests
+  test_cli.py              # 27 tests
+  test_stall.py            # 24 tests
+  test_health.py           # 18 tests
+  test_api_eval_settings.py # 18 tests
+  test_models.py           # 16 tests
+  test_estimator.py        # 12 tests
+  test_embed_proxy.py      # 12 tests
+  test_proxy.py            # 8 tests
+  test_dlq.py              # 8 tests
+  test_burst.py            # 7 tests
 ```
 
 ## How to Run
@@ -47,7 +52,7 @@ tests/
 cd ~/Documents/projects/ollama-queue
 source .venv/bin/activate
 
-# Run tests (367 total)
+# Run tests (535 total)
 pytest
 
 # Start the server (daemon + API + dashboard)
@@ -102,7 +107,7 @@ Sidebar nav (desktop) + bottom tab bar (mobile). 5 views: **Now** (2-column comm
 
 Route IDs: `now` | `plan` | `history` | `models` | `settings` | `eval`. Sidebar: 200px desktop, 64px icon-only (768–1023px), hidden on mobile. CSS classes: `layout-root`, `layout-sidebar`, `layout-main`, `now-grid`, `history-top-grid`, `mobile-bottom-nav`.
 
-**Eval tab** (4 sub-views): Runs (run list + active progress + repeat), Variants (prompt variant CRUD + stability table), Trends (F1 line chart + trend summary), Settings (judge defaults + data source + scheduling mode + setup checklist). Eval state: `evalActiveRun`, `evalSubTab`, `fetchEvalRuns` in `store.js`.
+**Eval tab** (4 sub-views): Runs (run list + active progress + repeat + judge-rerun), Variants (prompt variant CRUD + stability table), Trends (F1 line chart + trend summary), Settings (judge defaults + data source + scheduling mode + setup checklist). Eval state: `evalActiveRun`, `evalSubTab`, `fetchEvalRuns` in `store.js`. Key invariants: `repeat` starts a background thread (not just a DB row); `judge-rerun` copies gen_results from source run before judging; cancel sets `completed_at`; all fetch calls check `res.ok`.
 
 ### UI Layman Comments (always required)
 
@@ -144,6 +149,16 @@ This applies to: component files, store transformations in `store.js`, computed 
 - **Never submit a queue job that calls back through the proxy** — if a queue job calls `_call_proxy()` → `POST /api/generate`, it will deadlock because the daemon holds `current_job_id` for the running job, blocking `try_claim_for_proxy()`. Use `threading.Thread` for work that needs the proxy. Lesson #1733.
 - **`_recover_orphans()` must skip `proxy:` command sentinels** — proxy endpoints use sentinel jobs (`command LIKE 'proxy:%'`) to serialize Ollama access. On restart, these must be marked failed directly, not reset to pending, or the daemon will try to shell-execute them (exit 127 → DLQ). `get_pending_jobs()` also filters them out. Lessons #1734.
 - **`schedule add` with `bash -c` requires the full script as one quoted arg** — CLI tokenizes `COMMAND...` args; `shlex.quote` is applied at join time. `bash -c source /path...` stores `source` as the script and `/path` as `$0`. Use `--command 'bash -c '"'"'source ...'"'"''` or pass a single-token arg. Lesson #1735.
+- **Eval cooperative cancellation: re-check run status inside every loop iteration** — `run_eval_generate` and `run_eval_judge` run in background threads. `_recover_orphans()` marks the DB row `failed`/`cancelled` on daemon restart, but the thread is still alive. Each loop iteration must re-fetch the run row and return immediately if status is `failed`, `cancelled`, or the row is deleted. Without this, a restarted daemon produces a second overlapping execution while the zombie thread continues writing results.
+- **`completed_at` is required on every terminal eval status transition** — `failed`, `cancelled`, and `completed` must all set `completed_at = time.time()` in the DB update. Missing it leaves the run open-ended in trend queries and the Runs list never shows elapsed time correctly. The `cancel_eval_run` endpoint was missing this; it is now fixed.
+- **`repeat_eval_run` must start a background thread** — the endpoint creates a new DB run row and then must call `threading.Thread(target=run_eval_session, ...).start()`. The row alone does nothing; the daemon does not poll `eval_runs` for pending sessions. Previously the row was created but execution never started, producing a permanently-pending run.
+- **`judge_rerun_eval_run` must copy gen_results from the source run** — the judge-rerun endpoint creates a new run row and calls the judge phase directly, bypassing generation. If `gen_results` is not copied from the original run to the new row before judging, the judge has nothing to score and returns empty metrics (precision=0, recall=0, F1=0).
+- **`db._lock` must wrap every `db._connect()` call in eval endpoints** — `get_eval_trends` and any other eval read endpoint that calls `db._connect()` directly (outside the standard CRUD helpers) must do so inside `with db._lock:`. The RLock is reentrant, so nested acquisition is safe, but unguarded reads race against concurrent writes from background eval threads.
+- **SPA fetch errors must be checked explicitly** — `fetch()` resolves (does not throw) on 4xx/5xx responses; only network failures reject. Always check `res.ok` and throw on failure, otherwise the UI silently ignores HTTP errors and shows stale state. `cancelEvalRun` in `store.js` was missing this check.
+- **Action button feedback: use `useActionFeedback` hook** — all non-immediate action buttons (cancel, submit, pause, retry, etc.) use `src/hooks/useActionFeedback.js`. Pattern: `const [fb, act] = useActionFeedback(); <button disabled={fb.phase==='loading'} onClick={() => act('Loading…', fn, result => `Done: ${result.id}`)}>`; render `{fb.msg && <div class={`action-fb action-fb--${fb.phase}`}>{fb.msg}</div>}` below the button. Success labels must be specific (e.g. `"Run #12 started"`, `"Job #6350 queued"`), not generic "Done". Hook lives in `src/hooks/useActionFeedback.js` — one instance per button.
+- **`useActionFeedback` double-click guard** — `run()` returns early if `state.phase === 'loading'`. Place this check as the first line to prevent concurrent executions from the same button.
+- **Rules of Hooks in action buttons** — all `useActionFeedback()` calls must appear before any conditional `return null` in the component. If an early guard precedes the hooks, React will throw "rendered fewer hooks than previous render" on re-render. Move hook calls to the top of the function body.
+- **`evalActiveRun` sessionStorage staleness** — on store init, if `evalActiveRun` is loaded from sessionStorage (service restart), immediately verify via `GET /api/eval/runs/{id}/progress`. If status is terminal or fetch fails, clear `evalActiveRun.value` and remove the sessionStorage key. Use an identity guard (`run_id !== _storedId`) to prevent the async `.then()` from clobbering a new run started during the fetch window. See `store.js` after `API` declaration.
 
 ## Design Doc
 

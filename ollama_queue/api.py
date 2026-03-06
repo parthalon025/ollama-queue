@@ -1211,11 +1211,12 @@ def create_app(db: Database) -> FastAPI:
         """
         import statistics
 
-        conn = db._connect()
-        runs = conn.execute(
-            """SELECT id, started_at, metrics, item_ids, item_count
-               FROM eval_runs WHERE status = 'complete' ORDER BY id ASC"""
-        ).fetchall()
+        with db._lock:
+            conn = db._connect()
+            runs = conn.execute(
+                """SELECT id, started_at, metrics, item_ids, item_count
+                   FROM eval_runs WHERE status = 'complete' ORDER BY id ASC"""
+            ).fetchall()
 
         # Build per-variant run list
         variant_runs: dict[str, list[dict]] = {}
@@ -1454,13 +1455,21 @@ def create_app(db: Database) -> FastAPI:
             f"ollama-queue eval-run --variants {','.join(variants)} "
             f"--per-cluster {per_cluster} --run-mode {run_mode}"
         )
-        rj_id = db.add_recurring_job(
-            name=f"eval-session-{recurrence}",
-            command=command,
-            interval_seconds=interval_seconds,
-            tag="eval",
-            source="eval-schedule",
-        )
+        import sqlite3 as _sqlite3
+
+        try:
+            rj_id = db.add_recurring_job(
+                name=f"eval-session-{recurrence}",
+                command=command,
+                interval_seconds=interval_seconds,
+                tag="eval",
+                source="eval-schedule",
+            )
+        except (_sqlite3.IntegrityError, ValueError) as exc:
+            raise HTTPException(
+                status_code=409,
+                detail=f"eval-session-{recurrence} already exists — delete it first or use PUT /api/schedule to update",
+            ) from exc
         return {"job_id": rj_id}
 
     # --- Eval: Runs lifecycle ---
@@ -1551,16 +1560,23 @@ def create_app(db: Database) -> FastAPI:
             raise HTTPException(status_code=400, detail="variant_id or variants list is required")
 
         # Validate all requested variants exist
-        conn = db._connect()
         all_ids = variants_list if variants_list else [variant_id]
-        for vid in all_ids:
-            row = conn.execute("SELECT id FROM eval_variants WHERE id = ?", (vid,)).fetchone()
-            if row is None:
-                raise HTTPException(status_code=404, detail=f"Variant '{vid}' not found")
+        with db._lock:
+            conn = db._connect()
+            for vid in all_ids:
+                row = conn.execute("SELECT id FROM eval_variants WHERE id = ?", (vid,)).fetchone()
+                if row is None:
+                    raise HTTPException(status_code=404, detail=f"Variant '{vid}' not found")
 
         valid_modes = ("batch", "opportunistic", "fill-open-slots", "scheduled")
         if run_mode not in valid_modes:
             raise HTTPException(status_code=400, detail=f"run_mode must be one of: {', '.join(valid_modes)}")
+
+        # fill-open-slots limits (None = unlimited; frontend sends null when not applicable)
+        max_runs_raw = body.get("max_runs")
+        max_time_s_raw = body.get("max_time_s")
+        max_runs = int(max_runs_raw) if max_runs_raw is not None else None
+        max_time_s = int(max_time_s_raw) if max_time_s_raw is not None else None
 
         # Create the run row
         run_id = _ee.create_eval_run(
@@ -1572,6 +1588,8 @@ def create_app(db: Database) -> FastAPI:
             scheduled_by="api",
             variants=variants_list,
             per_cluster=int(per_cluster) if per_cluster else 4,
+            max_runs=max_runs,
+            max_time_s=max_time_s,
         )
 
         # Persist judge_model from request body so run_eval_judge uses it instead of the setting default
@@ -1640,7 +1658,10 @@ def create_app(db: Database) -> FastAPI:
                 detail=f"Cannot cancel run {run_id}: already in terminal status '{run['status']}'",
             )
 
-        _ee.update_eval_run(db, run_id, status="cancelled")
+        from datetime import UTC
+        from datetime import datetime as _cdt
+
+        _ee.update_eval_run(db, run_id, status="cancelled", completed_at=_cdt.now(UTC).isoformat())
         return {"ok": True, "run_id": run_id}
 
     @app.get("/api/eval/runs/{run_id}/results")
@@ -1816,6 +1837,21 @@ def create_app(db: Database) -> FastAPI:
             run_id,
             orig["seed"],
         )
+
+        import threading as _threading
+
+        _captured_new_id = new_run_id
+
+        def _run_repeat_in_background() -> None:
+            try:
+                from ollama_queue import eval_engine as _ee_repeat
+
+                _ee_repeat.run_eval_session(_captured_new_id, db)
+            except Exception:
+                _log.exception("run_eval_session failed for repeat run_id=%d", _captured_new_id)
+
+        _threading.Thread(target=_run_repeat_in_background, daemon=True).start()
+
         return {"run_id": new_run_id}
 
     @app.post("/api/eval/runs/{run_id}/promote")
@@ -1903,21 +1939,45 @@ def create_app(db: Database) -> FastAPI:
             item_ids=run.get("item_ids"),
         )
 
+        # Copy gen_results from original run so run_eval_judge can find them.
+        # Without this the new run has no eval_results rows and judge produces empty metrics.
+        # Scores are intentionally NOT copied — judge-rerun must score fresh.
+        # (INSERT OR IGNORE on a unique key would preserve old scores and make re-judging a no-op.)
+        with db._lock:
+            conn = db._connect()
+            conn.execute(
+                """INSERT OR IGNORE INTO eval_results
+                   (run_id, variant, source_item_id, principle, target_item_id,
+                    is_same_cluster, row_type, generation_time_s, queue_job_id,
+                    score_transfer, score_precision, score_action, error)
+                   SELECT ?, variant, source_item_id, principle, target_item_id,
+                          is_same_cluster, row_type, generation_time_s, queue_job_id,
+                          NULL, NULL, NULL, NULL
+                   FROM eval_results
+                   WHERE run_id = ? AND principle IS NOT NULL AND error IS NULL""",
+                (new_run_id, run_id),
+            )
+            conn.commit()
+
         # Set status to 'judging' (override 'queued' set by create_eval_run)
         _ee.update_eval_run(db, new_run_id, status="judging")
 
-        # Submit a background job for the judge phase
-        try:
-            db.submit_job(
-                command=f"ollama-queue eval-run --run-id {new_run_id} --judge-only",
-                model="",
-                priority=5,
-                timeout=3600,
-                source="eval-judge-rerun",
-                tag="eval",
-            )
-        except Exception:
-            _log.warning("judge_rerun_eval_run: failed to submit background job for run %d", new_run_id, exc_info=True)
+        # Spawn background thread for the judge phase — same pattern as trigger_eval_run.
+        # (The `ollama-queue eval-run` CLI subcommand does not exist; queue-job approach
+        # would fail with exit code 2.)
+        import threading as _threading_jr
+
+        _captured_judge_id = new_run_id
+
+        def _run_judge_in_background() -> None:
+            try:
+                from ollama_queue import eval_engine as _ee_jr
+
+                _ee_jr.run_eval_judge(_captured_judge_id, db)
+            except Exception:
+                _log.exception("run_eval_judge failed for judge-rerun run_id=%d", _captured_judge_id)
+
+        _threading_jr.Thread(target=_run_judge_in_background, daemon=True).start()
 
         return JSONResponse(content={"run_id": new_run_id}, status_code=201)
 
