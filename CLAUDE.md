@@ -20,24 +20,29 @@ ollama_queue/
   dashboard/
     spa/              # Preact SPA (built separately, served as static)
       src/            # Source: JSX components, signals store, CSS tokens
+        hooks/        # Shared Preact hooks (useActionFeedback)
       dist/           # Production build output (gitignored)
 scripts/
   migrate_timers.py            # Migrate 8 of 10 systemd timers to recurring jobs (--dry-run / --execute)
   migrate_dlq_max_retries.py   # Add max_retries column to existing dlq table (idempotent)
 tests/
-  test_db.py          # 87 tests
-  test_api.py         # 58 tests (incl. proxy priority, batch schedule, suggest endpoint)
-  test_daemon.py      # 62 tests
-  test_scheduler.py   # 28 tests
-  test_stall.py       # 24 tests
-  test_cli.py         # 27 tests
-  test_health.py      # 18 tests
-  test_models.py      # 16 tests
-  test_estimator.py   # 12 tests
-  test_embed_proxy.py # 12 tests
-  test_proxy.py       # 8 tests
-  test_dlq.py         # 8 tests
-  test_burst.py       # 7 tests
+  test_db.py               # 99 tests
+  test_eval_engine.py      # 69 tests
+  test_api.py              # 58 tests (incl. proxy priority, batch schedule, suggest endpoint)
+  test_daemon.py           # 62 tests
+  test_api_eval_runs.py    # 39 tests
+  test_api_eval_variants.py # 30 tests
+  test_scheduler.py        # 28 tests
+  test_cli.py              # 27 tests
+  test_stall.py            # 24 tests
+  test_health.py           # 18 tests
+  test_api_eval_settings.py # 18 tests
+  test_models.py           # 16 tests
+  test_estimator.py        # 12 tests
+  test_embed_proxy.py      # 12 tests
+  test_proxy.py            # 8 tests
+  test_dlq.py              # 8 tests
+  test_burst.py            # 7 tests
 ```
 
 ## How to Run
@@ -47,7 +52,7 @@ tests/
 cd ~/Documents/projects/ollama-queue
 source .venv/bin/activate
 
-# Run tests (367 total)
+# Run tests (535 total)
 pytest
 
 # Start the server (daemon + API + dashboard)
@@ -150,6 +155,10 @@ This applies to: component files, store transformations in `store.js`, computed 
 - **`judge_rerun_eval_run` must copy gen_results from the source run** — the judge-rerun endpoint creates a new run row and calls the judge phase directly, bypassing generation. If `gen_results` is not copied from the original run to the new row before judging, the judge has nothing to score and returns empty metrics (precision=0, recall=0, F1=0).
 - **`db._lock` must wrap every `db._connect()` call in eval endpoints** — `get_eval_trends` and any other eval read endpoint that calls `db._connect()` directly (outside the standard CRUD helpers) must do so inside `with db._lock:`. The RLock is reentrant, so nested acquisition is safe, but unguarded reads race against concurrent writes from background eval threads.
 - **SPA fetch errors must be checked explicitly** — `fetch()` resolves (does not throw) on 4xx/5xx responses; only network failures reject. Always check `res.ok` and throw on failure, otherwise the UI silently ignores HTTP errors and shows stale state. `cancelEvalRun` in `store.js` was missing this check.
+- **Action button feedback: use `useActionFeedback` hook** — all non-immediate action buttons (cancel, submit, pause, retry, etc.) use `src/hooks/useActionFeedback.js`. Pattern: `const [fb, act] = useActionFeedback(); <button disabled={fb.phase==='loading'} onClick={() => act('Loading…', fn, result => `Done: ${result.id}`)}>`; render `{fb.msg && <div class={`action-fb action-fb--${fb.phase}`}>{fb.msg}</div>}` below the button. Success labels must be specific (e.g. `"Run #12 started"`, `"Job #6350 queued"`), not generic "Done". Hook lives in `src/hooks/useActionFeedback.js` — one instance per button.
+- **`useActionFeedback` double-click guard** — `run()` returns early if `state.phase === 'loading'`. Place this check as the first line to prevent concurrent executions from the same button.
+- **Rules of Hooks in action buttons** — all `useActionFeedback()` calls must appear before any conditional `return null` in the component. If an early guard precedes the hooks, React will throw "rendered fewer hooks than previous render" on re-render. Move hook calls to the top of the function body.
+- **`evalActiveRun` sessionStorage staleness** — on store init, if `evalActiveRun` is loaded from sessionStorage (service restart), immediately verify via `GET /api/eval/runs/{id}/progress`. If status is terminal or fetch fails, clear `evalActiveRun.value` and remove the sessionStorage key. Use an identity guard (`run_id !== _storedId`) to prevent the async `.then()` from clobbering a new run started during the fetch window. See `store.js` after `API` declaration.
 
 ## Design Doc
 
