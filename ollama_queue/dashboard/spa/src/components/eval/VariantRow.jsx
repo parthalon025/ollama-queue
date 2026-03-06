@@ -2,6 +2,7 @@ import { h } from 'preact';
 import { useState } from 'preact/hooks';
 import { API, fetchEvalVariants } from '../../store.js';
 import { EVAL_TRANSLATIONS } from './translations.js';
+import { useActionFeedback } from '../../hooks/useActionFeedback.js';
 // What it shows: A single eval variant config with 3-level progressive disclosure.
 //   L1: ★ badge, variant ID/label, model, recommended/production badges, latest quality.
 //   L2: model, creativity, memory window, template, quality sparkline, edit/clone buttons.
@@ -16,6 +17,8 @@ function getTemplateLabelFromId(templateId) {
 }
 
 export default function VariantRow({ variant }) {
+  const [deleteFb, deleteAct] = useActionFeedback();
+
   const [level, setLevel] = useState(1); // 1 | 2 | 3
   const [cloning, setCloning] = useState(false);
   const [cloneError, setCloneError] = useState(null);
@@ -60,6 +63,20 @@ export default function VariantRow({ variant }) {
     } finally {
       setCloning(false);
     }
+  }
+
+  async function handleDelete(evt) {
+    evt.stopPropagation();
+    if (!confirm(`Delete variant "${label}"?`)) return;
+    await deleteAct(
+      'Deleting…',
+      async () => {
+        const res = await fetch(`${API}/eval/variants/${id}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
+        await fetchEvalVariants();
+      },
+      `Variant deleted`
+    );
   }
 
   return (
@@ -178,6 +195,19 @@ export default function VariantRow({ variant }) {
             >
               {level === 3 ? '▲ Hide run history' : '▼ Run history'}
             </button>
+            {!is_system && (
+              <div>
+                <button
+                  class="t-btn t-btn-secondary"
+                  style={{ fontSize: 'var(--type-label)', padding: '3px 10px', color: 'var(--status-error)' }}
+                  disabled={deleteFb.phase === 'loading'}
+                  onClick={handleDelete}
+                >
+                  {deleteFb.phase === 'loading' ? 'Deleting…' : 'Delete'}
+                </button>
+                {deleteFb.msg && <div class={`action-fb action-fb--${deleteFb.phase}`}>{deleteFb.msg}</div>}
+              </div>
+            )}
           </div>
         </div>
       )}

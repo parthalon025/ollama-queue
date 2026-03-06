@@ -1,7 +1,8 @@
 import { h } from 'preact';
 import { useState } from 'preact/hooks';
-import { API, fetchEvalTemplates } from '../../store.js';
+import { API, fetchEvalTemplates, fetchEvalVariants } from '../../store.js';
 import { EVAL_TRANSLATIONS } from './translations.js';
+import { useActionFeedback } from '../../hooks/useActionFeedback.js';
 // What it shows: A single prompt template with 3-level progressive disclosure.
 //   L1: template ID, plain-language label.
 //   L2: first 200 chars of instruction, edit/clone buttons.
@@ -12,6 +13,8 @@ import { EVAL_TRANSLATIONS } from './translations.js';
 // NOTE: All .map() callbacks use descriptive parameter names — never 'h' (shadows JSX factory)
 
 export default function TemplateRow({ template }) {
+  const [deleteFb, deleteAct] = useActionFeedback();
+
   const [level, setLevel] = useState(1); // 1 | 2 | 3
   const [cloning, setCloning] = useState(false);
   const [cloneError, setCloneError] = useState(null);
@@ -37,6 +40,20 @@ export default function TemplateRow({ template }) {
     } finally {
       setCloning(false);
     }
+  }
+
+  async function handleDelete(evt) {
+    evt.stopPropagation();
+    if (!confirm(`Delete template "${label}"?`)) return;
+    await deleteAct(
+      'Deleting…',
+      async () => {
+        const res = await fetch(`${API}/eval/templates/${id}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
+        await fetchEvalVariants(); // refreshes variants list
+      },
+      `Template deleted`
+    );
   }
 
   return (
@@ -114,6 +131,19 @@ export default function TemplateRow({ template }) {
               >
                 {level === 3 ? '▲ Collapse' : '▼ Full text'}
               </button>
+            )}
+            {!is_system && (
+              <div>
+                <button
+                  class="t-btn t-btn-secondary"
+                  style={{ fontSize: 'var(--type-label)', padding: '3px 10px', color: 'var(--status-error)' }}
+                  disabled={deleteFb.phase === 'loading'}
+                  onClick={handleDelete}
+                >
+                  {deleteFb.phase === 'loading' ? 'Deleting…' : 'Delete'}
+                </button>
+                {deleteFb.msg && <div class={`action-fb action-fb--${deleteFb.phase}`}>{deleteFb.msg}</div>}
+              </div>
             )}
           </div>
         </div>

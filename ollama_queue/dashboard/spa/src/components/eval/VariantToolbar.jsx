@@ -3,6 +3,7 @@ import { useState } from 'preact/hooks';
 import { signal } from '@preact/signals';
 import { API, evalTemplates, fetchEvalVariants } from '../../store.js';
 import { EVAL_TRANSLATIONS } from './translations.js';
+import { useActionFeedback } from '../../hooks/useActionFeedback.js';
 // What it shows: Action toolbar for managing variant configs — create new,
 //   bulk-generate from installed models, export, and import.
 // Decision it drives: User quickly populates configs for all local models,
@@ -13,8 +14,9 @@ import { EVAL_TRANSLATIONS } from './translations.js';
 export default function VariantToolbar() {
   const templates = evalTemplates.value;
 
+  const [genFb, genAct] = useActionFeedback();
+
   const [showNewForm, setShowNewForm] = useState(false);
-  const [generating, setGenerating] = useState(false);
   const [genPreview, setGenPreview] = useState(null);
   const [newVariant, setNewVariant] = useState({
     label: '',
@@ -65,16 +67,18 @@ export default function VariantToolbar() {
   }
 
   async function handleGenerateConfirm() {
-    setGenerating(true);
-    try {
-      await fetch(`${API}/eval/variants/generate`, { method: 'POST' });
-      await fetchEvalVariants();
-      setGenPreview(null);
-    } catch (e) {
-      console.error('Generate failed:', e);
-    } finally {
-      setGenerating(false);
-    }
+    await genAct(
+      'Generating variants…',
+      async () => {
+        const res = await fetch(`${API}/eval/variants/generate`, { method: 'POST' });
+        if (!res.ok) throw new Error(`Generate failed: ${res.status}`);
+        const data = await res.json();
+        await fetchEvalVariants();
+        setGenPreview(null);
+        return data;
+      },
+      data => `${data.created ?? data.count ?? 'Variants'} generated`
+    );
   }
 
   async function handleExport() {
@@ -124,7 +128,7 @@ export default function VariantToolbar() {
           class="t-btn t-btn-secondary"
           style={{ fontSize: 'var(--type-label)', padding: '4px 12px' }}
           onClick={handleGeneratePreview}
-          disabled={generating}
+          disabled={genFb.phase === 'loading'}
         >
           ⚡ Generate from models
         </button>
@@ -147,13 +151,19 @@ export default function VariantToolbar() {
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-primary)', marginBottom: '0.4rem' }}>
             Will create {genPreview.count ?? '?'} configurations from installed models.
           </div>
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
-            <button class="t-btn t-btn-primary" style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }} onClick={handleGenerateConfirm} disabled={generating}>
-              {generating ? 'Generating…' : 'Confirm'}
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+            <button
+              class="t-btn t-btn-primary"
+              style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }}
+              disabled={genFb.phase === 'loading'}
+              onClick={handleGenerateConfirm}
+            >
+              {genFb.phase === 'loading' ? 'Generating…' : 'Confirm'}
             </button>
             <button class="t-btn t-btn-secondary" style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }} onClick={() => setGenPreview(null)}>
               Cancel
             </button>
+            {genFb.msg && <div class={`action-fb action-fb--${genFb.phase}`}>{genFb.msg}</div>}
           </div>
         </div>
       )}
