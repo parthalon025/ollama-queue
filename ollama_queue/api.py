@@ -1740,9 +1740,17 @@ def create_app(db: Database) -> FastAPI:
                 (run_id,),
             ).fetchall()
 
+            # Resolve gen_model from variant (for swimlane model badge)
+            _variant_id = run.get("variant_id") or (run.get("variants") or "").split(",")[0].strip()
+            _variant_row = conn.execute("SELECT model FROM eval_variants WHERE id = ?", (_variant_id,)).fetchone()
+            gen_model = _variant_row["model"] if _variant_row else None
+
         generated = counts.get("generate", 0)
         judged = counts.get("judge", 0)
-        pct = round(judged / total * 100, 1) if total > 0 else 0.0
+        run_status = run["status"]
+        is_judging = run_status in ("judging",) or run.get("stage") in ("judging", "fetch_targets")
+        phase_count = judged if is_judging else generated
+        pct = round(phase_count / total * 100, 1) if total > 0 else 0.0
 
         # per_variant dict: {variant_id: {completed, total, failed}}
         # "total" per variant = number of generate rows (each needs a judge call)
@@ -1755,9 +1763,7 @@ def create_app(db: Database) -> FastAPI:
             }
 
         # Determine which stage we're in to compute the "completed" counter shown in the UI
-        run_status = run["status"]
-        is_judging = run_status in ("judging",) or run.get("stage") in ("judging", "fetch_targets")
-        completed = judged if is_judging else generated
+        completed = phase_count
 
         failure_rate = round(failed / total, 4) if total > 0 else 0.0
 
@@ -1777,6 +1783,9 @@ def create_app(db: Database) -> FastAPI:
             "failure_rate": failure_rate,
             "per_variant": per_variant,
             "eta_s": None,
+            # Swimlane model badge
+            "gen_model": gen_model,
+            "judge_model": run.get("judge_model"),
         }
 
     @app.post("/api/eval/runs/{run_id}/repeat")

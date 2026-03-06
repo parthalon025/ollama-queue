@@ -610,6 +610,68 @@ def test_repeat_run_404_for_missing_original(client):
 # ---------------------------------------------------------------------------
 
 
+def test_get_eval_run_progress_includes_model_fields(client_and_db):
+    """Progress response includes gen_model and judge_model fields."""
+    client, db = client_and_db
+    run_id = _make_run(db, variant_id="A", status="generating")
+    update_eval_run(db, run_id, item_count=10)
+
+    resp = client.get(f"/api/eval/runs/{run_id}/progress")
+    assert resp.status_code == 200
+    data = resp.json()
+    # Variant A is seeded with model "deepseek-r1:8b"
+    assert data["gen_model"] == "deepseek-r1:8b"
+    assert "judge_model" in data
+
+
+def test_get_eval_run_progress_pct_is_per_phase_generating(client_and_db):
+    """During generating phase, pct reflects generated/total (not judged/total)."""
+    client, db = client_and_db
+    run_id = _make_run(db, status="generating")
+    update_eval_run(db, run_id, item_count=10)
+
+    # Insert 3 generate rows (0 judge rows)
+    for i in range(3):
+        insert_eval_result(
+            db,
+            run_id=run_id,
+            variant="A",
+            source_item_id=f"src-{i}",
+            target_item_id=f"tgt-{i}",
+            is_same_cluster=1,
+            row_type="generate",
+        )
+
+    resp = client.get(f"/api/eval/runs/{run_id}/progress")
+    assert resp.status_code == 200
+    data = resp.json()
+    # 3/10 generated = 30%, not 0% (which it would be if using judged/total)
+    assert data["pct"] == 30.0
+
+
+def test_get_eval_run_progress_pct_is_per_phase_judging(client_and_db):
+    """During judging phase, pct reflects judged/total."""
+    client, db = client_and_db
+    run_id = _make_run(db, status="judging")
+    update_eval_run(db, run_id, item_count=10)
+
+    for i in range(4):
+        insert_eval_result(
+            db,
+            run_id=run_id,
+            variant="A",
+            source_item_id=f"src-{i}",
+            target_item_id=f"tgt-{i}",
+            is_same_cluster=1,
+            row_type="judge",
+            score_transfer=3,
+        )
+
+    resp = client.get(f"/api/eval/runs/{run_id}/progress")
+    assert resp.status_code == 200
+    assert resp.json()["pct"] == 40.0
+
+
 def test_run_eval_generate_persists_seed_when_none(tmp_path):
     """run_eval_generate() generates and writes a seed when the run has no seed."""
     import datetime
