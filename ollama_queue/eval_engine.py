@@ -699,7 +699,7 @@ def _generate_one(
         source_item_id=str(source_item["id"]),
         target_item_id=str(source_item["id"]),
         is_same_cluster=0,
-        row_type="generation",  # distinguishes from judge rows in queries
+        row_type="generate",  # matches progress query and DB row_type='judge' convention
         principle=text,
         generation_time_s=generation_time_s,
         queue_job_id=queue_job_id,
