@@ -1,6 +1,7 @@
 import { h } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { settings, submitJob } from '../store';
+import { useActionFeedback } from '../hooks/useActionFeedback.js';
 
 const inputStyle = {
     fontFamily: 'var(--font-mono)', fontSize: 'var(--type-body)',
@@ -27,8 +28,8 @@ export default function SubmitJobModal({ onJobSubmitted }) {
     const [model, setModel] = useState('');
     const [priority, setPriority] = useState(5);
     const [timeout, setTimeout_] = useState(120);
-    const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState(null);
+    const [fb, act] = useActionFeedback();
     const dialogRef = useRef(null);
 
     // Sync form defaults when settings signal updates
@@ -95,26 +96,29 @@ export default function SubmitJobModal({ onJobSubmitted }) {
             return;
         }
         setError(null);
-        setSubmitting(true);
-        try {
-            const body = {
-                command: command.trim(),
-                source: source.trim(),
-                priority: Number(priority),
-                timeout: Number(timeout),
-            };
-            if (model.trim()) {
-                body.model = model.trim();
-            }
-            const result = await submitJob(body);
-            setOpen(false);
-            resetForm();
-            if (onJobSubmitted) onJobSubmitted(result.job_id);
-        } catch (err) {
-            setError(err.message || 'Submit failed');
-        } finally {
-            setSubmitting(false);
-        }
+
+        await act(
+            'Submitting job\u2026',
+            async () => {
+                const body = {
+                    command: command.trim(),
+                    source: source.trim(),
+                    priority: Number(priority),
+                    timeout: Number(timeout),
+                };
+                if (model.trim()) {
+                    body.model = model.trim();
+                }
+                const result = await submitJob(body);
+                if (onJobSubmitted) onJobSubmitted(result.job_id);
+                setTimeout(() => {
+                    setOpen(false);
+                    resetForm();
+                }, 1500);
+                return result;
+            },
+            result => `Job #${result.job_id} queued`,
+        );
     }
 
     function handleCancel() {
@@ -243,7 +247,7 @@ export default function SubmitJobModal({ onJobSubmitted }) {
                                 </div>
                             )}
 
-                            {/* Action buttons */}
+                            {/* Action buttons + feedback */}
                             <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', paddingTop: '0.25rem' }}>
                                 <button
                                     type="button"
@@ -263,22 +267,23 @@ export default function SubmitJobModal({ onJobSubmitted }) {
                                 </button>
                                 <button
                                     type="submit"
-                                    disabled={submitting}
+                                    disabled={fb.phase === 'loading'}
                                     style={{
-                                        background: submitting ? 'var(--text-tertiary)' : 'var(--accent)',
+                                        background: fb.phase === 'loading' ? 'var(--text-tertiary)' : 'var(--accent)',
                                         color: 'var(--bg-base)',
                                         border: 'none',
                                         borderRadius: 'var(--radius)',
                                         padding: '0.4rem 1rem',
-                                        cursor: submitting ? 'not-allowed' : 'pointer',
+                                        cursor: fb.phase === 'loading' ? 'not-allowed' : 'pointer',
                                         fontWeight: 700,
                                         fontFamily: 'var(--font-mono)',
                                         fontSize: 'var(--type-body)',
                                     }}
                                 >
-                                    {submitting ? 'Submitting\u2026' : 'Submit'}
+                                    {fb.phase === 'loading' ? 'Submitting\u2026' : 'Submit'}
                                 </button>
                             </div>
+                            {fb.msg && <div class={`action-fb action-fb--${fb.phase}`}>{fb.msg}</div>}
                         </div>
                     </form>
                 </div>
