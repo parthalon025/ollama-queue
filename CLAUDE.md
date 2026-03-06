@@ -27,7 +27,7 @@ scripts/
   migrate_dlq_max_retries.py   # Add max_retries column to existing dlq table (idempotent)
 tests/
   test_db.py               # 99 tests
-  test_eval_engine.py      # 69 tests
+  test_eval_engine.py      # 72 tests
   test_api.py              # 58 tests (incl. proxy priority, batch schedule, suggest endpoint)
   test_daemon.py           # 62 tests
   test_api_eval_runs.py    # 42 tests
@@ -52,7 +52,7 @@ tests/
 cd ~/Documents/projects/ollama-queue
 source .venv/bin/activate
 
-# Run tests (538 total)
+# Run tests (541 total)
 pytest
 
 # Start the server (daemon + API + dashboard)
