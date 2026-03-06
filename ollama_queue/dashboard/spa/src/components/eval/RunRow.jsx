@@ -3,6 +3,7 @@ import { useState } from 'preact/hooks';
 import { EVAL_TRANSLATIONS } from './translations.js';
 import ResultsTable from './ResultsTable.jsx';
 import { evalActiveRun, evalSubTab, fetchEvalRuns, startEvalPoll } from '../../store.js';
+import { useActionFeedback } from '../../hooks/useActionFeedback.js';
 // What it shows: A single eval run row with 3-level progressive disclosure.
 //   L1: status dot, winner config, quality score, date, item count.
 //   L2: per-variant metric table, scorer info, action buttons.
@@ -49,8 +50,7 @@ function fmtPct(val) {
 
 export default function RunRow({ run }) {
   const [level, setLevel] = useState(1); // 1 | 2 | 3
-  const [repeatError, setRepeatError] = useState(null);
-  const [repeating, setRepeating] = useState(false);
+  const [repeatFb, repeatAct] = useActionFeedback();
 
   const {
     id,
@@ -68,28 +68,22 @@ export default function RunRow({ run }) {
 
   async function handleRepeat(evt) {
     evt.stopPropagation();
-    setRepeatError(null);
-    setRepeating(true);
-    try {
-      const res = await fetch(`/api/eval/runs/${id}/repeat`, { method: 'POST' });
-      const data = await res.json();
-      if (!res.ok) {
-        setRepeatError(data.detail || 'Repeat failed');
-        return;
-      }
-      // Switch to runs sub-tab, set the new run as active, and start live polling
-      evalSubTab.value = 'runs';
-      const activeState = { run_id: data.run_id, status: 'pending' };
-      evalActiveRun.value = activeState;
-      sessionStorage.setItem('evalActiveRun', JSON.stringify(activeState));
-      startEvalPoll(data.run_id);
-      // Refresh run list so the new run appears immediately
-      await fetchEvalRuns();
-    } catch (exc) {
-      setRepeatError(String(exc));
-    } finally {
-      setRepeating(false);
-    }
+    await repeatAct(
+      'Repeating run…',
+      async () => {
+        const res = await fetch(`/api/eval/runs/${id}/repeat`, { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Repeat failed');
+        evalSubTab.value = 'runs';
+        const activeState = { run_id: data.run_id, status: 'pending' };
+        evalActiveRun.value = activeState;
+        sessionStorage.setItem('evalActiveRun', JSON.stringify(activeState));
+        startEvalPoll(data.run_id);
+        await fetchEvalRuns();
+        return data;
+      },
+      data => `Run #${data.run_id} started`
+    );
   }
 
   // Parse metrics JSON if it came as string
@@ -236,20 +230,18 @@ export default function RunRow({ run }) {
               Export
             </button>
             {canRepeat && (
-              <button
-                class="t-btn t-btn-secondary"
-                style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }}
-                disabled={repeating}
-                onClick={handleRepeat}
-                title="Re-run this eval with the same items and seed"
-              >
-                {repeating ? 'Starting…' : '↺ Repeat'}
-              </button>
-            )}
-            {repeatError && (
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--status-error)' }}>
-                {repeatError}
-              </span>
+              <div>
+                <button
+                  class="t-btn t-btn-secondary"
+                  style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }}
+                  disabled={repeatFb.phase === 'loading'}
+                  onClick={handleRepeat}
+                  title="Re-run this eval with the same items and seed"
+                >
+                  {repeatFb.phase === 'loading' ? 'Repeating…' : '↺ Repeat'}
+                </button>
+                {repeatFb.msg && <div class={`action-fb action-fb--${repeatFb.phase}`}>{repeatFb.msg}</div>}
+              </div>
             )}
             <button
               class="t-btn t-btn-secondary"
