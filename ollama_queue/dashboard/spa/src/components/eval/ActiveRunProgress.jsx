@@ -1,7 +1,7 @@
 import { h } from 'preact';
 import { evalActiveRun, cancelEvalRun, startEvalPoll } from '../../store.js';
-import { EVAL_TRANSLATIONS } from './translations.js';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
+import EvalPipelineSwimline from './EvalPipelineSwimline.jsx';
 // What it shows: Live progress of the currently-running eval run, including
 //   stage (Writing/Scoring), overall % complete, per-variant progress bars,
 //   ETA, failure rate, and circuit breaker banner if the run is paused.
@@ -43,15 +43,6 @@ export default function ActiveRunProgress() {
     eta_s,
     failure_rate = 0,
   } = activeRun;
-
-  // DB stage values: 'generating', 'judging', 'fetch_items', 'fetch_targets'
-  // Fall back to status when stage is null (e.g. run just started)
-  const stageContext = stage || status;
-  const stageLabel = (stageContext === 'generating' || stageContext === 'generate')
-    ? EVAL_TRANSLATIONS.generating?.label ?? 'Writing principles…'
-    : (stageContext === 'judging' || stageContext === 'judge' || stageContext === 'fetch_targets')
-    ? EVAL_TRANSLATIONS.judging?.label ?? 'Scoring results…'
-    : 'Working…';
 
   const isPaused = status === 'paused';
   const showFailureWarning = failure_rate > 0.05 && !isPaused;
@@ -133,17 +124,22 @@ export default function ActiveRunProgress() {
         </div>
       )}
 
-      {/* Stage indicator */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-        <span class="cursor-working" style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-body)', color: 'var(--accent)' }}>
-          {stageLabel} ({completed}/{total})
-        </span>
-        {etaLabel && (
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)' }}>
-            {etaLabel}
-          </span>
-        )}
-      </div>
+      {/* Pipeline swimlane: shows all stages, active step, model, per-phase progress */}
+      <EvalPipelineSwimline
+        stage={stage}
+        status={status}
+        generated={activeRun.generated ?? 0}
+        judged={activeRun.judged ?? 0}
+        total={total}
+        pct={pct}
+        gen_model={activeRun.gen_model}
+        judge_model={activeRun.judge_model}
+      />
+      {etaLabel && (
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', marginBottom: '0.5rem', textAlign: 'right' }}>
+          {etaLabel}
+        </div>
+      )}
 
       {/* Overall progress bar */}
       <div class="eval-progress-track" style={{ marginBottom: '0.75rem' }}>
