@@ -389,7 +389,7 @@ def create_app(db: Database) -> FastAPI:
 
         priority = body.pop("_priority", 0)
         source = body.pop("_source", "proxy")
-        req_timeout = body.pop("_timeout", 120)
+        req_timeout = body.pop("_timeout", 600)  # default matches default_timeout_seconds; callers may override
 
         model = body.get("model", "")
 
@@ -429,6 +429,17 @@ def create_app(db: Database) -> FastAPI:
             )
             result["_queue_job_id"] = job_id
             return result
+        except httpx.ReadTimeout as e:
+            # ReadTimeout is expected for slow models (e.g. deepseek-r1); log as WARNING not ERROR
+            _log.warning("%s timed out for job %d after %ss (pass _timeout to override)", command, job_id, req_timeout)
+            db.complete_job(
+                job_id=job_id,
+                exit_code=1,
+                stdout_tail="",
+                stderr_tail=str(e)[:500],
+                outcome_reason=f"proxy timeout after {req_timeout}s",
+            )
+            raise HTTPException(status_code=504, detail=f"{error_prefix}: read timeout after {req_timeout}s") from e
         except Exception as e:
             _log.error("%s failed for job %d: %s", command, job_id, e, exc_info=True)
             db.complete_job(
@@ -452,7 +463,7 @@ def create_app(db: Database) -> FastAPI:
         Queue-specific fields (extracted from body, not forwarded to Ollama):
           _priority: int (default 0) — job priority (lower = higher priority)
           _source: str (default "proxy") — caller identifier for history/debugging
-          _timeout: int (default 120) — request timeout in seconds
+          _timeout: int (default 600) — request timeout in seconds; increase for slow reasoning models
         """
         body["stream"] = False  # MVP: no streaming; prevents resp.json() failure on NDJSON
         return await _proxy_ollama_request(
@@ -471,7 +482,7 @@ def create_app(db: Database) -> FastAPI:
         Queue-specific fields (extracted from body, not forwarded to Ollama):
           _priority: int (default 0) — job priority (lower = higher priority)
           _source: str (default "proxy") — caller identifier for history/debugging
-          _timeout: int (default 120) — request timeout in seconds
+          _timeout: int (default 600) — request timeout in seconds; increase for slow reasoning models
 
         Supports both single-string and array input:
           {"model": "nomic-embed-text", "input": "text"}

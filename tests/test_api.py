@@ -466,7 +466,7 @@ class TestProxyPriority:
         job = history[0]
         assert job["priority"] == 0
         assert job["source"] == "proxy"
-        assert job["timeout"] == 120
+        assert job["timeout"] == 600  # proxy default raised from 120 to 600
 
     def test_queue_fields_not_forwarded_to_ollama(self, client):
         from unittest.mock import patch
