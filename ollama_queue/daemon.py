@@ -401,7 +401,30 @@ class Daemon:
                 _log.info("Suspended low-priority (p8-10) promotion for 60s due to critical_backlog")
 
     def _recover_orphans(self) -> None:
-        """Reset jobs stuck in 'running' on daemon startup (no live subprocess)."""
+        """Reset jobs stuck in 'running' on daemon startup (no live subprocess).
+
+        Also marks eval_runs stuck in 'generating' or 'judging' as failed — their
+        background threads died with the previous process.
+        """
+        from datetime import UTC
+        from datetime import datetime as _dt
+
+        with self.db._lock:
+            conn = self.db._connect()
+            stuck = conn.execute(
+                "SELECT id FROM eval_runs WHERE status IN ('generating', 'judging', 'pending')"
+            ).fetchall()
+            now = _dt.now(UTC).isoformat()
+            for row in stuck:
+                conn.execute(
+                    "UPDATE eval_runs SET status='failed', error='daemon restart: session abandoned',"
+                    " completed_at=? WHERE id=?",
+                    (now, row["id"]),
+                )
+                _log.warning("Abandoned eval run #%d on daemon restart", row["id"])
+            if stuck:
+                conn.commit()
+
         orphans = self.db.get_running_jobs()
         for job in orphans:
             if job.get("command", "").startswith("proxy:"):
