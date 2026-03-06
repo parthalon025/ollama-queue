@@ -504,9 +504,10 @@ class Database:
             return cur.lastrowid
 
     def get_job(self, job_id: int) -> dict | None:
-        conn = self._connect()
-        row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
-        return dict(row) if row else None
+        with self._lock:
+            conn = self._connect()
+            row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+            return dict(row) if row else None
 
     def get_next_job(self) -> dict | None:
         """Return the highest-priority pending job for execution.
@@ -516,22 +517,23 @@ class Database:
             which implements SJF + aging). Retained for the proxy/embed path and
             backwards compatibility with callers outside the daemon.
         """
-        conn = self._connect()
-        now = time.time()
-        row = conn.execute(
-            """SELECT * FROM jobs
-               WHERE status = 'pending'
-               AND (retry_after IS NULL OR retry_after <= ?)
-               ORDER BY priority ASC,
-                        CASE WHEN model LIKE '%embed%' OR model LIKE '%nomic%' OR model LIKE '%bge%'
-                                  OR model LIKE '%mxbai%' OR model LIKE '%all-minilm%'
-                                  OR command LIKE '%/api/embed%'
-                             THEN 0 ELSE 1 END ASC,
-                        submitted_at ASC
-               LIMIT 1""",
-            (now,),
-        ).fetchone()
-        return dict(row) if row else None
+        with self._lock:
+            conn = self._connect()
+            now = time.time()
+            row = conn.execute(
+                """SELECT * FROM jobs
+                   WHERE status = 'pending'
+                   AND (retry_after IS NULL OR retry_after <= ?)
+                   ORDER BY priority ASC,
+                            CASE WHEN model LIKE '%embed%' OR model LIKE '%nomic%' OR model LIKE '%bge%'
+                                      OR model LIKE '%mxbai%' OR model LIKE '%all-minilm%'
+                                      OR command LIKE '%/api/embed%'
+                                 THEN 0 ELSE 1 END ASC,
+                            submitted_at ASC
+                   LIMIT 1""",
+                (now,),
+            ).fetchone()
+            return dict(row) if row else None
 
     def start_job(self, job_id: int) -> None:
         with self._lock:
@@ -634,53 +636,57 @@ class Database:
             return cur.rowcount > 0
 
     def get_pending_jobs(self) -> list[dict]:
-        conn = self._connect()
-        rows = conn.execute(
-            """SELECT * FROM jobs
-               WHERE status = 'pending'
-                 AND command NOT LIKE 'proxy:%'
-               ORDER BY priority ASC, submitted_at ASC"""
-        ).fetchall()
-        return [dict(r) for r in rows]
+        with self._lock:
+            conn = self._connect()
+            rows = conn.execute(
+                """SELECT * FROM jobs
+                   WHERE status = 'pending'
+                     AND command NOT LIKE 'proxy:%'
+                   ORDER BY priority ASC, submitted_at ASC"""
+            ).fetchall()
+            return [dict(r) for r in rows]
 
     def count_pending_jobs(self) -> int:
         """Return count of jobs currently waiting in the queue (status='pending')."""
-        conn = self._connect()
-        row = conn.execute(
-            "SELECT COUNT(*) FROM jobs WHERE status = 'pending' AND (retry_after IS NULL OR retry_after <= ?)",
-            (time.time(),),
-        ).fetchone()
-        return row[0]
+        with self._lock:
+            conn = self._connect()
+            row = conn.execute(
+                "SELECT COUNT(*) FROM jobs WHERE status = 'pending' AND (retry_after IS NULL OR retry_after <= ?)",
+                (time.time(),),
+            ).fetchone()
+            return row[0]
 
     def get_history(self, limit: int = 20, offset: int = 0, source: str | None = None) -> list[dict]:
-        conn = self._connect()
-        if source is not None:
-            rows = conn.execute(
-                """SELECT * FROM jobs
-                   WHERE status IN ('completed', 'failed', 'killed', 'cancelled')
-                     AND source = ?
-                   ORDER BY completed_at DESC
-                   LIMIT ? OFFSET ?""",
-                (source, limit, offset),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                """SELECT * FROM jobs
-                   WHERE status IN ('completed', 'failed', 'killed', 'cancelled')
-                   ORDER BY completed_at DESC
-                   LIMIT ? OFFSET ?""",
-                (limit, offset),
-            ).fetchall()
-        return [dict(r) for r in rows]
+        with self._lock:
+            conn = self._connect()
+            if source is not None:
+                rows = conn.execute(
+                    """SELECT * FROM jobs
+                       WHERE status IN ('completed', 'failed', 'killed', 'cancelled')
+                         AND source = ?
+                       ORDER BY completed_at DESC
+                       LIMIT ? OFFSET ?""",
+                    (source, limit, offset),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """SELECT * FROM jobs
+                       WHERE status IN ('completed', 'failed', 'killed', 'cancelled')
+                       ORDER BY completed_at DESC
+                       LIMIT ? OFFSET ?""",
+                    (limit, offset),
+                ).fetchall()
+            return [dict(r) for r in rows]
 
     # --- Settings ---
 
     def get_setting(self, key: str):
-        conn = self._connect()
-        row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
-        if row is None:
-            return None
-        return json.loads(row["value"])
+        with self._lock:
+            conn = self._connect()
+            row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+            if row is None:
+                return None
+            return json.loads(row["value"])
 
     def set_setting(self, key: str, value) -> None:
         with self._lock:
@@ -720,31 +726,33 @@ class Database:
             conn.commit()
 
     def get_duration_history(self, source: str, limit: int = 5) -> list[dict]:
-        conn = self._connect()
-        rows = conn.execute(
-            """SELECT * FROM duration_history
-               WHERE source = ?
-               ORDER BY recorded_at DESC
-               LIMIT ?""",
-            (source, limit),
-        ).fetchall()
-        return [dict(r) for r in rows]
+        with self._lock:
+            conn = self._connect()
+            rows = conn.execute(
+                """SELECT * FROM duration_history
+                   WHERE source = ?
+                   ORDER BY recorded_at DESC
+                   LIMIT ?""",
+                (source, limit),
+            ).fetchall()
+            return [dict(r) for r in rows]
 
     def estimate_duration(self, source: str) -> float | None:
-        conn = self._connect()
-        row = conn.execute(
-            """SELECT AVG(duration) as avg_dur
-               FROM (
-                   SELECT duration FROM duration_history
-                   WHERE source = ? AND exit_code = 0
-                   ORDER BY recorded_at DESC
-                   LIMIT 5
-               )""",
-            (source,),
-        ).fetchone()
-        if row is None or row["avg_dur"] is None:
-            return None
-        return row["avg_dur"]
+        with self._lock:
+            conn = self._connect()
+            row = conn.execute(
+                """SELECT AVG(duration) as avg_dur
+                   FROM (
+                       SELECT duration FROM duration_history
+                       WHERE source = ? AND exit_code = 0
+                       ORDER BY recorded_at DESC
+                       LIMIT 5
+                   )""",
+                (source,),
+            ).fetchone()
+            if row is None or row["avg_dur"] is None:
+                return None
+            return row["avg_dur"]
 
     def estimate_duration_bulk(self, sources: list[str]) -> dict[str, float]:
         """Return mean duration per source in a single query.
@@ -754,16 +762,17 @@ class Database:
         """
         if not sources:
             return {}
-        conn = self._connect()
-        placeholders = ",".join("?" * len(sources))
-        rows = conn.execute(
-            f"""SELECT source, AVG(duration) as avg_dur
-                FROM duration_history
-                WHERE source IN ({placeholders}) AND exit_code = 0
-                GROUP BY source""",
-            sources,
-        ).fetchall()
-        return {row["source"]: row["avg_dur"] for row in rows if row["avg_dur"] is not None}
+        with self._lock:
+            conn = self._connect()
+            placeholders = ",".join("?" * len(sources))
+            rows = conn.execute(
+                f"""SELECT source, AVG(duration) as avg_dur
+                    FROM duration_history
+                    WHERE source IN ({placeholders}) AND exit_code = 0
+                    GROUP BY source""",
+                sources,
+            ).fetchall()
+            return {row["source"]: row["avg_dur"] for row in rows if row["avg_dur"] is not None}
 
     def estimate_duration_stats(self, source: str) -> tuple[float, float] | None:
         """Return (mean, variance) from last 10 successful runs for a source.
@@ -772,21 +781,22 @@ class Database:
         Returns None if no history exists.
         Used by estimate_with_variance() for risk-adjusted SJF sort.
         """
-        conn = self._connect()
-        row = conn.execute(
-            """SELECT AVG(duration) as mean_dur,
-                      AVG(duration * duration) - AVG(duration) * AVG(duration) as variance
-               FROM (
-                   SELECT duration FROM duration_history
-                   WHERE source = ? AND exit_code = 0
-                   ORDER BY recorded_at DESC
-                   LIMIT 10
-               )""",
-            (source,),
-        ).fetchone()
-        if row is None or row["mean_dur"] is None:
-            return None
-        return float(row["mean_dur"]), max(0.0, float(row["variance"]) if row["variance"] is not None else 0.0)
+        with self._lock:
+            conn = self._connect()
+            row = conn.execute(
+                """SELECT AVG(duration) as mean_dur,
+                          AVG(duration * duration) - AVG(duration) * AVG(duration) as variance
+                   FROM (
+                       SELECT duration FROM duration_history
+                       WHERE source = ? AND exit_code = 0
+                       ORDER BY recorded_at DESC
+                       LIMIT 10
+                   )""",
+                (source,),
+            ).fetchone()
+            if row is None or row["mean_dur"] is None:
+                return None
+            return float(row["mean_dur"]), max(0.0, float(row["variance"]) if row["variance"] is not None else 0.0)
 
     # --- Health Log ---
 
@@ -811,15 +821,16 @@ class Database:
             conn.commit()
 
     def get_health_log(self, hours: int = 24) -> list[dict]:
-        conn = self._connect()
-        cutoff = time.time() - (hours * 3600)
-        rows = conn.execute(
-            """SELECT * FROM health_log
-               WHERE timestamp >= ?
-               ORDER BY timestamp DESC""",
-            (cutoff,),
-        ).fetchall()
-        return [dict(r) for r in rows]
+        with self._lock:
+            conn = self._connect()
+            cutoff = time.time() - (hours * 3600)
+            rows = conn.execute(
+                """SELECT * FROM health_log
+                   WHERE timestamp >= ?
+                   ORDER BY timestamp DESC""",
+                (cutoff,),
+            ).fetchall()
+            return [dict(r) for r in rows]
 
     # --- Daemon State ---
 
@@ -851,11 +862,12 @@ class Database:
             conn.commit()
 
     def get_daemon_state(self) -> dict:
-        conn = self._connect()
-        row = conn.execute("SELECT * FROM daemon_state WHERE id = 1").fetchone()
-        if row is None:
-            return {"state": "idle", "current_job_id": None, "paused_since": None, "paused_reason": None}
-        return dict(row)
+        with self._lock:
+            conn = self._connect()
+            row = conn.execute("SELECT * FROM daemon_state WHERE id = 1").fetchone()
+            if row is None:
+                return {"state": "idle", "current_job_id": None, "paused_since": None, "paused_reason": None}
+            return dict(row)
 
     # --- Proxy ---
 
@@ -980,29 +992,33 @@ class Database:
         return cur.lastrowid
 
     def get_recurring_job(self, rj_id: int) -> dict | None:
-        conn = self._connect()
-        row = conn.execute("SELECT * FROM recurring_jobs WHERE id = ?", (rj_id,)).fetchone()
-        return dict(row) if row else None
+        with self._lock:
+            conn = self._connect()
+            row = conn.execute("SELECT * FROM recurring_jobs WHERE id = ?", (rj_id,)).fetchone()
+            return dict(row) if row else None
 
     def get_recurring_job_by_name(self, name: str) -> dict | None:
-        conn = self._connect()
-        row = conn.execute("SELECT * FROM recurring_jobs WHERE name = ?", (name,)).fetchone()
-        return dict(row) if row else None
+        with self._lock:
+            conn = self._connect()
+            row = conn.execute("SELECT * FROM recurring_jobs WHERE name = ?", (name,)).fetchone()
+            return dict(row) if row else None
 
     def list_recurring_jobs(self) -> list[dict]:
-        conn = self._connect()
-        rows = conn.execute("SELECT * FROM recurring_jobs ORDER BY priority ASC, name ASC").fetchall()
-        return [dict(r) for r in rows]
+        with self._lock:
+            conn = self._connect()
+            rows = conn.execute("SELECT * FROM recurring_jobs ORDER BY priority ASC, name ASC").fetchall()
+            return [dict(r) for r in rows]
 
     def get_due_recurring_jobs(self, now: float) -> list[dict]:
-        conn = self._connect()
-        rows = conn.execute(
-            """SELECT * FROM recurring_jobs
-               WHERE enabled = 1 AND next_run <= ?
-               ORDER BY priority ASC, next_run ASC""",
-            (now,),
-        ).fetchall()
-        return [dict(r) for r in rows]
+        with self._lock:
+            conn = self._connect()
+            rows = conn.execute(
+                """SELECT * FROM recurring_jobs
+                   WHERE enabled = 1 AND next_run <= ?
+                   ORDER BY priority ASC, next_run ASC""",
+                (now,),
+            ).fetchall()
+            return [dict(r) for r in rows]
 
     def update_recurring_next_run(self, rj_id: int, completed_at: float, job_id: int | None = None) -> None:
         with self._lock:
@@ -1138,22 +1154,24 @@ class Database:
             conn.commit()
 
     def get_schedule_events(self, limit: int = 100) -> list[dict]:
-        conn = self._connect()
-        rows = conn.execute(
-            "SELECT * FROM schedule_events ORDER BY timestamp DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
-        return [dict(r) for r in rows]
+        with self._lock:
+            conn = self._connect()
+            rows = conn.execute(
+                "SELECT * FROM schedule_events ORDER BY timestamp DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+            return [dict(r) for r in rows]
 
     def has_pending_or_running_recurring(self, recurring_job_id: int) -> bool:
-        conn = self._connect()
-        row = conn.execute(
-            """SELECT 1 FROM jobs
-               WHERE recurring_job_id = ? AND status IN ('pending', 'running')
-               LIMIT 1""",
-            (recurring_job_id,),
-        ).fetchone()
-        return row is not None
+        with self._lock:
+            conn = self._connect()
+            row = conn.execute(
+                """SELECT 1 FROM jobs
+                   WHERE recurring_job_id = ? AND status IN ('pending', 'running')
+                   LIMIT 1""",
+                (recurring_job_id,),
+            ).fetchone()
+            return row is not None
 
     def get_last_successful_run_time(self, recurring_job_id: int) -> float | None:
         """Return timestamp of most recent successful (exit_code=0) job for a recurring job.
@@ -1161,16 +1179,17 @@ class Database:
         Uses exit_code=0 (not last_run which includes failures) for AoI accuracy.
         Returns None if the recurring job has never completed successfully.
         """
-        conn = self._connect()
-        row = conn.execute(
-            """SELECT MAX(completed_at) as last_success
-               FROM jobs
-               WHERE recurring_job_id = ? AND exit_code = 0""",
-            (recurring_job_id,),
-        ).fetchone()
-        if row is None or row["last_success"] is None:
-            return None
-        return float(row["last_success"])
+        with self._lock:
+            conn = self._connect()
+            row = conn.execute(
+                """SELECT MAX(completed_at) as last_success
+                   FROM jobs
+                   WHERE recurring_job_id = ? AND exit_code = 0""",
+                (recurring_job_id,),
+            ).fetchone()
+            if row is None or row["last_success"] is None:
+                return None
+            return float(row["last_success"])
 
     def _set_recurring_next_run(self, rj_id: int, next_run: float) -> None:
         """Update next_run for a recurring job. Single-purpose DB API — no direct _connect() outside this class."""
@@ -1234,26 +1253,29 @@ class Database:
             return cur.lastrowid
 
     def get_dlq_entry(self, dlq_id: int) -> dict | None:
-        conn = self._connect()
-        row = conn.execute("SELECT * FROM dlq WHERE id = ?", (dlq_id,)).fetchone()
-        return dict(row) if row else None
+        with self._lock:
+            conn = self._connect()
+            row = conn.execute("SELECT * FROM dlq WHERE id = ?", (dlq_id,)).fetchone()
+            return dict(row) if row else None
 
     def list_dlq(self, include_resolved: bool = False) -> list[dict]:
-        conn = self._connect()
-        if include_resolved:
-            rows = conn.execute("SELECT * FROM dlq ORDER BY moved_at DESC").fetchall()
-        else:
-            rows = conn.execute("SELECT * FROM dlq WHERE resolution IS NULL ORDER BY moved_at DESC").fetchall()
-        return [dict(r) for r in rows]
+        with self._lock:
+            conn = self._connect()
+            if include_resolved:
+                rows = conn.execute("SELECT * FROM dlq ORDER BY moved_at DESC").fetchall()
+            else:
+                rows = conn.execute("SELECT * FROM dlq WHERE resolution IS NULL ORDER BY moved_at DESC").fetchall()
+            return [dict(r) for r in rows]
 
     def dismiss_dlq_entry(self, dlq_id: int) -> bool:
-        conn = self._connect()
-        cur = conn.execute(
-            "UPDATE dlq SET resolution = 'dismissed', resolved_at = ? WHERE id = ?",
-            (time.time(), dlq_id),
-        )
-        conn.commit()
-        return cur.rowcount > 0
+        with self._lock:
+            conn = self._connect()
+            cur = conn.execute(
+                "UPDATE dlq SET resolution = 'dismissed', resolved_at = ? WHERE id = ?",
+                (time.time(), dlq_id),
+            )
+            conn.commit()
+            return cur.rowcount > 0
 
     def retry_dlq_entry(self, dlq_id: int) -> int | None:
         with self._lock:
@@ -1294,10 +1316,11 @@ class Database:
             return new_job_id
 
     def clear_dlq(self) -> int:
-        conn = self._connect()
-        cur = conn.execute("DELETE FROM dlq WHERE resolution IS NOT NULL")
-        conn.commit()
-        return cur.rowcount
+        with self._lock:
+            conn = self._connect()
+            cur = conn.execute("DELETE FROM dlq WHERE resolution IS NOT NULL")
+            conn.commit()
+            return cur.rowcount
 
     def has_pulling_model(self, model_name: str) -> bool:
         """Return True if any pull for model_name is currently in 'pulling' status."""
@@ -1312,8 +1335,9 @@ class Database:
     # --- Utility ---
 
     def list_tables(self) -> list[str]:
-        conn = self._connect()
-        rows = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
-        ).fetchall()
-        return [row["name"] for row in rows]
+        with self._lock:
+            conn = self._connect()
+            rows = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+            ).fetchall()
+            return [row["name"] for row in rows]
