@@ -27,6 +27,15 @@ _MAX_RETRIES = 2
 _RETRY_BASE_DELAY = 2.0
 
 
+class _ProxyDownError(Exception):
+    """Raised when the ollama-queue proxy itself is unreachable (e.g. service restarting).
+
+    This is distinct from Ollama returning a bad response — the proxy being down
+    means the process hosting it is stopping. It should abort the run cleanly
+    rather than counting toward the circuit breaker's error budget.
+    """
+
+
 # ---------------------------------------------------------------------------
 # DB helper functions (standalone — do NOT modify db.py)
 # ---------------------------------------------------------------------------
@@ -604,6 +613,10 @@ def _call_proxy(
                 continue
             _log.warning("proxy HTTP error: %s", exc)
             return None, None
+        except httpx.ConnectError as exc:
+            # The proxy itself is down — the service is likely restarting.
+            # Raise _ProxyDownError so loops can abort cleanly without tripping the circuit breaker.
+            raise _ProxyDownError(str(exc)) from exc
         except Exception as exc:
             _log.warning("proxy error: %s", exc)
             last_exc = exc
@@ -931,16 +944,29 @@ def run_eval_generate(
                 )
                 _sleep_fn(_OPPORTUNISTIC_THROTTLE_SLEEP_S)
 
-            ok = _generate_one(
-                db=db,
-                run_id=run_id,
-                variant_id=variant_id,
-                variant=variant,
-                template=template,
-                source_item=source_item,
-                items_by_cluster=items_by_cluster,
-                http_base=http_base,
-            )
+            try:
+                ok = _generate_one(
+                    db=db,
+                    run_id=run_id,
+                    variant_id=variant_id,
+                    variant=variant,
+                    template=template,
+                    source_item=source_item,
+                    items_by_cluster=items_by_cluster,
+                    http_base=http_base,
+                )
+            except _ProxyDownError as exc:
+                # Proxy is unreachable — service is restarting. Abort cleanly.
+                # Do NOT count toward circuit breaker; this is a deployment event, not an Ollama failure.
+                _log.warning("run_eval_generate: proxy down — aborting run_id=%d: %s", run_id, exc)
+                update_eval_run(
+                    db,
+                    run_id,
+                    status="failed",
+                    error="proxy_unavailable",
+                    completed_at=datetime.now(UTC).isoformat(),
+                )
+                return
             submitted += 1
             if not ok:
                 failed += 1
@@ -1157,19 +1183,31 @@ def run_eval_judge(
         for is_same, target_list in [(True, same_targets), (False, diff_targets)]:
             for target in target_list:
                 judge_pairs.append([source_item_id, str(target["id"])])
-                _judge_one_target(
-                    db=db,
-                    run_id=run_id,
-                    variant=gen_result["variant"],
-                    source_item_id=source_item_id,
-                    principle=principle,
-                    target=target,
-                    is_same=is_same,
-                    judge_model=judge_model,
-                    judge_temperature=judge_temperature,
-                    source_tag=source_tag,
-                    http_base=http_base,
-                )
+                try:
+                    _judge_one_target(
+                        db=db,
+                        run_id=run_id,
+                        variant=gen_result["variant"],
+                        source_item_id=source_item_id,
+                        principle=principle,
+                        target=target,
+                        is_same=is_same,
+                        judge_model=judge_model,
+                        judge_temperature=judge_temperature,
+                        source_tag=source_tag,
+                        http_base=http_base,
+                    )
+                except _ProxyDownError as exc:
+                    # Proxy is unreachable — service is restarting. Abort cleanly.
+                    _log.warning("run_eval_judge: proxy down — aborting run_id=%d: %s", run_id, exc)
+                    update_eval_run(
+                        db,
+                        run_id,
+                        status="failed",
+                        error="proxy_unavailable",
+                        completed_at=datetime.now(UTC).isoformat(),
+                    )
+                    return
 
     # Persist exact (source_item_id, target_item_id) pairs for reproducibility.
     # This overwrites the coarse source-only item_ids stored during generation.

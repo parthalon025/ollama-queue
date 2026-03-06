@@ -6,9 +6,12 @@ import json
 import random
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 
 from ollama_queue.eval_engine import (
+    _call_proxy,
+    _ProxyDownError,
     _should_throttle,
     build_generation_prompt,
     build_judge_prompt,
@@ -16,6 +19,7 @@ from ollama_queue.eval_engine import (
     parse_judge_response,
     render_report,
     run_eval_generate,
+    run_eval_judge,
 )
 
 # ---------------------------------------------------------------------------
@@ -872,3 +876,111 @@ class TestRunEvalGenerateBatchDefault:
             run_eval_generate(1, MagicMock(), _sleep=lambda s: None)
 
         assert len(submitted_count) == 2
+
+
+# ---------------------------------------------------------------------------
+# _ProxyDownError — service-restart abort (circuit breaker must NOT trigger)
+# ---------------------------------------------------------------------------
+
+
+class TestProxyDown:
+    """_ProxyDownError is raised on ConnectError and aborts generate/judge loops cleanly.
+
+    The circuit breaker exists to detect flaky Ollama quality. It must not fire
+    when the proxy itself is unreachable (i.e. service is restarting). These tests
+    verify that ConnectError → _ProxyDownError → clean abort path, distinct from the
+    normal failure → failed++ → circuit breaker path.
+    """
+
+    def test_call_proxy_raises_proxy_down_on_connect_error(self):
+        """httpx.ConnectError in _call_proxy must surface as _ProxyDownError, not (None, None)."""
+        with patch("httpx.Client") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.post.side_effect = httpx.ConnectError("Connection refused")
+            mock_client_cls.return_value = mock_client
+
+            with pytest.raises(_ProxyDownError):
+                _call_proxy(
+                    http_base="http://localhost:7683",
+                    model="test-model",
+                    prompt="test",
+                    temperature=0.7,
+                    num_ctx=4096,
+                    timeout=30,
+                    source="test",
+                    priority=0,
+                )
+
+    def test_generate_loop_aborts_on_proxy_down_without_circuit_breaker(self):
+        """When _generate_one raises _ProxyDownError, run is marked failed=proxy_unavailable
+        and the loop exits immediately — the circuit breaker is never reached."""
+        run = _make_run_record(run_mode="batch")
+        items = _make_items(5)  # 5 items — would need 10+ failures to trip breaker
+
+        with (
+            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval_engine.get_eval_variant", return_value=_make_variant()),
+            patch("ollama_queue.eval_engine.get_eval_template", return_value=_make_template()),
+            patch("ollama_queue.eval_engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
+            # First call raises _ProxyDownError — simulates service restart mid-run
+            patch("ollama_queue.eval_engine._generate_one", side_effect=_ProxyDownError("conn refused")),
+            patch("ollama_queue.eval_engine.update_eval_run") as mock_update,
+            patch("ollama_queue.eval_engine.insert_eval_result"),
+        ):
+            run_eval_generate(1, MagicMock(), _sleep=lambda s: None)
+
+        # Must have set status=failed with error=proxy_unavailable
+        failed_calls = [
+            c
+            for c in mock_update.call_args_list
+            if c.kwargs.get("status") == "failed" and c.kwargs.get("error") == "proxy_unavailable"
+        ]
+        assert len(failed_calls) == 1, "Expected exactly one proxy_unavailable failure update"
+
+        # Must NOT have set status=failed with circuit_breaker error
+        cb_calls = [c for c in mock_update.call_args_list if "circuit_breaker" in str(c.kwargs.get("error", ""))]
+        assert len(cb_calls) == 0, "Circuit breaker must not fire on proxy down"
+
+    def test_judge_loop_aborts_on_proxy_down(self):
+        """When _judge_one_target raises _ProxyDownError, run is marked failed=proxy_unavailable."""
+        run = {
+            "id": 1,
+            "data_source_url": "http://test-host/",
+            "judge_model": "judge-model",
+            "judge_temperature": 0.0,
+            "same_cluster_targets": 1,
+            "diff_cluster_targets": 1,
+            "item_ids": None,
+            "seed": 42,
+        }
+        # Simulate one generated result in the DB for the judge to process
+        gen_row = {"source_item_id": "0", "principle": "test principle", "variant": "A"}
+        items = _make_items(3)
+
+        # Build a mock DB that returns gen_row from the SQL query inside run_eval_judge
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value.fetchall.return_value = [gen_row]
+        mock_db = MagicMock()
+        mock_db._lock = MagicMock()
+        mock_db._lock.__enter__ = MagicMock(return_value=None)
+        mock_db._lock.__exit__ = MagicMock(return_value=False)
+        mock_db._connect.return_value = mock_conn
+
+        with (
+            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval_engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval_engine._get_eval_setting", side_effect=lambda db, key, default="": str(default)),
+            patch("ollama_queue.eval_engine._judge_one_target", side_effect=_ProxyDownError("conn refused")),
+            patch("ollama_queue.eval_engine.update_eval_run") as mock_update,
+        ):
+            run_eval_judge(1, mock_db)
+
+        failed_calls = [
+            c
+            for c in mock_update.call_args_list
+            if c.kwargs.get("status") == "failed" and c.kwargs.get("error") == "proxy_unavailable"
+        ]
+        assert len(failed_calls) == 1
