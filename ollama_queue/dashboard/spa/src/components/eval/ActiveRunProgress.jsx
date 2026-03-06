@@ -1,6 +1,7 @@
 import { h } from 'preact';
 import { evalActiveRun, cancelEvalRun, startEvalPoll } from '../../store.js';
 import { EVAL_TRANSLATIONS } from './translations.js';
+import { useActionFeedback } from '../../hooks/useActionFeedback.js';
 // What it shows: Live progress of the currently-running eval run, including
 //   stage (Writing/Scoring), overall % complete, per-variant progress bars,
 //   ETA, failure rate, and circuit breaker banner if the run is paused.
@@ -39,6 +40,10 @@ export default function ActiveRunProgress() {
     failure_rate = 0,
   } = activeRun;
 
+  const [cancelFb, cancelAct] = useActionFeedback();
+  const [resumeFb, resumeAct] = useActionFeedback();
+  const [retryFb, retryAct] = useActionFeedback();
+
   // DB stage values: 'generating', 'judging', 'fetch_items', 'fetch_targets'
   // Fall back to status when stage is null (e.g. run just started)
   const stageContext = stage || status;
@@ -54,17 +59,31 @@ export default function ActiveRunProgress() {
 
   async function handleCancel() {
     if (!confirm('Cancel this eval run? In-progress jobs will still complete.')) return;
-    await cancelEvalRun(run_id);
+    await cancelAct('Cancelling…', () => cancelEvalRun(run_id), `Run #${run_id} cancelled`);
   }
 
   async function handleResume() {
-    await fetch(`/api/eval/runs/${run_id}/resume`, { method: 'POST' });
-    startEvalPoll(run_id);
+    await resumeAct(
+      'Resuming…',
+      async () => {
+        const res = await fetch(`/api/eval/runs/${run_id}/resume`, { method: 'POST' });
+        if (!res.ok) throw new Error(`Resume failed: ${res.status}`);
+        startEvalPoll(run_id);
+      },
+      'Resumed'
+    );
   }
 
   async function handleRetryFailed() {
-    await fetch(`/api/eval/runs/${run_id}/retry-failed`, { method: 'POST' });
-    startEvalPoll(run_id);
+    await retryAct(
+      'Retrying failed…',
+      async () => {
+        const res = await fetch(`/api/eval/runs/${run_id}/retry-failed`, { method: 'POST' });
+        if (!res.ok) throw new Error(`Retry failed: ${res.status}`);
+        startEvalPoll(run_id);
+      },
+      'Retry queued'
+    );
   }
 
   const variantEntries = Object.entries(per_variant);
@@ -76,16 +95,40 @@ export default function ActiveRunProgress() {
       {isPaused && (
         <div class="eval-circuit-breaker-banner">
           <span>Too many failures — run paused</span>
-          <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.4rem' }}>
-            <button class="t-btn t-btn-secondary" style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }} onClick={handleResume}>
-              Resume anyway
-            </button>
-            <button class="t-btn t-btn-secondary" style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }} onClick={handleRetryFailed}>
-              Retry failed
-            </button>
-            <button class="t-btn t-btn-secondary" style={{ fontSize: 'var(--type-label)', padding: '3px 10px', color: 'var(--status-error)' }} onClick={handleCancel}>
-              Cancel
-            </button>
+          <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.4rem', flexWrap: 'wrap' }}>
+            <div>
+              <button
+                class="t-btn t-btn-secondary"
+                style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }}
+                disabled={resumeFb.phase === 'loading'}
+                onClick={handleResume}
+              >
+                {resumeFb.phase === 'loading' ? 'Resuming…' : 'Resume anyway'}
+              </button>
+              {resumeFb.msg && <div class={`action-fb action-fb--${resumeFb.phase}`}>{resumeFb.msg}</div>}
+            </div>
+            <div>
+              <button
+                class="t-btn t-btn-secondary"
+                style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }}
+                disabled={retryFb.phase === 'loading'}
+                onClick={handleRetryFailed}
+              >
+                {retryFb.phase === 'loading' ? 'Retrying…' : 'Retry failed'}
+              </button>
+              {retryFb.msg && <div class={`action-fb action-fb--${retryFb.phase}`}>{retryFb.msg}</div>}
+            </div>
+            <div>
+              <button
+                class="t-btn t-btn-secondary"
+                style={{ fontSize: 'var(--type-label)', padding: '3px 10px', color: 'var(--status-error)' }}
+                disabled={cancelFb.phase === 'loading'}
+                onClick={handleCancel}
+              >
+                {cancelFb.phase === 'loading' ? 'Cancelling…' : 'Cancel'}
+              </button>
+              {cancelFb.msg && <div class={`action-fb action-fb--${cancelFb.phase}`}>{cancelFb.msg}</div>}
+            </div>
           </div>
         </div>
       )}
@@ -155,13 +198,17 @@ export default function ActiveRunProgress() {
 
       {/* Cancel button */}
       {!isPaused && (
-        <button
-          class="t-btn t-btn-secondary"
-          style={{ fontSize: 'var(--type-label)', padding: '3px 10px', color: 'var(--status-error)' }}
-          onClick={handleCancel}
-        >
-          Cancel run
-        </button>
+        <div>
+          <button
+            class="t-btn t-btn-secondary"
+            style={{ fontSize: 'var(--type-label)', padding: '3px 10px', color: 'var(--status-error)' }}
+            disabled={cancelFb.phase === 'loading'}
+            onClick={handleCancel}
+          >
+            {cancelFb.phase === 'loading' ? 'Cancelling…' : 'Cancel run'}
+          </button>
+          {cancelFb.msg && <div class={`action-fb action-fb--${cancelFb.phase}`}>{cancelFb.msg}</div>}
+        </div>
       )}
     </div>
   );
