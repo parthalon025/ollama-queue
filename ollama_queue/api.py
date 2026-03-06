@@ -1741,7 +1741,13 @@ def create_app(db: Database) -> FastAPI:
             ).fetchall()
 
             # Resolve gen_model from variant (for swimlane model badge)
-            _variant_id = run.get("variant_id") or (run.get("variants") or "").split(",")[0].strip()
+            _raw_variants = run.get("variants") or ""
+            try:
+                _parsed = json.loads(_raw_variants)
+                _fallback_id = _parsed[0] if isinstance(_parsed, list) and _parsed else _raw_variants
+            except (ValueError, TypeError):
+                _fallback_id = _raw_variants.strip()
+            _variant_id = run.get("variant_id") or _fallback_id
             _variant_row = conn.execute("SELECT model FROM eval_variants WHERE id = ?", (_variant_id,)).fetchone()
             gen_model = _variant_row["model"] if _variant_row else None
 
