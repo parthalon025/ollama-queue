@@ -8,6 +8,7 @@ export function useActionFeedback() {
   const [state, setState] = useState({ phase: 'idle', msg: '' });
 
   async function run(loadingLabel, fn, successLabel) {
+    if (state.phase === 'loading') return;
     setState({ phase: 'loading', msg: loadingLabel });
     try {
       const result = await fn();
