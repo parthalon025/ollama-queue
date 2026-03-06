@@ -189,6 +189,7 @@ export default function Plan() {
     const [reenableFb, reenableAct] = useActionFeedback();
     const [saveFb, saveAct] = useActionFeedback();
     const [generateFb, generateAct] = useActionFeedback();
+    const [batchToggleFb, batchToggleAct] = useActionFeedback();
 
     // Group collapse state (persisted in localStorage)
     const [collapsedGroups, setCollapsedGroups] = useState(() => {
@@ -377,11 +378,14 @@ export default function Plan() {
     }
 
     async function handleBatchToggle(tag, enabled) {
-        try {
-            await batchToggleJobs(tag, enabled);
-        } catch (err) {
-            console.error(`Batch toggle failed for ${tag}:`, err);
-        }
+        await batchToggleAct(
+            enabled ? `Enabling ${tag}…` : `Disabling ${tag}…`,
+            async () => {
+                await batchToggleJobs(tag, enabled);
+                await fetchSchedule();
+            },
+            enabled ? `${tag} jobs enabled` : `${tag} jobs disabled`
+        );
     }
 
     async function handleRebalance() {
@@ -493,6 +497,7 @@ export default function Plan() {
                                        onChange={() => handleBatchToggle(tag, !allEnabled)} />
                                 All
                             </label>
+                            {batchToggleFb.msg && <div class={`action-fb action-fb--${batchToggleFb.phase}`}>{batchToggleFb.msg}</div>}
                         </div>
                     </div>
                 </td>
