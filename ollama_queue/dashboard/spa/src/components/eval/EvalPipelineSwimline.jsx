@@ -21,6 +21,7 @@ const STAGE_ORDER = ['fetch_items', 'generating', 'judging', 'done'];
 // Map raw stage/status values to the 4 display nodes
 function normalizeStage(stage, status) {
   if (status === 'complete') return 'done';
+  if (status === 'cancelled' || status === 'failed') return stage || 'generating'; // show last-known stage
   if (stage === 'fetch_targets') return 'judging'; // instantaneous — collapse into judging
   return stage || 'fetch_items';
 }
@@ -37,6 +38,7 @@ function nodeState(nodeId, currentStage) {
 
 export default function EvalPipelineSwimline({ stage, status, generated, judged, total, pct, gen_model, judge_model }) {
   const current = normalizeStage(stage, status);
+  // isJudging drives phaseLabel/model — only rendered when showInfo is true (not for 'done')
   const isJudging = current === 'judging' || current === 'done';
   const model = isJudging ? judge_model : gen_model;
   const count = isJudging ? (judged ?? 0) : (generated ?? 0);
