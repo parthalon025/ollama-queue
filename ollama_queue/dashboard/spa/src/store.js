@@ -171,7 +171,8 @@ export async function triggerEvalRun(body) {
 // What it shows: nothing — cancels an active eval run
 // Decision it drives: stops live progress polling and refreshes run history
 export async function cancelEvalRun(runId) {
-  await fetch(`${API}/eval/runs/${runId}`, { method: 'DELETE' });
+  const res = await fetch(`${API}/eval/runs/${runId}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error(`Cancel failed: ${res.status}`);
   stopEvalPoll();
   evalActiveRun.value = null;
   sessionStorage.removeItem('evalActiveRun');
@@ -182,6 +183,23 @@ export async function cancelEvalRun(runId) {
 // /ui/ → /api, /queue/ui/ → /queue/api
 const pathBase = window.location.pathname.replace(/\/ui\/.*$/, '').replace(/\/ui$/, '');
 export const API = `${pathBase}/api`;
+
+// On startup: verify stored active run is still live — clear it if the API says it's terminal.
+// This prevents a stale "Run #N generating" panel persisting after a service restart.
+if (evalActiveRun.value) {
+  const _storedId = evalActiveRun.value.run_id;
+  fetch(`${API}/eval/runs/${_storedId}/progress`)
+    .then(r => r.ok ? r.json() : null)
+    .then(data => {
+      if (!data || ['complete', 'failed', 'cancelled'].includes(data.status)) {
+        evalActiveRun.value = null;
+        sessionStorage.removeItem('evalActiveRun');
+      }
+    })
+    .catch(() => {
+      // If API is unreachable, leave the stored run — it may come back
+    });
+}
 
 let POLL_INTERVAL = 5000;
 let pollTimer = null;
