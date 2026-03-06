@@ -50,7 +50,8 @@ export default function TemplateRow({ template }) {
       async () => {
         const res = await fetch(`${API}/eval/templates/${id}`, { method: 'DELETE' });
         if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
-        await fetchEvalVariants(); // refreshes variants list
+        await fetchEvalTemplates();
+        await fetchEvalVariants(); // variants may reference this template
       },
       `Template deleted`
     );
