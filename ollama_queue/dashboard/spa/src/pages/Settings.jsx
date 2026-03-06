@@ -44,6 +44,10 @@ export default function Settings() {
       async () => {
         const res = await fetch(`${API}/daemon/pause`, { method: 'POST' });
         if (!res.ok) throw new Error(`Pause failed: ${res.status}`);
+        // Optimistically update daemon state so the button flips immediately
+        if (status.value?.daemon) {
+          status.value = { ...status.value, daemon: { ...status.value.daemon, state: 'paused' } };
+        }
       },
       'Daemon paused'
     );
@@ -55,6 +59,10 @@ export default function Settings() {
       async () => {
         const res = await fetch(`${API}/daemon/resume`, { method: 'POST' });
         if (!res.ok) throw new Error(`Resume failed: ${res.status}`);
+        // Optimistically update daemon state so the button flips immediately
+        if (status.value?.daemon) {
+          status.value = { ...status.value, daemon: { ...status.value.daemon, state: 'running' } };
+        }
       },
       'Daemon resumed'
     );
