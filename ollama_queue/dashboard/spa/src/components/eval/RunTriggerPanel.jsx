@@ -6,6 +6,7 @@ import {
   triggerEvalRun, fetchEvalRuns, startEvalPoll, evalActiveRun,
 } from '../../store.js';
 import { EVAL_TRANSLATIONS } from './translations.js';
+import { useActionFeedback } from '../../hooks/useActionFeedback.js';
 import SchedulingModeSelector from './SchedulingModeSelector.jsx';
 // What it shows: Form to configure and start a new eval run.
 //   Fields: variant multi-select, items per group, scorer AI, scheduling mode,
@@ -28,9 +29,7 @@ export default function RunTriggerPanel({ defaultCollapsed }) {
   const [runMode, setRunMode] = useState('batch');
   const [modeSubFields, setModeSubFields] = useState({});
   const [dryRun, setDryRun] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState(null);
-  const [success, setSuccess] = useState(null);
+  const [fb, act] = useActionFeedback();
 
   function toggleVariant(varId) {
     setSelectedVariants(prev =>
@@ -46,39 +45,34 @@ export default function RunTriggerPanel({ defaultCollapsed }) {
   async function handleSubmit(e) {
     e.preventDefault();
     if (selectedVariants.length === 0) {
-      setError('Select at least one configuration to test.');
       return;
     }
-    setError(null);
-    setSuccess(null);
-    setSubmitting(true);
-    try {
-      const body = {
-        variants: selectedVariants,
-        per_cluster: parseInt(perCluster) || 4,
-        judge_model: judgeModel,
-        run_mode: runMode,
-        dry_run: dryRun,
-        ...modeSubFields,
-      };
-      const result = await triggerEvalRun(body);
-      await fetchEvalRuns();
-      if (!dryRun && result.run_id) {
-        // Set active run and start live polling
-        evalActiveRun.value = { run_id: result.run_id, status: 'pending' };
-        sessionStorage.setItem('evalActiveRun', JSON.stringify(evalActiveRun.value));
-        startEvalPoll(result.run_id);
-        setSuccess(`Run #${result.run_id} started`);
-      } else {
-        setSuccess('Dry run complete — check console for preview');
-      }
-      // Auto-collapse after successful start
-      setOpen(false);
-    } catch (err) {
-      setError(err.message || 'Failed to start run');
-    } finally {
-      setSubmitting(false);
-    }
+    await act(
+      'Starting run…',
+      async () => {
+        const body = {
+          variants: selectedVariants,
+          per_cluster: parseInt(perCluster) || 4,
+          judge_model: judgeModel,
+          run_mode: runMode,
+          dry_run: dryRun,
+          ...modeSubFields,
+        };
+        const result = await triggerEvalRun(body);
+        if (!dryRun && result.run_id) {
+          // Set active run and start live polling
+          const activeState = { run_id: result.run_id, status: 'pending' };
+          evalActiveRun.value = activeState;
+          sessionStorage.setItem('evalActiveRun', JSON.stringify(activeState));
+          startEvalPoll(result.run_id);
+        }
+        await fetchEvalRuns();
+        // Auto-collapse after successful start
+        setOpen(false);
+        return result;
+      },
+      result => result.run_id ? `Run #${result.run_id} started` : 'Dry run complete — check console for preview'
+    );
   }
 
   // Group variants: system first, then user-created
@@ -227,28 +221,17 @@ export default function RunTriggerPanel({ defaultCollapsed }) {
             </span>
           </label>
 
-          {/* Error / success */}
-          {error && (
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--status-error)' }}>
-              {error}
-            </div>
-          )}
-          {success && (
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--status-healthy)' }}>
-              ✓ {success}
-            </div>
-          )}
-
           {/* Submit */}
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
             <button
               type="submit"
               class="t-btn t-btn-primary"
-              style={{ padding: '6px 16px', fontSize: 'var(--type-body)' }}
-              disabled={submitting}
+              style={{ fontSize: 'var(--type-label)', padding: '4px 12px' }}
+              disabled={fb.phase === 'loading'}
             >
-              {submitting ? 'Starting…' : dryRun ? 'Preview run' : 'Start run'}
+              {fb.phase === 'loading' ? 'Starting…' : 'Start Run'}
             </button>
+            {fb.msg && <div class={`action-fb action-fb--${fb.phase}`}>{fb.msg}</div>}
           </div>
         </form>
       )}
