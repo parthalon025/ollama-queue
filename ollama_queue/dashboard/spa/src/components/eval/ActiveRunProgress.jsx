@@ -1,5 +1,5 @@
 import { h } from 'preact';
-import { evalActiveRun, cancelEvalRun, startEvalPoll } from '../../store.js';
+import { API, evalActiveRun, cancelEvalRun, startEvalPoll } from '../../store.js';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
 import EvalPipelineSwimline from './EvalPipelineSwimline.jsx';
 // What it shows: Live progress of the currently-running eval run, including
@@ -57,7 +57,7 @@ export default function ActiveRunProgress() {
     await resumeAct(
       'Resuming…',
       async () => {
-        const res = await fetch(`/api/eval/runs/${run_id}/resume`, { method: 'POST' });
+        const res = await fetch(`${API}/eval/runs/${run_id}/resume`, { method: 'POST' });
         if (!res.ok) throw new Error(`Resume failed: ${res.status}`);
         startEvalPoll(run_id);
       },
@@ -69,7 +69,7 @@ export default function ActiveRunProgress() {
     await retryAct(
       'Retrying failed…',
       async () => {
-        const res = await fetch(`/api/eval/runs/${run_id}/retry-failed`, { method: 'POST' });
+        const res = await fetch(`${API}/eval/runs/${run_id}/retry-failed`, { method: 'POST' });
         if (!res.ok) throw new Error(`Retry failed: ${res.status}`);
         startEvalPoll(run_id);
       },

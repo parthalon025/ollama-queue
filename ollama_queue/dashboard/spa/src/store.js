@@ -66,7 +66,7 @@ export function startEvalPoll(runId) {
   stopEvalPoll();
   _evalPollId = setInterval(async () => {
     try {
-      const res = await fetch(`/api/eval/runs/${runId}/progress`);
+      const res = await fetch(`${API}/eval/runs/${runId}/progress`);
       if (!res.ok) return;
       const data = await res.json();
       evalActiveRun.value = data;

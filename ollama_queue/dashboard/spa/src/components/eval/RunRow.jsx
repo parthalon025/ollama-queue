@@ -2,7 +2,7 @@ import { h } from 'preact';
 import { useState } from 'preact/hooks';
 import { EVAL_TRANSLATIONS } from './translations.js';
 import ResultsTable from './ResultsTable.jsx';
-import { evalActiveRun, evalSubTab, fetchEvalRuns, startEvalPoll } from '../../store.js';
+import { API, evalActiveRun, evalSubTab, fetchEvalRuns, startEvalPoll } from '../../store.js';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
 // What it shows: A single eval run row with 3-level progressive disclosure.
 //   L1: status dot, winner config, quality score, date, item count.
@@ -72,7 +72,7 @@ export default function RunRow({ run }) {
     await analyzeAct(
       'Generating analysis…',
       async () => {
-        const res = await fetch(`/api/eval/runs/${id}/analyze`, { method: 'POST' });
+        const res = await fetch(`${API}/eval/runs/${id}/analyze`, { method: 'POST' });
         let data = null;
         try { data = await res.json(); } catch { /* non-JSON body */ }
         if (!res.ok) throw new Error(data?.detail || `Analyze failed: ${res.status}`);
@@ -89,7 +89,7 @@ export default function RunRow({ run }) {
     await repeatAct(
       'Repeating run…',
       async () => {
-        const res = await fetch(`/api/eval/runs/${id}/repeat`, { method: 'POST' });
+        const res = await fetch(`${API}/eval/runs/${id}/repeat`, { method: 'POST' });
         let data = null;
         try { data = await res.json(); } catch { /* non-JSON body */ }
         if (!res.ok) throw new Error(data?.detail || `Repeat failed: ${res.status}`);
