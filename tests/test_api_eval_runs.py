@@ -6,14 +6,14 @@ Covers: GET/POST /api/eval/runs, GET/DELETE /api/eval/runs/{id},
 """
 
 import json
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
 from ollama_queue.api import create_app
 from ollama_queue.db import Database
-from ollama_queue.eval_engine import create_eval_run, insert_eval_result, update_eval_run
+from ollama_queue.eval_engine import create_eval_run, do_promote_eval_run, insert_eval_result, update_eval_run
 
 
 @pytest.fixture
@@ -745,3 +745,169 @@ def test_analyze_eval_run_returns_ok_for_complete_run(client_and_db):
     data = resp.json()
     assert data["ok"] is True
     assert data["run_id"] == run_id
+
+
+# ---------------------------------------------------------------------------
+# do_promote_eval_run() shared core function
+# ---------------------------------------------------------------------------
+
+
+def _make_variant(db, variant_id: str = "A") -> None:
+    """Insert a minimal eval_variants row (uses zero-shot-causal to satisfy FK constraint)."""
+    with db._lock:
+        conn = db._connect()
+        conn.execute(
+            "INSERT OR IGNORE INTO eval_variants "
+            "(id, label, prompt_template_id, model, created_at) "
+            "VALUES (?, ?, ?, ?, datetime('now'))",
+            (variant_id, f"Config {variant_id}", "zero-shot-causal", "qwen2.5:7b"),
+        )
+        conn.commit()
+
+
+class TestDoPromoteEvalRun:
+    def test_raises_if_run_not_found(self, tmp_path):
+        db = Database(str(tmp_path / "test.db"))
+        db.initialize()
+        with pytest.raises(ValueError, match="not found"):
+            do_promote_eval_run(db, 9999)
+
+    def test_raises_if_run_not_complete(self, tmp_path):
+        db = Database(str(tmp_path / "test.db"))
+        db.initialize()
+        run_id = create_eval_run(db, variant_id="A")
+        with pytest.raises(ValueError, match="not complete"):
+            do_promote_eval_run(db, run_id)
+
+    def test_raises_if_no_winner_variant(self, tmp_path):
+        db = Database(str(tmp_path / "test.db"))
+        db.initialize()
+        run_id = create_eval_run(db, variant_id="A")
+        update_eval_run(db, run_id, status="complete")
+        with pytest.raises(ValueError, match="no winner_variant"):
+            do_promote_eval_run(db, run_id)
+
+    def test_raises_if_variant_not_in_db(self, tmp_path):
+        db = Database(str(tmp_path / "test.db"))
+        db.initialize()
+        run_id = create_eval_run(db, variant_id="A")
+        # Set winner_variant to a non-existent ID (initialize() seeds A-E, so use something else)
+        update_eval_run(db, run_id, status="complete", winner_variant="MISSING-XYZ")
+        with pytest.raises(ValueError, match="not found in eval_variants"):
+            do_promote_eval_run(db, run_id)
+
+    def test_sets_winner_as_production(self, tmp_path):
+        """Winner gets is_recommended=1 + is_production=1; others cleared."""
+        db = Database(str(tmp_path / "test.db"))
+        db.initialize()
+        _make_variant(db, "A")
+        _make_variant(db, "B")
+        # Pre-set B as production
+        from ollama_queue.eval_engine import update_eval_variant
+
+        update_eval_variant(db, "B", is_production=1, is_recommended=1)
+
+        run_id = create_eval_run(db, variant_id="A")
+        update_eval_run(db, run_id, status="complete", winner_variant="A")
+
+        with patch("ollama_queue.eval_engine.httpx.post") as mock_post:
+            mock_post.return_value = MagicMock(status_code=200)
+            result = do_promote_eval_run(db, run_id)
+
+        assert result["ok"] is True
+        assert result["variant_id"] == "A"
+
+        with db._lock:
+            conn = db._connect()
+            a_row = conn.execute("SELECT is_recommended, is_production FROM eval_variants WHERE id='A'").fetchone()
+            b_row = conn.execute("SELECT is_recommended, is_production FROM eval_variants WHERE id='B'").fetchone()
+        assert a_row["is_production"] == 1
+        assert a_row["is_recommended"] == 1
+        assert b_row["is_production"] == 0
+        assert b_row["is_recommended"] == 0
+
+    def test_raises_on_lessons_db_unreachable(self, tmp_path):
+        """Raises httpx.HTTPError when lessons-db is unreachable."""
+        import httpx
+
+        db = Database(str(tmp_path / "test.db"))
+        db.initialize()
+        _make_variant(db, "A")
+        run_id = create_eval_run(db, variant_id="A")
+        update_eval_run(db, run_id, status="complete", winner_variant="A")
+
+        with (
+            patch("ollama_queue.eval_engine.httpx.post", side_effect=httpx.ConnectError("refused")),
+            pytest.raises(httpx.HTTPError),
+        ):
+            do_promote_eval_run(db, run_id)
+
+
+# ---------------------------------------------------------------------------
+# promote_eval_run API endpoint
+# ---------------------------------------------------------------------------
+
+
+class TestPromoteEvalRunEndpoint:
+    def test_promote_returns_404_for_unknown_run(self, client):
+        resp = client.post("/api/eval/runs/9999/promote", json={})
+        assert resp.status_code == 404
+
+    def test_promote_returns_400_if_not_complete(self, client_and_db):
+        client, db = client_and_db
+        run_id = _make_run(db, status="queued")
+        resp = client.post(f"/api/eval/runs/{run_id}/promote", json={})
+        assert resp.status_code == 400
+
+    def test_promote_returns_400_if_no_winner_variant(self, client_and_db):
+        client, db = client_and_db
+        run_id = _make_run(db, status="complete")
+        resp = client.post(f"/api/eval/runs/{run_id}/promote", json={})
+        assert resp.status_code == 400
+        assert "winner_variant" in resp.json()["detail"]
+
+    def test_promote_auto_resolves_and_updates_local_db(self, client_and_db):
+        """Promote with empty body resolves winner from DB and sets is_production=1."""
+        client, db = client_and_db
+        _make_variant(db, "A")
+        run_id = create_eval_run(db, variant_id="A")
+        update_eval_run(db, run_id, status="complete", winner_variant="A")
+
+        with patch("ollama_queue.eval_engine.httpx.post") as mock_post:
+            mock_post.return_value = MagicMock(status_code=200)
+            resp = client.post(f"/api/eval/runs/{run_id}/promote", json={})
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert data["variant_id"] == "A"
+        assert data["run_id"] == run_id
+
+        # Verify local DB was updated
+        with db._lock:
+            conn = db._connect()
+            row = conn.execute("SELECT is_production FROM eval_variants WHERE id='A'").fetchone()
+        assert row["is_production"] == 1
+
+    def test_promote_returns_400_not_404_when_variant_missing(self, client_and_db):
+        """Variant not found in eval_variants routes to 400, not 404."""
+        client, db = client_and_db
+        # Create a complete run whose winner_variant ("ghost") has no eval_variants row
+        run_id = create_eval_run(db, variant_id="A")
+        update_eval_run(db, run_id, status="complete", winner_variant="ghost")
+        resp = client.post(f"/api/eval/runs/{run_id}/promote", json={})
+        assert resp.status_code == 400  # NOT 404
+        assert "eval_variants" in resp.json()["detail"]
+
+    def test_promote_returns_502_if_lessons_db_unreachable(self, client_and_db):
+        """Returns 502 when lessons-db is unreachable."""
+        import httpx
+
+        client, db = client_and_db
+        _make_variant(db, "A")
+        run_id = create_eval_run(db, variant_id="A")
+        update_eval_run(db, run_id, status="complete", winner_variant="A")
+
+        with patch("ollama_queue.eval_engine.httpx.post", side_effect=httpx.ConnectError("refused")):
+            resp = client.post(f"/api/eval/runs/{run_id}/promote", json={})
+        assert resp.status_code == 502

@@ -141,6 +141,230 @@ def update_eval_run(db: Database, run_id: int, **kwargs: Any) -> None:
         conn.commit()
 
 
+def update_eval_variant(db: Database, variant_id: str, **kwargs: Any) -> None:
+    """UPDATE eval_variants SET <kwargs> WHERE id=variant_id."""
+    if not kwargs:
+        return
+    cols = ", ".join(f"{k} = ?" for k in kwargs)
+    vals = [*list(kwargs.values()), variant_id]
+    with db._lock:
+        conn = db._connect()
+        conn.execute(f"UPDATE eval_variants SET {cols} WHERE id = ?", vals)
+        conn.commit()
+
+
+def do_promote_eval_run(db: Database, run_id: int) -> dict:
+    """Core promote logic: resolve winner variant, call lessons-db, update local DB.
+
+    Returns {"ok": True, "run_id": run_id, "variant_id": variant_id, "label": label}.
+    Raises ValueError for validation failures, httpx.HTTPError for lessons-db failures.
+    Both callers (promote_eval_run API endpoint and check_auto_promote) use this function.
+    """
+    run = get_eval_run(db, run_id)
+    if run is None:
+        raise ValueError(f"Eval run {run_id} not found")
+    if run["status"] != "complete":
+        raise ValueError(f"Run {run_id} is not complete (status: {run['status']})")
+
+    winner_variant = run.get("winner_variant")
+    if not winner_variant:
+        raise ValueError(f"Run {run_id} has no winner_variant")
+
+    variant = get_eval_variant(db, winner_variant)
+    if variant is None:
+        raise ValueError(f"Variant {winner_variant!r} not found in eval_variants")
+
+    # Call lessons-db to register the new production variant
+    data_source_url = run.get("data_source_url") or db.get_setting("eval.data_source_url") or "http://127.0.0.1:7685"
+    promote_url = f"{data_source_url.rstrip('/')}/eval/production-variant"
+    payload = {
+        "model": variant["model"],
+        "prompt_template_id": variant["prompt_template_id"],
+        "temperature": variant.get("temperature"),
+        "num_ctx": variant.get("num_ctx"),
+    }
+    resp = httpx.post(promote_url, json=payload, timeout=10.0)
+    if resp.status_code not in (200, 201, 204):
+        raise httpx.HTTPStatusError(
+            f"lessons-db promote endpoint returned HTTP {resp.status_code}",
+            request=resp.request,
+            response=resp,
+        )
+
+    # Update local eval_variants: winner becomes production + recommended
+    update_eval_variant(db, winner_variant, is_recommended=1, is_production=1)
+    # Clear production + recommended from all other variants
+    with db._lock:
+        conn = db._connect()
+        conn.execute(
+            "UPDATE eval_variants SET is_recommended = 0, is_production = 0 WHERE id != ?",
+            (winner_variant,),
+        )
+        conn.commit()
+
+    label = variant.get("label", winner_variant)
+    _log.info("Promoted variant %s (label=%r) to production for run %d", winner_variant, label, run_id)
+    return {"ok": True, "run_id": run_id, "variant_id": winner_variant, "label": label}
+
+
+def check_auto_promote(db: Database, run_id: int, http_base: str) -> None:
+    """Check whether a completed eval run qualifies for auto-promotion.
+
+    Three-gate criteria (all must pass):
+    1. Winner F1 >= eval.f1_threshold
+    2. Winner F1 > production_F1 + eval.auto_promote_min_improvement
+       (gate skipped if no production variant exists)
+    3. error_budget_used <= eval.error_budget
+
+    Optional stability gate: winner must have cleared f1_threshold in the
+    last eval.stability_window completed runs (if stability_window > 0).
+
+    NEVER raises — all errors are logged and the function returns silently.
+    Same contract as generate_eval_analysis.
+    """
+    try:
+        _check_auto_promote_inner(db, run_id)
+    except Exception:
+        _log.exception("check_auto_promote: unhandled error for run_id=%d", run_id)
+
+
+def _check_auto_promote_inner(db: Database, run_id: int) -> None:  # noqa: PLR0911
+    """Inner implementation called by check_auto_promote. May raise."""
+    # Gate 0: auto-promote enabled?
+    if not db.get_setting("eval.auto_promote"):
+        return
+
+    run = get_eval_run(db, run_id)
+    if run is None or run.get("status") != "complete":
+        return
+
+    winner_variant = run.get("winner_variant")
+    if not winner_variant:
+        _log.info("check_auto_promote: run %d has no winner_variant, skipping", run_id)
+        return
+
+    # Parse winner F1 from metrics
+    metrics_raw = run.get("metrics")
+    try:
+        parsed_metrics = json.loads(metrics_raw) if isinstance(metrics_raw, str) else (metrics_raw or {})
+    except (json.JSONDecodeError, TypeError):
+        _log.warning("check_auto_promote: run %d metrics unparseable, skipping", run_id)
+        return
+
+    winner_f1 = (parsed_metrics.get(winner_variant) or {}).get("f1")
+    if winner_f1 is None:
+        _log.info("check_auto_promote: run %d winner %s has no F1, skipping", run_id, winner_variant)
+        return
+
+    # Gate 1: F1 >= threshold
+    f1_threshold = float(db.get_setting("eval.f1_threshold") or 0.75)
+    if winner_f1 < f1_threshold:
+        _log.info(
+            "check_auto_promote: run %d winner F1=%.3f < threshold %.3f, skipping",
+            run_id,
+            winner_f1,
+            f1_threshold,
+        )
+        return
+
+    # Gate 2: F1 > production_F1 + min_improvement
+    min_improvement = float(db.get_setting("eval.auto_promote_min_improvement") or 0.05)
+    production_f1: float | None = None
+
+    with db._lock:
+        conn = db._connect()
+        prod_row = conn.execute("SELECT id FROM eval_variants WHERE is_production = 1 LIMIT 1").fetchone()
+
+    if prod_row is not None:
+        prod_id = prod_row["id"]
+        with db._lock:
+            conn = db._connect()
+            prod_run_row = conn.execute(
+                "SELECT metrics FROM eval_runs WHERE winner_variant = ? AND status = 'complete' "
+                "ORDER BY id DESC LIMIT 1",
+                (prod_id,),
+            ).fetchone()
+        if prod_run_row is not None:
+            try:
+                m = json.loads(prod_run_row["metrics"]) if isinstance(prod_run_row["metrics"], str) else {}
+                production_f1 = (m.get(prod_id) or {}).get("f1")
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        if production_f1 is not None and winner_f1 <= production_f1 + min_improvement:
+            _log.info(
+                "check_auto_promote: run %d winner F1=%.3f not enough improvement over "
+                "production F1=%.3f (need +%.3f), skipping",
+                run_id,
+                winner_f1,
+                production_f1,
+                min_improvement,
+            )
+            return
+
+    # Gate 3: error_budget_used <= error_budget
+    error_budget = float(db.get_setting("eval.error_budget") or 0.30)
+    item_count = run.get("item_count") or 0
+    if item_count > 0:
+        with db._lock:
+            conn = db._connect()
+            failed_count = conn.execute(
+                "SELECT COUNT(*) FROM eval_results "
+                "WHERE run_id = ? AND score_transfer IS NULL AND row_type = 'judge'",
+                (run_id,),
+            ).fetchone()[0]
+        error_budget_used = failed_count / item_count
+        if error_budget_used > error_budget:
+            _log.info(
+                "check_auto_promote: run %d error_budget_used=%.3f > %.3f, skipping",
+                run_id,
+                error_budget_used,
+                error_budget,
+            )
+            return
+
+    # Stability window gate (optional)
+    stability_window = int(db.get_setting("eval.stability_window") or 0)
+    if stability_window > 0:
+        with db._lock:
+            conn = db._connect()
+            recent_rows = conn.execute(
+                "SELECT metrics FROM eval_runs WHERE winner_variant = ? AND status = 'complete' "
+                "ORDER BY id DESC LIMIT ?",
+                (winner_variant, stability_window),
+            ).fetchall()
+        if len(recent_rows) < stability_window:
+            _log.info(
+                "check_auto_promote: variant %s only has %d/%d runs in stability window, skipping",
+                winner_variant,
+                len(recent_rows),
+                stability_window,
+            )
+            return
+        for row in recent_rows:
+            try:
+                m = json.loads(row["metrics"]) if isinstance(row["metrics"], str) else {}
+                row_f1 = (m.get(winner_variant) or {}).get("f1")
+                if row_f1 is None or row_f1 < f1_threshold:
+                    _log.info(
+                        "check_auto_promote: variant %s stability check failed (F1=%s < %.3f), skipping",
+                        winner_variant,
+                        row_f1,
+                        f1_threshold,
+                    )
+                    return
+            except (json.JSONDecodeError, TypeError):
+                _log.warning("check_auto_promote: could not parse stability run metrics, skipping")
+                return
+
+    # All gates passed — auto-promote
+    prod_str = (
+        f", +{winner_f1 - production_f1:.2f} over production={production_f1:.2f}" if production_f1 is not None else ""
+    )
+    _log.info("Auto-promoting variant %s (F1=%.2f%s) for run %d", winner_variant, winner_f1, prod_str, run_id)
+    do_promote_eval_run(db, run_id)
+
+
 def insert_eval_result(db: Database, **kwargs: Any) -> int:
     """INSERT OR IGNORE INTO eval_results and return the new (or existing) row id.
 
@@ -1509,6 +1733,7 @@ def run_eval_session(
         run = get_eval_run(db, run_id)
         if run is not None and run.get("status") == "complete":
             generate_eval_analysis(db, run_id, http_base)
+            check_auto_promote(db, run_id, http_base)
     except Exception as exc:
         _log.exception("run_eval_session run_id=%d unhandled error", run_id)
         try:

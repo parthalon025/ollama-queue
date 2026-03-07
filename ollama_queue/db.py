@@ -76,6 +76,8 @@ EVAL_SETTINGS_DEFAULTS = {
     "eval.error_budget": 0.30,
     "eval.setup_complete": False,
     "eval.analysis_model": "",  # empty = fall back to judge model
+    "eval.auto_promote": False,  # explicit opt-in only
+    "eval.auto_promote_min_improvement": 0.05,  # min F1 delta over current production
 }
 
 
