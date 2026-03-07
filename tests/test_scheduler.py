@@ -253,8 +253,17 @@ class TestSuggestTime:
             assert len(parts) == 5
 
     def test_all_slots_blocked_returns_empty(self, db, scheduler):
-        """suggest_time returns [] when all 48 slots are blocked by pinned jobs."""
+        """suggest_time returns [] when all 48 slots are blocked by pinned jobs.
+
+        Uses a fixed non-DST date (mid-January) so that cron jobs at 2:00 AM
+        are not phantom-shifted to 3:00 AM by DST spring-forward transitions.
+        Without a fixed now, running this test on March 8 (US DST day) causes
+        croniter to return 03:00 for '0 2 * * *' (slot 6 instead of slot 4),
+        leaving slot 4 unblocked and producing a non-empty suggestions list.
+        """
         import datetime
+
+        fixed_now = datetime.datetime(2025, 1, 15, 12, 0, 0).timestamp()
 
         # Pin every 30-min slot: 48 jobs, each adjacent bleed covers 3 slots
         # Using every-hour pins (slots 0,2,4,...) — each pins slot-1,slot,slot+1
@@ -267,7 +276,7 @@ class TestSuggestTime:
                 pinned=True,
                 next_run=datetime.datetime(2025, 1, 1, h, 0, 0).timestamp(),
             )
-        suggestions = scheduler.suggest_time(priority=5)
+        suggestions = scheduler.suggest_time(priority=5, now=fixed_now)
         assert suggestions == []
 
 
