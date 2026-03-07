@@ -16,12 +16,16 @@ from ollama_queue.eval_engine import (
     build_analysis_prompt,
     build_generation_prompt,
     build_judge_prompt,
+    check_auto_promote,
     compute_metrics,
+    create_eval_run,
     generate_eval_analysis,
+    insert_eval_result,
     parse_judge_response,
     render_report,
     run_eval_generate,
     run_eval_judge,
+    update_eval_run,
     update_eval_variant,
 )
 
@@ -1255,3 +1259,100 @@ def test_update_eval_variant_sets_fields(tmp_path):
         row = conn.execute("SELECT is_recommended, is_production FROM eval_variants WHERE id = 'V1'").fetchone()
     assert row["is_recommended"] == 1
     assert row["is_production"] == 1
+
+
+# ---------------------------------------------------------------------------
+# TestCheckAutoPromote
+# ---------------------------------------------------------------------------
+
+
+class TestCheckAutoPromote:
+    """Tests for check_auto_promote three-gate logic."""
+
+    @pytest.fixture
+    def db_with_complete_run(self, tmp_path):
+        from ollama_queue.db import Database
+
+        db = Database(str(tmp_path / "test.db"))
+        db.initialize()
+        db.set_setting("eval.auto_promote", True)
+        db.set_setting("eval.f1_threshold", 0.75)
+        db.set_setting("eval.auto_promote_min_improvement", 0.05)
+        db.set_setting("eval.error_budget", 0.30)
+        db.set_setting("eval.stability_window", 0)  # disabled
+        import json
+
+        run_id = create_eval_run(db, variant_id="A")
+        metrics = json.dumps({"A": {"f1": 0.85, "precision": 0.9, "recall": 0.8, "actionability": 0.8}})
+        update_eval_run(
+            db, run_id, status="complete", winner_variant="A", metrics=metrics, item_count=10, error_budget=0.30
+        )
+        return db, run_id
+
+    def test_skips_if_auto_promote_disabled(self, db_with_complete_run):
+        db, run_id = db_with_complete_run
+        db.set_setting("eval.auto_promote", False)
+        with patch("ollama_queue.eval_engine.do_promote_eval_run") as mock_promote:
+            check_auto_promote(db, run_id, "http://localhost:7683")
+        mock_promote.assert_not_called()
+
+    def test_skips_if_f1_below_threshold(self, db_with_complete_run):
+        db, run_id = db_with_complete_run
+        db.set_setting("eval.f1_threshold", 0.90)  # raise bar above winner F1=0.85
+        with patch("ollama_queue.eval_engine.do_promote_eval_run") as mock_promote:
+            check_auto_promote(db, run_id, "http://localhost:7683")
+        mock_promote.assert_not_called()
+
+    def test_skips_if_improvement_below_min(self, db_with_complete_run):
+        """Skips when winner F1 doesn't beat production F1 + min_improvement."""
+        import json
+
+        db, run_id = db_with_complete_run
+        # Mark variant B as production (B is seeded by initialize())
+        with db._lock:
+            conn = db._connect()
+            conn.execute("UPDATE eval_variants SET is_production = 1 WHERE id = 'B'")
+            conn.commit()
+        old_run_id = create_eval_run(db, variant_id="B")
+        old_metrics = json.dumps({"B": {"f1": 0.82, "precision": 0.85, "recall": 0.80, "actionability": 0.75}})
+        update_eval_run(db, old_run_id, status="complete", winner_variant="B", metrics=old_metrics)
+        with patch("ollama_queue.eval_engine.do_promote_eval_run") as mock_promote:
+            check_auto_promote(db, run_id, "http://localhost:7683")
+        mock_promote.assert_not_called()
+
+    def test_promotes_when_all_gates_pass(self, db_with_complete_run):
+        """Auto-promotes when F1 >= threshold AND delta >= min_improvement AND error_budget ok."""
+        db, run_id = db_with_complete_run
+        with patch("ollama_queue.eval_engine.do_promote_eval_run") as mock_promote:
+            mock_promote.return_value = {"ok": True, "run_id": run_id, "variant_id": "A", "label": "Config A"}
+            check_auto_promote(db, run_id, "http://localhost:7683")
+        mock_promote.assert_called_once_with(db, run_id)
+
+    def test_skips_if_error_budget_exceeded(self, db_with_complete_run):
+        """Skips if too many eval_results failed (score_transfer IS NULL)."""
+        db, run_id = db_with_complete_run
+        db.set_setting("eval.error_budget", 0.05)  # 5% tolerance
+        # Insert 5 failed results out of item_count=10 → 50% failure rate > 5%
+        for i in range(5):
+            insert_eval_result(
+                db,
+                run_id=run_id,
+                variant="A",
+                source_item_id=f"src-{i}",
+                target_item_id=f"tgt-{i}",
+                is_same_cluster=0,
+                row_type="judge",
+            )
+        with patch("ollama_queue.eval_engine.do_promote_eval_run") as mock_promote:
+            check_auto_promote(db, run_id, "http://localhost:7683")
+        mock_promote.assert_not_called()
+
+    def test_never_raises_on_unexpected_error(self, tmp_path):
+        """check_auto_promote swallows all exceptions — never propagates."""
+        from ollama_queue.db import Database
+
+        db = Database(str(tmp_path / "test.db"))
+        db.initialize()
+        db.set_setting("eval.auto_promote", True)
+        # No run exists — should log and return without raising
+        check_auto_promote(db, 9999, "http://localhost:7683")  # must not raise
