@@ -27,16 +27,16 @@ scripts/
   migrate_dlq_max_retries.py   # Add max_retries column to existing dlq table (idempotent)
 tests/
   test_db.py               # 99 tests
-  test_eval_engine.py      # 92 tests
+  test_eval_engine.py      # 100 tests
   test_api.py              # 58 tests (incl. proxy priority, batch schedule, suggest endpoint)
   test_daemon.py           # 62 tests
-  test_api_eval_runs.py    # 45 tests
+  test_api_eval_runs.py    # 57 tests
   test_api_eval_variants.py # 30 tests
   test_scheduler.py        # 28 tests
   test_cli.py              # 27 tests
   test_stall.py            # 24 tests
   test_health.py           # 18 tests
-  test_api_eval_settings.py # 20 tests
+  test_api_eval_settings.py # 25 tests
   test_models.py           # 16 tests
   test_estimator.py        # 12 tests
   test_embed_proxy.py      # 12 tests
@@ -160,6 +160,9 @@ This applies to: component files, store transformations in `store.js`, computed 
 - **`useActionFeedback` double-click guard** — `run()` returns early if `state.phase === 'loading'`. Place this check as the first line to prevent concurrent executions from the same button.
 - **Rules of Hooks in action buttons** — all `useActionFeedback()` calls must appear before any conditional `return null` in the component. If an early guard precedes the hooks, React will throw "rendered fewer hooks than previous render" on re-render. Move hook calls to the top of the function body.
 - **`evalActiveRun` sessionStorage staleness** — on store init, if `evalActiveRun` is loaded from sessionStorage (service restart), immediately verify via `GET /api/eval/runs/{id}/progress`. If status is terminal or fetch fails, clear `evalActiveRun.value` and remove the sessionStorage key. Use an identity guard (`run_id !== _storedId`) to prevent the async `.then()` from clobbering a new run started during the fetch window. See `store.js` after `API` declaration.
+- **`promote_eval_run` auto-resolves winner from DB** — the promote endpoint accepts an empty body `{}` and resolves model/prompt_template_id/temperature/num_ctx from `run.winner_variant` → `eval_variants` row. The shared core is `do_promote_eval_run()` in `eval_engine.py`; both the API endpoint and `check_auto_promote()` call it. Error routing: run-not-found → 404; not-complete/no-winner/variant-not-in-db → 400; lessons-db unreachable → 502.
+- **`check_auto_promote` never raises** — wraps `_check_auto_promote_inner` in `try/except Exception` and logs on any error. Same pattern as `generate_eval_analysis`. Called from `run_eval_session` after `generate_eval_analysis` completes. Three gates: winner F1 ≥ `eval.f1_threshold`; winner F1 > production F1 + `eval.auto_promote_min_improvement`; `error_budget_used ≤ eval.error_budget`. Auto-promote is off by default (`eval.auto_promote = false`) — must be explicitly enabled. Stability window gate: if `eval.stability_window > 0`, winner must have passed threshold in the last N completed runs.
+- **`is_production`/`is_recommended` cleared on all variants at promote time** — `do_promote_eval_run` sets winner to `is_recommended=1, is_production=1` then clears all other variants to 0 in the same DB transaction. The VariantRow badges (`★ Recommended`, `Production`) update automatically on the next `fetchEvalVariants()` call.
 
 ## Design Doc
 

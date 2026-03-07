@@ -1,7 +1,7 @@
 # Promote & Auto-Promote Design
 
 **Date:** 2026-03-07
-**Status:** Approved
+**Status:** Complete — PR #37
 **Feature:** Wire "Use this config" button + auto-promote winning eval variant to production based on quality criteria
 
 ---

@@ -1399,6 +1399,8 @@ def create_app(db: Database) -> FastAPI:
             "error_budget",
             "setup_complete",
             "analysis_model",
+            "auto_promote",
+            "auto_promote_min_improvement",
         }
 
         # Validation rules — validate ALL before writing any
@@ -1428,6 +1430,12 @@ def create_app(db: Database) -> FastAPI:
                     validation_errors.append("data_source_url must start with http:// or https://")
             elif bare_key == "stability_window" and not (isinstance(value, int) and (1 <= value <= 20)):
                 validation_errors.append(f"stability_window must be an integer 1-20, got {value!r}")
+            elif bare_key == "auto_promote" and not isinstance(value, bool):
+                validation_errors.append(f"auto_promote must be a boolean, got {value!r}")
+            elif bare_key == "auto_promote_min_improvement" and (
+                not isinstance(value, int | float) or not (0.0 <= float(value) <= 1.0)
+            ):
+                validation_errors.append(f"auto_promote_min_improvement must be 0.0-1.0, got {value!r}")
 
         if validation_errors:
             raise HTTPException(status_code=422, detail=validation_errors)
@@ -1920,55 +1928,30 @@ def create_app(db: Database) -> FastAPI:
         return {"run_id": new_run_id}
 
     @app.post("/api/eval/runs/{run_id}/promote")
-    def promote_eval_run(run_id: int, body: dict = Body(...)):
-        """Mark a completed run's variant as the production variant in lessons-db.
+    def promote_eval_run(run_id: int, body: dict = Body(default={})):
+        """Mark a completed run's winner variant as the production variant.
 
-        # What it shows: N/A — write action; confirms the best variant is now production.
-        # Decision it drives: Lets the user graduate a variant from evaluation to production
-        #   without manual DB edits.
+        # What it shows: N/A — write action; updates lessons-db + local eval_variants.
+        # Decision it drives: Promotes the winning eval config to production so the system
+        #   uses it for future inference without manual DB edits.
+
+        Accepts an empty body {}. Resolves the model/template/temperature/num_ctx
+        automatically from the run's winner_variant in eval_variants.
         """
         from ollama_queue import eval_engine as _ee
 
-        run = _ee.get_eval_run(db, run_id)
-        if run is None:
-            raise HTTPException(status_code=404, detail=f"Eval run {run_id} not found")
-
-        if run["status"] != "complete":
-            raise HTTPException(status_code=400, detail=f"Run {run_id} is not complete (status: {run['status']})")
-
-        model = body.get("model")
-        prompt_template_id = body.get("prompt_template_id")
-        temperature = body.get("temperature")
-        num_ctx = body.get("num_ctx")
-
-        if not model or not prompt_template_id:
-            raise HTTPException(status_code=400, detail="model and prompt_template_id are required")
-
-        data_source_url = (
-            run.get("data_source_url") or db.get_setting("eval.data_source_url") or "http://127.0.0.1:7685"
-        )
-        promote_url = f"{data_source_url.rstrip('/')}/eval/production-variant"
-
-        payload = {
-            "model": model,
-            "prompt_template_id": prompt_template_id,
-            "temperature": temperature,
-            "num_ctx": num_ctx,
-        }
-
         try:
-            resp = httpx.post(promote_url, json=payload, timeout=10.0)
-            if resp.status_code not in (200, 201, 204):
-                _log.warning("promote_eval_run: lessons-db returned %d for run %d", resp.status_code, run_id)
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"lessons-db promote endpoint returned HTTP {resp.status_code}",
-                )
+            result = _ee.do_promote_eval_run(db, run_id)
+            return result
+        except ValueError as exc:
+            msg = str(exc)
+            # "Eval run N not found" → 404; "Variant X not found in eval_variants" → 400
+            if "not found" in msg and "eval_variants" not in msg:
+                raise HTTPException(status_code=404, detail=msg)
+            raise HTTPException(status_code=400, detail=msg)
         except httpx.HTTPError as exc:
-            _log.warning("promote_eval_run: HTTP error posting to %s: %s", promote_url, exc)
+            _log.warning("promote_eval_run: HTTP error for run %d: %s", run_id, exc)
             raise HTTPException(status_code=502, detail=f"Failed to reach lessons-db: {exc}") from exc
-
-        return {"ok": True, "run_id": run_id, "promoted_to": promote_url}
 
     @app.post("/api/eval/runs/{run_id}/judge-rerun")
     def judge_rerun_eval_run(run_id: int, body: dict = Body(default={})):

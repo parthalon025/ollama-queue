@@ -16,6 +16,8 @@ export const EVAL_TRANSLATIONS = {
   per_cluster:       { label: 'Items per group',            tooltip: 'How many lessons to sample from each cluster per run.' },
   f1_threshold:      { label: 'Promotion threshold',        tooltip: 'Minimum quality score required to promote a configuration.' },
   stability_window:  { label: 'Stability window',           tooltip: 'Number of recent runs averaged to determine stability.' },
+  auto_promote:                 { label: 'Auto-promote',        tooltip: 'Automatically promote the winner when all quality gates pass. Off by default.' },
+  auto_promote_min_improvement: { label: 'Min improvement',     tooltip: 'Minimum quality score gain over current production required to auto-promote.' },
   'zero-shot-causal':{ label: 'Figure it out',              tooltip: 'Model reasons from cause to effect without examples.' },
   fewshot:           { label: 'Learn from examples first',  tooltip: 'Model sees examples before generating.' },
   chunked:           { label: 'Show examples in groups',    tooltip: 'Examples grouped by type for context.' },
