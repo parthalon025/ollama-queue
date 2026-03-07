@@ -1,9 +1,10 @@
 import { h } from 'preact';
-import { useState } from 'preact/hooks';
+import { useState, useEffect } from 'preact/hooks';
 import { signal } from '@preact/signals';
 import {
   evalVariants, evalSettings,
   triggerEvalRun, fetchEvalRuns, startEvalPoll, evalActiveRun,
+  testDataSource, primeDataSource,
 } from '../../store.js';
 import { EVAL_TRANSLATIONS } from './translations.js';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
@@ -30,6 +31,33 @@ export default function RunTriggerPanel({ defaultCollapsed }) {
   const [modeSubFields, setModeSubFields] = useState({});
   const [dryRun, setDryRun] = useState(false);
   const [fb, act] = useActionFeedback();
+
+  // null = not checked yet, 'checking', 'ready', 'needs_prime', 'offline'
+  const [readiness, setReadiness] = useState(null);
+  const [primeFb, primeAct] = useActionFeedback();
+
+  // Helper: run the readiness check and update banner state.
+  // Called on open (via useEffect) and on Retry button click.
+  const checkReadiness = () => {
+    setReadiness({ phase: 'checking' });
+    testDataSource()
+      .then(result => {
+        if (!result || !result.ok) {
+          setReadiness({ phase: 'offline', error: result?.error || 'No response' });
+        } else if (result.cluster_count < 2 || result.item_count < 10) {
+          setReadiness({ phase: 'needs_prime', item_count: result.item_count ?? 0, cluster_count: result.cluster_count ?? 0 });
+        } else {
+          setReadiness({ phase: 'ready', item_count: result.item_count, cluster_count: result.cluster_count });
+        }
+      })
+      .catch(err => setReadiness({ phase: 'offline', error: err.message }));
+  };
+
+  // Check readiness when panel opens. Re-runs whenever `open` toggles true.
+  useEffect(() => {
+    if (!open) return;
+    checkReadiness();
+  }, [open]);
 
   function toggleVariant(varId) {
     setSelectedVariants(prev =>
@@ -96,7 +124,56 @@ export default function RunTriggerPanel({ defaultCollapsed }) {
       </div>
 
       {open && (
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        <div>
+          {/* Readiness banner — shows whether lessons-db has enough data to run eval.
+              Checks on open; Prime button triggers cluster_seed backfill; Retry re-checks. */}
+          {readiness && readiness.phase !== 'checking' && (
+            <div class={`eval-readiness eval-readiness--${readiness.phase}`}>
+              {readiness.phase === 'ready' && (
+                <span>&#x2713; Ready &middot; {readiness.item_count} lessons &middot; {readiness.cluster_count} clusters</span>
+              )}
+              {readiness.phase === 'needs_prime' && (
+                <span>
+                  &#x26A0; Needs priming &middot; {readiness.item_count} lessons &middot; {readiness.cluster_count} clusters
+                  {' '}
+                  <button
+                    type="button"
+                    class="t-btn t-btn-secondary"
+                    style={{ fontSize: 'var(--type-label)', padding: '2px 8px', marginLeft: '0.5rem' }}
+                    disabled={primeFb.phase === 'loading'}
+                    onClick={() => primeAct('Priming\u2026', () => primeDataSource(), result => {
+                      // After prime succeeds, update readiness from returned counts
+                      if (result.cluster_count >= 2 && result.item_count >= 10) {
+                        setReadiness({ phase: 'ready', item_count: result.item_count, cluster_count: result.cluster_count });
+                      } else {
+                        setReadiness({ phase: 'needs_prime', item_count: result.item_count ?? 0, cluster_count: result.cluster_count ?? 0 });
+                      }
+                      return `Primed \u00b7 ${result.updated} updated`;
+                    })}
+                  >
+                    {primeFb.phase === 'loading' ? 'Priming\u2026' : 'Prime'}
+                  </button>
+                  {primeFb.msg && <span class={`action-fb action-fb--${primeFb.phase}`} style={{ marginLeft: '0.5rem' }}>{primeFb.msg}</span>}
+                </span>
+              )}
+              {readiness.phase === 'offline' && (
+                <span>
+                  &#x2717; Data source offline &middot; {readiness.error}
+                  {' '}
+                  <button
+                    type="button"
+                    class="t-btn t-btn-secondary"
+                    style={{ fontSize: 'var(--type-label)', padding: '2px 8px', marginLeft: '0.5rem' }}
+                    onClick={checkReadiness}
+                  >
+                    Retry
+                  </button>
+                </span>
+              )}
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
 
           {/* Variant multi-select */}
           <div>
@@ -234,6 +311,7 @@ export default function RunTriggerPanel({ defaultCollapsed }) {
             {fb.msg && <div class={`action-fb action-fb--${fb.phase}`}>{fb.msg}</div>}
           </div>
         </form>
+        </div>
       )}
     </div>
   );

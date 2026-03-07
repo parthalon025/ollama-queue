@@ -139,6 +139,15 @@ export async function testDataSource() {
   return res.json();
 }
 
+// What it shows: nothing — triggers cluster_seed backfill on the data source
+// Decision it drives: after this resolves, /eval/items will return lessons that
+//   were previously missing cluster_seed, making them visible to the eval pipeline
+export async function primeDataSource() {
+  const res = await fetch(`${API}/eval/datasource/prime`, { method: 'POST' });
+  if (!res.ok) throw new Error(`Prime failed: HTTP ${res.status}`);
+  return res.json();
+}
+
 // What it shows: nothing — saves eval settings to the backend
 // Decision it drives: updates evalSettings signal on success; throws on validation or server error
 export async function saveEvalSettings(updates) {

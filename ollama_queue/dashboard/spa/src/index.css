@@ -1193,3 +1193,10 @@ body {
   margin-bottom: 0.4rem;
 }
 .eval-model-badge { color: var(--text-tertiary, #666); }
+
+/* Eval readiness banner — shows data source health before a run is triggered.
+   Phase variants: ready (green), needs_prime (amber), offline (red). */
+.eval-readiness { padding: 6px 10px; border-radius: var(--radius, 4px); font-family: var(--font-mono); font-size: var(--type-label); margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem; }
+.eval-readiness--ready { background: var(--status-ok, #1a3a1a); color: var(--text-secondary); }
+.eval-readiness--needs_prime { background: var(--status-warn, #2a2010); color: var(--status-warn-text, #c8a040); }
+.eval-readiness--offline { background: var(--status-error-subtle, #2a1010); color: var(--status-error, #c84040); }
