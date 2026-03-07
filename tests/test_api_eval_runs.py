@@ -889,6 +889,16 @@ class TestPromoteEvalRunEndpoint:
             row = conn.execute("SELECT is_production FROM eval_variants WHERE id='A'").fetchone()
         assert row["is_production"] == 1
 
+    def test_promote_returns_400_not_404_when_variant_missing(self, client_and_db):
+        """Variant not found in eval_variants routes to 400, not 404."""
+        client, db = client_and_db
+        # Create a complete run whose winner_variant ("ghost") has no eval_variants row
+        run_id = create_eval_run(db, variant_id="A")
+        update_eval_run(db, run_id, status="complete", winner_variant="ghost")
+        resp = client.post(f"/api/eval/runs/{run_id}/promote", json={})
+        assert resp.status_code == 400  # NOT 404
+        assert "eval_variants" in resp.json()["detail"]
+
     def test_promote_returns_502_if_lessons_db_unreachable(self, client_and_db):
         """Returns 502 when lessons-db is unreachable."""
         import httpx

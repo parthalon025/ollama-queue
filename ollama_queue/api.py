@@ -1945,6 +1945,7 @@ def create_app(db: Database) -> FastAPI:
             return result
         except ValueError as exc:
             msg = str(exc)
+            # "Eval run N not found" → 404; "Variant X not found in eval_variants" → 400
             if "not found" in msg and "eval_variants" not in msg:
                 raise HTTPException(status_code=404, detail=msg)
             raise HTTPException(status_code=400, detail=msg)
