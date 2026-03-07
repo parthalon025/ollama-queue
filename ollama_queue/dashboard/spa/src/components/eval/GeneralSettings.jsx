@@ -92,7 +92,7 @@ export default function GeneralSettings() {
       init[def.key] = settings[def.key] != null ? def.parse(settings[def.key]) : def.default;
     });
     TOGGLE_DEFS.forEach(def => {
-      init[def.key] = settings[def.key] != null ? Boolean(settings[def.key]) : def.default;
+      init[def.key] = settings[def.key] ?? def.default;
     });
     IMPROVEMENT_DEFS.forEach(def => {
       init[def.key] = settings[def.key] != null ? def.parse(settings[def.key]) : def.default;
@@ -107,8 +107,8 @@ export default function GeneralSettings() {
 
   function handleChange(key, rawValue, def) {
     const parsed = def.parse(rawValue);
-    setValues(prev => ({ ...prev, [key]: parsed }));
-    const errMsg = def.validate(parsed);
+    const errMsg = isNaN(parsed) ? 'Must be a number' : def.validate(parsed);
+    if (!isNaN(parsed)) setValues(prev => ({ ...prev, [key]: parsed }));
     setErrors(prev => ({ ...prev, [key]: errMsg }));
   }
 
