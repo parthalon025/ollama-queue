@@ -2,7 +2,7 @@ import { h } from 'preact';
 import { useState } from 'preact/hooks';
 import { EVAL_TRANSLATIONS } from './translations.js';
 import ResultsTable from './ResultsTable.jsx';
-import { API, evalActiveRun, evalSubTab, fetchEvalRuns, startEvalPoll } from '../../store.js';
+import { API, evalActiveRun, evalSubTab, fetchEvalRuns, fetchEvalVariants, startEvalPoll } from '../../store.js';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
 // What it shows: A single eval run row with 3-level progressive disclosure.
 //   L1: status dot, winner config, quality score, date, item count.
@@ -51,6 +51,7 @@ export default function RunRow({ run }) {
   const [level, setLevel] = useState(1); // 1 | 2 | 3
   const [repeatFb, repeatAct] = useActionFeedback();
   const [analyzeFb, analyzeAct] = useActionFeedback();
+  const [promoteFb, promoteAct] = useActionFeedback();
 
   const {
     id,
@@ -102,6 +103,27 @@ export default function RunRow({ run }) {
         return data;
       },
       data => `Run #${data.run_id} started`
+    );
+  }
+
+  async function handlePromote(evt) {
+    evt.stopPropagation();
+    await promoteAct(
+      'Promoting…',
+      async () => {
+        const res = await fetch(`${API}/eval/runs/${id}/promote`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        let data = null;
+        try { data = await res.json(); } catch { /* non-JSON body */ }
+        if (!res.ok) throw new Error(data?.detail || `Promote failed: ${res.status}`);
+        await fetchEvalRuns();
+        await fetchEvalVariants();
+        return data;
+      },
+      data => `Config ${data.variant_id} promoted to production`
     );
   }
 
@@ -263,10 +285,18 @@ export default function RunRow({ run }) {
 
           {/* Action buttons */}
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
-            {winner_variant && (
-              <button class="t-btn t-btn-primary" style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }}>
-                Use this config
-              </button>
+            {status === 'complete' && winner_variant && (
+              <div>
+                <button
+                  class="t-btn t-btn-primary"
+                  style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }}
+                  disabled={promoteFb.phase === 'loading'}
+                  onClick={handlePromote}
+                >
+                  {promoteFb.phase === 'loading' ? 'Promoting…' : 'Use this config'}
+                </button>
+                {promoteFb.msg && <div class={`action-fb action-fb--${promoteFb.phase}`}>{promoteFb.msg}</div>}
+              </div>
             )}
             <button class="t-btn t-btn-secondary" style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }}>
               Score again
