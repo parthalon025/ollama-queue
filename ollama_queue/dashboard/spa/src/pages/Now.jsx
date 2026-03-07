@@ -66,7 +66,7 @@ export default function Now() {
                     padding: '0.5rem 1rem', borderRadius: 4,
                     border: '1px solid rgba(249,115,22,0.4)',
                 }}>
-                    ⚠ Disconnected — retrying...
+                    ⚠ Lost connection to the queue server — trying to reconnect...
                 </div>
             )}
 
@@ -107,11 +107,12 @@ export default function Now() {
                                 fontFamily: 'var(--font-mono)',
                                 flexShrink: 0,
                             }}>
-                                ⚠ ALERTS
+                                ⚠ Needs Attention
                             </span>
                             {dlqCnt > 0 && (
                                 <button
                                     onClick={() => { currentTab.value = 'history'; }}
+                                    title="Dead-letter queue — jobs that ran out of retries"
                                     style={{
                                         fontSize: 'var(--type-label)',
                                         color: 'var(--status-error)',
@@ -123,7 +124,7 @@ export default function Now() {
                                         padding: 0,
                                     }}
                                 >
-                                    {dlqCnt} DLQ {dlqCnt === 1 ? 'entry' : 'entries'}
+                                    {dlqCnt} failed {dlqCnt === 1 ? 'job' : 'jobs'} need attention
                                 </button>
                             )}
                             {recentFailures > 0 && (
@@ -140,7 +141,7 @@ export default function Now() {
                                         padding: 0,
                                     }}
                                 >
-                                    {recentFailures} failure{recentFailures > 1 ? 's' : ''} today
+                                    {recentFailures} job{recentFailures > 1 ? 's' : ''} failed in the last 24h
                                 </button>
                             )}
                         </div>
@@ -148,7 +149,7 @@ export default function Now() {
 
                     {/* Resource gauges */}
                     {latestHealth && (
-                        <div class="t-frame" data-label="Resources">
+                        <div class="t-frame" data-label="System Resources">
                             <ResourceGauges
                                 ram={latestHealth.ram_pct}
                                 vram={latestHealth.vram_pct}
@@ -162,21 +163,21 @@ export default function Now() {
                     {/* KPI cards — 2×2 grid */}
                     <div class="grid grid-cols-2 gap-3">
                         <HeroCard
-                            label="Jobs / 24h"
+                            label="Jobs Completed Today"
                             value={kpis ? kpis.jobs_24h : '--'}
                             sparkData={buildHealthSparkline(health, 'ram_pct')}
                             sparkColor="var(--accent)"
                             delta={kpis ? buildJobsDelta(kpis, hist) : null}
                         />
                         <HeroCard
-                            label="Avg Wait"
+                            label="Average Wait Before Starting"
                             value={kpis ? formatWaitReadable(kpis.avg_wait_seconds) : '--'}
                             sparkData={buildDurationSparkline(durations)}
                             sparkColor="var(--accent)"
                             delta={kpis ? buildWaitDelta(kpis.avg_wait_seconds) : null}
                         />
                         <HeroCard
-                            label="Pause Time"
+                            label="Auto-Paused Time Today"
                             value={kpis ? `${kpis.pause_minutes_24h}` : '--'}
                             unit="min"
                             warning={kpis && kpis.pause_minutes_24h > 30}
@@ -185,7 +186,7 @@ export default function Now() {
                             delta={kpis ? buildPauseDelta(kpis.pause_minutes_24h) : null}
                         />
                         <HeroCard
-                            label="Success Rate"
+                            label="7-Day Success Rate"
                             value={kpis ? `${Math.round(kpis.success_rate_7d * 100)}` : '--'}
                             unit="%"
                             warning={kpis && kpis.success_rate_7d < 0.9}
@@ -195,13 +196,16 @@ export default function Now() {
 
                     {/* Proxy mini-stat — shown only when proxy calls exist in history */}
                     {showProxyStat && (
-                        <div style={{
-                            fontFamily: 'var(--font-mono)',
-                            fontSize: 'var(--type-label)',
-                            color: 'var(--text-tertiary)',
-                            paddingTop: '0.25rem',
-                        }}>
-                            proxy{' '}
+                        <div
+                            title="Requests routed through the Ollama proxy endpoint"
+                            style={{
+                                fontFamily: 'var(--font-mono)',
+                                fontSize: 'var(--type-label)',
+                                color: 'var(--text-tertiary)',
+                                paddingTop: '0.25rem',
+                            }}
+                        >
+                            API proxy calls{' '}
                             {proxyGenerate > 0 && `${proxyGenerate} generate`}
                             {proxyGenerate > 0 && proxyEmbed > 0 && ' · '}
                             {proxyEmbed > 0 && `${proxyEmbed} embed`}

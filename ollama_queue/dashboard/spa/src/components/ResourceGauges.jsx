@@ -14,10 +14,10 @@ import { h } from 'preact';
 export default function ResourceGauges({ ram, vram, load, swap, settings }) {
   const s = settings || {};
   const gauges = [
-    { label: 'RAM', value: ram, pause: s.ram_pause_pct || 85, resume: s.ram_resume_pct || 75 },
-    { label: 'VRAM', value: vram, pause: s.vram_pause_pct || 90, resume: s.vram_resume_pct || 80 },
-    { label: 'Load', value: load, pause: (s.load_pause_multiplier || 2) * 50, resume: (s.load_resume_multiplier || 1.5) * 50 },
-    { label: 'Swap', value: swap, pause: s.swap_pause_pct || 50, resume: s.swap_resume_pct || 40 },
+    { label: 'RAM',  title: 'Main memory (RAM) — used by running programs',                value: ram,  pause: s.ram_pause_pct || 85,                              resume: s.ram_resume_pct || 75 },
+    { label: 'GPU',  title: 'GPU memory (VRAM) — used by AI models',                       value: vram, pause: s.vram_pause_pct || 90,                             resume: s.vram_resume_pct || 80 },
+    { label: 'CPU',  title: 'CPU workload — how busy the processor is',                    value: load, pause: (s.load_pause_multiplier || 2) * 50,                resume: (s.load_resume_multiplier || 1.5) * 50 },
+    { label: 'Swap', title: 'Swap memory — disk used as overflow when RAM is full',        value: swap, pause: s.swap_pause_pct || 50,                             resume: s.swap_resume_pct || 40 },
   ];
 
   return (
@@ -29,22 +29,25 @@ export default function ResourceGauges({ ram, vram, load, swap, settings }) {
         else if (pct >= g.resume) color = 'var(--status-warning)';
 
         return (
-          <div key={g.label} class="flex items-center gap-1" style="min-width: 80px; flex: 1;">
+          <div key={g.label} title={g.title} class="flex items-center gap-1" style="min-width: 80px; flex: 1;">
             <span class="data-mono" style="font-size: var(--type-micro); color: var(--text-tertiary); width: 32px; text-align: right;">
               {g.label}
             </span>
             <div style="flex: 1; height: 6px; background: var(--bg-inset); border-radius: 3px; position: relative; overflow: hidden;">
               {/* Pause threshold marker */}
-              <div style={{
-                position: 'absolute',
-                left: `${g.pause}%`,
-                top: 0,
-                bottom: 0,
-                width: '1px',
-                borderLeft: '1px dashed var(--text-tertiary)',
-                opacity: 0.5,
-                zIndex: 1,
-              }} />
+              <div
+                title="Pause threshold — the queue stops starting new jobs above this level"
+                style={{
+                  position: 'absolute',
+                  left: `${g.pause}%`,
+                  top: 0,
+                  bottom: 0,
+                  width: '1px',
+                  borderLeft: '1px dashed var(--text-tertiary)',
+                  opacity: 0.5,
+                  zIndex: 1,
+                }}
+              />
               <div style={{
                 width: `${pct}%`,
                 height: '100%',

@@ -41,8 +41,14 @@ export default function CurrentJob({ daemon, currentJob, latestHealth, settings 
   const isStalled = isRunning && currentJob && !!currentJob.stall_detected_at;
   const burstRegime = daemon.burst_regime || 'unknown';
 
+  const pausedReasonLabel = {
+    paused_health:      'Paused — system resources are too high to start new jobs',
+    paused_manual:      'Paused manually — resume in Settings when ready',
+    paused_interactive: 'Paused — waiting for active computer use to stop',
+  }[state] || (daemon.paused_reason || state.replace('paused_', ''));
+
   return (
-    <div class="t-frame" data-label="Current"
+    <div class="t-frame" data-label="Currently Running"
       style={isStalled ? 'border-left: 3px solid #f97316;' : ''}>
       {isRunning ? (
         <div class="flex flex-col gap-2">
@@ -60,9 +66,11 @@ export default function CurrentJob({ daemon, currentJob, latestHealth, settings 
                 </span>
               )}
               {isStalled && (
-                <span style="font-size: var(--type-label); color: #f97316; background: rgba(249,115,22,0.1);
+                <span
+                  title="This job appears to be frozen — not producing output or making progress"
+                  style="font-size: var(--type-label); color: #f97316; background: rgba(249,115,22,0.1);
                              padding: 1px 6px; border-radius: 3px; border: 1px solid #f97316;">
-                  ⚠ stalled
+                  ⚠ frozen
                 </span>
               )}
               {/* Burst regime badge — shows traffic pattern detected by burst detector.
@@ -78,7 +86,7 @@ export default function CurrentJob({ daemon, currentJob, latestHealth, settings 
               {isOverrun && (
                 <span style="font-size: var(--type-micro); color: #f97316; background: rgba(249,115,22,0.1);
                              padding: 1px 5px; border-radius: 3px; border: 1px solid rgba(249,115,22,0.3);">
-                  +{formatDuration(elapsed - estimated)} over
+                  +{formatDuration(elapsed - estimated)} over estimate
                 </span>
               )}
             </div>
@@ -109,13 +117,13 @@ export default function CurrentJob({ daemon, currentJob, latestHealth, settings 
         <div class="flex items-center gap-3">
           <StatusBadge state={state} />
           <span style="color: var(--text-secondary); font-size: var(--type-body);">
-            {daemon.paused_reason || state.replace('paused_', '')}
+            {pausedReasonLabel}
           </span>
         </div>
       ) : (
         <div class="flex items-center gap-3">
           <StatusBadge state="idle" />
-          <span style="color: var(--text-secondary); font-size: var(--type-body);">Idle</span>
+          <span style="color: var(--text-secondary); font-size: var(--type-body);">Ready — waiting for jobs to run</span>
         </div>
       )}
     </div>
@@ -133,6 +141,13 @@ const REGIME_STYLE = {
   unknown: { color: 'var(--text-tertiary)', border: 'var(--border-subtle)', bg: 'transparent' },
 };
 
+const REGIME_LABELS = {
+  burst:   'burst — high traffic',
+  trough:  'quiet — good time for batch work',
+  steady:  'steady',
+  unknown: 'unknown',
+};
+
 function BurstBadge({ regime }) {
   if (!regime || regime === 'unknown') return null;
   const style = REGIME_STYLE[regime] || REGIME_STYLE.unknown;
@@ -145,7 +160,7 @@ function BurstBadge({ regime }) {
       borderRadius: '3px',
       border: `1px solid ${style.border}`,
     }}>
-      {regime}
+      {REGIME_LABELS[regime] || regime}
     </span>
   );
 }

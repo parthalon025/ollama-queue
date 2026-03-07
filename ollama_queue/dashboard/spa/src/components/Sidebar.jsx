@@ -2,12 +2,12 @@ import { h } from 'preact';
 
 // NOTE: callback params use descriptive names (item, etc.) — never 'h' (shadows JSX factory)
 const NAV_ITEMS = [
-    { id: 'now',      icon: '●', label: 'Now' },
-    { id: 'plan',     icon: '◫', label: 'Plan' },
-    { id: 'history',  icon: '◷', label: 'History' },
-    { id: 'models',   icon: '⊞', label: 'Models' },
-    { id: 'settings', icon: '⚙', label: 'Settings' },
-    { id: 'eval',     icon: '⊡', label: 'Eval' },
+    { id: 'now',      icon: '●', label: 'Now',      tooltip: "Live view — what's running right now" },
+    { id: 'plan',     icon: '◫', label: 'Schedule', tooltip: 'Recurring jobs and upcoming run times' },
+    { id: 'history',  icon: '◷', label: 'History',  tooltip: 'Completed and failed jobs' },
+    { id: 'models',   icon: '⊞', label: 'Models',   tooltip: 'Installed AI models and downloads' },
+    { id: 'settings', icon: '⚙', label: 'Settings', tooltip: 'Configure queue thresholds and defaults' },
+    { id: 'eval',     icon: '⊡', label: 'Eval',     tooltip: 'Test and compare AI model configurations' },
 ];
 
 export default function Sidebar({ active, onNavigate, daemonState, dlqCount }) {
@@ -22,7 +22,11 @@ export default function Sidebar({ active, onNavigate, daemonState, dlqCount }) {
     const chipDot  = isRunning ? '▶' : isPaused ? '⏸' : '○';
     const chipText = isRunning
         ? (daemonState?.current_job_source || 'running')
-        : isPaused ? 'paused' : 'idle';
+        : isPaused ? (daemonState?.state === 'paused_health' ? 'paused — high resources'
+                    : daemonState?.state === 'paused_manual' ? 'paused manually'
+                    : daemonState?.state === 'paused_interactive' ? 'paused — user active'
+                    : 'paused')
+        : 'idle — ready';
 
     return (
         <aside class="layout-sidebar">
@@ -54,6 +58,7 @@ export default function Sidebar({ active, onNavigate, daemonState, dlqCount }) {
                     return (
                         <button
                             key={item.id}
+                            title={item.tooltip}
                             onClick={() => onNavigate(item.id)}
                             style={{
                                 display: 'flex',

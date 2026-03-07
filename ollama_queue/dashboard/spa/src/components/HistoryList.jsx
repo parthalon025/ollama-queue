@@ -27,16 +27,16 @@ export default function HistoryList({ jobs }) {
 
   if (allItems.length === 0) {
     return (
-      <div class="t-frame" data-label="History">
+      <div class="t-frame" data-label="Recent Jobs">
         <p style="color: var(--text-tertiary); font-size: var(--type-body); text-align: center;">
-          No completed jobs yet
+          No jobs have finished yet — submit some jobs and they'll appear here
         </p>
       </div>
     );
   }
 
   return (
-    <div class="t-frame" data-label="History">
+    <div class="t-frame" data-label="Recent Jobs">
       {tags.length > 0 && (
         <div style="display: flex; gap: 0.4rem; margin-bottom: 0.5rem; flex-wrap: wrap;">
           <span
@@ -102,9 +102,9 @@ function HistoryRow({ job }) {
         {/* Preemption badge — only shown when job.preemption_count > 0.
             Shows ↺N to indicate the job was interrupted N times by a higher-priority job. */}
         {preempted && (
-          <span class="data-mono" title={`Preempted ${job.preemption_count}×`}
+          <span class="data-mono" title={`Interrupted ${job.preemption_count} time${job.preemption_count > 1 ? 's' : ''} — a higher-priority job needed to run first`}
                 style="font-size: var(--type-micro); color: #f97316; white-space: nowrap;">
-            ↺{job.preemption_count}
+            ↺{job.preemption_count}×
           </span>
         )}
         {/* Model */}
@@ -126,7 +126,7 @@ function HistoryRow({ job }) {
         <div style="padding: 2px 0 6px 24px; display: flex; flex-direction: column; gap: 3px;">
           {hasStall && stallSignals && (
             <div class="data-mono" style="font-size: var(--type-micro); color: #f97316;">
-              stall  posterior={pct(stallSignals.posterior)}  process={fmt(stallSignals.process)}  cpu={fmt(stallSignals.cpu)}  silence={fmt(stallSignals.silence)}  ps={fmt(stallSignals.ps)}
+              frozen job — confidence: {pct(stallSignals.posterior)}  stdout-silence: {fmt(stallSignals.silence)}  cpu: {fmt(stallSignals.cpu)}  process: {fmt(stallSignals.process)}
             </div>
           )}
           {hasReason && (

@@ -31,7 +31,7 @@ export default function History() {
     useEffect(() => { fetchDLQ(); }, []);
 
     async function handleRetryAll() {
-        if (!window.confirm(`Retry all ${dlq.length} failed jobs?`)) return;
+        if (!window.confirm(`Re-queue all ${dlq.length} failed jobs so they try again?`)) return;
         await retryAllAct(
             'Retrying all…',
             async () => {
@@ -41,12 +41,12 @@ export default function History() {
                 await fetchDLQ();
                 return data;
             },
-            data => `${data.retried ?? data.count ?? 'All'} entries requeued`,
+            data => `${data.retried ?? data.count ?? 'All'} jobs re-queued`,
         );
     }
 
     async function handleClearDLQ() {
-        if (!window.confirm('Clear all DLQ entries? This cannot be undone.')) return;
+        if (!window.confirm('Permanently delete all failed jobs? This cannot be undone.')) return;
         await clearAct(
             'Clearing DLQ…',
             async () => {
@@ -54,7 +54,7 @@ export default function History() {
                 if (!res.ok) throw new Error(`Clear failed: ${res.status}`);
                 await fetchDLQ();
             },
-            'DLQ cleared',
+            'All failed jobs deleted',
         );
     }
 
@@ -75,7 +75,7 @@ export default function History() {
 
             {/* DLQ section — only shown when entries exist */}
             {dlqCnt > 0 && (
-                <div class="t-frame" data-label={`Failed Jobs (${dlqCnt})`}>
+                <div class="t-frame" data-label={`Jobs That Couldn't Complete (${dlqCnt})`}>
                     <div style={{
                         display: 'flex',
                         justifyContent: 'space-between',
@@ -89,7 +89,8 @@ export default function History() {
                             fontSize: 'var(--type-label)',
                             fontFamily: 'var(--font-mono)',
                         }}>
-                            {dlqCnt} {dlqCnt === 1 ? 'entry' : 'entries'} in dead-letter queue
+                            {dlqCnt} {dlqCnt === 1 ? 'job' : 'jobs'} failed all retry attempts and {dlqCnt === 1 ? 'needs' : 'need'} your attention
+                            <span style="display: block; font-size: var(--type-micro); color: var(--text-tertiary); font-family: var(--font-mono); margin-top: 1px;">dead-letter queue</span>
                         </span>
                         <div class="flex gap-2" style="align-items: flex-start;">
                             <div>
@@ -99,7 +100,7 @@ export default function History() {
                                     onClick={handleRetryAll}
                                     disabled={retryAllFb.phase === 'loading'}
                                 >
-                                    {retryAllFb.phase === 'loading' ? 'Retrying all…' : 'Retry all'}
+                                    {retryAllFb.phase === 'loading' ? 'Retrying all…' : 'Re-queue all failed jobs'}
                                 </button>
                                 {retryAllFb.msg && (
                                     <div class={`action-fb action-fb--${retryAllFb.phase}`}>{retryAllFb.msg}</div>
@@ -112,7 +113,7 @@ export default function History() {
                                     onClick={handleClearDLQ}
                                     disabled={clearFb.phase === 'loading'}
                                 >
-                                    {clearFb.phase === 'loading' ? 'Clearing…' : 'Clear'}
+                                    {clearFb.phase === 'loading' ? 'Clearing…' : 'Delete all'}
                                 </button>
                                 {clearFb.msg && (
                                     <div class={`action-fb action-fb--${clearFb.phase}`}>{clearFb.msg}</div>
@@ -128,7 +129,7 @@ export default function History() {
 
             {/* Duration trends + Activity heatmap — side by side on desktop */}
             <div class="history-top-grid">
-                <div class="t-frame" data-label="Duration Trends">
+                <div class="t-frame" data-label="How Long Jobs Take Over Time">
                     {durations && durations.length > 0 ? (
                         buildDurationBySources(durations).map(({ source, data }) => (
                             <div key={source} style="margin-bottom: 0.75rem;">
@@ -149,7 +150,7 @@ export default function History() {
                         ))
                     ) : (
                         <p style="color: var(--text-tertiary); font-size: var(--type-body); text-align: center;">
-                            No data yet
+                            No timing data yet — run some jobs first
                         </p>
                     )}
                 </div>
@@ -209,10 +210,10 @@ function DLQRow({ entry, onAction }) {
                         onClick={() => retryAct(
                             'Retrying…',
                             () => onAction('retry', entry.id),
-                            'Queued for retry',
+                            'Job re-queued for retry',
                         )}
                     >
-                        {retryFb.phase === 'loading' ? 'Retrying…' : 'Retry'}
+                        {retryFb.phase === 'loading' ? 'Retrying…' : 'Re-queue'}
                     </button>
                     {retryFb.msg && (
                         <div class={`action-fb action-fb--${retryFb.phase}`}>{retryFb.msg}</div>
@@ -226,10 +227,10 @@ function DLQRow({ entry, onAction }) {
                         onClick={() => dismissAct(
                             'Dismissing…',
                             () => onAction('dismiss', entry.id),
-                            'Dismissed',
+                            'Deleted from failed queue',
                         )}
                     >
-                        {dismissFb.phase === 'loading' ? 'Dismissing…' : 'Dismiss'}
+                        {dismissFb.phase === 'loading' ? 'Dismissing…' : 'Delete'}
                     </button>
                     {dismissFb.msg && (
                         <div class={`action-fb action-fb--${dismissFb.phase}`}>{dismissFb.msg}</div>

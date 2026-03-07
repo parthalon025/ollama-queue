@@ -48,9 +48,9 @@ export default function QueueList({ jobs, currentJob }) {
 
   if (allItems.length === 0 && !currentJob) {
     return (
-      <div class="t-frame" data-label="Queue">
+      <div class="t-frame" data-label="Waiting to Run">
         <p style="color: var(--text-tertiary); font-size: var(--type-body); text-align: center;">
-          Queue empty
+          Nothing in the queue — all caught up
         </p>
       </div>
     );
@@ -111,7 +111,7 @@ export default function QueueList({ jobs, currentJob }) {
   }
 
   return (
-    <div class="t-frame" data-label="Queue" data-footer={`Est. total wait: ${formatWait(totalWait)}`}>
+    <div class="t-frame" data-label="Waiting to Run" data-footer={`Estimated wait for all jobs: ${formatWait(totalWait)}`}>
       {/* Tag filter chips */}
       {tags.length > 0 && (
         <div style="display: flex; gap: 0.4rem; margin-bottom: 0.5rem; flex-wrap: wrap;">
@@ -161,7 +161,7 @@ export default function QueueList({ jobs, currentJob }) {
                 {/* Drag handle — hidden/greyed for running job */}
                 <span
                   style={`color: ${job._isRunning ? 'transparent' : 'var(--text-tertiary)'}; font-size: 12px; user-select: none; flex-shrink: 0;`}
-                  title={job._isRunning ? undefined : 'Drag to reprioritize'}
+                  title={job._isRunning ? undefined : 'Drag up or down to change when this job runs'}
                 >
                   ⠿
                 </span>
@@ -194,8 +194,9 @@ export default function QueueList({ jobs, currentJob }) {
                   {job.source || 'unknown'}
                   {job.retry_count > 0 && (
                     <span style="font-size: 10px; background: #f97316; color: #fff;
-                                 padding: 0.1rem 0.3rem; border-radius: 3px; margin-left: 4px;">
-                      retry {job.retry_count}
+                                 padding: 0.1rem 0.3rem; border-radius: 3px; margin-left: 4px;"
+                          title={`This job has been re-tried ${job.retry_count} time${job.retry_count > 1 ? 's' : ''} after failing`}>
+                      retry #{job.retry_count}
                     </span>
                   )}
                 </span>
@@ -220,7 +221,7 @@ export default function QueueList({ jobs, currentJob }) {
                 <button
                   class="t-btn"
                   style="background: none; border: none; color: var(--status-error); font-size: 14px; cursor: pointer; padding: 2px 6px; line-height: 1; flex-shrink: 0;"
-                  title="Cancel job"
+                  title="Remove this job from the queue — cannot be undone"
                   onClick={(e) => { e.stopPropagation(); cancelJob(job.id, job._isRunning); }}
                 >
                   ×
@@ -231,9 +232,9 @@ export default function QueueList({ jobs, currentJob }) {
               {expandedId === job.id && (
                 <div class="data-mono" style="font-size: var(--type-micro); color: var(--text-secondary);
                                               padding: 4px 8px 8px 32px; background: var(--bg-inset);">
-                  <div style="color: var(--text-tertiary); text-transform: uppercase; font-size: 10px; margin-bottom: 2px;">command</div>
+                  <div style="color: var(--text-tertiary); text-transform: uppercase; font-size: 10px; margin-bottom: 2px;">shell command</div>
                   <div style="color: var(--text-primary); white-space: pre-wrap; word-break: break-all;">{job.command}</div>
-                  {job.timeout && <div style="margin-top: 4px; color: var(--text-tertiary);">timeout: {job.timeout}s  •  profile: {job.resource_profile || 'ollama'}</div>}
+                  {job.timeout && <div style="margin-top: 4px; color: var(--text-tertiary);">time limit: {job.timeout}s  •  resource type: {job.resource_profile || 'ollama'}</div>}
                 </div>
               )}
             </div>

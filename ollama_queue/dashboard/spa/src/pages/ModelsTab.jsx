@@ -78,7 +78,7 @@ export default function ModelsTab() {
             }, 2000);
             pullIntervalsRef.current[pullId] = iv;
         } catch (err) {
-            setPullError(`Pull failed: ${err.message}`);
+            setPullError(`Download failed: ${err.message}`);
         }
     }
 
@@ -93,7 +93,7 @@ export default function ModelsTab() {
                 return next;
             });
         } catch (err) {
-            setPullError(`Cancel failed: ${err.message}`);
+            setPullError(`Could not cancel download: ${err.message}`);
         }
     }
 
@@ -127,7 +127,7 @@ export default function ModelsTab() {
         <div class="flex flex-col gap-4 animate-page-enter">
             <h2 style={{ margin: 0, fontFamily: 'var(--font-mono)', fontWeight: 700,
                          fontSize: 'var(--type-headline)', color: 'var(--text-primary)' }}>
-                Models
+                AI Models
             </h2>
 
             {pullError && (
@@ -141,7 +141,7 @@ export default function ModelsTab() {
             {/* Active Pulls */}
             {Object.entries(activePulls).map(([pullId, pull]) => (
                 <div key={pullId} class="t-frame" style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                    <span style={{ fontFamily: 'var(--font-mono)', flex: 1 }}>{pull.model}</span>
+                    <span style={{ fontFamily: 'var(--font-mono)', flex: 1 }}>Downloading: {pull.model}</span>
                     <div style={{ flex: 2, background: 'var(--bg-inset)',
                                   borderRadius: 'var(--radius)', height: 8, overflow: 'hidden' }}>
                         <div style={{ width: `${pull.progress || 0}%`, height: '100%',
@@ -160,7 +160,7 @@ export default function ModelsTab() {
                         <button class="t-btn t-btn-secondary"
                                 style={{ fontSize: 'var(--type-label)', padding: '0.2rem 0.6rem' }}
                                 onClick={() => handleCancel(pullId)}>
-                            Cancel
+                            Cancel Download
                         </button>
                     )}
                 </div>
@@ -171,7 +171,7 @@ export default function ModelsTab() {
                 <h3 style={{ fontFamily: 'var(--font-mono)', fontWeight: 700,
                              fontSize: 'var(--type-label)', color: 'var(--text-secondary)',
                              textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 0.5rem' }}>
-                    Installed ({models.value.length})
+                    Installed on This Machine ({models.value.length})
                 </h3>
                 <div class="t-frame" style={{ padding: 0, overflow: 'hidden' }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--type-body)' }}>
@@ -180,15 +180,15 @@ export default function ModelsTab() {
                                          background: 'var(--bg-surface-raised)' }}>
                                 <th onClick={() => handleSort('name')}
                                     style={{ cursor: 'pointer', userSelect: 'none', ...thStyle }}>
-                                    Name {sortCol === 'name' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
+                                    Model Name {sortCol === 'name' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                                 </th>
-                                <th style={thStyle}>Type</th>
+                                <th style={thStyle}>Category</th>
                                 <th onClick={() => handleSort('size_bytes')}
                                     style={{ cursor: 'pointer', userSelect: 'none', ...thStyle }}>
-                                    Size {sortCol === 'size_bytes' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
+                                    Disk Space {sortCol === 'size_bytes' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                                 </th>
-                                <th style={thStyle}>VRAM</th>
-                                <th style={thStyle}>Avg Duration</th>
+                                <th style={thStyle}>GPU Memory</th>
+                                <th style={thStyle}>Avg. Job Time</th>
                                 <th style={thStyle}>Status</th>
                             </tr>
                         </thead>
@@ -217,8 +217,8 @@ export default function ModelsTab() {
                                     <td style={{ padding: '0.5rem 0.75rem' }}>
                                         {model.loaded
                                             ? <span style={{ color: 'var(--status-healthy)', fontFamily: 'var(--font-mono)',
-                                                             fontSize: 'var(--type-label)' }}>● loaded</span>
-                                            : <span style={{ color: 'var(--text-tertiary)', fontSize: 'var(--type-label)' }}>idle</span>}
+                                                             fontSize: 'var(--type-label)' }} title="This model is currently loaded in GPU memory and ready to use">● in memory</span>
+                                            : <span style={{ color: 'var(--text-tertiary)', fontSize: 'var(--type-label)' }} title="This model is installed but not currently loaded — it will load automatically when needed">idle</span>}
                                     </td>
                                 </tr>
                             ))}
@@ -232,11 +232,11 @@ export default function ModelsTab() {
                 <h3 style={{ fontFamily: 'var(--font-mono)', fontWeight: 700,
                              fontSize: 'var(--type-label)', color: 'var(--text-secondary)',
                              textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 0.5rem' }}>
-                    Download Models
+                    Browse & Download More Models
                 </h3>
 
                 <input
-                    type="text" placeholder="Search ollama.com…"
+                    type="text" placeholder="Search by name — e.g. llama3, mistral, qwen…"
                     value={searchQuery}
                     onInput={ev => setSearchQuery(ev.target.value)}
                     style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'var(--font-mono)',
@@ -249,7 +249,7 @@ export default function ModelsTab() {
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '0.75rem' }}>
                     {allCatalogModels.map(catalogModel => {
                         const isInstalled = installedNames.has(catalogModel.name);
-                        const vramMap = { light: '< 4GB', medium: '~8GB', heavy: '16GB+' };
+                        const vramMap = { light: 'GPU memory: < 4 GB', medium: 'GPU memory: ~8 GB', heavy: 'GPU memory: 16 GB+' };
                         const vramLabel = catalogModel.resource_profile && catalogModel.resource_profile !== 'ollama'
                             ? vramMap[catalogModel.resource_profile]
                             : null;
@@ -265,7 +265,7 @@ export default function ModelsTab() {
                                         <span style={{ background: 'var(--status-healthy)', color: 'var(--accent-text)',
                                                        fontSize: 'var(--type-label)', padding: '0.1rem 0.4rem',
                                                        borderRadius: 'var(--radius)', fontFamily: 'var(--font-mono)',
-                                                       fontWeight: 700 }}>★ rec</span>
+                                                       fontWeight: 700 }}>★ Best choice</span>
                                     )}
                                 </div>
                                 <p style={{ margin: 0, fontSize: 'var(--type-label)',
@@ -286,7 +286,7 @@ export default function ModelsTab() {
                                         padding: '1px 5px',
                                         alignSelf: 'flex-start',
                                     }}>
-                                        VRAM: {vramLabel}
+                                        {vramLabel}
                                     </span>
                                 )}
                                 <button
@@ -295,7 +295,7 @@ export default function ModelsTab() {
                                              opacity: isInstalled ? 0.5 : 1 }}
                                     disabled={isInstalled}
                                     onClick={() => !isInstalled && handlePull(catalogModel.name)}>
-                                    {isInstalled ? '✓ Installed' : '↓ Download'}
+                                    {isInstalled ? '✓ Already installed' : '↓ Download'}
                                 </button>
                             </div>
                         );
@@ -304,11 +304,11 @@ export default function ModelsTab() {
 
                 {debouncedSearch && allCatalogModels.length === 0 && (
                     <div style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--text-tertiary)', fontSize: 'var(--type-body)' }}>
-                        No models match "{debouncedSearch}"
+                        No models found matching "{debouncedSearch}" — try a different name or clear the search
                         <br />
                         <button class="t-btn t-btn-secondary"
                                 style={{ marginTop: '0.5rem', padding: '4px 12px', fontSize: 'var(--type-label)' }}
-                                onClick={() => setSearchQuery('')}>Clear</button>
+                                onClick={() => setSearchQuery('')}>Clear Search</button>
                     </div>
                 )}
             </section>

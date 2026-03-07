@@ -99,7 +99,7 @@ export default function RunTriggerPanel({ defaultCollapsed }) {
         setOpen(false);
         return result;
       },
-      result => result.run_id ? `Run #${result.run_id} started` : 'Dry run complete — check console for preview'
+      result => result.run_id ? `Test run #${result.run_id} started` : 'Preview complete — no jobs were submitted'
     );
   }
 
@@ -108,7 +108,7 @@ export default function RunTriggerPanel({ defaultCollapsed }) {
   const userVariants = (variants || []).filter(v => !v.is_system);
 
   return (
-    <div class="t-frame" data-label="Start New Run">
+    <div class="t-frame" data-label="Start a New Evaluation Run">
       <div
         style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', marginBottom: open ? '1rem' : 0 }}
         onClick={() => setOpen(o => !o)}
@@ -116,7 +116,7 @@ export default function RunTriggerPanel({ defaultCollapsed }) {
         aria-expanded={open}
       >
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-body)', color: 'var(--text-primary)' }}>
-          Configure run
+          Set up and start a test run
         </span>
         <span style={{ color: 'var(--text-tertiary)', fontSize: 'var(--type-label)' }}>
           {open ? '▲' : '▼'}
@@ -130,11 +130,11 @@ export default function RunTriggerPanel({ defaultCollapsed }) {
           {readiness && readiness.phase !== 'checking' && (
             <div class={`eval-readiness eval-readiness--${readiness.phase}`}>
               {readiness.phase === 'ready' && (
-                <span>&#x2713; Ready &middot; {readiness.item_count} lessons &middot; {readiness.cluster_count} clusters</span>
+                <span>&#x2713; Ready — {readiness.item_count} lessons across {readiness.cluster_count} groups available</span>
               )}
               {readiness.phase === 'needs_prime' && (
                 <span>
-                  &#x26A0; Needs priming &middot; {readiness.item_count} lessons &middot; {readiness.cluster_count} clusters
+                  &#x26A0; Not enough data to run — {readiness.item_count} lessons / {readiness.cluster_count} groups (need 10+ lessons, 2+ groups)
                   {' '}
                   <button
                     type="button"
@@ -151,14 +151,14 @@ export default function RunTriggerPanel({ defaultCollapsed }) {
                       return `Primed \u00b7 ${result.updated} updated`;
                     })}
                   >
-                    {primeFb.phase === 'loading' ? 'Priming\u2026' : 'Prime'}
+                    {primeFb.phase === 'loading' ? 'Priming\u2026' : 'Prepare Data'}
                   </button>
                   {primeFb.msg && <span class={`action-fb action-fb--${primeFb.phase}`} style={{ marginLeft: '0.5rem' }}>{primeFb.msg}</span>}
                 </span>
               )}
               {readiness.phase === 'offline' && (
                 <span>
-                  &#x2717; Data source offline &middot; {readiness.error}
+                  &#x2717; Cannot reach the lesson data source — {readiness.error}
                   {' '}
                   <button
                     type="button"
@@ -166,7 +166,7 @@ export default function RunTriggerPanel({ defaultCollapsed }) {
                     style={{ fontSize: 'var(--type-label)', padding: '2px 8px', marginLeft: '0.5rem' }}
                     onClick={checkReadiness}
                   >
-                    Retry
+                    Try Again
                   </button>
                 </span>
               )}
@@ -178,17 +178,17 @@ export default function RunTriggerPanel({ defaultCollapsed }) {
           {/* Variant multi-select */}
           <div>
             <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.4rem' }}>
-              Configurations to test
+              Which configurations to compare
             </div>
             {variants.length === 0 ? (
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)' }}>
-                No configurations found. Go to the Configurations tab to create some.
+                No configurations yet — go to the Configurations tab to create one before running a test
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                 {systemVariants.length > 0 && (
                   <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', marginBottom: '2px' }}>
-                    — System defaults —
+                    — Built-in configurations —
                   </div>
                 )}
                 {systemVariants.map(variant => (
@@ -213,7 +213,7 @@ export default function RunTriggerPanel({ defaultCollapsed }) {
                 ))}
                 {userVariants.length > 0 && (
                   <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', marginTop: '4px', marginBottom: '2px' }}>
-                    — Custom configs —
+                    — Your custom configurations —
                   </div>
                 )}
                 {userVariants.map(variant => (
@@ -294,7 +294,7 @@ export default function RunTriggerPanel({ defaultCollapsed }) {
               onChange={e => setDryRun(e.target.checked)}
             />
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-secondary)' }}>
-              Dry run — show what would run without submitting jobs
+              Preview mode — show what would run without actually submitting any jobs
             </span>
           </label>
 
@@ -306,7 +306,7 @@ export default function RunTriggerPanel({ defaultCollapsed }) {
               style={{ fontSize: 'var(--type-label)', padding: '4px 12px' }}
               disabled={fb.phase === 'loading'}
             >
-              {fb.phase === 'loading' ? 'Starting…' : 'Start Run'}
+              {fb.phase === 'loading' ? 'Starting…' : 'Start Test Run'}
             </button>
             {fb.msg && <div class={`action-fb action-fb--${fb.phase}`}>{fb.msg}</div>}
           </div>

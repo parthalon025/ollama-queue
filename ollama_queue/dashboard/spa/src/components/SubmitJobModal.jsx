@@ -130,7 +130,7 @@ export default function SubmitJobModal({ onJobSubmitted }) {
         <div>
             {/* FAB */}
             <button
-                aria-label="Submit job"
+                aria-label="Add a new job to the queue"
                 onClick={() => setOpen(true)}
                 style={{
                     position: 'fixed',
@@ -170,13 +170,16 @@ export default function SubmitJobModal({ onJobSubmitted }) {
                     overflow: 'auto',
                 }}
             >
-                <div class="t-frame" data-label="Submit Job" style={{ margin: 0, border: 'none' }}>
+                <div class="t-frame" data-label="Add a New Job to the Queue" style={{ margin: 0, border: 'none' }}>
                     <form onSubmit={handleSubmit}>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
 
                             {/* Command */}
                             <div>
-                                <label style={labelStyle}>Command</label>
+                                <label style={labelStyle}>Shell Command to Run</label>
+                                <p style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-micro)', color: 'var(--text-tertiary)', margin: '0 0 0.25rem' }}>
+                                    The exact command the queue will execute — same as typing it in a terminal
+                                </p>
                                 <textarea
                                     rows={2}
                                     required
@@ -189,7 +192,10 @@ export default function SubmitJobModal({ onJobSubmitted }) {
 
                             {/* Source */}
                             <div>
-                                <label style={labelStyle}>Source</label>
+                                <label style={labelStyle}>Source Name</label>
+                                <p style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-micro)', color: 'var(--text-tertiary)', margin: '0 0 0.25rem' }}>
+                                    A short name for who or what is submitting this job — used for filtering and reports
+                                </p>
                                 <input
                                     type="text"
                                     required
@@ -201,7 +207,10 @@ export default function SubmitJobModal({ onJobSubmitted }) {
 
                             {/* Model */}
                             <div>
-                                <label style={labelStyle}>Model (optional)</label>
+                                <label style={labelStyle}>AI Model (optional)</label>
+                                <p style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-micro)', color: 'var(--text-tertiary)', margin: '0 0 0.25rem' }}>
+                                    Which AI model this job uses — leave blank for non-AI jobs
+                                </p>
                                 <input
                                     type="text"
                                     placeholder="qwen2.5:7b"
@@ -214,7 +223,10 @@ export default function SubmitJobModal({ onJobSubmitted }) {
                             {/* Priority + Timeout side-by-side */}
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
                                 <div>
-                                    <label style={labelStyle}>Priority</label>
+                                    <label style={labelStyle}>Priority (1–10)</label>
+                                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-micro)', color: 'var(--text-tertiary)', margin: '0 0 0.25rem' }}>
+                                        1 = run first (urgent) · 10 = run last (background)
+                                    </p>
                                     <input
                                         type="number"
                                         min={0}
@@ -225,7 +237,10 @@ export default function SubmitJobModal({ onJobSubmitted }) {
                                     />
                                 </div>
                                 <div>
-                                    <label style={labelStyle}>Timeout (sec)</label>
+                                    <label style={labelStyle}>Time Limit (seconds)</label>
+                                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-micro)', color: 'var(--text-tertiary)', margin: '0 0 0.25rem' }}>
+                                        The job will be killed if it takes longer than this
+                                    </p>
                                     <input
                                         type="number"
                                         min={1}
@@ -280,7 +295,7 @@ export default function SubmitJobModal({ onJobSubmitted }) {
                                         fontSize: 'var(--type-body)',
                                     }}
                                 >
-                                    {fb.phase === 'loading' ? 'Submitting\u2026' : 'Submit'}
+                                    {fb.phase === 'loading' ? 'Adding to queue\u2026' : 'Add to Queue'}
                                 </button>
                             </div>
                             {fb.msg && <div class={`action-fb action-fb--${fb.phase}`}>{fb.msg}</div>}
