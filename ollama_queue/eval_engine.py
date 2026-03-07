@@ -635,7 +635,7 @@ def render_report(run_id: int, metrics: dict[str, dict[str, float]], db: Databas
 # ---------------------------------------------------------------------------
 
 
-def generate_eval_analysis(
+def generate_eval_analysis(  # noqa: PLR0911 — guard-and-return pattern is intentional
     db: Database,
     run_id: int,
     http_base: str = "http://127.0.0.1:7683",
@@ -672,7 +672,7 @@ def generate_eval_analysis(
         except (ValueError, TypeError):
             _log.warning("generate_eval_analysis: could not parse metrics for run_id=%d", run_id)
     if not metrics:
-        _log.info("generate_eval_analysis: no metrics for run_id=%d — skipping", run_id)
+        _log.warning("generate_eval_analysis: run_id=%d has no metrics — skipping analysis", run_id)
         return
 
     # Resolve analysis model: dedicated setting → run's judge model → global judge default
@@ -686,21 +686,41 @@ def generate_eval_analysis(
         variant_ids: list[str] = json.loads(run.get("variants") or "[]")
         if not isinstance(variant_ids, list):
             variant_ids = [str(variant_ids)]
-    except (ValueError, TypeError):
+    except (ValueError, TypeError) as exc:
+        _log.warning(
+            "generate_eval_analysis: could not parse variants for run_id=%d (%s) — proceeding with empty list",
+            run_id,
+            exc,
+        )
         variant_ids = []
 
-    top_pairs, bottom_pairs = _fetch_analysis_samples(db, run_id)
+    try:
+        top_pairs, bottom_pairs = _fetch_analysis_samples(db, run_id)
+    except Exception:
+        _log.exception(
+            "generate_eval_analysis: failed to fetch analysis samples for run_id=%d — skipping",
+            run_id,
+        )
+        return
 
-    prompt = build_analysis_prompt(
-        run_id=run_id,
-        variants=variant_ids,
-        item_count=run.get("item_count") or 0,
-        judge_model=run.get("judge_model") or "",
-        metrics=metrics,
-        winner=run.get("winner_variant"),
-        top_pairs=top_pairs,
-        bottom_pairs=bottom_pairs,
-    )
+    try:
+        prompt = build_analysis_prompt(
+            run_id=run_id,
+            variants=variant_ids,
+            item_count=run.get("item_count") or 0,
+            judge_model=run.get("judge_model") or "",
+            metrics=metrics,
+            winner=run.get("winner_variant"),
+            top_pairs=top_pairs,
+            bottom_pairs=bottom_pairs,
+        )
+    except (KeyError, TypeError) as exc:
+        _log.error(
+            "generate_eval_analysis: failed to build prompt for run_id=%d — malformed metrics: %s",
+            run_id,
+            exc,
+        )
+        return
 
     _log.info(
         "generate_eval_analysis: calling %s for run_id=%d (%d variants, %d+%d samples)",
@@ -720,7 +740,7 @@ def generate_eval_analysis(
             num_ctx=4096,
             timeout=180,
             source=f"eval-analysis-{run_id}",
-            priority=1,  # background — don't displace user work
+            priority=9,  # background — must not displace user work (critical tier = 1-2)
         )
     except _ProxyDownError as exc:
         _log.warning("generate_eval_analysis: proxy down for run_id=%d: %s", run_id, exc)
@@ -730,7 +750,12 @@ def generate_eval_analysis(
         _log.warning("generate_eval_analysis: empty response from %s for run_id=%d", analysis_model, run_id)
         return
 
-    update_eval_run(db, run_id, analysis_md=analysis_text)
+    try:
+        update_eval_run(db, run_id, analysis_md=analysis_text)
+    except Exception:
+        _log.exception("generate_eval_analysis: failed to store analysis for run_id=%d", run_id)
+        return
+
     _log.info("generate_eval_analysis: stored %d chars for run_id=%d", len(analysis_text), run_id)
 
 

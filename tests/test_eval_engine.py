@@ -1201,6 +1201,24 @@ class TestGenerateEvalAnalysis:
         called_model = mock_proxy.call_args.kwargs["model"]
         assert called_model == "run-judge-model"
 
+    def test_falls_back_to_global_judge_model_when_run_judge_model_absent(self):
+        # Rung 3: analysis_model="" AND run.judge_model=None → global eval.judge_model
+        run = self._complete_run(judge_model=None)
+        mock_db = self._mock_db_with_run(run)
+        with (
+            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval_engine._fetch_analysis_samples", return_value=([], [])),
+            patch(
+                "ollama_queue.eval_engine._get_eval_setting",
+                side_effect=lambda db, key, default="": "global-judge" if key == "eval.judge_model" else "",
+            ),
+            patch("ollama_queue.eval_engine._call_proxy", return_value=("analysis text", None)) as mock_proxy,
+            patch("ollama_queue.eval_engine.update_eval_run"),
+        ):
+            generate_eval_analysis(mock_db, 1)
+        called_model = mock_proxy.call_args.kwargs["model"]
+        assert called_model == "global-judge"
+
     def test_not_found_run_returns_gracefully(self):
         mock_db = MagicMock()
         with patch("ollama_queue.eval_engine.get_eval_run", return_value=None):

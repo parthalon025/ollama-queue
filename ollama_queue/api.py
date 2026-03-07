@@ -1706,6 +1706,10 @@ def create_app(db: Database) -> FastAPI:
                 _ee.generate_eval_analysis(db, run_id)
             except Exception:
                 _log.exception("generate_eval_analysis failed for run_id=%d", run_id)
+                try:
+                    _ee.update_eval_run(db, run_id, analysis_md="[Analysis failed — see server logs]")
+                except Exception:
+                    _log.exception("could not record analysis failure for run_id=%d", run_id)
 
         _threading_analyze.Thread(target=_run_analysis, daemon=True).start()
         return {"ok": True, "run_id": run_id, "message": "Analysis started in background"}

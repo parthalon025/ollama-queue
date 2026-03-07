@@ -80,7 +80,7 @@ export default function RunRow({ run }) {
         setTimeout(() => fetchEvalRuns(), 8000);
         return data;
       },
-      () => 'Analysis started — refresh in a moment'
+      () => `Analysis started for run #${id} — refresh in a moment`
     );
   }
 
