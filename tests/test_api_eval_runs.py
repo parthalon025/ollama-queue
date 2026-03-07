@@ -841,3 +841,63 @@ class TestDoPromoteEvalRun:
             pytest.raises(httpx.HTTPError),
         ):
             do_promote_eval_run(db, run_id)
+
+
+# ---------------------------------------------------------------------------
+# promote_eval_run API endpoint
+# ---------------------------------------------------------------------------
+
+
+class TestPromoteEvalRunEndpoint:
+    def test_promote_returns_404_for_unknown_run(self, client):
+        resp = client.post("/api/eval/runs/9999/promote", json={})
+        assert resp.status_code == 404
+
+    def test_promote_returns_400_if_not_complete(self, client_and_db):
+        client, db = client_and_db
+        run_id = _make_run(db, status="queued")
+        resp = client.post(f"/api/eval/runs/{run_id}/promote", json={})
+        assert resp.status_code == 400
+
+    def test_promote_returns_400_if_no_winner_variant(self, client_and_db):
+        client, db = client_and_db
+        run_id = _make_run(db, status="complete")
+        resp = client.post(f"/api/eval/runs/{run_id}/promote", json={})
+        assert resp.status_code == 400
+        assert "winner_variant" in resp.json()["detail"]
+
+    def test_promote_auto_resolves_and_updates_local_db(self, client_and_db):
+        """Promote with empty body resolves winner from DB and sets is_production=1."""
+        client, db = client_and_db
+        _make_variant(db, "A")
+        run_id = create_eval_run(db, variant_id="A")
+        update_eval_run(db, run_id, status="complete", winner_variant="A")
+
+        with patch("ollama_queue.eval_engine.httpx.post") as mock_post:
+            mock_post.return_value = MagicMock(status_code=200)
+            resp = client.post(f"/api/eval/runs/{run_id}/promote", json={})
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert data["variant_id"] == "A"
+        assert data["run_id"] == run_id
+
+        # Verify local DB was updated
+        with db._lock:
+            conn = db._connect()
+            row = conn.execute("SELECT is_production FROM eval_variants WHERE id='A'").fetchone()
+        assert row["is_production"] == 1
+
+    def test_promote_returns_502_if_lessons_db_unreachable(self, client_and_db):
+        """Returns 502 when lessons-db is unreachable."""
+        import httpx
+
+        client, db = client_and_db
+        _make_variant(db, "A")
+        run_id = create_eval_run(db, variant_id="A")
+        update_eval_run(db, run_id, status="complete", winner_variant="A")
+
+        with patch("ollama_queue.eval_engine.httpx.post", side_effect=httpx.ConnectError("refused")):
+            resp = client.post(f"/api/eval/runs/{run_id}/promote", json={})
+        assert resp.status_code == 502
