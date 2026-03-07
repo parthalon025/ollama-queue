@@ -1343,6 +1343,28 @@ def create_app(db: Database) -> FastAPI:
                 "error": str(exc)[:200],
             }
 
+    @app.post("/api/eval/datasource/prime")
+    def prime_eval_datasource():
+        """Trigger cluster_seed backfill on the lessons-db data source.
+
+        What it shows: nothing — fires a POST to the configured data source's /eval/prime endpoint.
+        Decision it drives: after this runs, /eval/items returns lessons that were previously
+          invisible because they had cluster set but cluster_seed missing.
+        Calls POST {data_source_url}/eval/prime with a 15s timeout and returns the result.
+        Returns ok=False with error message if the data source is unreachable.
+        """
+        data_source_url = db.get_setting("eval.data_source_url") or "http://127.0.0.1:7685"
+        token = db.get_setting("eval.data_source_token") or ""
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        url = f"{data_source_url.rstrip('/')}/eval/prime"
+        try:
+            resp = httpx.post(url, headers=headers, timeout=15.0)
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as exc:
+            _log.warning("eval datasource prime failed: %s", exc)
+            return {"ok": False, "updated": 0, "item_count": None, "cluster_count": None, "error": str(exc)[:200]}
+
     # --- Eval: Settings ---
 
     @app.get("/api/eval/settings")

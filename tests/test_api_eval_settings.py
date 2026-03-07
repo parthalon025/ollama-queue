@@ -225,3 +225,31 @@ def test_eval_trends_returns_expected_shape_with_no_runs(client):
     assert "item_sets_differ" in data
     assert isinstance(data["variants"], dict)
     assert data["item_sets_differ"] is False
+
+
+def test_post_eval_datasource_prime_proxies_and_returns_result(client):
+    """POST /api/eval/datasource/prime proxies to data source and returns its response."""
+    mock_response = MagicMock()
+    mock_response.json.return_value = {"ok": True, "updated": 3, "item_count": 10, "cluster_count": 2}
+    mock_response.raise_for_status = MagicMock()
+
+    with patch("httpx.post", return_value=mock_response):
+        resp = client.post("/api/eval/datasource/prime")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["updated"] == 3
+    assert data["cluster_count"] == 2
+
+
+def test_post_eval_datasource_prime_returns_ok_false_when_offline(client):
+    """POST /api/eval/datasource/prime returns ok=False when data source is unreachable."""
+    with patch("httpx.post", side_effect=Exception("Connection refused")):
+        resp = client.post("/api/eval/datasource/prime")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is False
+    assert "error" in data
+    assert data["updated"] == 0
