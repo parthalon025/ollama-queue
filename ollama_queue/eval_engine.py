@@ -141,6 +141,18 @@ def update_eval_run(db: Database, run_id: int, **kwargs: Any) -> None:
         conn.commit()
 
 
+def update_eval_variant(db: Database, variant_id: str, **kwargs: Any) -> None:
+    """UPDATE eval_variants SET <kwargs> WHERE id=variant_id."""
+    if not kwargs:
+        return
+    cols = ", ".join(f"{k} = ?" for k in kwargs)
+    vals = [*list(kwargs.values()), variant_id]
+    with db._lock:
+        conn = db._connect()
+        conn.execute(f"UPDATE eval_variants SET {cols} WHERE id = ?", vals)
+        conn.commit()
+
+
 def insert_eval_result(db: Database, **kwargs: Any) -> int:
     """INSERT OR IGNORE INTO eval_results and return the new (or existing) row id.
 

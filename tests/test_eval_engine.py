@@ -22,6 +22,7 @@ from ollama_queue.eval_engine import (
     render_report,
     run_eval_generate,
     run_eval_judge,
+    update_eval_variant,
 )
 
 # ---------------------------------------------------------------------------
@@ -1223,3 +1224,34 @@ class TestGenerateEvalAnalysis:
         mock_db = MagicMock()
         with patch("ollama_queue.eval_engine.get_eval_run", return_value=None):
             generate_eval_analysis(mock_db, 999)  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# update_eval_variant
+# ---------------------------------------------------------------------------
+
+
+def test_update_eval_variant_sets_fields(tmp_path):
+    """update_eval_variant sets arbitrary columns on an eval_variants row."""
+    from ollama_queue.db import Database
+
+    db = Database(str(tmp_path / "test.db"))
+    db.initialize()
+
+    # Insert a variant row directly; use "zero-shot-causal" which initialize() seeds.
+    with db._lock:
+        conn = db._connect()
+        conn.execute(
+            "INSERT INTO eval_variants (id, label, prompt_template_id, model, created_at) "
+            "VALUES (?, ?, ?, ?, datetime('now'))",
+            ("V1", "Variant 1", "zero-shot-causal", "qwen2.5:7b"),
+        )
+        conn.commit()
+
+    update_eval_variant(db, "V1", is_recommended=1, is_production=1)
+
+    with db._lock:
+        conn = db._connect()
+        row = conn.execute("SELECT is_recommended, is_production FROM eval_variants WHERE id = 'V1'").fetchone()
+    assert row["is_recommended"] == 1
+    assert row["is_production"] == 1
