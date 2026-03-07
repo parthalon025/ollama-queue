@@ -257,7 +257,7 @@ def test_post_eval_datasource_prime_returns_ok_false_when_offline(client):
 
 def test_auto_promote_defaults_to_false(client_and_db):
     """eval.auto_promote defaults to False."""
-    client, db = client_and_db
+    client, _db = client_and_db
     resp = client.get("/api/eval/settings")
     assert resp.status_code == 200
     data = resp.json()
@@ -266,7 +266,7 @@ def test_auto_promote_defaults_to_false(client_and_db):
 
 def test_auto_promote_min_improvement_default(client_and_db):
     """eval.auto_promote_min_improvement defaults to 0.05."""
-    client, db = client_and_db
+    client, _db = client_and_db
     resp = client.get("/api/eval/settings")
     assert resp.status_code == 200
     data = resp.json()
@@ -288,7 +288,7 @@ def test_put_eval_settings_rejects_out_of_range_auto_promote_min_improvement(cli
 
 def test_can_save_auto_promote_settings(client_and_db):
     """Can save both new auto-promote settings via PUT."""
-    client, db = client_and_db
+    client, _db = client_and_db
     resp = client.put(
         "/api/eval/settings",
         json={
