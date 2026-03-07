@@ -1399,6 +1399,8 @@ def create_app(db: Database) -> FastAPI:
             "error_budget",
             "setup_complete",
             "analysis_model",
+            "auto_promote",
+            "auto_promote_min_improvement",
         }
 
         # Validation rules — validate ALL before writing any
@@ -1428,6 +1430,12 @@ def create_app(db: Database) -> FastAPI:
                     validation_errors.append("data_source_url must start with http:// or https://")
             elif bare_key == "stability_window" and not (isinstance(value, int) and (1 <= value <= 20)):
                 validation_errors.append(f"stability_window must be an integer 1-20, got {value!r}")
+            elif bare_key == "auto_promote" and not isinstance(value, bool):
+                validation_errors.append(f"auto_promote must be a boolean, got {value!r}")
+            elif bare_key == "auto_promote_min_improvement" and (
+                not isinstance(value, int | float) or not (0.0 <= float(value) <= 1.0)
+            ):
+                validation_errors.append(f"auto_promote_min_improvement must be 0.0-1.0, got {value!r}")
 
         if validation_errors:
             raise HTTPException(status_code=422, detail=validation_errors)
