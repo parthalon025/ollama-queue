@@ -40,8 +40,8 @@ def test_get_eval_settings_returns_all_eval_keys(client):
     assert all(k.startswith("eval.") for k in data)
 
 
-def test_get_eval_settings_count_is_12(client):
-    """GET /api/eval/settings should return exactly 12 keys."""
+def test_get_eval_settings_count_matches_defaults(client):
+    """GET /api/eval/settings should return exactly as many keys as EVAL_SETTINGS_DEFAULTS."""
     resp = client.get("/api/eval/settings")
     assert len(resp.json()) == len(EVAL_SETTINGS_DEFAULTS)
 
@@ -271,6 +271,19 @@ def test_auto_promote_min_improvement_default(client_and_db):
     assert resp.status_code == 200
     data = resp.json()
     assert data["eval.auto_promote_min_improvement"] == pytest.approx(0.05)
+
+
+def test_put_eval_settings_rejects_non_bool_auto_promote(client):
+    """auto_promote must be a boolean — string 'yes' is rejected."""
+    resp = client.put("/api/eval/settings", json={"eval.auto_promote": "yes"})
+    assert resp.status_code == 422
+
+
+def test_put_eval_settings_rejects_out_of_range_auto_promote_min_improvement(client):
+    """auto_promote_min_improvement must be 0.0-1.0 -- 1.5 and -0.1 are rejected."""
+    for bad_val in [1.5, -0.1]:
+        resp = client.put("/api/eval/settings", json={"eval.auto_promote_min_improvement": bad_val})
+        assert resp.status_code == 422, f"Expected 422 for value {bad_val}, got {resp.status_code}"
 
 
 def test_can_save_auto_promote_settings(client_and_db):
