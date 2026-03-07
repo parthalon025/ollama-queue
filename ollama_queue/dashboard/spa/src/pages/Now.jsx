@@ -62,9 +62,9 @@ export default function Now() {
             {/* Disconnected banner */}
             {connectionStatus.value === 'disconnected' && (
                 <div style={{
-                    background: '#1c1917', color: '#f97316',
+                    background: 'var(--bg-surface)', color: 'var(--status-warning)',
                     padding: '0.5rem 1rem', borderRadius: 4,
-                    border: '1px solid rgba(249,115,22,0.4)',
+                    border: '1px solid var(--status-warning-subtle)',
                 }}>
                     ⚠ Lost connection to the queue server — trying to reconnect...
                 </div>

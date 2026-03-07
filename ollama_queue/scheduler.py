@@ -163,6 +163,10 @@ class Scheduler:
         """
         if now is None:
             now = time.time()
+        # NOTE: list_recurring_jobs() and the subsequent _set_recurring_next_run() calls each
+        # acquire db._lock independently — there is a narrow TOCTOU window where a concurrent
+        # add/delete could produce a stale rj_id reference. Rebalance is rare (called on startup
+        # and via API) so this race is accepted; add a db-level batch API if it becomes a problem.
         rjs = [r for r in self.db.list_recurring_jobs() if r["enabled"]]
         if not rjs:
             return []

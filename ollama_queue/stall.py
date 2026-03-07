@@ -16,6 +16,7 @@ import json as _json
 import logging
 import math
 import os
+import threading
 import urllib.request
 
 _log = logging.getLogger(__name__)
@@ -38,15 +39,19 @@ class StallDetector:
         self._last_stdout: dict[int, float] = {}
         # job_id → (sample_timestamp, cpu_ticks) for delta computation
         self._cpu_prev: dict[int, tuple[float, int]] = {}
+        # Protects _last_stdout: written by worker threads, read by poll thread
+        self._stdout_lock = threading.Lock()
 
     # ── stdout activity tracking ──────────────────────────────────────────────
 
     def update_stdout_activity(self, job_id: int, now: float) -> None:
-        self._last_stdout[job_id] = now
+        with self._stdout_lock:
+            self._last_stdout[job_id] = now
 
     def get_stdout_silence(self, job_id: int, now: float) -> float | None:
         """Seconds since last stdout output. None if never produced output."""
-        last = self._last_stdout.get(job_id)
+        with self._stdout_lock:
+            last = self._last_stdout.get(job_id)
         return None if last is None else now - last
 
     # ── process state ─────────────────────────────────────────────────────────
@@ -187,5 +192,6 @@ class StallDetector:
 
     def forget(self, job_id: int) -> None:
         """Remove all tracking state for a completed or cancelled job."""
-        self._last_stdout.pop(job_id, None)
+        with self._stdout_lock:
+            self._last_stdout.pop(job_id, None)
         self._cpu_prev.pop(job_id, None)

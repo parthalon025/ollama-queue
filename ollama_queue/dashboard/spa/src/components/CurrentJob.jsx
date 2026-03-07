@@ -49,7 +49,7 @@ export default function CurrentJob({ daemon, currentJob, latestHealth, settings 
 
   return (
     <div class="t-frame" data-label="Currently Running"
-      style={isStalled ? 'border-left: 3px solid #f97316;' : ''}>
+      style={isStalled ? 'border-left: 3px solid var(--status-warning);' : ''}>
       {isRunning ? (
         <div class="flex flex-col gap-2">
           <div class="flex items-center justify-between flex-wrap gap-2">
@@ -68,8 +68,8 @@ export default function CurrentJob({ daemon, currentJob, latestHealth, settings 
               {isStalled && (
                 <span
                   title="This job appears to be frozen — not producing output or making progress"
-                  style="font-size: var(--type-label); color: #f97316; background: rgba(249,115,22,0.1);
-                             padding: 1px 6px; border-radius: 3px; border: 1px solid #f97316;">
+                  style="font-size: var(--type-label); color: var(--status-warning); background: var(--status-warning-subtle);
+                             padding: 1px 6px; border-radius: 3px; border: 1px solid var(--status-warning);">
                   ⚠ frozen
                 </span>
               )}
@@ -84,8 +84,8 @@ export default function CurrentJob({ daemon, currentJob, latestHealth, settings 
                 {estimated ? ` / ~${formatDuration(estimated)}` : ''}
               </span>
               {isOverrun && (
-                <span style="font-size: var(--type-micro); color: #f97316; background: rgba(249,115,22,0.1);
-                             padding: 1px 5px; border-radius: 3px; border: 1px solid rgba(249,115,22,0.3);">
+                <span style="font-size: var(--type-micro); color: var(--status-warning); background: var(--status-warning-subtle);
+                             padding: 1px 5px; border-radius: 3px; border: 1px solid var(--border-warning);">
                   +{formatDuration(elapsed - estimated)} over estimate
                 </span>
               )}

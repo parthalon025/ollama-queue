@@ -20,7 +20,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0.0", "pytest-xdist>=3.5.0"]
+dev = ["pytest>=8.0.0", "pytest-xdist>=3.5.0", "httpx>=0.27.0"]
 
 [project.scripts]
 ollama-queue = "ollama_queue.cli:main"

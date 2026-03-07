@@ -32,6 +32,13 @@ export default [
     },
   },
   {
+    // Jest test files: expose describe/it/expect/beforeEach etc. as globals
+    files: ["src/**/*.test.{js,jsx}", "src/**/*.spec.{js,jsx}"],
+    languageOptions: {
+      globals: { ...globals.jest },
+    },
+  },
+  {
     files: ["esbuild.config.mjs", "scripts/**/*.js"],
     languageOptions: {
       globals: { ...globals.node },

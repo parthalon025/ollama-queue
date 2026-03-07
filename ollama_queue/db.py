@@ -1077,8 +1077,8 @@ class Database:
             conn.commit()
 
     def delete_recurring_job(self, name: str) -> bool:
-        conn = self._connect()
         with self._lock:
+            conn = self._connect()
             rj = conn.execute("SELECT id FROM recurring_jobs WHERE name = ?", (name,)).fetchone()
             if rj is None:
                 return False
@@ -1116,8 +1116,8 @@ class Database:
         updates = {k: v for k, v in fields.items() if k in allowed}
         if not updates:
             return False
-        conn = self._connect()
         with self._lock:
+            conn = self._connect()
             set_clause = ", ".join(f"{k} = ?" for k in updates)
             values = [*list(updates.values()), rj_id]
             cur = conn.execute(
@@ -1129,8 +1129,8 @@ class Database:
 
     def delete_recurring_job_by_id(self, rj_id: int) -> bool:
         """Delete a recurring job by ID with full cascade cleanup."""
-        conn = self._connect()
         with self._lock:
+            conn = self._connect()
             conn.execute(
                 "UPDATE jobs SET recurring_job_id = NULL WHERE recurring_job_id = ?",
                 (rj_id,),
@@ -1252,7 +1252,10 @@ class Database:
                     time.time(),
                 ),
             )
-            conn.execute("UPDATE jobs SET status = 'dead' WHERE id = ?", (job_id,))
+            conn.execute(
+                "UPDATE jobs SET status = 'dead', completed_at = ? WHERE id = ?",
+                (time.time(), job_id),
+            )
             conn.commit()
             return cur.lastrowid
 

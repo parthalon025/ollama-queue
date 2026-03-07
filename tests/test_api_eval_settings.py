@@ -95,9 +95,15 @@ def test_put_eval_settings_rejects_invalid_data_source_url(client):
     assert resp.status_code == 422
 
 
-def test_put_eval_settings_accepts_valid_https_url(client):
-    """PUT with an https:// data_source_url should succeed."""
+def test_put_eval_settings_rejects_non_localhost_url(client):
+    """PUT with a non-localhost data_source_url should return 422 (SSRF protection)."""
     resp = client.put("/api/eval/settings", json={"eval.data_source_url": "https://example.com"})
+    assert resp.status_code == 422
+
+
+def test_put_eval_settings_accepts_localhost_url(client):
+    """PUT with a localhost data_source_url should succeed."""
+    resp = client.put("/api/eval/settings", json={"eval.data_source_url": "http://127.0.0.1:7685"})
     assert resp.status_code == 200
 
 
@@ -243,16 +249,12 @@ def test_post_eval_datasource_prime_proxies_and_returns_result(client):
     assert data["cluster_count"] == 2
 
 
-def test_post_eval_datasource_prime_returns_ok_false_when_offline(client):
-    """POST /api/eval/datasource/prime returns ok=False when data source is unreachable."""
+def test_post_eval_datasource_prime_returns_502_when_offline(client):
+    """POST /api/eval/datasource/prime returns 502 when data source is unreachable."""
     with patch("httpx.post", side_effect=Exception("Connection refused")):
         resp = client.post("/api/eval/datasource/prime")
 
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["ok"] is False
-    assert "error" in data
-    assert data["updated"] == 0
+    assert resp.status_code == 502
 
 
 def test_auto_promote_defaults_to_false(client_and_db):

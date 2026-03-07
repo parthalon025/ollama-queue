@@ -149,9 +149,6 @@ def _call_generate_description(rj_id: int, name: str, tag: str | None, command: 
     job does and why it runs regularly, then saves the result to the database.
     Decision it drives: Shows job owners what each scheduled task is actually for in plain terms.
     """
-    import json as _json
-    import urllib.request
-
     prompt = (
         f"{_JOB_DESCRIPTION_CONTEXT}\n\n"
         f"Job name: {name}\n"
@@ -161,27 +158,25 @@ def _call_generate_description(rj_id: int, name: str, tag: str | None, command: 
         "Write for the technical owner who built this system — be specific about what data or "
         "action is involved, not generic. Do not start with 'This job'."
     )
-    payload = _json.dumps(
-        {
-            "model": "qwen3:8b",
-            "prompt": prompt,
-            "temperature": 0.2,
-            "stream": False,
-            "think": False,
-        }
-    ).encode()
+    payload = {
+        "model": "qwen3:8b",
+        "prompt": prompt,
+        "temperature": 0.2,
+        "stream": False,
+        "think": False,
+        "_source": "description-gen",
+        "_timeout": 120,
+    }
     try:
-        req = urllib.request.Request(
-            "http://localhost:11434/api/generate",
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=120) as resp:  # noqa: S310
-            data = _json.loads(resp.read())
-            description = data.get("response", "").strip()
-            if description:
-                db_ref.update_recurring_job(rj_id, description=description)
+        # Route through queue proxy (port 7683) to respect Ollama concurrency limits
+        with httpx.Client(timeout=150.0) as client:
+            resp = client.post("http://127.0.0.1:7683/api/generate", json=payload)
+        resp.raise_for_status()
+        description = (resp.json().get("response") or "").strip()
+        if description:
+            db_ref.update_recurring_job(rj_id, description=description)
+        else:
+            _log.warning("generate-description: empty response from model for job %d", rj_id)
     except Exception:
         _log.exception("generate-description failed for recurring job %s", rj_id)
 
@@ -297,35 +292,37 @@ def create_app(db: Database) -> FastAPI:
 
     @app.get("/api/durations")
     def get_durations(days: int = 7, source: str | None = None):
-        conn = db._connect()
         cutoff = time.time() - (days * 86400)
-        if source:
-            rows = conn.execute(
-                "SELECT * FROM duration_history WHERE recorded_at >= ? AND source = ? ORDER BY recorded_at DESC",
-                (cutoff, source),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT * FROM duration_history WHERE recorded_at >= ? ORDER BY recorded_at DESC",
-                (cutoff,),
-            ).fetchall()
+        with db._lock:
+            conn = db._connect()
+            if source:
+                rows = conn.execute(
+                    "SELECT * FROM duration_history WHERE recorded_at >= ? AND source = ? ORDER BY recorded_at DESC",
+                    (cutoff, source),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM duration_history WHERE recorded_at >= ? ORDER BY recorded_at DESC",
+                    (cutoff,),
+                ).fetchall()
         return [dict(r) for r in rows]
 
     # --- Heatmap ---
 
     @app.get("/api/heatmap")
     def get_heatmap(days: int = 7):
-        conn = db._connect()
         cutoff = time.time() - (days * 86400)
-        rows = conn.execute(
-            """SELECT strftime('%w', datetime(started_at, 'unixepoch', 'localtime')) as dow,
-                      strftime('%H', datetime(started_at, 'unixepoch', 'localtime')) as hour,
-                      SUM(completed_at - started_at) / 60.0 as gpu_minutes
-               FROM jobs
-               WHERE status='completed' AND started_at > ?
-               GROUP BY dow, hour""",
-            (cutoff,),
-        ).fetchall()
+        with db._lock:
+            conn = db._connect()
+            rows = conn.execute(
+                """SELECT strftime('%w', datetime(started_at, 'unixepoch', 'localtime')) as dow,
+                          strftime('%H', datetime(started_at, 'unixepoch', 'localtime')) as hour,
+                          SUM(completed_at - started_at) / 60.0 as gpu_minutes
+                   FROM jobs
+                   WHERE status='completed' AND started_at > ?
+                   GROUP BY dow, hour""",
+                (cutoff,),
+            ).fetchall()
         return [dict(r) for r in rows]
 
     # --- Settings ---
@@ -670,16 +667,17 @@ def create_app(db: Database) -> FastAPI:
 
     @app.get("/api/schedule/{rj_id}/runs")
     def get_schedule_runs(rj_id: int, limit: int = 5):
-        conn = db._connect()
-        rows = conn.execute(
-            """SELECT id, status, started_at, completed_at,
-                      CASE WHEN started_at IS NOT NULL AND completed_at IS NOT NULL
-                           THEN completed_at - started_at ELSE NULL END as duration,
-                      exit_code
-               FROM jobs WHERE recurring_job_id = ?
-               ORDER BY id DESC LIMIT ?""",
-            (rj_id, limit),
-        ).fetchall()
+        with db._lock:
+            conn = db._connect()
+            rows = conn.execute(
+                """SELECT id, status, started_at, completed_at,
+                          CASE WHEN started_at IS NOT NULL AND completed_at IS NOT NULL
+                               THEN completed_at - started_at ELSE NULL END as duration,
+                          exit_code
+                   FROM jobs WHERE recurring_job_id = ?
+                   ORDER BY id DESC LIMIT ?""",
+                (rj_id, limit),
+            ).fetchall()
         return [dict(r) for r in rows]
 
     @app.delete("/api/schedule/{rj_id}")
@@ -1217,6 +1215,12 @@ def create_app(db: Database) -> FastAPI:
                 """SELECT id, started_at, metrics, item_ids, item_count
                    FROM eval_runs WHERE status = 'complete' ORDER BY id ASC"""
             ).fetchall()
+            # Fetch agreement counts inside the same lock to avoid racing with
+            # background eval threads that hold db._lock while inserting results.
+            _agreed_expr = "SUM(CASE WHEN COALESCE(override_score_transfer, score_transfer) > 1 THEN 1 ELSE 0 END)"
+            agreement_rows = conn.execute(
+                f"SELECT variant, COUNT(*) as total, {_agreed_expr} as agreed" " FROM eval_results GROUP BY variant"
+            ).fetchall()
 
         # Build per-variant run list
         variant_runs: dict[str, list[dict]] = {}
@@ -1247,11 +1251,7 @@ def create_app(db: Database) -> FastAPI:
                 )
 
         # Judge agreement: fraction of eval_results where score_transfer > 1
-        agreement_rows = conn.execute(
-            """SELECT variant, COUNT(*) as total,
-                      SUM(CASE WHEN COALESCE(override_score_transfer, score_transfer) > 1 THEN 1 ELSE 0 END) as agreed
-               FROM eval_results GROUP BY variant"""
-        ).fetchall()
+        # (query already executed inside db._lock above to avoid data race)
         agreement_by_variant: dict[str, float] = {}
         for ar in agreement_rows:
             total = ar["total"] or 0
@@ -1361,9 +1361,15 @@ def create_app(db: Database) -> FastAPI:
             resp = httpx.post(url, headers=headers, timeout=15.0)
             resp.raise_for_status()
             return resp.json()
+        except httpx.HTTPStatusError as exc:
+            _log.warning("eval datasource prime: upstream returned %d", exc.response.status_code)
+            raise HTTPException(
+                status_code=502,
+                detail=f"Data source returned {exc.response.status_code}",
+            )
         except Exception as exc:
             _log.warning("eval datasource prime failed: %s", exc)
-            return {"ok": False, "updated": 0, "item_count": None, "cluster_count": None, "error": str(exc)[:200]}
+            raise HTTPException(status_code=502, detail=f"Data source unreachable: {str(exc)[:200]}")
 
     # --- Eval: Settings ---
 
@@ -1375,7 +1381,11 @@ def create_app(db: Database) -> FastAPI:
         Decision it drives: Lets the user review and adjust settings before running an eval.
         """
         all_settings = db.get_all_settings()
-        return {k: v for k, v in all_settings.items() if k.startswith("eval.")}
+        result = {k: v for k, v in all_settings.items() if k.startswith("eval.")}
+        # Mask token — bearer credential must not be readable via API
+        if result.get("eval.data_source_token"):
+            result["eval.data_source_token"] = "***"  # noqa: S105
+        return result
 
     @app.put("/api/eval/settings")
     def put_eval_settings(body: dict = Body(...)):
@@ -1428,6 +1438,11 @@ def create_app(db: Database) -> FastAPI:
             elif bare_key == "data_source_url":
                 if not isinstance(value, str) or not (value.startswith("http://") or value.startswith("https://")):
                     validation_errors.append("data_source_url must start with http:// or https://")
+                elif not any(
+                    value.startswith(f"http://{h}") or value.startswith(f"https://{h}")
+                    for h in ("127.0.0.1", "localhost")
+                ):
+                    validation_errors.append("data_source_url must target 127.0.0.1 or localhost only")
             elif bare_key == "stability_window" and not (isinstance(value, int) and (1 <= value <= 20)):
                 validation_errors.append(f"stability_window must be an integer 1-20, got {value!r}")
             elif bare_key == "auto_promote" and not isinstance(value, bool):
@@ -1885,7 +1900,7 @@ def create_app(db: Database) -> FastAPI:
                    (data_source_url, variants, per_cluster, status, run_mode,
                     item_ids, seed, judge_model, judge_backend, error_budget,
                     started_at)
-                   VALUES (?, ?, ?, 'pending', ?,
+                   VALUES (?, ?, ?, 'queued', ?,
                            ?, ?, ?, ?, ?,
                            ?)""",
                 (
@@ -2022,8 +2037,25 @@ def create_app(db: Database) -> FastAPI:
                 from ollama_queue import eval_engine as _ee_jr
 
                 _ee_jr.run_eval_judge(_captured_judge_id, db)
-            except Exception:
+            except Exception as _exc:
                 _log.exception("run_eval_judge failed for judge-rerun run_id=%d", _captured_judge_id)
+                try:
+                    import datetime as _dt_jr
+
+                    from ollama_queue import eval_engine as _ee_jr2
+
+                    _ee_jr2.update_eval_run(
+                        db,
+                        _captured_judge_id,
+                        status="failed",
+                        error=str(_exc)[:200],
+                        completed_at=_dt_jr.datetime.now(_dt_jr.UTC).isoformat(),
+                    )
+                except Exception:
+                    _log.exception(
+                        "run_eval_judge: also failed to mark run_id=%d as failed",
+                        _captured_judge_id,
+                    )
 
         _threading_jr.Thread(target=_run_judge_in_background, daemon=True).start()
 

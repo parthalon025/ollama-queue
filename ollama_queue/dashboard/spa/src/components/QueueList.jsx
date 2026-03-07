@@ -28,9 +28,10 @@ function priorityColor(p) {
   return PRIORITY_COLORS.background;
 }
 
-function cancelJob(id, isRunning) {
+async function cancelJob(id, isRunning) {
   if (isRunning && !confirm('Cancel this running job? The process will be killed.')) return;
-  fetch(`${API}/queue/cancel/${id}`, { method: 'POST' }).catch(console.error);
+  const res = await fetch(`${API}/queue/cancel/${id}`, { method: 'POST' }).catch(console.error);
+  if (res && !res.ok) console.error(`Cancel failed: HTTP ${res.status}`);
 }
 
 export default function QueueList({ jobs, currentJob }) {
@@ -102,6 +103,8 @@ export default function QueueList({ jobs, currentJob }) {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ priority: i + 1 }),
+        }).then((res) => {
+          if (!res.ok) console.error(`Priority update failed for job ${job.id}: HTTP ${res.status}`);
         }).catch(console.error);
       }
     });
@@ -193,7 +196,7 @@ export default function QueueList({ jobs, currentJob }) {
                 >
                   {job.source || 'unknown'}
                   {job.retry_count > 0 && (
-                    <span style="font-size: 10px; background: #f97316; color: #fff;
+                    <span style="font-size: 10px; background: var(--status-warning); color: #fff;
                                  padding: 0.1rem 0.3rem; border-radius: 3px; margin-left: 4px;"
                           title={`This job has been re-tried ${job.retry_count} time${job.retry_count > 1 ? 's' : ''} after failing`}>
                       retry #{job.retry_count}

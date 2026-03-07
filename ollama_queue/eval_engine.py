@@ -191,11 +191,13 @@ def do_promote_eval_run(db: Database, run_id: int) -> dict:
             response=resp,
         )
 
-    # Update local eval_variants: winner becomes production + recommended
-    update_eval_variant(db, winner_variant, is_recommended=1, is_production=1)
-    # Clear production + recommended from all other variants
+    # Update local eval_variants atomically: set winner and clear all others in one lock
     with db._lock:
         conn = db._connect()
+        conn.execute(
+            "UPDATE eval_variants SET is_recommended = 1, is_production = 1 WHERE id = ?",
+            (winner_variant,),
+        )
         conn.execute(
             "UPDATE eval_variants SET is_recommended = 0, is_production = 0 WHERE id != ?",
             (winner_variant,),
@@ -289,7 +291,11 @@ def _check_auto_promote_inner(db: Database, run_id: int) -> None:  # noqa: PLR09
                 m = json.loads(prod_run_row["metrics"]) if isinstance(prod_run_row["metrics"], str) else {}
                 production_f1 = (m.get(prod_id) or {}).get("f1")
             except (json.JSONDecodeError, TypeError):
-                pass
+                _log.warning(
+                    "check_auto_promote: production metrics unparseable for variant %s — gate 2 skipped as unsafe",
+                    prod_id,
+                )
+                return
 
         if production_f1 is not None and winner_f1 <= production_f1 + min_improvement:
             _log.info(
@@ -1048,8 +1054,12 @@ def _call_proxy(
             # The proxy itself is down — the service is likely restarting.
             # Raise _ProxyDownError so loops can abort cleanly without tripping the circuit breaker.
             raise _ProxyDownError(str(exc)) from exc
+        except httpx.TimeoutException:
+            _log.warning("proxy timeout for model=%s (attempt %d/%d)", model, attempt + 1, _MAX_RETRIES + 1)
+            last_exc = Exception(f"timeout model={model}")
+            return None, None
         except Exception as exc:
-            _log.warning("proxy error: %s", exc)
+            _log.exception("proxy unexpected error for model=%s: %s", model, exc)
             last_exc = exc
             return None, None
 
@@ -1234,7 +1244,7 @@ def _ensure_seed(db: Database, run_id: int, run: dict) -> None:
         _log.info("_ensure_seed: generated seed=%d for run_id=%d", generated_seed, run_id)
 
 
-def run_eval_generate(
+def run_eval_generate(  # noqa: PLR0911
     run_id: int,
     db: Database,
     http_base: str = "http://127.0.0.1:7683",
@@ -1374,6 +1384,14 @@ def run_eval_generate(
                     _OPPORTUNISTIC_THROTTLE_SLEEP_S,
                 )
                 _sleep_fn(_OPPORTUNISTIC_THROTTLE_SLEEP_S)
+                # Re-check after sleep: run may have been cancelled while waiting
+                _current = get_eval_run(db, run_id)
+                if _current is None or _current.get("status") in ("failed", "cancelled"):
+                    _log.info(
+                        "run_eval_generate: run_id=%d cancelled during throttle sleep — aborting",
+                        run_id,
+                    )
+                    return
 
             try:
                 ok = _generate_one(
@@ -1402,6 +1420,15 @@ def run_eval_generate(
             if not ok:
                 failed += 1
 
+    # Guard: if run was cancelled (e.g. during the last throttle sleep), don't overwrite status
+    _final = get_eval_run(db, run_id)
+    if _final is not None and _final.get("status") in ("failed", "cancelled"):
+        _log.info(
+            "run_eval_generate: run_id=%d status=%s at end — skipping judging transition",
+            run_id,
+            _final.get("status"),
+        )
+        return
     update_eval_run(db, run_id, status="judging", stage="judging", runs_completed=submitted)
 
 

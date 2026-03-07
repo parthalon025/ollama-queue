@@ -3,10 +3,15 @@ Description=Ollama Job Queue Daemon
 After=ollama.service
 
 [Service]
-ExecStart=/bin/bash -c '. ~/.env && exec /home/justin/Documents/projects/ollama-queue/.venv/bin/ollama-queue serve --port 7683'
+ExecStart=/bin/bash -c '. ~/.env && exec %h/Documents/projects/ollama-queue/.venv/bin/ollama-queue serve --port 7683'
 Restart=always
 RestartSec=5
 MemoryMax=512M
+NoNewPrivileges=true
+PrivateTmp=true
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ollama-queue
 
 [Install]
 WantedBy=default.target

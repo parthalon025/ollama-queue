@@ -10,6 +10,7 @@ No external packages required (no 'tick', no scipy).
 from __future__ import annotations
 
 import logging
+import threading
 from collections import deque
 
 _log = logging.getLogger(__name__)
@@ -55,22 +56,24 @@ class BurstDetector:
         self._ewma: float | None = None
         self._baseline_samples: deque[float] = deque(maxlen=baseline_window)
         self._last_ts: float | None = None
+        self._lock = threading.Lock()
 
     def record_submission(self, ts: float) -> None:
         """Record a job submission timestamp. Call on every /api/submit."""
-        if self._last_ts is not None:
-            interval = ts - self._last_ts
-            if interval > 0:
-                self._baseline_samples.append(interval)
-                if self._ewma is None:
-                    self._ewma = interval
+        with self._lock:
+            if self._last_ts is not None:
+                interval = ts - self._last_ts
+                if interval > 0:
+                    self._baseline_samples.append(interval)
+                    if self._ewma is None:
+                        self._ewma = interval
+                    else:
+                        self._ewma = self._alpha * interval + (1 - self._alpha) * self._ewma
                 else:
-                    self._ewma = self._alpha * interval + (1 - self._alpha) * self._ewma
-            else:
-                _log.debug(
-                    "BurstDetector: discarding non-positive interval %.6f (clock skew or duplicate ts)", interval
-                )
-        self._last_ts = ts
+                    _log.debug(
+                        "BurstDetector: discarding non-positive interval %.6f (clock skew or duplicate ts)", interval
+                    )
+            self._last_ts = ts
 
     def regime(self, now: float) -> str:
         """Return current burst regime classification.
@@ -84,25 +87,26 @@ class BurstDetector:
 
         Requires at least 10 inter-arrival samples for a reliable baseline.
         """
-        if len(self._baseline_samples) < 10 or self._ewma is None:
-            return "unknown"
+        with self._lock:
+            if len(self._baseline_samples) < 10 or self._ewma is None:
+                return "unknown"
 
-        # 75th percentile baseline: robust against burst contamination.
-        # Nearest-rank p75 (0-indexed): ceil(0.75 * N) - 1, computed via
-        # ceiling-division trick to avoid importing math.
-        sorted_samples = sorted(self._baseline_samples)
-        n = len(sorted_samples)
-        p75_idx = min(-(-n * 3 // 4) - 1, n - 1)
-        baseline = sorted_samples[p75_idx]
+            # 75th percentile baseline: robust against burst contamination.
+            # Nearest-rank p75 (0-indexed): ceil(0.75 * N) - 1, computed via
+            # ceiling-division trick to avoid importing math.
+            sorted_samples = sorted(self._baseline_samples)
+            n = len(sorted_samples)
+            p75_idx = min(-(-n * 3 // 4) - 1, n - 1)
+            baseline = sorted_samples[p75_idx]
 
-        if baseline <= 0:
-            return "unknown"
+            if baseline <= 0:
+                return "unknown"
 
-        ratio = self._ewma / baseline
-        for name, low, high in _REGIMES:
-            if low <= ratio < high:
-                return name
-        return "subcritical"
+            ratio = self._ewma / baseline
+            for name, low, high in _REGIMES:
+                if low <= ratio < high:
+                    return name
+            return "subcritical"
 
 
 # Module-level singleton shared between daemon and API.
