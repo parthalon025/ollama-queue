@@ -49,7 +49,7 @@ export default function ActiveRunProgress() {
   const etaLabel = formatEta(eta_s);
 
   async function handleCancel() {
-    if (!confirm('Cancel this eval run? In-progress jobs will still complete.')) return;
+    if (!confirm('Stop this test run? Any jobs already submitted will still finish, but no new ones will start.')) return;
     await cancelAct('Cancelling…', () => cancelEvalRun(run_id), `Run #${run_id} cancelled`);
   }
 
@@ -73,19 +73,19 @@ export default function ActiveRunProgress() {
         if (!res.ok) throw new Error(`Retry failed: ${res.status}`);
         startEvalPoll(run_id);
       },
-      'Retry queued'
+      'Failed jobs re-queued'
     );
   }
 
   const variantEntries = Object.entries(per_variant);
 
   return (
-    <div class="t-frame eval-active-run-frame" data-label="Live Run Progress">
+    <div class="t-frame eval-active-run-frame" data-label="Test Run in Progress">
 
       {/* Circuit breaker banner */}
       {isPaused && (
         <div class="eval-circuit-breaker-banner">
-          <span>Too many failures — run paused</span>
+          <span>Too many errors — the run stopped automatically to prevent wasted work</span>
           <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.4rem', flexWrap: 'wrap' }}>
             <div>
               <button
@@ -94,7 +94,7 @@ export default function ActiveRunProgress() {
                 disabled={resumeFb.phase === 'loading'}
                 onClick={handleResume}
               >
-                {resumeFb.phase === 'loading' ? 'Resuming…' : 'Resume anyway'}
+                {resumeFb.phase === 'loading' ? 'Resuming…' : 'Continue despite errors'}
               </button>
               {resumeFb.msg && <div class={`action-fb action-fb--${resumeFb.phase}`}>{resumeFb.msg}</div>}
             </div>
@@ -105,7 +105,7 @@ export default function ActiveRunProgress() {
                 disabled={retryFb.phase === 'loading'}
                 onClick={handleRetryFailed}
               >
-                {retryFb.phase === 'loading' ? 'Retrying…' : 'Retry failed'}
+                {retryFb.phase === 'loading' ? 'Retrying…' : 'Re-run failed jobs'}
               </button>
               {retryFb.msg && <div class={`action-fb action-fb--${retryFb.phase}`}>{retryFb.msg}</div>}
             </div>
@@ -158,7 +158,7 @@ export default function ActiveRunProgress() {
         </span>
         {showFailureWarning && (
           <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--status-warning)' }}>
-            ⚠ {Math.round(failure_rate * 100)}% failure rate
+            ⚠ {Math.round(failure_rate * 100)}% of jobs failed
           </span>
         )}
       </div>
@@ -172,7 +172,7 @@ export default function ActiveRunProgress() {
               <div key={variantId}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
                   <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-secondary)' }}>
-                    Config {variantId}
+                    Configuration {variantId}
                   </span>
                   <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)' }}>
                     {vdata.completed}/{vdata.total}

@@ -41,10 +41,10 @@ export default function LoadMapStrip({ data }) {
             {/* Header */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
                 <span class="data-mono" style={{ fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                    Load
+                    Queue Activity
                 </span>
                 <span class="data-mono" style={{ fontSize: 'var(--type-label)', color: 'var(--text-tertiary)' }}>
-                    24h
+                    next 24h
                 </span>
             </div>
 
@@ -53,7 +53,7 @@ export default function LoadMapStrip({ data }) {
                 {slots.map((count, idx) => (
                     <div
                         key={idx}
-                        title={`${slotLabel(idx)} — ${count} job${count !== 1 ? 's' : ''}`}
+                        title={`${slotLabel(idx)} — ${count} job${count !== 1 ? 's' : ''} scheduled in this 30-minute window${count === 0 ? ' (quiet time)' : ''}`}
                         style={{
                             flex: 1,
                             height: '100%',

@@ -78,9 +78,9 @@ function computeRho(jobList) {
 }
 
 function rhoStatus(rho) {
-    if (rho < 0.60) return { label: 'safe', color: 'var(--status-healthy)' };
-    if (rho < 0.80) return { label: 'moderate', color: 'var(--status-warning)' };
-    return { label: 'dense', color: 'var(--status-error)' };
+    if (rho < 0.60) return { label: 'light load', color: 'var(--status-healthy)' };
+    if (rho < 0.80) return { label: 'moderate load', color: 'var(--status-warning)' };
+    return { label: 'very busy', color: 'var(--status-error)' };
 }
 
 // Priority design token colors (theme-aware)
@@ -149,7 +149,7 @@ function groupNextDue(groupJobs) {
 
 // --- Table layout ---
 
-const COLUMNS = ['Name', 'Model', 'VRAM', 'Schedule', 'Priority', 'Next Run', 'ETA', 'Check', 'Runs', '\u2605', 'Enabled', ''];
+const COLUMNS = ['Name', 'Model', 'GPU Mem', 'Repeats', 'Priority', 'Due In', 'Est. Time', '\u2713', 'Limit', '\u{1F4CC}', 'On', ''];
 const COL_COUNT = COLUMNS.length;
 
 const STATUS_COLORS = {
@@ -607,7 +607,7 @@ export default function Plan() {
                 <td style={{ textAlign: 'center' }}>
                     <div>
                         <button
-                            title={rj.pinned ? 'Pinned \u2014 click to unpin' : 'Click to pin this time slot'}
+                            title={rj.pinned ? 'Locked \u2014 click to unlock this time slot' : 'Lock this time slot so the scheduler won\'t move it when you rebalance'}
                             disabled={pinFb.phase === 'loading'}
                             onClick={() => handlePinToggle(rj)}
                             style={{
@@ -691,7 +691,7 @@ export default function Plan() {
                                         lineHeight: 1.4, fontFamily: 'var(--font-mono)',
                                         opacity: generatingDescId === rj.id ? 0.5 : 1,
                                     }}
-                                    title="Auto-generate description with local AI (qwen3:8b, ~10s)"
+                                    title="Ask a local AI to write a plain-English description of what this job does (~10 seconds)"
                                     onClick={() => handleGenerateDescription(rj.id)}
                                     disabled={generatingDescId === rj.id}
                                 >
@@ -747,7 +747,7 @@ export default function Plan() {
                         }}>
                             <div>
                                 <label style={labelStyle}>
-                                    {editForm.cron_expression ? 'Cron' : 'Interval'}
+                                    {editForm.cron_expression ? 'Cron schedule' : 'Repeats every'}
                                 </label>
                                 {editForm.cron_expression ? (
                                     <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-body)',
@@ -762,7 +762,7 @@ export default function Plan() {
                                 )}
                             </div>
                             <div>
-                                <label style={labelStyle}>Priority (1-10)</label>
+                                <label style={labelStyle}>Priority (1=highest, 10=lowest)</label>
                                 <input class="t-input" type="number" min="1" max="10"
                                        value={editForm.priority}
                                        onInput={ev => setEditForm(prev => ({ ...prev, priority: ev.target.value }))}
@@ -783,14 +783,14 @@ export default function Plan() {
                                 </select>
                             </div>
                             <div>
-                                <label style={labelStyle}>Timeout</label>
+                                <label style={labelStyle}>Max run time</label>
                                 <input class="t-input" type="text" value={editForm.timeout}
                                        onInput={ev => setEditForm(prev => ({ ...prev, timeout: ev.target.value }))}
                                        placeholder="e.g. 10m, 1h"
                                        style={inputStyle} />
                             </div>
                             <div>
-                                <label style={labelStyle}>Max Retries</label>
+                                <label style={labelStyle}>Retry attempts if it fails</label>
                                 <input class="t-input" type="number" min="0" max="10"
                                        value={editForm.max_retries}
                                        onInput={ev => setEditForm(prev => ({ ...prev, max_retries: ev.target.value }))}
@@ -803,7 +803,7 @@ export default function Plan() {
                                     <input type="checkbox" checked={editForm.pinned}
                                            style={{ accentColor: 'var(--status-warning)', width: 14, height: 14 }}
                                            onChange={ev => setEditForm(prev => ({ ...prev, pinned: ev.target.checked }))} />
-                                    Pinned
+                                    Lock this time slot
                                 </label>
                                 <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem',
                                                 fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)',
@@ -961,7 +961,7 @@ export default function Plan() {
                     <span style={{ color: 'var(--status-success)', fontFamily: 'var(--font-mono)',
                                    fontWeight: 700, fontSize: 'var(--type-label)',
                                    textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
-                        {'\u25CF'} Running
+                        {'\u25CF'} Running now
                     </span>
                     <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)',
                                    fontSize: 'var(--type-body)' }}>
@@ -997,7 +997,7 @@ export default function Plan() {
                             fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)',
                             color: 'var(--text-tertiary)',
                         }}>
-                            24h load
+                            Daily load
                         </span>
                         <span style={{
                             fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)',
@@ -1008,10 +1008,10 @@ export default function Plan() {
                             padding: '1px 6px',
                             letterSpacing: '0.02em',
                         }}
-                            title={`Traffic intensity: ${rho.toFixed(2)}. Keep below 0.80 to avoid job queueing delays. Dense schedules (≥0.80) may cause jobs to wait for slots.`}
+                            title={`How packed is your daily schedule? 0.0 = nothing scheduled, 1.0 = queue running non-stop. Keep below 0.80 to avoid jobs piling up and waiting for each other. Current: ${rho.toFixed(2)}`}
                             aria-label={`Traffic intensity: ${rho.toFixed(2)}, status: ${label}`}
                         >
-                            {'\u03c1'} {rho.toFixed(2)} {label}
+                            load {rho.toFixed(2)} — {label}
                         </span>
                         <button
                             class="t-btn t-btn--ghost"
@@ -1029,12 +1029,12 @@ export default function Plan() {
                                     setSuggestLoading(false);
                                 }
                             }}
-                            title="Show top-3 low-load slots for a new job"
+                            title="Find the best time windows to add a new recurring job — highlights the quietest slots on the chart above"
                         >
                             {suggestLoading ? '…'
-                                : suggestSlots === null ? 'Suggest slot'
-                                : suggestSlots.length === 0 ? 'No slots found'
-                                : 'Clear'}
+                                : suggestSlots === null ? 'Find best slot'
+                                : suggestSlots.length === 0 ? 'No open slots found'
+                                : 'Clear suggestions'}
                         </button>
                     </div>
                 );
@@ -1126,11 +1126,11 @@ export default function Plan() {
                              fontSize: 'var(--type-label)', color: 'var(--text-secondary)',
                              textTransform: 'uppercase', letterSpacing: '0.05em',
                              margin: '0 0 0.5rem' }}>
-                    Rebalance Log
+                    Schedule Change History
                 </h3>
                 {events.length === 0 ? (
                     <p style={{ color: 'var(--text-tertiary)', fontSize: 'var(--type-body)' }}>
-                        No events yet.
+                        No schedule changes yet. Changes appear here after you rebalance or add jobs.
                     </p>
                 ) : (
                     <div class="t-frame" style={{ padding: 0, overflow: 'hidden' }}>

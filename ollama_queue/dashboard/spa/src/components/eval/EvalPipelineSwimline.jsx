@@ -13,10 +13,10 @@ import { h } from 'preact';
 // Four user-facing stages. Instantaneous backend stages (fetch_items, fetch_targets)
 // are collapsed into these nodes by normalizeStage below.
 const STAGES = [
-  { id: 'queued',     label: 'Queue' },
-  { id: 'generating', label: 'Generate' },
-  { id: 'judging',    label: 'Score' },
-  { id: 'done',       label: 'Done' },
+  { id: 'queued',     label: 'Waiting' },
+  { id: 'generating', label: 'Writing Principles' },
+  { id: 'judging',    label: 'Scoring Quality' },
+  { id: 'done',       label: 'Done ✓' },
 ];
 
 // Ordered list used to determine "is this stage before/at/after current"
@@ -50,7 +50,7 @@ export default function EvalPipelineSwimline({ stage, status, generated, judged,
   const isJudging = current === 'judging';
   const model = isJudging ? judge_model : gen_model;
   const count = isJudging ? (judged ?? 0) : (generated ?? 0);
-  const phaseLabel = isJudging ? 'Scoring' : 'Generating';
+  const phaseLabel = isJudging ? 'Scoring quality' : 'Writing principles';
   const showInfo = current === 'generating' || current === 'judging';
 
   return (

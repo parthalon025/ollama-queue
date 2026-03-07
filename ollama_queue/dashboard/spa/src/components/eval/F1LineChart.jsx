@@ -89,7 +89,7 @@ function ChartCanvas({ variants, itemSetsDiffer }) {
           grid:   { stroke: gridColor, width: 1 },
           font:   `10px ${fontMono}`,
           ticks:  { stroke: gridColor, width: 1 },
-          label:  itemSetsDiffer ? 'Item count' : 'Run date',
+          label:  itemSetsDiffer ? 'Lessons Tested' : 'Run date',
         },
         {
           stroke: textColor,
@@ -97,7 +97,7 @@ function ChartCanvas({ variants, itemSetsDiffer }) {
           font:   `10px ${fontMono}`,
           ticks:  { stroke: gridColor, width: 1 },
           size:   50,
-          label:  'Quality score (F1)',
+          label:  'Quality Score (0–100%, higher is better)',
           values: (_u, vals) => vals.map(v => v == null ? '' : (v * 100).toFixed(0) + '%'),
         },
       ],
@@ -135,8 +135,8 @@ export default function F1LineChart() {
 
   if (!trends || !trends.variants || trends.variants.length === 0) {
     return (
-      <div class="t-frame eval-f1-chart-empty" data-label="Quality score over time">
-        Run at least 2 evals to see trends.
+      <div class="t-frame eval-f1-chart-empty" data-label="Quality Score Over Time">
+        Complete at least 2 evaluation runs to see whether quality is improving, staying the same, or declining over time.
       </div>
     );
   }
@@ -144,10 +144,10 @@ export default function F1LineChart() {
   const itemSetsDiffer = !!trends.item_sets_differ;
 
   return (
-    <div class="t-frame eval-f1-chart" data-label="Quality score over time">
+    <div class="t-frame eval-f1-chart" data-label="Quality Score Over Time">
       {itemSetsDiffer && (
         <div class="eval-f1-chart__warning t-callout" style="margin-bottom: 12px; padding: 8px 12px;">
-          Item sets differ across runs — changes may reflect data pool changes, not variant quality changes.
+          ⚠ The set of lessons tested changed between runs — score differences may reflect different data, not a real improvement in quality.
         </div>
       )}
       <ChartCanvas variants={trends.variants} itemSetsDiffer={itemSetsDiffer} />

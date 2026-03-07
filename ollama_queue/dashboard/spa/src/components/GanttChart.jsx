@@ -50,11 +50,11 @@ export function buildTooltip(job, isConcurrent) {
     const modelStr = job.model || job.model_profile || 'ollama';
     const parts = [
         `${job.name}`,
-        `via ${job.source || 'unknown'} · ${modelStr}`,
-        `est. ${formatDuration(job.estimated_duration)} · next: ${nextRunStr}`,
-        `last run: ${lastRunStr}`,
+        `submitted by: ${job.source || 'unknown'} · AI model: ${modelStr}`,
+        `expected duration: ${formatDuration(job.estimated_duration)} · runs at: ${nextRunStr}`,
+        `last ran: ${lastRunStr}`,
     ];
-    if (isConcurrent) parts.push('⟡ runs concurrently');
+    if (isConcurrent) parts.push('⟡ runs at the same time as another job');
     return parts.join('\n');
 }
 
@@ -106,13 +106,13 @@ export function findHeavyConflicts(jobs) {
 }
 
 export function runStatus(lastRun, intervalSeconds, _now = Date.now() / 1000) {
-    if (!lastRun) return { label: 'never', color: 'var(--text-tertiary)' };
+    if (!lastRun) return { label: 'never run yet', color: 'var(--text-tertiary)' };
     const elapsed = _now - lastRun;
     const interval = intervalSeconds || 3600;
     const drift = elapsed - interval;
     const threshold = interval * 0.05;
-    if (drift <= threshold) return { label: 'on time', color: 'var(--status-healthy)' };
-    return { label: 'late', color: 'var(--status-warning)' };
+    if (drift <= threshold) return { label: 'running on schedule', color: 'var(--status-healthy)' };
+    return { label: 'running behind', color: 'var(--status-warning)' };
 }
 
 // Score at which a slot is considered pinned/blocked by the scheduler.
@@ -189,8 +189,8 @@ export function GanttChart({ jobs, tick, windowHours = 24, loadMapSlots = [], su
                             border: '1px solid var(--border-subtle)',
                         }}
                         title={useLoadMap
-                            ? `Priority-weighted load per 30 min${hasPinned ? ' — amber = pinned/blocked slot' : ''}`
-                            : 'Job density per 30 min — darker = more jobs active'}
+                            ? `How busy is each 30-minute window — darker blue = more work scheduled${hasPinned ? '. Orange = a reserved slot the scheduler keeps free' : ''}`
+                            : 'How many jobs overlap each 30-minute window — darker = more scheduled work piling up at that time'}
                     >
                         {densityBuckets.map((score, bucketIdx) => {
                             const isSuggested = suggestDisplayIndices.has(bucketIdx);
@@ -214,10 +214,10 @@ export function GanttChart({ jobs, tick, windowHours = 24, loadMapSlots = [], su
                                         outlineOffset: '-2px',
                                     }}
                                     title={isSuggested
-                                        ? `Suggested slot — low load, good time for a new job`
+                                        ? `Good time to add a job — low traffic, suggested by the scheduler`
                                         : useLoadMap && score > 0
-                                            ? (score >= LOAD_MAP_PIN_SCORE ? 'Pinned slot — rebalancer avoids scheduling here' : `Load score: ${score}`)
-                                            : (score > 0 ? `${score} job${score > 1 ? 's' : ''} active` : undefined)}
+                                            ? (score >= LOAD_MAP_PIN_SCORE ? 'Locked slot — the scheduler keeps this window free and won\'t add new jobs here' : `Busy level: ${score} — higher = more work competing in this window`)
+                                            : (score > 0 ? `${score} job${score > 1 ? 's are' : ' is'} active in this 30-minute window` : undefined)}
                                 />
                             );
                         })}
@@ -304,7 +304,7 @@ export function GanttChart({ jobs, tick, windowHours = 24, loadMapSlots = [], su
                         badges.push(
                             <div
                                 key={`conflict-${a.id}-${b.id}`}
-                                title="Two heavy models overlap — one will queue behind the other"
+                                title="Schedule conflict — these two large AI models overlap in time. One will have to wait for the other to finish."
                                 style={{
                                     position: 'absolute',
                                     left: `${Math.max(1, Math.min(leftPct - 4, 88))}%`,
@@ -320,7 +320,7 @@ export function GanttChart({ jobs, tick, windowHours = 24, loadMapSlots = [], su
                                     whiteSpace: 'nowrap',
                                 }}
                             >
-                                ⚠ conflict
+                                ⚠ overlap
                             </div>
                         );
                     }
@@ -399,7 +399,7 @@ export function GanttChart({ jobs, tick, windowHours = 24, loadMapSlots = [], su
                                     : 'never';
                                 return (
                                     <span
-                                        title={`Last run: ${lastRunStr} (${label})`}
+                                        title={`Last ran: ${lastRunStr} · ${label}`}
                                         style={{
                                             position: 'absolute',
                                             right: 4,

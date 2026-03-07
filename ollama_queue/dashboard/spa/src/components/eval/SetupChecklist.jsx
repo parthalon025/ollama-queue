@@ -128,7 +128,7 @@ export default function SetupChecklist() {
   }
 
   return (
-    <div class="setup-checklist t-frame" data-label="Getting started with eval">
+    <div class="setup-checklist t-frame" data-label="Get Started — 4 Steps to Your First Quality Test">
       <Step
         number={1}
         complete={step1Complete}
@@ -148,25 +148,25 @@ export default function SetupChecklist() {
         number={2}
         complete={step2Complete}
         disabled={!step1Complete}
-        title="Verify AI models are available"
+        title="Make sure the AI models are installed"
         detail={
           !step1Complete
             ? 'Complete step 1 first.'
-            : 'Confirm that your variant models are loaded in Ollama.'
+            : 'Check that the AI models your configurations use are installed on this machine.'
         }
-        actionLabel="Check models"
+        actionLabel="Go to Models tab →"
         onAction={handleStep2Action}
       />
       <Step
         number={3}
         complete={step3Complete}
         disabled={!step2Complete}
-        title="Create configurations to test"
+        title="Create configurations to compare"
         detail={
           !step2Complete
             ? 'Complete step 2 first.'
             : variants.length <= 5
-              ? 'Add at least one custom configuration beyond the system defaults.'
+              ? 'Add at least one custom configuration to compare against the built-in defaults.'
               : `${variants.length} configurations ready.`
         }
         actionLabel="Go to Configurations →"
@@ -176,15 +176,15 @@ export default function SetupChecklist() {
         number={4}
         complete={step4Complete}
         disabled={!step3Complete}
-        title="Run your first evaluation"
+        title="Run your first quality test"
         detail={
           !step3Complete
             ? 'Complete step 3 first.'
             : runs.length === 0
-              ? 'Start your first eval run to begin collecting quality data.'
+              ? 'Start your first test to begin measuring how well your configurations perform.'
               : `${runs.length} run${runs.length !== 1 ? 's' : ''} completed.`
         }
-        actionLabel="Start first run →"
+        actionLabel="Start first test →"
         onAction={handleStep4Action}
       />
     </div>

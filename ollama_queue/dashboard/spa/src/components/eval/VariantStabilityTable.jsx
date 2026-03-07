@@ -38,7 +38,7 @@ function StabilityRow({ vari }) {
         class="eval-stability-row__header"
         onClick={() => setOpen(!open)}
         aria-expanded={open}
-        aria-label={`${open ? 'Collapse' : 'Expand'} variant ${vari.id} stability details`}
+        aria-label={`${open ? 'Collapse' : 'Expand'} stability history for configuration ${vari.id}`}
       >
         <span class="eval-stability-row__id data-mono">{vari.id}</span>
         {f1Pct !== null && (
@@ -59,7 +59,7 @@ function StabilityRow({ vari }) {
           {runs.length > 0 ? (
             <>
               <p class="eval-stability-row__run-history">
-                <span class="t-bracket">Run scores</span>{' '}
+                <span class="t-bracket">Quality scores, run by run</span>{' '}
                 <span class="data-mono">
                   {runs.map(r => Math.round((r.f1 || 0) * 100) + '%').join(' → ')}
                 </span>
@@ -81,7 +81,7 @@ function StabilityRow({ vari }) {
             <p class="eval-stability-row__empty">No completed runs for this variant.</p>
           )}
           <p class="eval-stability-row__l3-hint" style="color: var(--text-tertiary); font-size: var(--type-label); margin-top: 8px;">
-            Per-cluster performance coming in a future update.
+            Breakdown by topic category — coming in a future update.
           </p>
         </div>
       )}
@@ -98,7 +98,7 @@ export default function VariantStabilityTable() {
   }
 
   return (
-    <div class="t-frame eval-stability-table" data-label="Variant stability">
+    <div class="t-frame eval-stability-table" data-label="How Consistent Is Each Configuration?">
       {trends.variants.map(vari => (
         <StabilityRow key={vari.id} vari={vari} />
       ))}

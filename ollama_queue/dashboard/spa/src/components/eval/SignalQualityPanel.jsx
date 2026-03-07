@@ -14,25 +14,25 @@ export default function SignalQualityPanel() {
   if (!trends) return null;
 
   const completedRuns     = trends.completed_runs ?? 0;
-  const itemCountGrowing  = trends.item_count_growing ? 'Growing' : 'Stable';
+  const itemCountGrowing  = trends.item_count_growing ? 'Growing (more lessons each run)' : 'Stable (same lessons each run)';
   const judgeReliability  = trends.judge_reliability != null
     ? Math.round(trends.judge_reliability * 100) + '%'
     : '—';
 
   return (
-    <div class="t-frame eval-signal-quality" data-label="Signal quality">
+    <div class="t-frame eval-signal-quality" data-label="Is the Data Reliable?">
       <dl class="eval-signal-quality__list">
         <div class="eval-signal-quality__row">
-          <dt>Completed runs</dt>
+          <dt>Finished test runs</dt>
           <dd class="data-mono">{completedRuns}</dd>
         </div>
         <div class="eval-signal-quality__row">
-          <dt>Item count growth</dt>
+          <dt>Lesson pool size</dt>
           <dd class="data-mono">{itemCountGrowing}</dd>
         </div>
         <div class="eval-signal-quality__row">
           <dt>
-            {EVAL_TRANSLATIONS.judge_model?.label ?? 'Scorer'} reliability
+            Scorer consistency
             {EVAL_TRANSLATIONS.judge_model?.tooltip && (
               <span
                 class="eval-tooltip-trigger"
