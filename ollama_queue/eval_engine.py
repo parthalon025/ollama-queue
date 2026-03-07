@@ -153,6 +153,60 @@ def update_eval_variant(db: Database, variant_id: str, **kwargs: Any) -> None:
         conn.commit()
 
 
+def do_promote_eval_run(db: Database, run_id: int) -> dict:
+    """Core promote logic: resolve winner variant, call lessons-db, update local DB.
+
+    Returns {"ok": True, "run_id": run_id, "variant_id": variant_id, "label": label}.
+    Raises ValueError for validation failures, httpx.HTTPError for lessons-db failures.
+    Both callers (promote_eval_run API endpoint and check_auto_promote) use this function.
+    """
+    run = get_eval_run(db, run_id)
+    if run is None:
+        raise ValueError(f"Eval run {run_id} not found")
+    if run["status"] != "complete":
+        raise ValueError(f"Run {run_id} is not complete (status: {run['status']})")
+
+    winner_variant = run.get("winner_variant")
+    if not winner_variant:
+        raise ValueError(f"Run {run_id} has no winner_variant")
+
+    variant = get_eval_variant(db, winner_variant)
+    if variant is None:
+        raise ValueError(f"Variant {winner_variant!r} not found in eval_variants")
+
+    # Call lessons-db to register the new production variant
+    data_source_url = run.get("data_source_url") or db.get_setting("eval.data_source_url") or "http://127.0.0.1:7685"
+    promote_url = f"{data_source_url.rstrip('/')}/eval/production-variant"
+    payload = {
+        "model": variant["model"],
+        "prompt_template_id": variant["prompt_template_id"],
+        "temperature": variant.get("temperature"),
+        "num_ctx": variant.get("num_ctx"),
+    }
+    resp = httpx.post(promote_url, json=payload, timeout=10.0)
+    if resp.status_code not in (200, 201, 204):
+        raise httpx.HTTPStatusError(
+            f"lessons-db promote endpoint returned HTTP {resp.status_code}",
+            request=resp.request,
+            response=resp,
+        )
+
+    # Update local eval_variants: winner becomes production + recommended
+    update_eval_variant(db, winner_variant, is_recommended=1, is_production=1)
+    # Clear production + recommended from all other variants
+    with db._lock:
+        conn = db._connect()
+        conn.execute(
+            "UPDATE eval_variants SET is_recommended = 0, is_production = 0 WHERE id != ?",
+            (winner_variant,),
+        )
+        conn.commit()
+
+    label = variant.get("label", winner_variant)
+    _log.info("Promoted variant %s (label=%r) to production for run %d", winner_variant, label, run_id)
+    return {"ok": True, "run_id": run_id, "variant_id": winner_variant, "label": label}
+
+
 def insert_eval_result(db: Database, **kwargs: Any) -> int:
     """INSERT OR IGNORE INTO eval_results and return the new (or existing) row id.
 
