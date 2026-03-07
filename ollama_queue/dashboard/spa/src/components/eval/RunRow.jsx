@@ -106,6 +106,7 @@ export default function RunRow({ run }) {
     );
   }
 
+  // Writes winner variant to lessons-db as production config and refreshes local eval_variants.
   async function handlePromote(evt) {
     evt.stopPropagation();
     await promoteAct(
@@ -123,7 +124,7 @@ export default function RunRow({ run }) {
         await fetchEvalVariants();
         return data;
       },
-      data => `Config ${data.variant_id} promoted to production`
+      data => `Config ${data?.variant_id ?? winner_variant} promoted to production`
     );
   }
 
@@ -292,6 +293,7 @@ export default function RunRow({ run }) {
                   style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }}
                   disabled={promoteFb.phase === 'loading'}
                   onClick={handlePromote}
+                  title="Promote winning config to production"
                 >
                   {promoteFb.phase === 'loading' ? 'Promoting…' : 'Use this config'}
                 </button>
