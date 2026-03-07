@@ -13,6 +13,54 @@ import ModelsTab from './pages/ModelsTab.jsx';
 import Settings from './pages/Settings.jsx';
 import Eval from './pages/Eval.jsx';
 
+// What it shows: A thin persistent strip at the top of the content area whenever an eval
+//   session is running — shows eval run #, model name, and current phase.
+// Decision it drives: User always knows Ollama is busy with eval regardless of which tab
+//   they're viewing. Clicking jumps to the Eval tab for live progress details.
+function EvalActivityBanner({ activeEval, onNavigate }) {
+    return (
+        <div
+            onClick={() => onNavigate('eval')}
+            title="Eval session in progress — click to view"
+            style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                padding: '0.25rem 0.75rem',
+                marginBottom: '0.75rem',
+                background: 'rgba(74,222,128,0.07)',
+                border: '1px solid var(--status-healthy)',
+                borderRadius: 'var(--radius)',
+                cursor: 'pointer',
+                flexWrap: 'wrap',
+            }}
+        >
+            <span class="animate-pulse-amber" style={{
+                display: 'inline-block',
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                background: 'var(--status-healthy)',
+                flexShrink: 0,
+            }} />
+            <span class="data-mono" style="font-size: var(--type-label); color: var(--status-healthy);">
+                eval #{activeEval.id}
+            </span>
+            {activeEval.judge_model && (
+                <span class="data-mono" style="font-size: var(--type-label); color: var(--text-secondary);">
+                    {activeEval.judge_model}
+                </span>
+            )}
+            <span class="data-mono" style="font-size: var(--type-label); color: var(--text-tertiary);">
+                · {activeEval.status}
+            </span>
+            <span style="margin-left: auto; font-size: var(--type-micro); color: var(--text-tertiary);">
+                view →
+            </span>
+        </div>
+    );
+}
+
 export function App() {
     useEffect(() => {
         startPolling();
@@ -38,6 +86,7 @@ export function App() {
     }
 
     const daemonState = status.value?.daemon ?? null;
+    const activeEval = status.value?.active_eval ?? null;
 
     return (
         <div class="layout-root" style="background: var(--bg-base); color: var(--text-primary);">
@@ -48,6 +97,8 @@ export function App() {
                 dlqCount={dlqCount.value}
             />
             <main class="layout-main animate-page-enter">
+                {/* Banner only on tabs without a dedicated eval panel — Now has CurrentJob, Eval has ActiveRunProgress */}
+                {activeEval && currentTab.value !== 'eval' && currentTab.value !== 'now' && <EvalActivityBanner activeEval={activeEval} onNavigate={handleNavigate} />}
                 {renderView()}
             </main>
             <BottomNav

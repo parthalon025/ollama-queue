@@ -30,6 +30,7 @@ export default function Now() {
     const daemon = st?.daemon ?? null;
     const kpis = st?.kpis ?? null;
     const currentJob = st?.current_job ?? null;
+    const activeEval = st?.active_eval ?? null;
     const latestHealth = health?.length > 0 ? health[0] : null;
 
     // Count failures in last 24h for alert strip
@@ -81,6 +82,7 @@ export default function Now() {
                         currentJob={currentJob}
                         latestHealth={latestHealth}
                         settings={sett}
+                        activeEval={activeEval}
                     />
                     {/* QueueList renders its own t-frame — no wrapper needed */}
                     <QueueList jobs={q} currentJob={currentJob} />

@@ -207,7 +207,19 @@ def create_app(db: Database) -> FastAPI:
         current_job = None
         if daemon and daemon.get("current_job_id"):
             current_job = db.get_job(daemon["current_job_id"])
-        return {"daemon": daemon, "queue": queue, "kpis": kpis, "current_job": current_job}
+        # Include active eval run so the Now tab can show eval activity between proxy calls.
+        # eval_runs.status stays 'generating'/'judging' for the whole session (unlike
+        # daemon_state which flips idle→running→idle on each individual proxy call).
+        active_eval = None
+        with db._lock:
+            conn = db._connect()
+            row = conn.execute(
+                "SELECT id, status, judge_model FROM eval_runs"
+                " WHERE status IN ('generating', 'judging') ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            if row:
+                active_eval = dict(row)
+        return {"daemon": daemon, "queue": queue, "kpis": kpis, "current_job": current_job, "active_eval": active_eval}
 
     # --- Queue ---
 

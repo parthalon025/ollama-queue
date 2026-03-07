@@ -10,13 +10,15 @@ import ResourceGauges from './ResourceGauges.jsx';
  *   Should I cancel it and investigate? The progress bar turns orange when the job exceeds
  *   its estimated duration so you can decide whether to wait or kill it.
  *
- * @param {{ daemon: object, currentJob: object|null, latestHealth: object|null, settings: object }} props
+ * @param {{ daemon: object, currentJob: object|null, latestHealth: object|null, settings: object, activeEval: object|null }} props
  *   daemon: daemon_state row (state, current_job_id, paused_reason, ...)
  *   currentJob: the running job row if any (source, model, started_at, estimated_duration, ...)
  *   latestHealth: most recent health_log row (ram_pct, vram_pct, load_avg, swap_pct)
  *   settings: threshold settings for resource gauges
+ *   activeEval: active eval_run row if any (id, status, judge_model) — present for the full session,
+ *     not just during individual proxy calls, so eval activity is always visible in the Now tab
  */
-export default function CurrentJob({ daemon, currentJob, latestHealth, settings }) {
+export default function CurrentJob({ daemon, currentJob, latestHealth, settings, activeEval }) {
   if (!daemon) return null;
 
   const state = daemon.state || 'idle';
@@ -64,6 +66,22 @@ export default function CurrentJob({ daemon, currentJob, latestHealth, settings 
                 <span class="data-mono" style="font-size: var(--type-label); color: var(--text-secondary);">
                   {currentJob.model}
                 </span>
+              )}
+              {/* Proxy call in progress for an eval session (current_job_id=-1 → no job row) */}
+              {!currentJob && activeEval && (
+                <>
+                  <span class="data-mono" style="font-size: var(--type-body); color: var(--text-primary);">
+                    eval #{activeEval.id}
+                  </span>
+                  {activeEval.judge_model && (
+                    <span class="data-mono" style="font-size: var(--type-label); color: var(--text-secondary);">
+                      {activeEval.judge_model}
+                    </span>
+                  )}
+                  <span class="data-mono" style="font-size: var(--type-label); color: var(--text-tertiary);">
+                    {activeEval.status}
+                  </span>
+                </>
               )}
               {isStalled && (
                 <span
@@ -118,6 +136,23 @@ export default function CurrentJob({ daemon, currentJob, latestHealth, settings 
           <StatusBadge state={state} />
           <span style="color: var(--text-secondary); font-size: var(--type-body);">
             {pausedReasonLabel}
+          </span>
+        </div>
+      ) : activeEval ? (
+        /* Eval session running between proxy calls — daemon shows idle but Ollama is active.
+         * Driven by: user knows eval is consuming GPU even when no queue job is running. */
+        <div class="flex items-center gap-3 flex-wrap">
+          <StatusBadge state="running" />
+          <span class="data-mono" style="font-size: var(--type-body); color: var(--text-primary);">
+            eval #{activeEval.id}
+          </span>
+          {activeEval.judge_model && (
+            <span class="data-mono" style="font-size: var(--type-label); color: var(--text-secondary);">
+              {activeEval.judge_model}
+            </span>
+          )}
+          <span class="data-mono" style="font-size: var(--type-label); color: var(--text-tertiary);">
+            {activeEval.status}
           </span>
         </div>
       ) : (

@@ -48,12 +48,20 @@ export function buildTooltip(job, isConcurrent) {
         ? new Date(job.last_run * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
         : 'never';
     const modelStr = job.model || job.model_profile || 'ollama';
-    const parts = [
+    const parts = [];
+    // Plain-English description first — the most useful context line
+    if (job.description) parts.push(job.description);
+    parts.push(
         `${job.name}`,
-        `submitted by: ${job.source || 'unknown'} · AI model: ${modelStr}`,
-        `expected duration: ${formatDuration(job.estimated_duration)} · runs at: ${nextRunStr}`,
+        `program: ${job.source || 'unknown'} · model: ${modelStr}`,
+        `expected run time: ${formatDuration(job.estimated_duration)} · starts at: ${nextRunStr}`,
         `last ran: ${lastRunStr}`,
-    ];
+    );
+    // Truncated command — lets the user verify what's actually executing
+    if (job.command) {
+        const cmd = job.command.length > 70 ? `${job.command.slice(0, 67)}…` : job.command;
+        parts.push(`runs: ${cmd}`);
+    }
     if (isConcurrent) parts.push('⟡ runs at the same time as another job');
     return parts.join('\n');
 }
@@ -288,7 +296,7 @@ export function GanttChart({ jobs, tick, windowHours = 24, loadMapSlots = [], su
                     }} />
                 </div>
 
-                {/* Job blocks */}
+                {/* Job bars */}
                 {/* Heavy conflict badges */}
                 {conflictIds.size > 0 && (() => {
                     const heavy = laneJobs.filter(j => j.model_profile === 'heavy' && conflictIds.has(j.id));
@@ -339,7 +347,10 @@ export function GanttChart({ jobs, tick, windowHours = 24, loadMapSlots = [], su
                         ? job.model.split(':')[0]
                         : (job.model_profile || null);
                     const barWidth = Math.max(0.5, Math.min(widthPct, 100 - leftPct));
-                    const showChip = barWidth > 8;
+                    // Lower threshold so model shows on smaller bars too
+                    const showChip = barWidth > 5;
+                    // Source chip only when bar is wide enough to hold both name + chips
+                    const showSource = barWidth > 14 && job.source && job.source !== job.name;
 
                     return (
                         <div
@@ -391,6 +402,21 @@ export function GanttChart({ jobs, tick, windowHours = 24, loadMapSlots = [], su
                                     {modelLabel}
                                 </span>
                             )}
+                            {/* Source program chip — only when bar is wide enough and source differs from name */}
+                            {showSource && (
+                                <span style={{
+                                    fontFamily: 'var(--font-mono)',
+                                    fontSize: 'var(--type-micro)',
+                                    color: 'rgba(255,255,255,0.55)',
+                                    background: 'rgba(0,0,0,0.18)',
+                                    borderRadius: 3,
+                                    padding: '1px 4px',
+                                    whiteSpace: 'nowrap',
+                                    flexShrink: 0,
+                                }}>
+                                    {job.source}
+                                </span>
+                            )}
                             {/* On-time status dot — only shown when bar is wide enough */}
                             {showChip && (() => {
                                 const { label, color } = runStatus(job.last_run, job.interval_seconds);
@@ -419,6 +445,58 @@ export function GanttChart({ jobs, tick, windowHours = 24, loadMapSlots = [], su
                     );
                 })}
             </div>
+
+        {/* Legend — anchors the visual encoding so bars are readable without prior knowledge */}
+        <div style={{
+            display: 'flex', flexWrap: 'wrap', gap: '0.3rem 0.9rem',
+            marginTop: '0.5rem', alignItems: 'center',
+            fontFamily: 'var(--font-mono)', fontSize: 'var(--type-micro)',
+            color: 'var(--text-tertiary)',
+        }}>
+            <span style={{ fontWeight: 600, color: 'var(--text-tertiary)', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                color:
+            </span>
+            {[
+                { color: 'var(--accent)',      label: 'aria'     },
+                { color: '#f97316',            label: 'telegram' },
+                { color: '#a78bfa',            label: 'notion'   },
+                { color: 'var(--text-tertiary)', label: 'other'  },
+            ].map(({ color, label }) => (
+                <span key={label} style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                    <span style={{
+                        display: 'inline-block', width: 10, height: 10,
+                        borderRadius: 2, background: color, opacity: 0.85, flexShrink: 0,
+                    }} />
+                    {label}
+                </span>
+            ))}
+            <span style={{ color: 'var(--border-subtle)', userSelect: 'none' }}>│</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                <span style={{
+                    display: 'inline-block', width: 10, height: 10,
+                    borderRadius: 2, background: 'var(--text-tertiary)',
+                    borderLeft: '3px solid var(--status-warning)', flexShrink: 0,
+                }} />
+                large model
+            </span>
+            <span style={{ color: 'var(--border-subtle)', userSelect: 'none' }}>│</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                <span style={{
+                    display: 'inline-block', width: 7, height: 7,
+                    borderRadius: '50%', background: 'var(--status-healthy)', flexShrink: 0,
+                }} />
+                on schedule
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                <span style={{
+                    display: 'inline-block', width: 7, height: 7,
+                    borderRadius: '50%', background: 'var(--status-warning)', flexShrink: 0,
+                }} />
+                running late
+            </span>
+            <span style={{ color: 'var(--border-subtle)', userSelect: 'none' }}>│</span>
+            <span>bar width = expected run time · hover for details</span>
         </div>
+    </div>
     );
 }

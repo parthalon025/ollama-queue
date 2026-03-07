@@ -1043,7 +1043,18 @@ export default function Plan() {
             {/* Load map density strip — 48-slot daily load visualization */}
             <LoadMapStrip data={loadMap.value} />
 
-            <GanttChart jobs={jobs} tick={tick} windowHours={24} loadMapSlots={loadMap.value?.slots || []} suggestSlots={suggestSlots || []} />
+            {/* Gantt timeline — each bar is one scheduled job; width = expected run time; color = source program */}
+            <div class="t-frame" data-label="Next 24 hours">
+                <p style={{
+                    margin: '0 0 0.6rem 0',
+                    fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)',
+                    color: 'var(--text-tertiary)', lineHeight: 1.5,
+                }}>
+                    Each bar is a scheduled job. Bar width shows how long it&apos;s expected to run.
+                    Color shows which program runs it. Hover any bar to see the model, command, and description.
+                </p>
+                <GanttChart jobs={jobs} tick={tick} windowHours={24} loadMapSlots={loadMap.value?.slots || []} suggestSlots={suggestSlots || []} />
+            </div>
 
             {jobs.length === 0 ? (
                 <div class="t-frame" style={{ textAlign: 'center', padding: '2rem',
