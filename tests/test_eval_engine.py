@@ -13,9 +13,11 @@ from ollama_queue.eval_engine import (
     _call_proxy,
     _ProxyDownError,
     _should_throttle,
+    build_analysis_prompt,
     build_generation_prompt,
     build_judge_prompt,
     compute_metrics,
+    generate_eval_analysis,
     parse_judge_response,
     render_report,
     run_eval_generate,
@@ -984,3 +986,222 @@ class TestProxyDown:
             if c.kwargs.get("status") == "failed" and c.kwargs.get("error") == "proxy_unavailable"
         ]
         assert len(failed_calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# build_analysis_prompt
+# ---------------------------------------------------------------------------
+
+
+class TestBuildAnalysisPrompt:
+    def _metrics(self):
+        return {
+            "D": {"f1": 0.71, "recall": 0.82, "precision": 0.62, "actionability": 3.9},
+            "E": {"f1": 0.79, "recall": 0.88, "precision": 0.71, "actionability": 4.1},
+        }
+
+    def _top(self):
+        return [{"variant": "E", "principle": "Always validate inputs", "score_transfer": 5}]
+
+    def _bottom(self):
+        return [{"variant": "D", "principle": "Be careful", "score_transfer": 1}]
+
+    def test_contains_run_id(self):
+        prompt = build_analysis_prompt(
+            42, ["D", "E"], 20, "deepseek-r1:8b", self._metrics(), "E", self._top(), self._bottom()
+        )
+        assert "42" in prompt
+
+    def test_contains_variant_ids(self):
+        prompt = build_analysis_prompt(
+            1, ["D", "E"], 20, "deepseek-r1:8b", self._metrics(), "E", self._top(), self._bottom()
+        )
+        assert "D" in prompt and "E" in prompt
+
+    def test_contains_winner_label(self):
+        prompt = build_analysis_prompt(
+            1, ["D", "E"], 20, "deepseek-r1:8b", self._metrics(), "E", self._top(), self._bottom()
+        )
+        assert "winner" in prompt.lower()
+
+    def test_contains_f1_values(self):
+        prompt = build_analysis_prompt(
+            1, ["D", "E"], 20, "deepseek-r1:8b", self._metrics(), "E", self._top(), self._bottom()
+        )
+        assert "0.79" in prompt
+        assert "0.71" in prompt
+
+    def test_contains_top_pair_principle(self):
+        prompt = build_analysis_prompt(
+            1, ["D", "E"], 20, "deepseek-r1:8b", self._metrics(), "E", self._top(), self._bottom()
+        )
+        assert "Always validate inputs" in prompt
+
+    def test_contains_bottom_pair_principle(self):
+        prompt = build_analysis_prompt(
+            1, ["D", "E"], 20, "deepseek-r1:8b", self._metrics(), "E", self._top(), self._bottom()
+        )
+        assert "Be careful" in prompt
+
+    def test_empty_pairs_still_produces_prompt(self):
+        prompt = build_analysis_prompt(1, ["D"], 10, "judge", self._metrics(), None, [], [])
+        assert len(prompt) > 100
+
+    def test_contains_summary_section_request(self):
+        prompt = build_analysis_prompt(1, ["D"], 10, "judge", self._metrics(), "D", [], [])
+        assert "SUMMARY" in prompt
+
+    def test_contains_recommendations_section_request(self):
+        prompt = build_analysis_prompt(1, ["D"], 10, "judge", self._metrics(), "D", [], [])
+        assert "RECOMMENDATIONS" in prompt
+
+    def test_judge_model_in_prompt(self):
+        prompt = build_analysis_prompt(1, ["D"], 10, "my-judge-model", self._metrics(), "D", [], [])
+        assert "my-judge-model" in prompt
+
+    def test_item_count_in_prompt(self):
+        prompt = build_analysis_prompt(1, ["D"], 99, "judge", self._metrics(), "D", [], [])
+        assert "99" in prompt
+
+    def test_principle_truncated_at_180_chars(self):
+        long_principle = "x" * 300
+        pairs = [{"variant": "D", "principle": long_principle, "score_transfer": 3}]
+        prompt = build_analysis_prompt(1, ["D"], 10, "judge", self._metrics(), "D", pairs, [])
+        # 180-char truncation means the 181st char is never in the prompt
+        assert "x" * 181 not in prompt
+        assert "x" * 180 in prompt
+
+
+# ---------------------------------------------------------------------------
+# generate_eval_analysis
+# ---------------------------------------------------------------------------
+
+
+class TestGenerateEvalAnalysis:
+    def _complete_run(self, **overrides):
+        base = {
+            "id": 1,
+            "status": "complete",
+            "variants": '["D", "E"]',
+            "judge_model": "deepseek-r1:8b",
+            "metrics": json.dumps(
+                {
+                    "D": {"f1": 0.71, "recall": 0.82, "precision": 0.62, "actionability": 3.9},
+                    "E": {"f1": 0.79, "recall": 0.88, "precision": 0.71, "actionability": 4.1},
+                }
+            ),
+            "winner_variant": "E",
+            "item_count": 20,
+        }
+        base.update(overrides)
+        return base
+
+    def _mock_db_with_run(self, run):
+        mock_db = MagicMock()
+        mock_db._lock = MagicMock()
+        mock_db._lock.__enter__ = MagicMock(return_value=None)
+        mock_db._lock.__exit__ = MagicMock(return_value=False)
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value.fetchall.return_value = []
+        mock_db._connect.return_value = mock_conn
+        return mock_db
+
+    def test_stores_analysis_md_on_success(self):
+        run = self._complete_run()
+        mock_db = self._mock_db_with_run(run)
+        with (
+            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval_engine._fetch_analysis_samples", return_value=([], [])),
+            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
+            patch(
+                "ollama_queue.eval_engine._call_proxy",
+                return_value=("SUMMARY: Good.\nWHY: High F1.\nRECOMMENDATIONS:\n1. Use E.", None),
+            ),
+            patch("ollama_queue.eval_engine.update_eval_run") as mock_update,
+        ):
+            generate_eval_analysis(mock_db, 1)
+        stored_calls = [c for c in mock_update.call_args_list if "analysis_md" in c.kwargs]
+        assert len(stored_calls) == 1
+        assert "SUMMARY" in stored_calls[0].kwargs["analysis_md"]
+
+    def test_skips_non_complete_run(self):
+        run = self._complete_run(status="generating")
+        mock_db = self._mock_db_with_run(run)
+        with (
+            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval_engine.update_eval_run") as mock_update,
+        ):
+            generate_eval_analysis(mock_db, 1)
+        assert all("analysis_md" not in c.kwargs for c in mock_update.call_args_list)
+
+    def test_skips_run_with_no_metrics(self):
+        run = self._complete_run(metrics=None)
+        mock_db = self._mock_db_with_run(run)
+        with (
+            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval_engine.update_eval_run") as mock_update,
+        ):
+            generate_eval_analysis(mock_db, 1)
+        assert all("analysis_md" not in c.kwargs for c in mock_update.call_args_list)
+
+    def test_graceful_on_empty_proxy_response(self):
+        run = self._complete_run()
+        mock_db = self._mock_db_with_run(run)
+        with (
+            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval_engine._fetch_analysis_samples", return_value=([], [])),
+            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
+            patch("ollama_queue.eval_engine._call_proxy", return_value=(None, None)),
+            patch("ollama_queue.eval_engine.update_eval_run") as mock_update,
+        ):
+            generate_eval_analysis(mock_db, 1)  # must not raise
+        assert all("analysis_md" not in c.kwargs for c in mock_update.call_args_list)
+
+    def test_graceful_on_proxy_down(self):
+        run = self._complete_run()
+        mock_db = self._mock_db_with_run(run)
+        with (
+            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval_engine._fetch_analysis_samples", return_value=([], [])),
+            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
+            patch("ollama_queue.eval_engine._call_proxy", side_effect=_ProxyDownError("down")),
+            patch("ollama_queue.eval_engine.update_eval_run") as mock_update,
+        ):
+            generate_eval_analysis(mock_db, 1)  # must not raise
+        assert all("analysis_md" not in c.kwargs for c in mock_update.call_args_list)
+
+    def test_uses_analysis_model_setting_when_set(self):
+        run = self._complete_run()
+        mock_db = self._mock_db_with_run(run)
+        with (
+            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval_engine._fetch_analysis_samples", return_value=([], [])),
+            patch(
+                "ollama_queue.eval_engine._get_eval_setting",
+                side_effect=lambda db, key, default="": "custom-model" if key == "eval.analysis_model" else default,
+            ),
+            patch("ollama_queue.eval_engine._call_proxy", return_value=("analysis text", None)) as mock_proxy,
+            patch("ollama_queue.eval_engine.update_eval_run"),
+        ):
+            generate_eval_analysis(mock_db, 1)
+        called_model = mock_proxy.call_args.kwargs["model"]
+        assert called_model == "custom-model"
+
+    def test_falls_back_to_judge_model_when_analysis_model_empty(self):
+        run = self._complete_run(judge_model="run-judge-model")
+        mock_db = self._mock_db_with_run(run)
+        with (
+            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval_engine._fetch_analysis_samples", return_value=([], [])),
+            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
+            patch("ollama_queue.eval_engine._call_proxy", return_value=("analysis text", None)) as mock_proxy,
+            patch("ollama_queue.eval_engine.update_eval_run"),
+        ):
+            generate_eval_analysis(mock_db, 1)
+        called_model = mock_proxy.call_args.kwargs["model"]
+        assert called_model == "run-judge-model"
+
+    def test_not_found_run_returns_gracefully(self):
+        mock_db = MagicMock()
+        with patch("ollama_queue.eval_engine.get_eval_run", return_value=None):
+            generate_eval_analysis(mock_db, 999)  # must not raise

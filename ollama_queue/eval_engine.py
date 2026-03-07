@@ -367,6 +367,84 @@ def build_judge_prompt(principle: str, target_item: dict, is_same_cluster: bool)
 
 
 # ---------------------------------------------------------------------------
+# Analysis prompt
+# ---------------------------------------------------------------------------
+
+
+def build_analysis_prompt(
+    run_id: int,
+    variants: list[str],
+    item_count: int,
+    judge_model: str,
+    metrics: dict[str, dict[str, float]],
+    winner: str | None,
+    top_pairs: list[dict],
+    bottom_pairs: list[dict],
+) -> str:
+    """Build the Ollama prompt for post-run analysis.
+
+    Feeds the model: run context, per-variant metrics table, best-performing
+    and worst-performing same-cluster pairs. Asks for three plain-text sections:
+    SUMMARY / WHY / RECOMMENDATIONS.
+    """
+    lines: list[str] = []
+    lines.append(
+        "You are analyzing the results of a prompt evaluation run.\n"
+        "The eval tests how well an AI model extracts transferable principles from lessons\n"
+        "and applies them to recognize related lessons in the same problem cluster."
+    )
+    lines.append(f"\nRun #{run_id}")
+    lines.append(f"Variants tested: {', '.join(variants) if variants else 'none'}")
+    lines.append(f"Items evaluated: {item_count}")
+    lines.append(f"Scorer model: {judge_model}\n")
+
+    lines.append("## Results")
+    lines.append(
+        "Recall = how often the principle matched a correct same-cluster target (higher = better).\n"
+        "Precision = 1 minus how often the principle matched an incorrect diff-cluster target (higher = better).\n"
+        "F1 = harmonic mean of recall + precision.\n"
+        "Actionability = mean score of how useful/specific the generated principles were (1-5).\n"
+    )
+    lines.append("| Config | F1 | Recall | Precision | Actionability |")
+    lines.append("|--------|----|--------|-----------|---------------|")
+    for vid in sorted(metrics.keys()):
+        m = metrics[vid]
+        mark = " (winner)" if vid == winner else ""
+        lines.append(
+            f"| {vid}{mark} | {m['f1']:.2f} | {m['recall']:.2f}"
+            f" | {m['precision']:.2f} | {m['actionability']:.2f}/5 |"
+        )
+    lines.append("")
+
+    if top_pairs:
+        lines.append("## Best-performing examples (same-cluster pairs, highest transfer scores)")
+        for p in top_pairs:
+            principle_snippet = str(p.get("principle") or "").replace("\n", " ")[:180]
+            lines.append(f"- Config {p['variant']}, score {p.get('score_transfer', '?')}/5: {principle_snippet}")
+        lines.append("")
+
+    if bottom_pairs:
+        lines.append("## Worst-performing examples (same-cluster pairs, lowest transfer scores)")
+        for p in bottom_pairs:
+            principle_snippet = str(p.get("principle") or "").replace("\n", " ")[:180]
+            lines.append(f"- Config {p['variant']}, score {p.get('score_transfer', '?')}/5: {principle_snippet}")
+        lines.append("")
+
+    lines.append(
+        "## Task\n"
+        "Analyze this eval run. Respond with exactly three plain-text sections (no markdown).\n\n"
+        "SUMMARY: One sentence — did this run succeed? What was the best config?\n\n"
+        "WHY: 2-3 sentences on what the metrics reveal. What caused high/low recall or precision?"
+        " What do the example principles suggest about model behavior?\n\n"
+        "RECOMMENDATIONS: Three numbered, concrete next steps. Reference specific config IDs,"
+        " metric patterns, or templates.\n\n"
+        "Keep your response under 250 words. Do not define recall or precision in general —"
+        " focus on what these specific results reveal."
+    )
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Judge response parsing
 # ---------------------------------------------------------------------------
 
@@ -550,6 +628,110 @@ def render_report(run_id: int, metrics: dict[str, dict[str, float]], db: Databas
         )
 
     return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------------------
+# Post-run Ollama analysis
+# ---------------------------------------------------------------------------
+
+
+def generate_eval_analysis(
+    db: Database,
+    run_id: int,
+    http_base: str = "http://127.0.0.1:7683",
+) -> None:
+    """Generate an Ollama-powered analysis of a completed eval run.
+
+    Builds a prompt from the run metrics and a sample of best/worst-scoring
+    pairs, calls the analysis model through the proxy, and stores the result
+    in eval_runs.analysis_md.
+
+    Called automatically at the end of run_eval_session() after judging.
+    Also callable on demand via POST /api/eval/runs/{id}/analyze.
+    Falls through silently on proxy/model errors so failures never affect
+    the already-completed run record.
+    """
+    run = get_eval_run(db, run_id)
+    if run is None:
+        _log.error("generate_eval_analysis: run_id=%d not found", run_id)
+        return
+
+    if run.get("status") != "complete":
+        _log.warning(
+            "generate_eval_analysis: run_id=%d status=%s — only complete runs are analysed",
+            run_id,
+            run.get("status"),
+        )
+        return
+
+    metrics: dict = {}
+    raw_metrics = run.get("metrics")
+    if raw_metrics:
+        try:
+            metrics = json.loads(raw_metrics) if isinstance(raw_metrics, str) else raw_metrics
+        except (ValueError, TypeError):
+            _log.warning("generate_eval_analysis: could not parse metrics for run_id=%d", run_id)
+    if not metrics:
+        _log.info("generate_eval_analysis: no metrics for run_id=%d — skipping", run_id)
+        return
+
+    # Resolve analysis model: dedicated setting → run's judge model → global judge default
+    analysis_model: str = (
+        _get_eval_setting(db, "eval.analysis_model", "")
+        or run.get("judge_model")
+        or _get_eval_setting(db, "eval.judge_model", "deepseek-r1:8b")
+    )
+
+    try:
+        variant_ids: list[str] = json.loads(run.get("variants") or "[]")
+        if not isinstance(variant_ids, list):
+            variant_ids = [str(variant_ids)]
+    except (ValueError, TypeError):
+        variant_ids = []
+
+    top_pairs, bottom_pairs = _fetch_analysis_samples(db, run_id)
+
+    prompt = build_analysis_prompt(
+        run_id=run_id,
+        variants=variant_ids,
+        item_count=run.get("item_count") or 0,
+        judge_model=run.get("judge_model") or "",
+        metrics=metrics,
+        winner=run.get("winner_variant"),
+        top_pairs=top_pairs,
+        bottom_pairs=bottom_pairs,
+    )
+
+    _log.info(
+        "generate_eval_analysis: calling %s for run_id=%d (%d variants, %d+%d samples)",
+        analysis_model,
+        run_id,
+        len(variant_ids),
+        len(top_pairs),
+        len(bottom_pairs),
+    )
+
+    try:
+        analysis_text, _ = _call_proxy(
+            http_base=http_base,
+            model=analysis_model,
+            prompt=prompt,
+            temperature=0.3,  # low temp for consistent, deterministic analysis
+            num_ctx=4096,
+            timeout=180,
+            source=f"eval-analysis-{run_id}",
+            priority=1,  # background — don't displace user work
+        )
+    except _ProxyDownError as exc:
+        _log.warning("generate_eval_analysis: proxy down for run_id=%d: %s", run_id, exc)
+        return
+
+    if not analysis_text:
+        _log.warning("generate_eval_analysis: empty response from %s for run_id=%d", analysis_model, run_id)
+        return
+
+    update_eval_run(db, run_id, analysis_md=analysis_text)
+    _log.info("generate_eval_analysis: stored %d chars for run_id=%d", len(analysis_text), run_id)
 
 
 # ---------------------------------------------------------------------------
@@ -1089,6 +1271,47 @@ def _fetch_scored_rows(db: Database, run_id: int) -> list[dict]:
         ]
 
 
+def _fetch_analysis_samples(
+    db: Database,
+    run_id: int,
+    n: int = 4,
+) -> tuple[list[dict], list[dict]]:
+    """Return (top_n, bottom_n) same-cluster judge pairs for the analysis prompt.
+
+    top_n: highest effective transfer scores (shows what worked).
+    bottom_n: lowest effective transfer scores (shows where the model struggled).
+    Only same-cluster pairs used: these are the true positives / false negatives
+    and give the most diagnostic signal for why recall is high or low.
+    """
+    with db._lock:
+        conn = db._connect()
+        top = [
+            dict(r)
+            for r in conn.execute(
+                """SELECT variant, principle, score_transfer
+                   FROM eval_results
+                   WHERE run_id = ? AND row_type = 'judge' AND is_same_cluster = 1
+                     AND score_transfer IS NOT NULL AND error IS NULL AND principle IS NOT NULL
+                   ORDER BY COALESCE(override_score_transfer, score_transfer) DESC
+                   LIMIT ?""",
+                (run_id, n),
+            ).fetchall()
+        ]
+        bottom = [
+            dict(r)
+            for r in conn.execute(
+                """SELECT variant, principle, score_transfer
+                   FROM eval_results
+                   WHERE run_id = ? AND row_type = 'judge' AND is_same_cluster = 1
+                     AND score_transfer IS NOT NULL AND error IS NULL AND principle IS NOT NULL
+                   ORDER BY COALESCE(override_score_transfer, score_transfer) ASC
+                   LIMIT ?""",
+                (run_id, n),
+            ).fetchall()
+        ]
+    return top, bottom
+
+
 # ---------------------------------------------------------------------------
 # Judge orchestrator
 # ---------------------------------------------------------------------------
@@ -1256,6 +1479,11 @@ def run_eval_session(
         if run is None or run.get("status") in ("failed", "cancelled"):
             return
         run_eval_judge(run_id, db, http_base)
+        # Generate Ollama analysis after judging (non-blocking for run status —
+        # failures here are logged but never change the completed run record)
+        run = get_eval_run(db, run_id)
+        if run is not None and run.get("status") == "complete":
+            generate_eval_analysis(db, run_id, http_base)
     except Exception as exc:
         _log.exception("run_eval_session run_id=%d unhandled error", run_id)
         try:

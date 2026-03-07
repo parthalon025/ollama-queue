@@ -75,6 +75,7 @@ EVAL_SETTINGS_DEFAULTS = {
     "eval.stability_window": 3,
     "eval.error_budget": 0.30,
     "eval.setup_complete": False,
+    "eval.analysis_model": "",  # empty = fall back to judge model
 }
 
 
@@ -134,6 +135,7 @@ class Database:
         self._add_column_if_missing(conn, "eval_runs", "scheduled_by", "TEXT")
         self._add_column_if_missing(conn, "eval_runs", "created_at", "TEXT")
         self._add_column_if_missing(conn, "eval_runs", "data_source_token", "TEXT")
+        self._add_column_if_missing(conn, "eval_runs", "analysis_md", "TEXT")
 
     def initialize(self) -> None:
         """Create all tables and seed defaults."""

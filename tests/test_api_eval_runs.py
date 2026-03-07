@@ -6,6 +6,7 @@ Covers: GET/POST /api/eval/runs, GET/DELETE /api/eval/runs/{id},
 """
 
 import json
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -78,14 +79,16 @@ def test_list_eval_runs_has_required_fields(client_and_db):
         "id",
         "status",
         "variant_id",
-        "created_at",
+        "winner_variant",
+        "metrics",
         "completed_at",
         "item_count",
-        "f1_score",
-        "recall",
-        "precision",
-        "error_budget_used",
+        "item_ids",
+        "started_at",
+        "judge_model",
+        "analysis_md",
         "scheduled_by",
+        "run_mode",
     }
     assert required.issubset(run.keys())
 
@@ -708,3 +711,37 @@ def test_run_eval_generate_persists_seed_when_none(tmp_path):
     assert run is not None
     assert run["seed"] is not None
     assert isinstance(run["seed"], int)
+
+
+# ---------------------------------------------------------------------------
+# POST /api/eval/runs/{id}/analyze
+# ---------------------------------------------------------------------------
+
+
+def test_analyze_eval_run_returns_404_for_unknown_id(client):
+    resp = client.post("/api/eval/runs/9999/analyze")
+    assert resp.status_code == 404
+
+
+def test_analyze_eval_run_returns_400_for_non_complete_run(client_and_db):
+    client, db = client_and_db
+    _make_run(db, status="generating")
+    with db._lock:
+        conn = db._connect()
+        run_id = conn.execute("SELECT id FROM eval_runs ORDER BY id DESC LIMIT 1").fetchone()["id"]
+    resp = client.post(f"/api/eval/runs/{run_id}/analyze")
+    assert resp.status_code == 400
+
+
+def test_analyze_eval_run_returns_ok_for_complete_run(client_and_db):
+    client, db = client_and_db
+    _make_run(db, status="complete")
+    with db._lock:
+        conn = db._connect()
+        run_id = conn.execute("SELECT id FROM eval_runs ORDER BY id DESC LIMIT 1").fetchone()["id"]
+    with patch("ollama_queue.eval_engine.generate_eval_analysis"):
+        resp = client.post(f"/api/eval/runs/{run_id}/analyze")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["run_id"] == run_id

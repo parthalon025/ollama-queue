@@ -1398,6 +1398,7 @@ def create_app(db: Database) -> FastAPI:
             "stability_window",
             "error_budget",
             "setup_complete",
+            "analysis_model",
         }
 
         # Validation rules — validate ALL before writing any
@@ -1510,8 +1511,10 @@ def create_app(db: Database) -> FastAPI:
         with db._lock:
             conn = db._connect()
             rows = conn.execute(
-                """SELECT id, status, variant_id, created_at, completed_at,
-                          item_count, metrics, error_budget, scheduled_by, label
+                """SELECT id, status, variants, variant_id, winner_variant, metrics,
+                          item_count, item_ids, started_at, completed_at,
+                          judge_model, analysis_md, error, label, scheduled_by,
+                          error_budget, run_mode
                    FROM eval_runs
                    ORDER BY id DESC
                    LIMIT ? OFFSET ?""",
@@ -1520,38 +1523,32 @@ def create_app(db: Database) -> FastAPI:
         result = []
         for row in rows:
             r = dict(row)
-            # Parse metrics to surface scalar fields
-            f1 = recall = precision = error_budget_used = None
+            # Parse metrics JSON so RunRow can render the per-variant table directly
+            parsed_metrics = None
             if r.get("metrics"):
                 try:
-                    m = json.loads(r["metrics"])
-                    # Metrics may be keyed by variant_id or be a flat dict
-                    if r.get("variant_id") and r["variant_id"] in m:
-                        vm = m[r["variant_id"]]
-                    elif isinstance(m, dict) and "f1" in m:
-                        vm = m
-                    else:
-                        vm = {}
-                    f1 = vm.get("f1")
-                    recall = vm.get("recall")
-                    precision = vm.get("precision")
-                    error_budget_used = vm.get("error_budget_used")
+                    parsed_metrics = json.loads(r["metrics"])
                 except (ValueError, TypeError):
                     _log.warning("list_eval_runs: failed to parse metrics for run %s", r.get("id"))
             result.append(
                 {
                     "id": r["id"],
                     "status": r["status"],
+                    "variants": r.get("variants"),
                     "variant_id": r.get("variant_id"),
-                    "created_at": r.get("created_at"),
-                    "completed_at": r.get("completed_at"),
+                    "winner_variant": r.get("winner_variant"),
+                    "metrics": parsed_metrics,
                     "item_count": r.get("item_count"),
-                    "f1_score": f1,
-                    "recall": recall,
-                    "precision": precision,
-                    "error_budget_used": error_budget_used,
-                    "scheduled_by": r.get("scheduled_by"),
+                    "item_ids": r.get("item_ids"),
+                    "started_at": r.get("started_at"),
+                    "completed_at": r.get("completed_at"),
+                    "judge_model": r.get("judge_model"),
+                    "analysis_md": r.get("analysis_md"),
+                    "error": r.get("error"),
                     "label": r.get("label"),
+                    "scheduled_by": r.get("scheduled_by"),
+                    "error_budget": r.get("error_budget"),
+                    "run_mode": r.get("run_mode"),
                 }
             )
         return result
@@ -1685,6 +1682,33 @@ def create_app(db: Database) -> FastAPI:
 
         _ee.update_eval_run(db, run_id, status="cancelled", completed_at=_cdt.now(UTC).isoformat())
         return {"ok": True, "run_id": run_id}
+
+    @app.post("/api/eval/runs/{run_id}/analyze")
+    def analyze_eval_run(run_id: int):
+        """Trigger on-demand Ollama analysis for a completed eval run.
+
+        # What it shows: N/A — write-only; analysis_md appears in GET /api/eval/runs after completion.
+        # Decision it drives: Lets the user request analysis for any completed run, including
+        #   runs that completed before this feature was introduced or when the model was unavailable.
+        """
+        import threading as _threading_analyze
+
+        from ollama_queue import eval_engine as _ee
+
+        run = _ee.get_eval_run(db, run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail=f"Eval run {run_id} not found")
+        if run.get("status") != "complete":
+            raise HTTPException(status_code=400, detail="Analysis requires a completed run")
+
+        def _run_analysis() -> None:
+            try:
+                _ee.generate_eval_analysis(db, run_id)
+            except Exception:
+                _log.exception("generate_eval_analysis failed for run_id=%d", run_id)
+
+        _threading_analyze.Thread(target=_run_analysis, daemon=True).start()
+        return {"ok": True, "run_id": run_id, "message": "Analysis started in background"}
 
     @app.get("/api/eval/runs/{run_id}/results")
     def get_eval_run_results(run_id: int, row_type: str | None = None):

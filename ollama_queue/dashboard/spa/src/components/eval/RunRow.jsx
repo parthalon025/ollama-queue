@@ -6,11 +6,10 @@ import { evalActiveRun, evalSubTab, fetchEvalRuns, startEvalPoll } from '../../s
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
 // What it shows: A single eval run row with 3-level progressive disclosure.
 //   L1: status dot, winner config, quality score, date, item count.
-//   L2: per-variant metric table, scorer info, action buttons.
+//   L2: per-variant metric table, scorer info, Ollama analysis panel, action buttons.
 //   L3: paginated ResultsTable of scored pairs.
 // Decision it drives: User sees run history at a glance, drills into
-//   per-variant breakdown, and can re-run, compare, or export.
-
+//   per-variant breakdown + AI-generated analysis, and can re-run, compare, or export.
 // NOTE: All .map() callbacks use descriptive parameter names — never 'h' (shadows JSX factory)
 
 function statusDot(status) {
@@ -51,6 +50,7 @@ function fmtPct(val) {
 export default function RunRow({ run }) {
   const [level, setLevel] = useState(1); // 1 | 2 | 3
   const [repeatFb, repeatAct] = useActionFeedback();
+  const [analyzeFb, analyzeAct] = useActionFeedback();
 
   const {
     id,
@@ -61,10 +61,28 @@ export default function RunRow({ run }) {
     started_at,
     judge_model,
     item_ids,
+    analysis_md,
   } = run;
 
   // Only show Repeat button for runs that have reproducibility data persisted
   const canRepeat = Boolean(item_ids);
+
+  async function handleAnalyze(evt) {
+    evt.stopPropagation();
+    await analyzeAct(
+      'Generating analysis…',
+      async () => {
+        const res = await fetch(`/api/eval/runs/${id}/analyze`, { method: 'POST' });
+        let data = null;
+        try { data = await res.json(); } catch { /* non-JSON body */ }
+        if (!res.ok) throw new Error(data?.detail || `Analyze failed: ${res.status}`);
+        // Refresh runs list so analysis_md appears once the background job finishes
+        setTimeout(() => fetchEvalRuns(), 8000);
+        return data;
+      },
+      () => 'Analysis started — refresh in a moment'
+    );
+  }
 
   async function handleRepeat(evt) {
     evt.stopPropagation();
@@ -217,6 +235,32 @@ export default function RunRow({ run }) {
             </div>
           )}
 
+          {/* Analysis panel — shows Ollama-generated explanation of why the run succeeded/failed */}
+          {status === 'complete' && analysis_md && (
+            <div style={{
+              marginBottom: '0.75rem',
+              padding: '0.75rem',
+              background: 'var(--bg-raised)',
+              borderRadius: '4px',
+              borderLeft: '2px solid var(--accent)',
+            }}>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', marginBottom: '0.4rem' }}>
+                Analysis
+              </div>
+              <pre style={{
+                fontFamily: 'var(--font-body)',
+                fontSize: 'var(--type-body)',
+                color: 'var(--text-primary)',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+                margin: 0,
+                lineHeight: 1.6,
+              }}>
+                {analysis_md}
+              </pre>
+            </div>
+          )}
+
           {/* Action buttons */}
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
             {winner_variant && (
@@ -230,6 +274,20 @@ export default function RunRow({ run }) {
             <button class="t-btn t-btn-secondary" style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }}>
               Export
             </button>
+            {status === 'complete' && (
+              <div>
+                <button
+                  class="t-btn t-btn-secondary"
+                  style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }}
+                  disabled={analyzeFb.phase === 'loading'}
+                  onClick={handleAnalyze}
+                  title={analysis_md ? 'Regenerate analysis' : 'Analyze this run with Ollama'}
+                >
+                  {analyzeFb.phase === 'loading' ? 'Analysing…' : (analysis_md ? '↺ Re-analyze' : '✦ Analyze')}
+                </button>
+                {analyzeFb.msg && <div class={`action-fb action-fb--${analyzeFb.phase}`}>{analyzeFb.msg}</div>}
+              </div>
+            )}
             {canRepeat && (
               <div>
                 <button
