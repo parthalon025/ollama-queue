@@ -451,6 +451,21 @@ def create_app(db: Database) -> FastAPI:
         source = body.pop("_source", "proxy")
         req_timeout = body.pop("_timeout", 600)  # default matches default_timeout_seconds; callers may override
 
+        # Track request against known consumer for health monitoring
+        try:
+            for _row in db.list_consumers():
+                if _row.get("source_label") == source and _row.get("status") in ("patched", "included"):
+                    import time as _time_mod
+
+                    db.update_consumer(
+                        _row["id"],
+                        request_count=(_row["request_count"] or 0) + 1,
+                        last_seen=int(_time_mod.time()),
+                    )
+                    break
+        except Exception:
+            _log.debug("request_count tracking failed for source=%s", source)
+
         model = body.get("model", "")
 
         waited = 0.0
@@ -551,6 +566,22 @@ def create_app(db: Database) -> FastAPI:
         priority = body.pop("_priority", 0)
         source = body.pop("_source", "proxy")
         req_timeout = body.pop("_timeout", 600)
+
+        # Track request against known consumer for health monitoring (streaming path)
+        try:
+            for _row in db.list_consumers():
+                if _row.get("source_label") == source and _row.get("status") in ("patched", "included"):
+                    import time as _time_mod
+
+                    db.update_consumer(
+                        _row["id"],
+                        request_count=(_row["request_count"] or 0) + 1,
+                        last_seen=int(_time_mod.time()),
+                    )
+                    break
+        except Exception:
+            _log.debug("request_count tracking failed for source=%s", source)
+
         model = body.get("model", "")
 
         waited = 0.0
@@ -2336,6 +2367,11 @@ def create_app(db: Database) -> FastAPI:
             )
 
         app.mount("/ui", StaticFiles(directory=str(spa_dir), html=True), name="ui")
+
+    # Auto-scan for Ollama consumers on startup (daemon thread — won't block shutdown)
+    import threading as _threading
+
+    _threading.Thread(target=lambda: run_scan(db), daemon=True).start()
 
     return app
 
