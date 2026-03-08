@@ -26,14 +26,14 @@ def client_and_db(tmp_path):
 # --- Variants ---
 
 
-def test_list_variants_returns_5_system_variants(client):
-    """After init there should be exactly 5 system variants (A-E)."""
+def test_list_variants_returns_system_variants(client):
+    """After init there should be system variants (A-G)."""
     resp = client.get("/api/eval/variants")
     assert resp.status_code == 200
     variants = resp.json()
-    assert len(variants) == 5
+    assert len(variants) == 7
     ids = {v["id"] for v in variants}
-    assert ids == {"A", "B", "C", "D", "E"}
+    assert ids == {"A", "B", "C", "D", "E", "F", "G"}
 
 
 def test_list_variants_includes_latest_f1_null_when_no_runs(client):
@@ -217,9 +217,9 @@ def test_generate_preview_returns_count_without_creating(client):
     assert data["would_create"] == 2
     assert len(data["names"]) == 2
 
-    # Confirm list count is still 5 (unchanged)
+    # Confirm list count is still 7 (unchanged — preview doesn't create)
     list_resp = client.get("/api/eval/variants")
-    assert len(list_resp.json()) == 5
+    assert len(list_resp.json()) == 7
 
 
 def test_generate_preview_empty_models_returns_zero(client):
@@ -326,14 +326,14 @@ def test_import_is_idempotent(client):
 # --- Templates ---
 
 
-def test_list_templates_returns_3_system_templates(client):
-    """After init there should be exactly 3 system templates."""
+def test_list_templates_returns_system_templates(client):
+    """After init there should be system templates (3 original + contrastive)."""
     resp = client.get("/api/eval/templates")
     assert resp.status_code == 200
     templates = resp.json()
-    assert len(templates) == 3
+    assert len(templates) == 4
     ids = {t["id"] for t in templates}
-    assert ids == {"fewshot", "zero-shot-causal", "chunked"}
+    assert ids == {"fewshot", "zero-shot-causal", "chunked", "contrastive"}
 
 
 def test_update_system_template_returns_422(client):

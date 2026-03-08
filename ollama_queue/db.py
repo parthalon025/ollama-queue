@@ -138,6 +138,7 @@ class Database:
         self._add_column_if_missing(conn, "eval_runs", "created_at", "TEXT")
         self._add_column_if_missing(conn, "eval_runs", "data_source_token", "TEXT")
         self._add_column_if_missing(conn, "eval_runs", "analysis_md", "TEXT")
+        self._add_column_if_missing(conn, "eval_prompt_templates", "is_contrastive", "INTEGER DEFAULT 0")
 
     def initialize(self) -> None:
         """Create all tables and seed defaults."""
@@ -283,14 +284,15 @@ class Database:
             );
 
             CREATE TABLE IF NOT EXISTS eval_prompt_templates (
-                id           TEXT PRIMARY KEY,
-                label        TEXT NOT NULL,
-                instruction  TEXT NOT NULL,
-                format_spec  TEXT,
-                examples     TEXT,
-                is_chunked   INTEGER DEFAULT 0,
-                is_system    INTEGER DEFAULT 1,
-                created_at   TEXT NOT NULL
+                id              TEXT PRIMARY KEY,
+                label           TEXT NOT NULL,
+                instruction     TEXT NOT NULL,
+                format_spec     TEXT,
+                examples        TEXT,
+                is_chunked      INTEGER DEFAULT 0,
+                is_contrastive  INTEGER DEFAULT 0,
+                is_system       INTEGER DEFAULT 1,
+                created_at      TEXT NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS eval_variants (
@@ -476,6 +478,20 @@ class Database:
                 (tmpl_id, label, instruction, is_chunked, is_system, created_at),
             )
 
+        # Contrastive template — shows same-cluster AND diff-cluster items to force specificity
+        conn.execute(
+            """INSERT OR IGNORE INTO eval_prompt_templates
+               (id, label, instruction, is_chunked, is_contrastive, is_system, created_at)
+               VALUES (?, ?, ?, 0, 1, 1, ?)""",
+            (
+                "contrastive",
+                "Compare and distinguish",
+                "You are extracting a principle that distinguishes one failure pattern from others. "
+                "You will see examples from the SAME failure cluster and from DIFFERENT clusters.",
+                created_at,
+            ),
+        )
+
         # 5 system variants A-E
         variants = [
             ("A", "Baseline", "fewshot", "deepseek-r1:8b", 0.7, 4096, 0, 1),
@@ -483,6 +499,8 @@ class Database:
             ("C", "Grouped context", "chunked", "deepseek-r1:8b", 0.6, 8192, 0, 1),
             ("D", "Causal + large model", "zero-shot-causal", "qwen3:14b", 0.6, 8192, 1, 1),
             ("E", "Grouped + large model", "chunked", "qwen3:14b", 0.6, 8192, 1, 1),
+            ("F", "Contrastive", "contrastive", "deepseek-r1:8b", 0.6, 8192, 1, 1),
+            ("G", "Contrastive + large model", "contrastive", "qwen3:14b", 0.6, 8192, 1, 1),
         ]
         for var_id, label, tmpl_id, model, temperature, num_ctx, is_recommended, is_system in variants:
             conn.execute(

@@ -423,21 +423,32 @@ def build_generation_prompt(
     template: dict,
     source_item: dict,
     cluster_items: list[dict] | None = None,
+    diff_cluster_items: list[dict] | None = None,
 ) -> str:
     """Build the principle-extraction prompt for a given template + source item.
 
     template: row from eval_prompt_templates (id, label, instruction, format_spec,
-              examples, is_chunked)
+              examples, is_chunked, is_contrastive)
     source_item: {id, title, one_liner, description, cluster_id, category}
-    cluster_items: sibling items from same cluster — only used when template.is_chunked=1
+    cluster_items: sibling items from same cluster (chunked + contrastive)
+    diff_cluster_items: items from different clusters (contrastive only)
     """
     is_chunked = bool(template.get("is_chunked"))
+    is_contrastive = bool(template.get("is_contrastive"))
     instruction = template.get("instruction") or ""
     examples_raw = template.get("examples")
 
     title = source_item.get("title") or ""
     one_liner = source_item.get("one_liner") or ""
     description = (source_item.get("description") or "")[:500]
+
+    if is_contrastive and cluster_items and diff_cluster_items:
+        return _build_contrastive_prompt(
+            instruction,
+            source_item,
+            cluster_items,
+            diff_cluster_items,
+        )
 
     if is_chunked and cluster_items:
         return _build_chunked_prompt(instruction, source_item, cluster_items)
@@ -558,18 +569,61 @@ def _build_chunked_prompt(
     )
 
 
+def _build_contrastive_prompt(
+    instruction: str,
+    primary: dict,
+    same_cluster_items: list[dict],
+    diff_cluster_items: list[dict],
+) -> str:
+    """Contrastive variant: show same-cluster AND diff-cluster items.
+
+    Forces specificity by requiring the principle to be TRUE for same-cluster
+    items and FALSE/irrelevant for diff-cluster items.
+    """
+    same_lines = []
+    all_same = [primary, *same_cluster_items]
+    for i, item in enumerate(all_same, 1):
+        t = item.get("title") or ""
+        o = item.get("one_liner") or ""
+        same_lines.append(f"  {i}. {t} — {o}")
+    same_block = "\n".join(same_lines)
+
+    diff_lines = []
+    for i, item in enumerate(diff_cluster_items, 1):
+        t = item.get("title") or ""
+        o = item.get("one_liner") or ""
+        diff_lines.append(f"  {i}. {t} — {o}")
+    diff_block = "\n".join(diff_lines)
+
+    return (
+        f"{instruction}\n\n"
+        "SAME PATTERN (these lessons share the same structural failure):\n"
+        f"{same_block}\n\n"
+        "DIFFERENT PATTERNS (these are UNRELATED failure types):\n"
+        f"{diff_block}\n\n"
+        "Extract ONE structural principle that:\n"
+        "- Is TRUE for ALL lessons in the SAME PATTERN group\n"
+        "- Is FALSE or IRRELEVANT for the DIFFERENT PATTERNS group\n"
+        "- Names the structural pattern, not the technology\n\n"
+        "The principle must be specific enough to DISTINGUISH this failure type "
+        "from the others listed above.\n\n"
+        "Causal form: '<pattern> causes <consequence> when <condition>'\n"
+        "One sentence, 10-25 words. No technology names."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Judge prompt construction
 # ---------------------------------------------------------------------------
 
 
 def build_judge_prompt(principle: str, target_item: dict, is_same_cluster: bool) -> str:
-    """Build rubric-based scoring prompt for a (principle, target_item) pair.
+    """Build rubric-based scoring prompt with calibration anchors.
 
-    Asks the judge to score on transfer, precision, actionability (1-5 each)
-    and return a JSON object with those scores plus optional reasoning.
-    is_same_cluster is included in context so callers can verify understanding,
-    but is NOT passed to the judge (would bias the scoring).
+    Includes concrete scored examples so the judge's internal scale is
+    anchored, reducing score inflation on cross-cluster pairs.
+    is_same_cluster is available for caller verification but is NOT
+    passed to the judge (would bias the scoring).
     """
     title = target_item.get("title") or ""
     one_liner = target_item.get("one_liner") or ""
@@ -583,14 +637,24 @@ def build_judge_prompt(principle: str, target_item: dict, is_same_cluster: bool)
         f"Title: {title}\n"
         f"One-liner: {one_liner}\n"
         f"Description: {description}\n\n"
-        "Score this (principle, target) pair on three criteria, each 1-5:\n\n"
-        "1. **Transfer Recognition** — does the principle help identify the "
-        "structural pattern in the target?\n"
-        "   1=No connection  3=Vague connection  5=Clear structural match\n\n"
-        "2. **Precision** — would this principle false-positive on unrelated lessons?\n"
-        "   1=Would match anything  3=Somewhat specific  5=Only matches structurally similar\n\n"
-        "3. **Actionability** — could an LLM use this principle to prevent this bug class?\n"
-        "   1=Too abstract to act on  3=Useful with context  5=Immediately actionable\n\n"
+        "Score this (principle, target) pair on three criteria, each 1-5.\n\n"
+        "## Scoring Guide with Examples\n\n"
+        "**Transfer Recognition** — does the principle structurally match the target?\n"
+        "  1 = No structural connection. E.g. principle about resource cleanup → target about naming conventions → 1\n"
+        "  3 = Vague thematic overlap but different mechanism. "
+        "E.g. error handling principle → logging gaps target → 3\n"
+        "  5 = Same structural pattern, different technology. "
+        "E.g. resource cleanup principle → unclosed DB connections → 5\n\n"
+        "**Precision** — would this principle false-positive on unrelated lessons?\n"
+        "  1 = So general it matches everything (e.g. 'always test your code')\n"
+        "  3 = Matches a broad category but not everything\n"
+        "  5 = Only matches lessons with the same specific structural failure\n\n"
+        "**Actionability** — could an LLM use this to prevent this class of bug?\n"
+        "  1 = Too abstract to act on (e.g. 'be careful with state')\n"
+        "  3 = Useful with additional context\n"
+        "  5 = Specific enough to implement a check or review step\n\n"
+        "IMPORTANT: Be skeptical. Most principles do NOT transfer to unrelated lessons. "
+        "Default to low transfer scores unless there is a clear structural match.\n\n"
         'Return ONLY a JSON object: {"transfer": N, "precision": N, "actionability": N, "reasoning": "one sentence"}\n'
         "No other text."
     )
@@ -1133,12 +1197,23 @@ def _generate_one(
 ) -> bool:
     """Generate a principle for one (variant, source_item) pair. Returns True on success."""
     is_chunked = bool(template.get("is_chunked"))
+    is_contrastive = bool(template.get("is_contrastive"))
     cluster_items: list[dict] = []
-    if is_chunked:
-        cid = str(source_item.get("cluster_id") or source_item.get("cluster_seed") or "")
+    diff_cluster_items: list[dict] = []
+
+    cid = str(source_item.get("cluster_id") or source_item.get("cluster_seed") or "")
+
+    if is_chunked or is_contrastive:
         cluster_items = [it for it in items_by_cluster.get(cid, []) if str(it["id"]) != str(source_item["id"])][:3]
 
-    prompt = build_generation_prompt(template, source_item, cluster_items)
+    if is_contrastive:
+        all_diff = []
+        for other_cid, other_items in sorted(items_by_cluster.items()):
+            if other_cid != cid:
+                all_diff.extend(other_items[:2])
+        diff_cluster_items = all_diff[:4]
+
+    prompt = build_generation_prompt(template, source_item, cluster_items, diff_cluster_items)
     t0 = time.monotonic()
     text, queue_job_id = _call_proxy(
         http_base=http_base,
