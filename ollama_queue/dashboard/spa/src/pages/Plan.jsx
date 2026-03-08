@@ -8,7 +8,7 @@ import {
     generateJobDescription,
 } from '../store';
 import { useActionFeedback } from '../hooks/useActionFeedback.js';
-import { GanttChart } from '../components/GanttChart';
+import { GanttChart, runStatus } from '../components/GanttChart';
 import { ModelBadge } from '../components/ModelBadge';
 import LoadMapStrip from '../components/LoadMapStrip.jsx';
 import AddRecurringJobModal from '../components/AddRecurringJobModal.jsx';
@@ -222,6 +222,7 @@ export default function Plan() {
     const [generatingDescId, setGeneratingDescId] = useState(null);
 
     const refreshingRef = useRef(false);
+    const jobRowRefs = useRef({});
     const debouncedSearch = useDebounce(search, 300);
 
     useEffect(() => {
@@ -424,6 +425,16 @@ export default function Plan() {
         );
     }
 
+    function handleScrollToJob(rjId) {
+        const el = jobRowRefs.current[rjId];
+        if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            el.style.outline = '2px solid var(--accent)';
+            setTimeout(() => { if (el) el.style.outline = ''; }, 1500);
+        }
+        if (expandedJobId !== rjId) toggleJobDetail(rjId);
+    }
+
     // --- Derived data ---
 
     // Reference tick for per-second countdown updates
@@ -444,6 +455,10 @@ export default function Plan() {
         : jobs;
 
     const groups = groupJobsByTag(visibleJobs);
+
+    const lateJobs = jobs.filter(rj =>
+        rj.enabled && runStatus(rj.last_run, rj.interval_seconds).label === 'running behind'
+    );
 
     // --- Render helpers ---
 
@@ -527,6 +542,7 @@ export default function Plan() {
 
         return (
             <tr key={rj.id}
+                ref={el => { if (el) jobRowRefs.current[rj.id] = el; else delete jobRowRefs.current[rj.id]; }}
                 style={{
                     borderBottom: isExpanded ? 'none' : '1px solid var(--border-subtle)',
                     cursor: 'pointer',
@@ -1099,6 +1115,34 @@ export default function Plan() {
                                     textAlign: 'center', padding: '1rem 0' }}>
                             No jobs match "{debouncedSearch}"
                         </p>
+                    )}
+                    {lateJobs.length > 0 && (
+                        <div style={{
+                            display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap',
+                            padding: '0.4rem 0.75rem',
+                            background: 'rgba(251,146,60,0.08)',
+                            border: '1px solid var(--status-warning)',
+                            borderRadius: 'var(--radius)',
+                            fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)',
+                            marginBottom: '0.25rem',
+                        }}>
+                            <span style={{ color: 'var(--status-warning)', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                                ⚠ {lateJobs.length} job{lateJobs.length > 1 ? 's' : ''} running behind schedule —
+                            </span>
+                            {lateJobs.map((rj, idx) => (
+                                <span key={rj.id}>
+                                    <button
+                                        onClick={() => handleScrollToJob(rj.id)}
+                                        style={{
+                                            background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+                                            fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)',
+                                            color: 'var(--accent)', textDecoration: 'underline',
+                                        }}
+                                    >{rj.name}</button>
+                                    {idx < lateJobs.length - 1 ? ', ' : ''}
+                                </span>
+                            ))}
+                        </div>
                     )}
                     <div class="t-frame" style={{ padding: 0, overflowX: 'auto' }}>
                         <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
