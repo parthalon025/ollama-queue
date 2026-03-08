@@ -1220,4 +1220,39 @@ body {
 .intercept-banner__info { display: flex; flex-direction: column; gap: 0.25rem; }
 .intercept-banner__action { display: flex; flex-direction: column; align-items: flex-end; gap: 0.25rem; }
 .intercept-badge { font-weight: 600; }
-.consumers-page {}
+/* ── Consumers Tab ──────────────────────────────────── */
+.consumers-page { padding: 1rem; }
+.consumers-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 1rem;
+}
+.consumers-wizard-banner {
+  background: color-mix(in srgb, var(--status-warn, #ffc107) 15%, var(--bg-surface));
+  border: 1px solid var(--status-warn, #ffc107);
+  border-radius: 4px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+}
+.consumers-table { width: 100%; border-collapse: collapse; }
+.consumers-table th,
+.consumers-table td {
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border-subtle, #dee2e6);
+}
+.consumers-empty { color: var(--text-secondary); padding: 2rem; text-align: center; }
+.consumer-actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+.streaming-confirm {
+  background: color-mix(in srgb, var(--status-warn, #ffc107) 15%, var(--bg-surface));
+  padding: 0.5rem; border-radius: 4px;
+}
+.snippet {
+  font-family: var(--font-mono);
+  background: var(--bg-base);
+  padding: 0.5rem; border-radius: 4px;
+  white-space: pre-wrap; word-break: break-all;
+}
+.badge--lock { background: var(--status-error, #dc3545); color: #fff; }
+.badge--system { background: var(--text-secondary, #6c757d); color: #fff; }
+.badge--caution { background: #fd7e14; color: #fff; }
+.badge--ok { background: color-mix(in srgb, var(--status-ok, #198754) 15%, var(--bg-surface)); color: var(--status-ok, #198754); }
