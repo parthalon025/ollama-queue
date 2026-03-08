@@ -949,10 +949,10 @@ body {
   right: 0;
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
-  border-radius: 4px;
+  border-radius: var(--radius);
   max-height: 240px;
   overflow-y: auto;
-  z-index: 200;
+  z-index: var(--z-dropdown);
   box-shadow: 0 4px 12px rgba(0,0,0,0.15);
 }
 
@@ -995,7 +995,7 @@ body {
 }
 
 .model-select__dot--loaded {
-  color: #4caf50;
+  color: var(--status-healthy);
 }
 
 .model-select__dot--unloaded {
