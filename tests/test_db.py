@@ -31,6 +31,7 @@ class TestInitialize:
             "eval_runs",
             "eval_results",
             "judge_attempts",
+            "consumers",
         }
         assert expected == set(tables)
 

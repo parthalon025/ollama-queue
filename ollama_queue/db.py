@@ -374,6 +374,30 @@ class Database:
                 metrics       TEXT,
                 created_at    TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS consumers (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                name                TEXT NOT NULL,
+                type                TEXT NOT NULL,
+                platform            TEXT NOT NULL,
+                source_label        TEXT NOT NULL,
+                status              TEXT NOT NULL DEFAULT 'discovered',
+                streaming_confirmed INTEGER DEFAULT 0,
+                streaming_suspect   INTEGER DEFAULT 0,
+                is_managed_job      INTEGER DEFAULT 0,
+                patch_type          TEXT,
+                restart_policy      TEXT DEFAULT 'deferred',
+                patch_applied       INTEGER DEFAULT 0,
+                patch_path          TEXT,
+                patch_snippet       TEXT,
+                health_status       TEXT DEFAULT 'unknown',
+                health_checked_at   INTEGER,
+                request_count       INTEGER DEFAULT 0,
+                last_seen           INTEGER,
+                last_live_seen      INTEGER,
+                detected_at         INTEGER NOT NULL,
+                onboarded_at        INTEGER
+            );
         """)
 
             self._run_migrations(conn)
@@ -1348,3 +1372,48 @@ class Database:
                 "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
             ).fetchall()
             return [row["name"] for row in rows]
+
+    # --- Consumers ---
+
+    def upsert_consumer(self, data: dict) -> int:
+        """Insert or update a consumer by (name, platform). Returns id."""
+        with self._lock:
+            conn = self._connect()
+            existing = conn.execute(
+                "SELECT id FROM consumers WHERE name = ? AND platform = ?",
+                (data["name"], data["platform"]),
+            ).fetchone()
+            if existing:
+                sets = ", ".join(f"{k} = ?" for k in data if k not in ("name", "platform"))
+                vals = [v for k, v in data.items() if k not in ("name", "platform")]
+                conn.execute(f"UPDATE consumers SET {sets} WHERE id = ?", [*vals, existing["id"]])
+                conn.commit()
+                return existing["id"]
+            cols = ", ".join(data.keys())
+            placeholders = ", ".join("?" * len(data))
+            cur = conn.execute(
+                f"INSERT INTO consumers ({cols}) VALUES ({placeholders})",
+                list(data.values()),
+            )
+            conn.commit()
+            return cur.lastrowid
+
+    def list_consumers(self) -> list[dict]:
+        conn = self._connect()
+        rows = conn.execute("SELECT * FROM consumers ORDER BY detected_at DESC").fetchall()
+        return [dict(r) for r in rows]
+
+    def get_consumer(self, consumer_id: int) -> dict | None:
+        conn = self._connect()
+        row = conn.execute("SELECT * FROM consumers WHERE id = ?", (consumer_id,)).fetchone()
+        return dict(row) if row else None
+
+    def update_consumer(self, consumer_id: int, **kwargs) -> None:
+        with self._lock:
+            conn = self._connect()
+            sets = ", ".join(f"{k} = ?" for k in kwargs)
+            conn.execute(
+                f"UPDATE consumers SET {sets} WHERE id = ?",
+                [*kwargs.values(), consumer_id],
+            )
+            conn.commit()
