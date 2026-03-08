@@ -7,7 +7,8 @@ const NAV_ITEMS = [
     { id: 'history',  icon: '◷', label: 'History',  tooltip: 'Completed and failed jobs' },
     { id: 'models',   icon: '⊞', label: 'Models',   tooltip: 'Installed AI models and downloads' },
     { id: 'settings', icon: '⚙', label: 'Settings', tooltip: 'Configure queue thresholds and defaults' },
-    { id: 'eval',     icon: '⊡', label: 'Eval',     tooltip: 'Test and compare AI model configurations' },
+    { id: 'eval',      icon: '⊡', label: 'Eval',      tooltip: 'Test and compare AI model configurations' },
+    { id: 'consumers', icon: '⇄', label: 'Consumers', tooltip: 'Detected Ollama consumers and routing' },
 ];
 
 export default function Sidebar({ active, onNavigate, daemonState, dlqCount }) {
