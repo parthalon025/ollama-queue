@@ -457,16 +457,13 @@ export function GanttChart({ jobs, tick, windowHours = 24, loadMapSlots = [], su
                 color:
             </span>
             {[
-                { color: 'var(--accent)',      label: 'aria'     },
-                { color: '#f97316',            label: 'telegram' },
-                { color: '#a78bfa',            label: 'notion'   },
-                { color: 'var(--text-tertiary)', label: 'other'  },
-            ].map(({ color, label }) => (
+                { color: 'var(--accent)',        label: 'aria',     symbol: '◆' },
+                { color: '#f97316',              label: 'telegram', symbol: '●' },
+                { color: '#a78bfa',              label: 'notion',   symbol: '▲' },
+                { color: 'var(--text-tertiary)', label: 'other',    symbol: '·' },
+            ].map(({ color, label, symbol }) => (
                 <span key={label} style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                    <span style={{
-                        display: 'inline-block', width: 10, height: 10,
-                        borderRadius: 2, background: color, opacity: 0.85, flexShrink: 0,
-                    }} />
+                    <span style={{ color }}>{symbol}</span>
                     {label}
                 </span>
             ))}
