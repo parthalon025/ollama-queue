@@ -680,14 +680,65 @@ def _self_critique(
 # ---------------------------------------------------------------------------
 
 
+def _clean_principle(text: str) -> str:
+    """Strip Chain-of-Thought artifacts from a generated principle.
+
+    deepseek-r1 often includes reasoning traces, lesson-by-lesson analysis,
+    and "This principle applies because..." explanations.  The judge should
+    score the principle statement alone, not the surrounding rationale.
+    """
+    if not text:
+        return text
+
+    text = text.strip()
+
+    # 1. If text starts with CoT preamble, try to find actual principle below
+    cot_start = re.match(
+        r"^(okay|let me|let's|the lessons|here's|i'll|to analyze|looking at)",
+        text,
+        re.IGNORECASE,
+    )
+    if cot_start:
+        paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+        for para in paragraphs[1:]:
+            if para.startswith("*") or para.startswith("-"):
+                continue
+            if len(para) > 20:
+                text = para
+                break
+
+    # 2. Extract text after "**Principle:**" or "The principle is:" markers
+    marker = re.search(
+        r"(?:\*\*Principle:\*\*|The principle is:)\s*(.+?)(?:\n\n|$)",
+        text,
+        re.DOTALL,
+    )
+    if marker:
+        text = marker.group(1).strip()
+
+    # 3. Take only the first paragraph (strip trailing explanations)
+    if "\n\n" in text:
+        text = text.split("\n\n")[0].strip()
+
+    # 4. Strip markdown bold markers
+    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+
+    # 5. Strip trailing parenthetical explanations like "*(This principle...)"
+    text = re.sub(r"\s*\*?\(This principle\b.*", "", text, flags=re.DOTALL)
+
+    return text.strip()
+
+
 def build_judge_prompt(principle: str, target_item: dict, is_same_cluster: bool) -> str:
     """Build rubric-based scoring prompt with calibration anchors.
 
+    Cleans CoT artifacts from the principle before embedding in the prompt.
     Includes concrete scored examples so the judge's internal scale is
     anchored, reducing score inflation on cross-cluster pairs.
     is_same_cluster is available for caller verification but is NOT
     passed to the judge (would bias the scoring).
     """
+    principle = _clean_principle(principle)
     title = target_item.get("title") or ""
     one_liner = target_item.get("one_liner") or ""
     description = (target_item.get("description") or "")[:300]
@@ -1302,6 +1353,10 @@ def _generate_one(
             http_base=http_base,
             source=f"eval-run-{run_id}-critique",
         )
+
+    # Clean CoT artifacts before storing
+    if text:
+        text = _clean_principle(text)
 
     insert_eval_result(
         db,
