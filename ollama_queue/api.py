@@ -591,12 +591,16 @@ def create_app(db: Database) -> FastAPI:
 
         headers = {k: v for k, v in rp_resp.headers.items() if k.lower() not in _hop_by_hop}
 
+        async def _close_streaming_resources():
+            await rp_resp.aclose()
+            await async_client.aclose()
+
         return StreamingResponse(
             _iter_ndjson(rp_resp, release_fn=_release),
             status_code=rp_resp.status_code,
             headers=headers,
             media_type="application/x-ndjson",
-            background=BackgroundTask(rp_resp.aclose),
+            background=BackgroundTask(_close_streaming_resources),
         )
 
     @app.post("/api/embed")
