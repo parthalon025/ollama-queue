@@ -16,7 +16,10 @@ ollama_queue/
   estimator.py        # Duration prediction: rolling avg + model-based defaults
   scheduler.py        # Recurring job promotion: promote_due_jobs, update_next_run, rebalance
   dlq.py              # DLQManager: handle_failure routes to retry (backoff) or DLQ
-  api.py              # FastAPI REST API (60+ endpoints including /api/generate + /api/embed proxy, eval pipeline) + static SPA serving
+  scanner.py          # 4-phase consumer detection: live (ss/lsof/netstat), static (config files), stream (streaming_confirmed flag), deadlock (queue-recursive call guard)
+  patcher.py          # Config rewriter (systemd/env/yaml/toml) + health checker + backup/revert; patch_consumer(), revert_consumer(), check_health()
+  intercept.py        # iptables REDIRECT intercept mode (Linux only); enable_intercept(), disable_intercept(), get_intercept_status()
+  api.py              # FastAPI REST API (70+ endpoints including /api/generate + /api/embed proxy, eval pipeline, consumer management) + static SPA serving
   dashboard/
     spa/              # Preact SPA (built separately, served as static)
       src/            # Source: JSX components, signals store, CSS tokens
@@ -43,6 +46,11 @@ tests/
   test_proxy.py            # 8 tests
   test_dlq.py              # 8 tests
   test_burst.py            # 7 tests
+  test_scanner.py          # 17 tests
+  test_patcher.py          # 7 tests
+  test_intercept.py        # 5 tests
+  test_consumers.py        # 4 tests (DB layer)
+  test_consumers_api.py    # 11 tests (API endpoints)
 ```
 
 ## How to Run
@@ -52,7 +60,7 @@ tests/
 cd ~/Documents/projects/ollama-queue
 source .venv/bin/activate
 
-# Run tests (566 total)
+# Run tests (638 total)
 pytest
 
 # Start the server (daemon + API + dashboard)
@@ -103,9 +111,9 @@ npm run build        # Production
 npm run dev          # Watch mode
 ```
 
-Sidebar nav (desktop) + bottom tab bar (mobile). 5 views: **Now** (2-column command center: running job, queue, resource gauges, KPI cards, alert strip) + **Plan** (24h Gantt timeline with "now" needle, 48-bucket load-map density strip, ρ traffic intensity badge, "Suggest slot" button highlighting top-3 low-load windows; tag-grouped recurring jobs with collapsible sections, bulk actions, expandable detail panels) + **History** (DLQ entries, duration trends, activity heatmap, job list) + **Models** (model table) + **Settings** (thresholds, defaults, retention, daemon controls).
+Sidebar nav (desktop) + bottom tab bar (mobile). 6 views: **Now** (2-column command center: running job, queue, resource gauges, KPI cards, alert strip) + **Plan** (24h Gantt timeline with "now" needle, 48-bucket load-map density strip, ρ traffic intensity badge, "Suggest slot" button highlighting top-3 low-load windows; tag-grouped recurring jobs with collapsible sections, bulk actions, expandable detail panels) + **History** (DLQ entries, duration trends, activity heatmap, job list) + **Models** (model table) + **Settings** (thresholds, defaults, retention, daemon controls) + **Consumers** (scan button, consumer cards with status badges and include/ignore/revert actions, intercept toggle with status banner).
 
-Route IDs: `now` | `plan` | `history` | `models` | `settings` | `eval`. Sidebar: 200px desktop, 64px icon-only (768–1023px), hidden on mobile. CSS classes: `layout-root`, `layout-sidebar`, `layout-main`, `now-grid`, `history-top-grid`, `mobile-bottom-nav`.
+Route IDs: `now` | `plan` | `history` | `models` | `settings` | `eval` | `consumers`. Sidebar: 200px desktop, 64px icon-only (768–1023px), hidden on mobile. CSS classes: `layout-root`, `layout-sidebar`, `layout-main`, `now-grid`, `history-top-grid`, `mobile-bottom-nav`.
 
 **Eval tab** (4 sub-views): Runs (run list + active progress + repeat + judge-rerun + per-run analysis panel with Analyze/Re-analyze button), Variants (prompt variant CRUD + stability table), Trends (F1 line chart + trend summary), Settings (judge defaults + data source + scheduling mode + setup checklist + `eval.analysis_model` — empty string means use judge model). Eval state: `evalActiveRun`, `evalSubTab`, `fetchEvalRuns` in `store.js`. Key invariants: `repeat` starts a background thread (not just a DB row); `judge-rerun` copies gen_results from source run before judging; cancel sets `completed_at`; all fetch calls check `res.ok`; `generate_eval_analysis()` runs automatically after each eval run completes and stores markdown to `eval_runs.analysis_md`.
 
@@ -176,6 +184,12 @@ This applies to: component files, store transformations in `store.js`, computed 
 - **`run_eval_generate` re-checks status after opportunistic throttle sleep** — after `_sleep_fn(_OPPORTUNISTIC_THROTTLE_SLEEP_S)` wakes, the run may have been cancelled during the sleep. Re-fetch the run row and return immediately if status is `failed` or `cancelled`. Also guard before the final `update_eval_run(status='judging')` at the end of the loop. Without this, a cancel during the last sleep overwrites the `cancelled` status with `judging`. Issue #42.
 - **`GET /api/eval/settings` masks `eval.data_source_token`** — the endpoint returns `"***"` for the token. Never log or return the raw token value. `PUT /api/eval/settings` also rejects `data_source_url` that doesn't target `127.0.0.1` or `localhost` (SSRF protection). Issue #56.
 - **Migration scripts need `sqlite3.connect(timeout=30)`** — without a timeout, if the daemon holds a write lock during migration, the script raises `OperationalError: database is locked` and exits non-zero. 3 consecutive non-zero exits open the circuit breaker, blocking all queue jobs. Always pass `timeout=30` and handle the `"locked"` case with `sys.exit(0)`. Issue #58.
+- **`intercept/enable` requires ≥1 included consumer** — the endpoint raises 400 if `included_consumer_ids` is empty or missing. This guard prevents accidentally redirecting all port-11434 traffic before any consumers have been onboarded.
+- **`disable_intercept` returns `enabled=True` on iptables failure** — if the `iptables -D` command fails, `intercept.py` catches the error, logs WARNING, and returns `{"enabled": True, "error": "..."}`. The API endpoint then raises HTTP 500. The caller should treat non-ok responses as "intercept still active".
+- **Scanner `deadlock_check` needs `with db._lock:`** — `deadlock_check()` calls `db._connect()` to look up active jobs. Must always be wrapped in `with db._lock:` (same as all other `_connect()` calls). Missing the lock causes a race with daemon write transactions.
+- **`_live_scan_*` functions: check returncode, not just exception** — `subprocess.run()` on `ss`/`lsof`/`netstat` does not raise on non-zero exit; it returns a `CompletedProcess` with `returncode != 0`. Log a WARNING and return `[]` on non-zero rather than silently returning an empty list on success. Same pattern in `_reload_systemd` and `_restart_service` in patcher.py.
+- **Consumer `patch_path` may be empty** — `revert_consumer()` must check `patch_path` before calling `Path(patch_path).exists()`. An empty string produces a false-positive hit on the current directory.
+- **scanner.py and patcher.py use `subprocess` with known system binaries** — `S603`/`S607` (bandit/ruff subprocess rules) are suppressed via `per-file-ignores` in `ruff.toml`, matching the same pattern as `daemon.py`. Do not add inline `# noqa` comments — they will be flagged as RUF100 (redundant) if the per-file-ignore is already in effect.
 
 ## Design Doc
 
