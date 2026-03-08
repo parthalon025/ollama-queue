@@ -190,9 +190,12 @@ const inputStyle = {
 };
 
 
+const isMobileScreen = () => typeof window !== 'undefined' && window.innerWidth <= 640;
+
 export default function Plan() {
     const [tick, setTick] = useState(0);
     const [search, setSearch] = useState('');
+    const [ganttExpanded, setGanttExpanded] = useState(false);
 
     // Action feedback hooks — one per distinct action type, all declared before any early returns
     const [deleteFb, deleteAct] = useActionFeedback();
@@ -242,6 +245,13 @@ export default function Plan() {
             clearInterval(refreshInterval);
         };
     }, []);
+
+    useEffect(() => {
+        if (!ganttExpanded) return;
+        function onKey(evt) { if (evt.key === 'Escape') setGanttExpanded(false); }
+        document.addEventListener('keydown', onKey);
+        return () => document.removeEventListener('keydown', onKey);
+    }, [ganttExpanded]);
 
     // --- Handlers ---
 
@@ -1091,18 +1101,60 @@ export default function Plan() {
             {/* Load map density strip — 48-slot daily load visualization */}
             <LoadMapStrip data={loadMap.value} />
 
-            {/* Gantt timeline — each bar is one scheduled job; width = expected run time; color = source program */}
+            {/* Gantt timeline — tap/click bars for details; ⤢ expands to full screen on mobile */}
             <div class="t-frame" data-label="Next 24 hours">
-                <p style={{
-                    margin: '0 0 0.6rem 0',
-                    fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)',
-                    color: 'var(--text-tertiary)', lineHeight: 1.5,
-                }}>
-                    Each bar is a scheduled job. Bar width shows how long it&apos;s expected to run.
-                    Color shows which program runs it. Hover any bar to see the model, command, and description.
-                </p>
-                <GanttChart jobs={jobs} tick={tick} windowHours={24} loadMapSlots={loadMap.value?.slots || []} suggestSlots={suggestSlots || []} />
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
+                    <p style={{ margin: 0, fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', lineHeight: 1.5, flex: 1 }}>
+                        Each bar is a scheduled job. Bar width shows how long it&apos;s expected to run.
+                        Color shows which program runs it. Tap or hover any bar for details.
+                    </p>
+                    <button
+                        title="Expand to full screen — on mobile this shows a 6-hour window with wider bars"
+                        onClick={() => setGanttExpanded(true)}
+                        style={{
+                            background: 'none', border: '1px solid var(--border-subtle)',
+                            borderRadius: 'var(--radius)', cursor: 'pointer',
+                            color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)',
+                            fontSize: 'var(--type-label)', padding: '2px 7px', marginLeft: '0.5rem', flexShrink: 0,
+                        }}
+                    >⤢</button>
+                </div>
+                <GanttChart
+                    jobs={jobs}
+                    tick={tick}
+                    windowHours={24}
+                    loadMapSlots={loadMap.value?.slots || []}
+                    suggestSlots={suggestSlots || []}
+                    onRunJob={id => { const rj = jobs.find(j => j.id === id); if (rj) handleRunNow(rj); }}
+                    onScrollToJob={handleScrollToJob}
+                />
             </div>
+
+            {ganttExpanded && (
+                <div
+                    style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'var(--bg-base)', overflowY: 'auto', padding: '1rem' }}
+                    onClick={evt => { if (evt.target === evt.currentTarget) setGanttExpanded(false); }}
+                >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 'var(--type-headline)', color: 'var(--text-primary)' }}>
+                            Schedule {isMobileScreen() ? '(next 6h)' : '(next 24h)'}
+                        </span>
+                        <button
+                            onClick={() => setGanttExpanded(false)}
+                            style={{ background: 'none', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius)', cursor: 'pointer', color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', fontSize: 'var(--type-body)', padding: '3px 10px' }}
+                        >✕ close</button>
+                    </div>
+                    <GanttChart
+                        jobs={jobs}
+                        tick={tick}
+                        windowHours={isMobileScreen() ? 6 : 24}
+                        loadMapSlots={loadMap.value?.slots || []}
+                        suggestSlots={suggestSlots || []}
+                        onRunJob={id => { const rj = jobs.find(j => j.id === id); if (rj) handleRunNow(rj); }}
+                        onScrollToJob={id => { setGanttExpanded(false); handleScrollToJob(id); }}
+                    />
+                </div>
+            )}
 
             {jobs.length === 0 ? (
                 <div class="t-frame" style={{ textAlign: 'center', padding: '2rem',
