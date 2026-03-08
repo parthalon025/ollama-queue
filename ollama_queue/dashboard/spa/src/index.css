@@ -1205,3 +1205,19 @@ body {
     from { transform: translateY(100%); }
     to   { transform: translateY(0); }
 }
+
+/* ── Intercept Mode Banner ─────────────────────────── */
+.intercept-banner {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 0.75rem 1rem; margin-bottom: 1rem;
+  border: 1px solid var(--border-subtle, #dee2e6); border-radius: 4px;
+  background: var(--bg-surface, #f8f9fa);
+}
+.intercept-banner--active {
+  border-color: var(--status-ok, #198754);
+  background: color-mix(in srgb, var(--status-ok, #198754) 15%, var(--bg-surface));
+}
+.intercept-banner__info { display: flex; flex-direction: column; gap: 0.25rem; }
+.intercept-banner__action { display: flex; flex-direction: column; align-items: flex-end; gap: 0.25rem; }
+.intercept-badge { font-weight: 600; }
+.consumers-page {}

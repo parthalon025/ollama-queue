@@ -534,6 +534,35 @@ export async function refreshQueue() {
     }
 }
 
+// ── Intercept mode state ──────────────────────────────────────────────────────
+
+// What it shows: Whether iptables intercept mode is enabled and whether the rule is live.
+// Decision it drives: User sees at a glance if all :11434 traffic is being routed through
+//   the queue; enables or disables MITM interception for services with hardcoded Ollama URLs.
+export const interceptStatus = signal({ enabled: false, rule_present: false });
+
+export async function fetchInterceptStatus() {
+  try {
+    const res = await fetch(`${API}/consumers/intercept/status`);
+    if (res.ok) interceptStatus.value = await res.json();
+  } catch (e) { console.error('fetchInterceptStatus failed:', e); }
+}
+
+export async function enableIntercept() {
+  const res = await fetch(`${API}/consumers/intercept/enable`, { method: 'POST' });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  await fetchInterceptStatus();
+  return res.json();
+}
+
+export async function disableIntercept() {
+  const res = await fetch(`${API}/consumers/intercept/disable`, { method: 'POST' });
+  if (res.ok) await fetchInterceptStatus();
+}
+
 async function fetchAll() {
     fetchStatus();
     fetchDLQ(); // populate DLQ badge on first load
