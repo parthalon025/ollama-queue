@@ -40,7 +40,7 @@ export default function ModelSelect({ value, onChange, backend = 'ollama', place
       setLoading(true);
       fetchModels().finally(() => setLoading(false));
     }
-  }, [open, backend]);
+  }, [open, backend, loading]);
 
   // Pre-highlight matching row when dropdown opens
   useEffect(() => {
