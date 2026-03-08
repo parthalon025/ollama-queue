@@ -1014,58 +1014,76 @@ export default function Plan() {
                 </div>
             )}
 
-            {/* ρ traffic intensity indicator */}
+            {/* ρ traffic intensity — visual bar shows daily load vs 0.80 warn threshold */}
+            {/* What it shows: How full the day's schedule is (0=empty, 1=non-stop). */}
+            {/* Decision: Keep below 0.80 — above that queue wait times grow sharply (Kingman's formula). */}
             {jobs.length > 0 && (() => {
                 const rho = computeRho(jobs);
                 const { label, color } = rhoStatus(rho);
+                const fillPct = Math.min(rho, 1) * 100;
                 return (
-                    <div style={{
-                        display: 'flex', alignItems: 'center', gap: '0.5rem',
-                        marginBottom: '0.4rem',
-                    }}>
-                        <span style={{
-                            fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)',
-                            color: 'var(--text-tertiary)',
-                        }}>
-                            Daily load
-                        </span>
-                        <span style={{
-                            fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)',
-                            fontWeight: 700, color,
-                            background: 'var(--bg-surface-raised)',
-                            border: `1px solid ${color}`,
-                            borderRadius: 'var(--radius)',
-                            padding: '1px 6px',
-                            letterSpacing: '0.02em',
-                        }}
-                            title={`How packed is your daily schedule? 0.0 = nothing scheduled, 1.0 = queue running non-stop. Keep below 0.80 to avoid jobs piling up and waiting for each other. Current: ${rho.toFixed(2)}`}
-                            aria-label={`Traffic intensity: ${rho.toFixed(2)}, status: ${label}`}
-                        >
-                            load {rho.toFixed(2)} — {label}
-                        </span>
-                        <button
-                            class="t-btn t-btn--ghost"
-                            style={{ marginLeft: 'auto', fontSize: 'var(--type-label)', padding: '1px 8px' }}
-                            disabled={suggestLoading}
-                            onClick={async () => {
-                                if (suggestSlots !== null) { setSuggestSlots(null); return; }
-                                setSuggestLoading(true);
-                                try {
-                                    const data = await fetchSuggestTime(5, 3);
-                                    setSuggestSlots(data.suggestions || []);
-                                } catch (e) {
-                                    console.error('fetchSuggestTime failed:', e);
-                                } finally {
-                                    setSuggestLoading(false);
-                                }
-                            }}
-                            title="Find the best time windows to add a new recurring job — highlights the quietest slots on the chart above"
-                        >
-                            {suggestLoading ? '…'
-                                : suggestSlots === null ? 'Find best slot'
-                                : suggestSlots.length === 0 ? 'No open slots found'
-                                : 'Clear suggestions'}
-                        </button>
+                    <div style={{ marginBottom: '0.4rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.3rem' }}>
+                            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>
+                                Daily load
+                            </span>
+                            <div style={{
+                                position: 'relative', flex: 1, height: 8,
+                                background: 'var(--bg-inset)',
+                                border: '1px solid var(--border-subtle)',
+                                borderRadius: 'var(--radius)',
+                                minWidth: 80,
+                            }}>
+                                <div style={{
+                                    position: 'absolute', left: 0, top: 0, bottom: 0,
+                                    width: `${fillPct}%`,
+                                    background: color,
+                                    borderRadius: 'var(--radius)',
+                                    transition: 'width 0.4s ease, background 0.3s ease',
+                                }} />
+                                <div
+                                    aria-hidden="true"
+                                    title="Warning threshold — keep below 0.80 to avoid job pile-up"
+                                    style={{
+                                        position: 'absolute', left: '80%', top: -3, bottom: -3,
+                                        width: 1, borderLeft: '1px dashed var(--status-warning)', zIndex: 2,
+                                    }}
+                                />
+                                <span style={{
+                                    position: 'absolute', left: '80%', top: -16,
+                                    transform: 'translateX(-50%)',
+                                    fontFamily: 'var(--font-mono)', fontSize: 'var(--type-micro)',
+                                    color: 'var(--status-warning)', whiteSpace: 'nowrap', pointerEvents: 'none',
+                                }}>0.80</span>
+                            </div>
+                            <span
+                                style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', fontWeight: 700, color, whiteSpace: 'nowrap' }}
+                                title={`How packed is your daily schedule? 0.0 = nothing scheduled, 1.0 = queue running non-stop. Keep below 0.80 to avoid jobs piling up and waiting for each other. Current: ${rho.toFixed(2)}`}
+                                aria-label={`Traffic intensity: ${rho.toFixed(2)}, status: ${label}`}
+                            >
+                                {rho.toFixed(2)} — {label}
+                            </span>
+                            <button
+                                class="t-btn t-btn--ghost"
+                                style={{ fontSize: 'var(--type-label)', padding: '1px 8px', whiteSpace: 'nowrap' }}
+                                disabled={suggestLoading}
+                                onClick={async () => {
+                                    if (suggestSlots !== null) { setSuggestSlots(null); return; }
+                                    setSuggestLoading(true);
+                                    try {
+                                        const data = await fetchSuggestTime(5, 3);
+                                        setSuggestSlots(data.suggestions || []);
+                                    } catch (e) {
+                                        console.error('fetchSuggestTime failed:', e);
+                                    } finally {
+                                        setSuggestLoading(false);
+                                    }
+                                }}
+                                title="Find the best time windows to add a new recurring job — highlights the quietest slots on the chart above"
+                            >
+                                {suggestLoading ? '…' : suggestSlots === null ? 'Find best slot' : suggestSlots.length === 0 ? 'No open slots found' : 'Clear suggestions'}
+                            </button>
+                        </div>
                     </div>
                 );
             })()}
