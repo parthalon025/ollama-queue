@@ -70,7 +70,7 @@ def _rule_present(uid: int, queue_port: int) -> bool:
         )
         return str(queue_port) in result.stdout and str(uid) in result.stdout
     except Exception as e:
-        _log.debug("_rule_present check failed: %s", e)
+        _log.warning("_rule_present check failed: %s", e)
         return False
 
 

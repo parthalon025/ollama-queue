@@ -544,7 +544,8 @@ export const interceptStatus = signal({ enabled: false, rule_present: false });
 export async function fetchInterceptStatus() {
   try {
     const res = await fetch(`${API}/consumers/intercept/status`);
-    if (res.ok) interceptStatus.value = await res.json();
+    if (!res.ok) { console.warn('fetchInterceptStatus: HTTP', res.status); return; }
+    interceptStatus.value = await res.json();
   } catch (e) { console.error('fetchInterceptStatus failed:', e); }
 }
 
@@ -571,17 +572,18 @@ export const consumers = signal([]);
 export const consumersScanning = signal(false);
 
 export async function fetchConsumers() {
-  try {
-    const res = await fetch(`${API}/consumers`);
-    if (res.ok) consumers.value = await res.json();
-  } catch (e) { console.error('fetchConsumers failed:', e); }
+  const res = await fetch(`${API}/consumers`);
+  if (!res.ok) throw new Error(`Failed to load consumers: HTTP ${res.status}`);
+  consumers.value = await res.json();
 }
 
 export async function scanConsumers() {
   consumersScanning.value = true;
   try {
     const res = await fetch(`${API}/consumers/scan`, { method: 'POST' });
-    if (res.ok) consumers.value = await res.json();
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.detail || `Scan failed: HTTP ${res.status}`);
+    consumers.value = body;
   } finally {
     consumersScanning.value = false;
   }
@@ -603,18 +605,26 @@ export async function includeConsumer(id, opts = {}) {
 
 export async function ignoreConsumer(id) {
   const res = await fetch(`${API}/consumers/${id}/ignore`, { method: 'POST' });
-  if (res.ok) await fetchConsumers();
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  await fetchConsumers();
 }
 
 export async function revertConsumer(id) {
   const res = await fetch(`${API}/consumers/${id}/revert`, { method: 'POST' });
-  if (res.ok) await fetchConsumers();
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  await fetchConsumers();
 }
 
 export async function fetchConsumerHealth(id) {
   const res = await fetch(`${API}/consumers/${id}/health`);
-  if (res.ok) return res.json();
-  return null;
+  if (!res.ok) throw new Error(`Health check failed: HTTP ${res.status}`);
+  return res.json();
 }
 
 async function fetchAll() {

@@ -2276,7 +2276,10 @@ def create_app(db: Database) -> FastAPI:
                 detail="System path requires explicit confirmation. Send system_confirm=true.",
             )
 
-        result = patch_consumer({**consumer, "restart_policy": body.restart_policy})
+        try:
+            result = patch_consumer({**consumer, "restart_policy": body.restart_policy})
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Patch failed: {e}") from e
         db.update_consumer(
             consumer_id,
             status=result.get("status", "patched"),

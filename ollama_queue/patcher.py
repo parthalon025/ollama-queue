@@ -28,24 +28,34 @@ def patch_consumer(consumer: dict) -> dict:
     _backup(path)
 
     ctype = consumer.get("type", "unknown")
-    if ctype == "systemd":
-        _patch_systemd(path)
-        if consumer.get("restart_policy") == "immediate":
-            _reload_systemd()
-            _restart_service(consumer["name"])
-    elif ctype == "env_file":
-        _patch_env(path)
-    elif ctype == "config_yaml":
-        _patch_yaml(path)
-    elif ctype == "config_toml":
-        _patch_toml(path)
-    else:
-        return {
-            **consumer,
-            "patch_type": "manual_snippet",
-            "patch_snippet": f"export OLLAMA_HOST={_QUEUE_HOST}",
-            "patch_applied": False,
-        }
+    try:
+        if ctype == "systemd":
+            _patch_systemd(path)
+            if consumer.get("restart_policy") == "immediate":
+                _reload_systemd()
+                _restart_service(consumer["name"])
+        elif ctype == "env_file":
+            _patch_env(path)
+        elif ctype == "config_yaml":
+            _patch_yaml(path)
+        elif ctype == "config_toml":
+            _patch_toml(path)
+        else:
+            return {
+                **consumer,
+                "patch_type": "manual_snippet",
+                "patch_snippet": f"export OLLAMA_HOST={_QUEUE_HOST}",
+                "patch_applied": False,
+            }
+    except Exception:
+        _log.error(
+            "patch_consumer failed: name=%s type=%s path=%s",
+            consumer.get("name"),
+            ctype,
+            patch_path,
+            exc_info=True,
+        )
+        raise
 
     status = "pending_restart" if consumer.get("restart_policy") == "deferred" else "patched"
     return {**consumer, "patch_type": ctype, "patch_applied": True, "status": status}
@@ -55,6 +65,11 @@ def revert_consumer(consumer: dict) -> None:
     """Restore backup. Restarts service if it was restarted."""
     patch_path = consumer.get("patch_path")
     if not patch_path:
+        _log.info(
+            "revert_consumer: no patch_path for '%s' (type=%s) — nothing to revert on disk",
+            consumer.get("name"),
+            consumer.get("type"),
+        )
         return
     path = pathlib.Path(patch_path)
     bak = pathlib.Path(str(path) + _BAK_SUFFIX)

@@ -1385,6 +1385,8 @@ class Database:
             ).fetchone()
             if existing:
                 sets = ", ".join(f"{k} = ?" for k in data if k not in ("name", "platform"))
+                if not sets:
+                    return existing["id"]  # nothing to update beyond the key fields
                 vals = [v for k, v in data.items() if k not in ("name", "platform")]
                 conn.execute(f"UPDATE consumers SET {sets} WHERE id = ?", [*vals, existing["id"]])
                 conn.commit()
