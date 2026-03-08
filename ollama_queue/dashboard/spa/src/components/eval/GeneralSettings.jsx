@@ -241,7 +241,7 @@ export default function GeneralSettings() {
         </div>
         <label class="eval-settings-label">
           <span>
-            Analysis model
+            Model
             <span class="eval-tooltip-trigger" title="Model used to generate run analysis. Leave blank to use the judge model." aria-label="Model used to generate run analysis. Leave blank to use the judge model."> ?</span>
           </span>
           <ModelSelect
