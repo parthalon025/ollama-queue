@@ -266,7 +266,7 @@ async function _fetchNonRealtime() {
             fetch(`${API}/history`),
             fetch(`${API}/schedule/load-map`),
         ]);
-        if (hResp.ok) healthData.value = await hResp.json();
+        if (hResp.ok) { const d = await hResp.json(); healthData.value = Array.isArray(d) ? d : (d.log ?? []); }
         if (durResp.ok) durationData.value = await durResp.json();
         if (heatResp.ok) heatmapData.value = await heatResp.json();
         if (histResp.ok) history.value = await histResp.json();
@@ -549,7 +549,7 @@ async function fetchAll() {
         ]);
         if (qResp.ok) queue.value = await qResp.json();
         if (hResp.ok) history.value = await hResp.json();
-        if (healthResp.ok) healthData.value = await healthResp.json();
+        if (healthResp.ok) { const d = await healthResp.json(); healthData.value = Array.isArray(d) ? d : (d.log ?? []); }
         if (durResp.ok) durationData.value = await durResp.json();
         if (heatResp.ok) heatmapData.value = await heatResp.json();
         if (setResp.ok) settings.value = await setResp.json();

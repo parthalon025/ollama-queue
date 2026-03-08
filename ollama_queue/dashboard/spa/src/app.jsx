@@ -1,5 +1,21 @@
-import { h } from 'preact';
+import { h, Component } from 'preact';
 import { useEffect } from 'preact/hooks';
+
+// Temporary debug boundary — catches Plan render errors that signals swallows silently
+class PlanErrorBoundary extends Component {
+    constructor() { super(); this.state = { error: null }; }
+    componentDidCatch(err) {
+        console.error('[PlanErrorBoundary] caught:', err);
+        this.setState({ error: err ? (err.message || String(err)) : 'unknown error' });
+    }
+    render() {
+        if (this.state.error) {
+            return h('div', { style: 'color:red;padding:1rem;font-family:monospace;white-space:pre-wrap' },
+                'Plan render error:\n' + this.state.error);
+        }
+        return this.props.children;
+    }
+}
 import {
     currentTab, dlqCount, fetchModels, fetchSchedule,
     startPolling, stopPolling, stopEvalPoll, status,
@@ -76,7 +92,7 @@ export function App() {
 
     function renderView() {
         switch (currentTab.value) {
-            case 'plan':     return <Plan />;
+            case 'plan':     return <PlanErrorBoundary><Plan /></PlanErrorBoundary>;
             case 'history':  return <History />;
             case 'models':   return <ModelsTab />;
             case 'settings': return <Settings />;
