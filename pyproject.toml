@@ -2,6 +2,9 @@
 requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.packages.find]
+include = ["ollama_queue*"]
+
 [project]
 name = "ollama-queue"
 version = "0.1.0"
