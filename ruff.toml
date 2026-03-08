@@ -42,6 +42,8 @@ ignore = [
 "ollama_queue/models.py" = ["S603", "S607", "SIM105", "RUF002"]
 # Admin migration script — subprocess calls use known binary paths, not user input
 "scripts/*.py" = ["S603", "S607"]
+# iptables intercept — subprocess calls use known system binaries, not user input
+"ollama_queue/intercept.py" = ["S603", "S607", "RUF005"]
 
 [lint.mccabe]
 max-complexity = 10

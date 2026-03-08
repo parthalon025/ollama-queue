@@ -41,6 +41,7 @@ _hop_by_hop = frozenset(
 from ollama_queue.burst import _default_detector as _burst_detector
 from ollama_queue.db import DEFAULTS, Database
 from ollama_queue.estimator import DurationEstimator
+from ollama_queue.intercept import disable_intercept, enable_intercept, get_intercept_status
 from ollama_queue.models import OllamaModels
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
@@ -2191,6 +2192,34 @@ def create_app(db: Database) -> FastAPI:
         _threading_jr.Thread(target=_run_judge_in_background, daemon=True).start()
 
         return JSONResponse(content={"run_id": new_run_id}, status_code=201)
+
+    # --- Intercept mode endpoints ---
+
+    @app.post("/api/consumers/intercept/enable")
+    def intercept_enable():
+        import platform as _plat
+
+        if _plat.system() != "Linux":
+            raise HTTPException(status_code=422, detail="iptables intercept is Linux-only")
+        uid = os.getuid()
+        result = enable_intercept(uid=uid, queue_port=7683)
+        if not result.get("enabled"):
+            raise HTTPException(status_code=422, detail=result.get("error", "iptables failed"))
+        db.set_setting("intercept_mode_enabled", "1")
+        db.set_setting("intercept_mode_uid", str(uid))
+        return result
+
+    @app.post("/api/consumers/intercept/disable")
+    def intercept_disable():
+        uid = int(db.get_setting("intercept_mode_uid") or os.getuid())
+        result = disable_intercept(uid=uid, queue_port=7683)
+        db.set_setting("intercept_mode_enabled", "0")
+        return result
+
+    @app.get("/api/consumers/intercept/status")
+    def intercept_status():
+        uid = int(db.get_setting("intercept_mode_uid") or os.getuid())
+        return get_intercept_status(uid=uid, queue_port=7683)
 
     # --- Static files for SPA ---
     spa_dir = Path(__file__).parent / "dashboard" / "spa" / "dist"
