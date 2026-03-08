@@ -149,7 +149,21 @@ function groupNextDue(groupJobs) {
 
 // --- Table layout ---
 
-const COLUMNS = ['Name', 'Model', 'GPU Mem', 'Repeats', 'Priority', 'Due In', 'Est. Time', '\u2713', 'Limit', '\u{1F4CC}', 'On', ''];
+const COLUMN_DEFS = [
+    { label: 'Name',      title: 'Job name — set when the recurring job was created' },
+    { label: 'Model',     title: 'Ollama model this job uses (overrides the system default)' },
+    { label: 'GPU Mem',   title: 'Memory profile: light · standard · heavy. Heavy needs ≥16GB VRAM and cannot overlap another heavy job' },
+    { label: 'Repeats',   title: 'How often this job runs — interval (e.g. 4h) or cron expression' },
+    { label: 'Priority',  title: '1=highest, 10=lowest. Lower number dequeues first when multiple jobs are waiting' },
+    { label: 'Due In',    title: 'Time until the next scheduled run' },
+    { label: 'Est. Time', title: 'Estimated run duration based on recent run history' },
+    { label: '\u2713',    title: 'Number of completed successful runs' },
+    { label: 'Limit',     title: 'Max retry attempts before the job is moved to the Dead Letter Queue (DLQ)' },
+    { label: '\u{1F4CC}', title: "Pinned slot — the rebalancer will not move this job's scheduled run time" },
+    { label: 'On',        title: 'Enable or disable this recurring job' },
+    { label: '',          title: undefined },
+];
+const COLUMNS = COLUMN_DEFS.map(d => d.label);
 const COL_COUNT = COLUMNS.length;
 
 const STATUS_COLORS = {
@@ -1093,9 +1107,9 @@ export default function Plan() {
                                 <thead>
                                     <tr style={{ borderBottom: '1px solid var(--border-subtle)',
                                                  background: 'var(--bg-surface-raised)' }}>
-                                        {COLUMNS.map(col => (
-                                            <th key={col} style={{
-                                                textAlign: col === 'Name' ? 'left' : 'center',
+                                        {COLUMN_DEFS.map(({ label, title }) => (
+                                            <th key={label || 'actions'} title={title} style={{
+                                                textAlign: label === 'Name' ? 'left' : 'center',
                                                 padding: '0.5rem 0.75rem',
                                                 fontSize: 'var(--type-label)',
                                                 color: 'var(--text-secondary)',
@@ -1104,11 +1118,12 @@ export default function Plan() {
                                                 letterSpacing: '0.05em',
                                                 fontFamily: 'var(--font-mono)',
                                                 whiteSpace: 'nowrap',
-                                                ...(col === 'Name' ? {
+                                                cursor: title ? 'help' : undefined,
+                                                ...(label === 'Name' ? {
                                                     position: 'sticky', left: 0,
                                                     background: 'var(--bg-surface-raised)', zIndex: 1,
                                                 } : {}),
-                                            }}>{col}</th>
+                                            }}>{label}</th>
                                         ))}
                                     </tr>
                                 </thead>
