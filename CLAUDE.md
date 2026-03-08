@@ -131,6 +131,7 @@ This applies to: component files, store transformations in `store.js`, computed 
 ## Gotchas
 
 - **SPA dist/ is gitignored** — must `npm run build` after cloning
+- **Worktree + `expedition33-ui` `file:` dep** — `npm install` in a worktree creates a relative symlink for the `file:` local dep. The path is valid from the main repo depth but silently broken from `.worktrees/<branch>/`. Fix: `rm node_modules/expedition33-ui && ln -s /home/justin/Documents/projects/expedition33-ui node_modules/expedition33-ui` in the worktree's spa dir. Permanent fix: run this in `postinstall`. See global `~/CLAUDE.md` gotcha (Lesson #1461).
 - **check_same_thread=False** on SQLite — required for FastAPI worker threads, safe with WAL mode
 - **httpx** must be installed for API tests — `pip install httpx`
 - **Proxy endpoint uses sentinel job_id=-1** — `try_claim_for_proxy()` sets `current_job_id=-1` to distinguish proxy claims from real job execution. `release_proxy_claim()` only releases claims with `current_job_id=-1` to avoid accidentally releasing real jobs.
