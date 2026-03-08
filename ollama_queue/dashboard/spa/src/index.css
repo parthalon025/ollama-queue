@@ -911,6 +911,117 @@ body {
   width: 100%;
   box-sizing: border-box;
 }
+
+/* ── Model Select combo-box ─────────────────────────────────────────── */
+.model-select {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.model-select__input-wrap {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+}
+
+.model-select__chevron {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  transition: transform 0.15s ease;
+  line-height: 1;
+}
+
+.model-select__chevron--open {
+  transform: translateY(-50%) rotate(180deg);
+}
+
+.model-select__dropdown {
+  position: absolute;
+  top: calc(100% + 3px);
+  left: 0;
+  right: 0;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  max-height: 240px;
+  overflow-y: auto;
+  z-index: var(--z-dropdown);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.model-select__row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: var(--type-label);
+  color: var(--text-primary);
+  transition: background 0.1s;
+}
+
+.model-select__row:hover,
+.model-select__row--active {
+  background: var(--bg-surface-raised);
+}
+
+.model-select__name {
+  font-weight: 600;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-select__meta {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+  font-size: var(--type-label);
+}
+
+.model-select__dot {
+  font-size: 10px;
+}
+
+.model-select__dot--loaded {
+  color: var(--status-healthy);
+}
+
+.model-select__dot--unloaded {
+  color: var(--text-tertiary);
+}
+
+.model-select__badge {
+  font-size: 10px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--bg-surface-raised);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+}
+
+.model-select__empty,
+.model-select__loading {
+  padding: 8px 10px;
+  font-family: var(--font-mono);
+  font-size: var(--type-label);
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
 .eval-settings-error {
   color: var(--status-error);
   font-size: var(--type-label);

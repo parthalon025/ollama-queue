@@ -7,6 +7,7 @@ import { useState } from 'preact/hooks';
 
 import { evalSettings, saveEvalSettings } from '../../store.js';
 import { EVAL_TRANSLATIONS } from './translations.js';
+import ModelSelect from '../ModelSelect.jsx';
 
 export default function JudgeDefaultsForm() {
   // Read .value at top of body to subscribe to signal changes
@@ -64,12 +65,13 @@ export default function JudgeDefaultsForm() {
             <span class="eval-tooltip-trigger" title={T.judge_model.tooltip} aria-label={T.judge_model.tooltip}> ?</span>
           )}
         </span>
-        <input
-          class="t-input eval-settings-input"
-          type="text"
+        <ModelSelect
           value={judgeModel}
-          onInput={evt => setJudgeModel(evt.currentTarget.value)}
+          onChange={val => setJudgeModel(val)}
+          backend={judgeBackend}
           placeholder="deepseek-r1:8b"
+          class="eval-settings-input"
+          disabled={saving}
         />
       </label>
 

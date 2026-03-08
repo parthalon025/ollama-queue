@@ -4,6 +4,7 @@ import { signal } from '@preact/signals';
 import { API, evalTemplates, fetchEvalVariants } from '../../store.js';
 import { EVAL_TRANSLATIONS } from './translations.js';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
+import ModelSelect from '../ModelSelect.jsx';
 // What it shows: Action toolbar for managing variant configs — create new,
 //   bulk-generate from installed models, export, and import.
 // Decision it drives: User quickly populates configs for all local models,
@@ -175,24 +176,34 @@ export default function VariantToolbar() {
             New configuration
           </div>
 
-          {[
-            { field: 'label', label: 'Name', placeholder: 'My custom config', type: 'text' },
-            { field: 'model', label: 'Model', placeholder: 'qwen3:14b', type: 'text' },
-          ].map(({ field, label, placeholder, type }) => (
-            <div key={field} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <label style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-secondary)', width: '70px', flexShrink: 0 }}>
-                {label}
-              </label>
-              <input
-                type={type}
-                class="t-input"
-                style={{ padding: '4px 8px', fontSize: 'var(--type-label)', flex: 1 }}
-                value={newVariant[field]}
-                onInput={e => handleNewFieldChange(field, e.target.value)}
-                placeholder={placeholder}
-              />
-            </div>
-          ))}
+          {/* Name field */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <label style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-secondary)', width: '70px', flexShrink: 0 }}>
+              Name
+            </label>
+            <input
+              type="text"
+              class="t-input"
+              style={{ padding: '4px 8px', fontSize: 'var(--type-label)', flex: 1 }}
+              value={newVariant.label}
+              onInput={e => handleNewFieldChange('label', e.target.value)}
+              placeholder="My custom config"
+            />
+          </div>
+
+          {/* Model field */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <label style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-secondary)', width: '70px', flexShrink: 0 }}>
+              Model
+            </label>
+            <ModelSelect
+              value={newVariant.model}
+              onChange={val => handleNewFieldChange('model', val)}
+              backend="ollama"
+              placeholder="qwen3:14b"
+              class="t-input"
+            />
+          </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <label style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-secondary)', width: '70px', flexShrink: 0 }}>

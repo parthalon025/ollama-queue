@@ -8,6 +8,7 @@ import { useState } from 'preact/hooks';
 
 import { evalSettings, saveEvalSettings } from '../../store.js';
 import { EVAL_TRANSLATIONS } from './translations.js';
+import ModelSelect from '../ModelSelect.jsx';
 
 const FIELD_DEFS = [
   {
@@ -104,6 +105,7 @@ export default function GeneralSettings() {
   const [saving,    setSaving]    = useState(false);
   const [saveError, setSaveError] = useState('');
   const [saveOk,    setSaveOk]    = useState(false);
+  const [analysisModel, setAnalysisModel] = useState(settings['eval.analysis_model'] ?? '');
 
   function handleChange(key, rawValue, def) {
     const parsed = def.parse(rawValue);
@@ -135,6 +137,7 @@ export default function GeneralSettings() {
       FIELD_DEFS.forEach(def => { payload[def.key] = values[def.key]; });
       TOGGLE_DEFS.forEach(def => { payload[def.key] = values[def.key]; });
       IMPROVEMENT_DEFS.forEach(def => { payload[def.key] = values[def.key]; });
+      payload['eval.analysis_model'] = analysisModel;
       await saveEvalSettings(payload);
       setSaveOk(true);
       setTimeout(() => setSaveOk(false), 2000);
@@ -229,6 +232,27 @@ export default function GeneralSettings() {
             </label>
           );
         })}
+      </div>
+
+      {/* Analysis model */}
+      <div style={{ marginTop: '1rem', borderTop: '1px solid var(--border-subtle)', paddingTop: '0.75rem' }}>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', marginBottom: '0.5rem' }}>
+          Analysis model
+        </div>
+        <label class="eval-settings-label">
+          <span>
+            Model
+            <span class="eval-tooltip-trigger" title="Model used to generate run analysis. Leave blank to use the judge model." aria-label="Model used to generate run analysis. Leave blank to use the judge model."> ?</span>
+          </span>
+          <ModelSelect
+            value={analysisModel}
+            onChange={val => setAnalysisModel(val)}
+            backend="ollama"
+            placeholder="Leave blank to use judge model"
+            class="eval-settings-input"
+            disabled={saving}
+          />
+        </label>
       </div>
 
       <div class="eval-settings-form__footer">
