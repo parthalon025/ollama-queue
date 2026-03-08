@@ -1200,3 +1200,8 @@ body {
 .eval-readiness--ready { background: var(--status-ok, #1a3a1a); color: var(--text-secondary); }
 .eval-readiness--needs_prime { background: var(--status-warn, #2a2010); color: var(--status-warn-text, #c8a040); }
 .eval-readiness--offline { background: var(--status-error-subtle, #2a1010); color: var(--status-error, #c84040); }
+
+@keyframes slideUp {
+    from { transform: translateY(100%); }
+    to   { transform: translateY(0); }
+}
