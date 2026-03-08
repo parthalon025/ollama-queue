@@ -9,6 +9,7 @@ import {
 import { EVAL_TRANSLATIONS } from './translations.js';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
 import SchedulingModeSelector from './SchedulingModeSelector.jsx';
+import ModelSelect from '../ModelSelect.jsx';
 // What it shows: Form to configure and start a new eval run.
 //   Fields: variant multi-select, items per group, scorer AI, scheduling mode,
 //   dry-run toggle, and [Start Run] button.
@@ -265,13 +266,12 @@ export default function RunTriggerPanel({ defaultCollapsed }) {
             <label style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
               {EVAL_TRANSLATIONS.judge_model.label}
             </label>
-            <input
-              type="text"
+            <ModelSelect
               value={judgeModel}
-              onInput={e => setJudgeModel(e.target.value)}
-              class="t-input"
-              style={{ padding: '4px 8px', fontSize: 'var(--type-label)', flex: 1 }}
+              onChange={val => setJudgeModel(val)}
+              backend={evalSettings.value['eval.judge_backend'] ?? 'ollama'}
               placeholder="deepseek-r1:8b"
+              class="t-input"
             />
             <button
               type="button"
