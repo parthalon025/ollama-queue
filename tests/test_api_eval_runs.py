@@ -6,6 +6,7 @@ Covers: GET/POST /api/eval/runs, GET/DELETE /api/eval/runs/{id},
 """
 
 import json
+import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -463,16 +464,28 @@ def test_judge_rerun_creates_new_run(client_and_db):
 
 
 def test_judge_rerun_new_run_status_is_judging(client_and_db):
-    """New run created by judge-rerun starts with status='judging'."""
+    """New run created by judge-rerun starts with status='judging'.
+
+    Uses a gated mock to prevent the background judge thread from completing
+    before the GET fires — avoids a race where status flips to 'complete'
+    before the assertion runs (flaky under xdist parallel execution).
+    """
     client, db = client_and_db
     run_id = _make_run(db, status="complete")
 
-    resp = client.post(f"/api/eval/runs/{run_id}/judge-rerun")
-    new_run_id = resp.json()["run_id"]
+    gate = threading.Event()
 
-    detail = client.get(f"/api/eval/runs/{new_run_id}")
-    assert detail.status_code == 200
-    assert detail.json()["status"] == "judging"
+    def _blocked_judge(*args, **kwargs):
+        gate.wait(timeout=5)  # Block until assertion is done
+
+    with patch("ollama_queue.eval_engine.run_eval_judge", side_effect=_blocked_judge):
+        resp = client.post(f"/api/eval/runs/{run_id}/judge-rerun")
+        new_run_id = resp.json()["run_id"]
+
+        detail = client.get(f"/api/eval/runs/{new_run_id}")
+        assert detail.status_code == 200
+        assert detail.json()["status"] == "judging"
+        gate.set()  # Release background thread before patch context exits
 
 
 def test_judge_rerun_copies_item_ids(client_and_db):
