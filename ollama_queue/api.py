@@ -43,6 +43,8 @@ from ollama_queue.db import DEFAULTS, Database
 from ollama_queue.estimator import DurationEstimator
 from ollama_queue.intercept import disable_intercept, enable_intercept, get_intercept_status
 from ollama_queue.models import OllamaModels
+from ollama_queue.patcher import check_health, patch_consumer, revert_consumer
+from ollama_queue.scanner import run_scan
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
 PROXY_WAIT_TIMEOUT = 300
@@ -136,6 +138,12 @@ class RecurringJobUpdate(BaseModel):
     check_command: str | None = None
     max_runs: int | None = None
     description: str | None = None
+
+
+class ConsumerIncludeRequest(BaseModel):
+    restart_policy: str = "deferred"
+    force_streaming_override: bool = False
+    system_confirm: bool = False
 
 
 _JOB_DESCRIPTION_CONTEXT = (
@@ -2192,6 +2200,93 @@ def create_app(db: Database) -> FastAPI:
         _threading_jr.Thread(target=_run_judge_in_background, daemon=True).start()
 
         return JSONResponse(content={"run_id": new_run_id}, status_code=201)
+
+    # --- Consumer CRUD endpoints ---
+
+    @app.get("/api/consumers")
+    def list_consumers():
+        return db.list_consumers()
+
+    @app.post("/api/consumers/scan")
+    def scan_consumers():
+        return run_scan(db)
+
+    @app.post("/api/consumers/{consumer_id}/include")
+    def include_consumer(consumer_id: int, body: ConsumerIncludeRequest):
+        import threading as _threading
+        import time as _time
+
+        consumer = db.get_consumer(consumer_id)
+        if not consumer:
+            raise HTTPException(status_code=404, detail="Consumer not found")
+
+        if consumer.get("is_managed_job"):
+            raise HTTPException(
+                status_code=409,
+                detail="Managed queue job — including would cause a deadlock (Lesson #1733)",
+            )
+
+        if consumer.get("platform") == "windows":
+            raise HTTPException(
+                status_code=422,
+                detail="Auto-patch not supported on Windows. Use the generated snippet.",
+            )
+
+        if consumer.get("streaming_confirmed") and not body.force_streaming_override:
+            raise HTTPException(
+                status_code=422,
+                detail="Streaming detected. Proxy forces stream=False. Send force_streaming_override=true to confirm.",
+            )
+
+        patch_path = consumer.get("patch_path", "")
+        if patch_path.startswith("/etc/systemd/system") and not body.system_confirm:
+            raise HTTPException(
+                status_code=422,
+                detail="System path requires explicit confirmation. Send system_confirm=true.",
+            )
+
+        result = patch_consumer({**consumer, "restart_policy": body.restart_policy})
+        db.update_consumer(
+            consumer_id,
+            status=result.get("status", "patched"),
+            patch_applied=1 if result.get("patch_applied") else 0,
+            patch_type=result.get("patch_type"),
+            patch_snippet=result.get("patch_snippet"),
+            onboarded_at=int(_time.time()),
+        )
+
+        if result.get("status") == "patched":
+            _threading.Thread(
+                target=check_health,
+                args=({**consumer, "id": consumer_id}, db),
+                daemon=True,
+            ).start()
+
+        return db.get_consumer(consumer_id)
+
+    @app.post("/api/consumers/{consumer_id}/ignore")
+    def ignore_consumer(consumer_id: int):
+        consumer = db.get_consumer(consumer_id)
+        if not consumer:
+            raise HTTPException(status_code=404, detail="Consumer not found")
+        db.update_consumer(consumer_id, status="ignored")
+        return db.get_consumer(consumer_id)
+
+    @app.post("/api/consumers/{consumer_id}/revert")
+    def revert_consumer_endpoint(consumer_id: int):
+        consumer = db.get_consumer(consumer_id)
+        if not consumer:
+            raise HTTPException(status_code=404, detail="Consumer not found")
+        revert_consumer(consumer)
+        db.update_consumer(consumer_id, status="discovered", patch_applied=0, health_status="unknown")
+        return db.get_consumer(consumer_id)
+
+    @app.get("/api/consumers/{consumer_id}/health")
+    def consumer_health(consumer_id: int):
+        consumer = db.get_consumer(consumer_id)
+        if not consumer:
+            raise HTTPException(status_code=404, detail="Consumer not found")
+        return check_health(consumer, db)
 
     # --- Intercept mode endpoints ---
 
