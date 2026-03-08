@@ -277,3 +277,186 @@ Status: "Manual — unverifiable" (no health check possible)
 - Lesson #1733: deadlock — queue job calling back through proxy
 - Existing proxy guard: `api.py:370-466` `_proxy_ollama_request()`
 - Existing pattern: `useActionFeedback` hook, `src/hooks/useActionFeedback.js`
+
+---
+
+## Extension: Streaming Proxy Passthrough + iptables Intercept Mode
+
+*Added 2026-03-08 — research: `docs/plans/2026-03-08-mitm-proxy-research.md`*
+
+### Why this changes the design
+
+The original design treated streaming consumers as an exclusion class — warn, require override, accept breakage. The research showed that FastAPI `StreamingResponse` + `httpx` streaming makes transparent NDJSON passthrough straightforward. With streaming solved, two things change:
+
+1. **`streaming_confirmed` becomes informational only** — no longer a hard block. Include proceeds normally; the streaming path is now supported.
+2. **iptables intercept mode becomes viable** — previously rejected because stream=False would silently break all streaming consumers. With passthrough working, a system-wide redirect is safe.
+
+---
+
+### Ollama Wire Format (from research)
+
+Pure **NDJSON** — not SSE. Each chunk is a complete JSON object followed by `\n`.
+
+```json
+{"model":"llama3.2","response":"The","done":false}
+{"model":"llama3.2","response":"","done":true,"eval_count":259,...}
+```
+
+No special headers required. `Content-Type: application/json` throughout. The `done=true` final chunk is the hook point for post-completion actions (timing, metrics, queue release).
+
+---
+
+### Streaming Proxy Implementation
+
+Replace the current `stream=False` forced proxy with:
+
+```python
+# In _proxy_ollama_request() — api.py
+from starlette.responses import StreamingResponse
+from starlette.background import BackgroundTask
+
+async def _iter_ndjson(rp_resp):
+    """Buffer aiter_raw() output and yield complete NDJSON lines.
+    
+    aiter_raw() chunks are NOT line-aligned — one yield may span multiple
+    JSON objects or cut mid-object. Must buffer and split on newline.
+    """
+    buffer = b""
+    async for raw in rp_resp.aiter_raw():
+        buffer += raw
+        while b"\n" in buffer:
+            line, buffer = buffer.split(b"\n", 1)
+            if line.strip():
+                yield line + b"\n"
+    if buffer.strip():
+        yield buffer  # flush any partial final chunk
+
+# In endpoint:
+if body.get("stream", False):
+    _client = httpx.AsyncClient(base_url=OLLAMA_URL, timeout=None)  # timeout=None for long inference
+    rp_req = _client.build_request("POST", path, json=body,
+                                    headers=_strip_hop_by_hop(request.headers))
+    rp_resp = await _client.send(rp_req, stream=True)
+    # Release proxy claim on final done=true chunk, not on response start
+    return StreamingResponse(
+        _iter_ndjson_with_release(rp_resp, db, consumer_id),
+        media_type="application/x-ndjson",
+        background=BackgroundTask(rp_resp.aclose),
+    )
+```
+
+**Hop-by-hop headers to strip** before forwarding (prevents proxy chain corruption):
+`connection`, `keep-alive`, `transfer-encoding`, `te`, `trailer`, `upgrade`
+
+**Proxy claim release timing:** For streaming responses, release the proxy claim when the `done=true` chunk is seen inside `_iter_ndjson_with_release`, not when the response starts. This correctly holds the queue slot for the full inference duration.
+
+---
+
+### iptables Intercept Mode
+
+**When to offer:** After at least one consumer is included via env-var patching. Intercept mode catches anything env-var patching can't reach (hardcoded URLs, third-party libs).
+
+**Rule:**
+```bash
+# Redirect all :11434 OUTPUT traffic to :7683,
+# EXCEPT traffic from the queue process itself (prevents infinite loop)
+iptables -t nat -A OUTPUT \
+  -p tcp \
+  --dport 11434 \
+  -m owner ! --uid-owner $(id -u) \
+  -j REDIRECT --to-port 7683
+
+# Persist across reboots
+iptables-save | sudo tee /etc/iptables/rules.v4
+```
+
+**Why `$(id -u)` not a hardcoded username:** ollama-queue runs as the current user. Using the UID directly avoids username resolution failures and works in containers.
+
+**REDIRECT vs TPROXY:** TPROXY preserves original destination IP — only needed for remote-origin traffic. REDIRECT is sufficient and simpler for localhost-only interception.
+
+**Ubuntu 24.04 note:** `iptables` is backed by the nftables kernel via `iptables-nft` shim — no conflict. Use `iptables` commands; nft syntax equivalent is `meta skuid !=` in the OUTPUT chain.
+
+**Teardown:**
+```bash
+iptables -t nat -D OUTPUT -p tcp --dport 11434 \
+  -m owner ! --uid-owner $(id -u) -j REDIRECT --to-port 7683
+```
+
+---
+
+### Updated Data Model
+
+Add two fields to `consumers` table:
+
+```sql
+-- Added for iptables intercept mode
+intercept_mode_active INTEGER DEFAULT 0,  -- system-wide iptables rule active
+intercept_mode_uid    INTEGER,             -- UID used in the --uid-owner rule
+```
+
+Add `daemon_state` entry for global intercept flag:
+
+```sql
+-- In settings table (or daemon_state):
+intercept_mode_enabled INTEGER DEFAULT 0
+```
+
+---
+
+### Updated API
+
+```
+POST /api/consumers/intercept/enable
+  Guard: Linux only (422 on other platforms)
+  Guard: at least one consumer included (422 if none — partial intercept has no value)
+  Guard: requires root OR CAP_NET_ADMIN (422 with message if unavailable)
+  Action: runs iptables rule, persists uid, sets intercept_mode_enabled=1
+
+POST /api/consumers/intercept/disable
+  Action: removes iptables rule, sets intercept_mode_enabled=0
+
+GET /api/consumers/intercept/status
+  Returns: { enabled: bool, uid: int, rule_present: bool }
+  Note: verifies rule is actually present in iptables (not just DB flag)
+```
+
+---
+
+### Updated SPA
+
+Add intercept mode banner to Consumers tab:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Intercept Mode                                              │
+│ Redirect ALL :11434 traffic through queue — catches         │
+│ hardcoded URLs that env-var patching can't reach.           │
+│                                                             │
+│ [Enable intercept mode]  Status: ● Disabled                 │
+│ ⓘ Requires sudo. Linux only. Streaming is fully supported.  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+Show `● Active — X connections intercepted` when enabled (derived from `request_count` with `source="proxy"` after enable).
+
+---
+
+### Updated Risk Register
+
+| Risk | Updated Status |
+|------|---------------|
+| Streaming forced False | ✅ RESOLVED — StreamingResponse passthrough implemented |
+| Hardcoded URLs bypass env-var | ✅ RESOLVED — iptables intercept mode catches these |
+| iptables breaks streaming | ✅ RESOLVED — streaming passthrough makes iptables safe |
+| Streaming detection hard-blocks | ✅ DOWNGRADED — now informational badge only |
+| Deadlock | ⛔ UNCHANGED — hard block, no override |
+| Service restart on patch | ⚠ UNCHANGED — deferred/immediate policy |
+| Cross-platform | ⚠ UNCHANGED — iptables is Linux-only (Windows stays detect+snippet) |
+
+---
+
+### Reference (additions)
+
+- Research: `docs/plans/2026-03-08-mitm-proxy-research.md`
+- FastAPI streaming proxy pattern: `httpx.AsyncClient.send(..., stream=True)` + `aiter_raw()` + line buffer
+- iptables REDIRECT: OUTPUT chain + `--uid-owner` exclusion (not TPROXY — overkill for localhost)

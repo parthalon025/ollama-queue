@@ -4,11 +4,564 @@
 
 **Goal:** Detect services calling Ollama on port 11434, surface them in a new SPA Consumers tab, and auto-patch included consumers to route through the queue proxy on port 7683.
 
-**Architecture:** Scanner (4-phase: live/static/stream/deadlock) writes to a `consumers` DB table. Patcher injects `OLLAMA_HOST=localhost:7683` into systemd units, .env, or config files — always backing up first. API exposes CRUD + health validation. SPA adds a sixth "Consumers" tab with include/ignore per row and a first-run wizard.
+**Architecture:** Scanner (4-phase: live/static/stream/deadlock) writes to a `consumers` DB table. Patcher injects `OLLAMA_HOST=localhost:7683` into systemd units, .env, or config files — always backing up first. Proxy supports full streaming passthrough via `StreamingResponse` + `aiter_raw()` line buffering. Optional iptables intercept mode catches hardcoded URLs. API exposes CRUD + health validation + intercept control. SPA adds a sixth "Consumers" tab with include/ignore per row, a first-run wizard, and intercept mode toggle.
 
-**Tech Stack:** Python (subprocess, sqlite3, ruamel.yaml, tomlkit), FastAPI/Pydantic, Preact + @preact/signals, existing `useActionFeedback` hook.
+**Tech Stack:** Python (subprocess, sqlite3, ruamel.yaml, tomlkit, httpx streaming), FastAPI/Pydantic, Preact + @preact/signals, existing `useActionFeedback` hook.
 
 **Design doc:** `docs/plans/2026-03-08-consumer-detection-design.md`
+
+---
+
+## Batch 0: Streaming Proxy Passthrough
+
+*Must run before Batch 1. Unblocks streaming consumers and makes iptables intercept safe.*
+
+### Task 0: Fix proxy to support stream=True passthrough
+
+**Files:**
+- Modify: `ollama_queue/api.py` (find `_proxy_ollama_request` ~line 370)
+- Modify: `tests/test_proxy.py`
+- Modify: `tests/test_embed_proxy.py`
+
+**Step 1: Write the failing tests**
+
+```python
+# append to tests/test_proxy.py
+import json
+
+def test_generate_proxy_streams_ndjson_when_stream_true(client):
+    """stream=True returns chunked NDJSON, not a single JSON blob."""
+    chunks = [
+        json.dumps({"response": "He", "done": False}).encode() + b"\n",
+        json.dumps({"response": "llo", "done": True, "eval_count": 5}).encode() + b"\n",
+    ]
+
+    async def fake_aiter_raw():
+        for chunk in chunks:
+            yield chunk
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.aiter_raw = fake_aiter_raw
+    mock_resp.aclose = AsyncMock()
+
+    with patch("ollama_queue.api.httpx.AsyncClient") as mock_cls:
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.send = AsyncMock(return_value=mock_resp)
+        mock_cls.return_value = mock_client
+
+        resp = client.post(
+            "/api/generate",
+            json={"model": "llama3.2:3b", "prompt": "hello", "stream": True},
+        )
+
+    assert resp.status_code == 200
+    lines = [l for l in resp.content.split(b"\n") if l.strip()]
+    assert len(lines) == 2
+    assert json.loads(lines[0])["done"] is False
+    assert json.loads(lines[1])["done"] is True
+
+def test_generate_proxy_buffers_misaligned_chunks(client):
+    """aiter_raw chunks that split across JSON lines are reassembled correctly."""
+    full = json.dumps({"response": "ok", "done": True}).encode() + b"\n"
+    # Split arbitrarily mid-object
+    part1, part2 = full[:10], full[10:]
+
+    async def fake_aiter_raw():
+        yield part1
+        yield part2
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.aiter_raw = fake_aiter_raw
+    mock_resp.aclose = AsyncMock()
+
+    with patch("ollama_queue.api.httpx.AsyncClient") as mock_cls:
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.send = AsyncMock(return_value=mock_resp)
+        mock_cls.return_value = mock_client
+
+        resp = client.post(
+            "/api/generate",
+            json={"model": "llama3.2:3b", "prompt": "hi", "stream": True},
+        )
+
+    lines = [l for l in resp.content.split(b"\n") if l.strip()]
+    assert len(lines) == 1
+    assert json.loads(lines[0])["done"] is True
+
+def test_generate_proxy_non_stream_unchanged(client):
+    """stream=False (or absent) still returns a single JSON response as before."""
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"response": "Hello!", "done": True}
+    mock_response.raise_for_status = MagicMock()
+
+    with patch("ollama_queue.api.httpx.AsyncClient") as mock_cls:
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.post = AsyncMock(return_value=mock_response)
+        mock_cls.return_value = mock_client
+
+        resp = client.post("/api/generate",
+                           json={"model": "llama3.2:3b", "prompt": "hello"})
+
+    assert resp.status_code == 200
+    assert resp.json()["response"] == "Hello!"
+```
+
+**Step 2: Run to verify fails**
+
+```bash
+python3 -m pytest tests/test_proxy.py::test_generate_proxy_streams_ndjson_when_stream_true -v
+```
+Expected: FAIL
+
+**Step 3: Update `_proxy_ollama_request` in `api.py`**
+
+Add helper above `_proxy_ollama_request`:
+
+```python
+_HOP_BY_HOP = frozenset([
+    "connection", "keep-alive", "transfer-encoding",
+    "te", "trailer", "upgrade",
+])
+
+async def _iter_ndjson(rp_resp, release_fn=None):
+    """Yield complete NDJSON lines from a streaming httpx response.
+
+    Buffers aiter_raw() output — chunks are NOT guaranteed line-aligned.
+    Calls release_fn() when done=true final chunk is seen (releases proxy claim).
+    """
+    buffer = b""
+    try:
+        async for raw in rp_resp.aiter_raw():
+            buffer += raw
+            while b"\n" in buffer:
+                line, buffer = buffer.split(b"\n", 1)
+                line = line.strip()
+                if not line:
+                    continue
+                yield line + b"\n"
+                try:
+                    if json.loads(line).get("done"):
+                        if release_fn:
+                            release_fn()
+                            release_fn = None  # only release once
+                except (json.JSONDecodeError, AttributeError):
+                    pass
+        if buffer.strip():
+            yield buffer
+    finally:
+        if release_fn:
+            release_fn()  # always release on exit even if done=true never seen
+```
+
+In `_proxy_ollama_request` (or the `/api/generate` endpoint directly), add streaming branch **before** the existing non-streaming path:
+
+```python
+# Detect streaming request
+is_streaming = body.get("stream", False)
+# Force stream=False for non-streaming path (existing behaviour preserved)
+if not is_streaming:
+    body["stream"] = False
+
+# ... existing priority/source/timeout extraction ...
+
+if is_streaming:
+    # Streaming path: hold proxy claim for full inference duration
+    async_client = httpx.AsyncClient(
+        base_url=f"http://127.0.0.1:{OLLAMA_PORT}",
+        timeout=httpx.Timeout(None),  # no timeout — inference can take minutes
+        limits=httpx.Limits(max_connections=100),
+    )
+    fwd_headers = {
+        k: v for k, v in request.headers.items()
+        if k.lower() not in _HOP_BY_HOP
+    }
+    rp_req = async_client.build_request("POST", request.url.path,
+                                         json=body, headers=fwd_headers)
+    rp_resp = await async_client.send(rp_req, stream=True)
+
+    def _release():
+        db.release_proxy_claim()
+
+    return StreamingResponse(
+        _iter_ndjson(rp_resp, release_fn=_release),
+        status_code=rp_resp.status_code,
+        media_type="application/x-ndjson",
+        background=BackgroundTask(rp_resp.aclose),
+    )
+
+# Non-streaming path continues as before...
+```
+
+Add imports at top of `api.py` if not present:
+```python
+import json
+from starlette.responses import StreamingResponse
+from starlette.background import BackgroundTask
+```
+
+**Step 4: Run proxy tests**
+
+```bash
+python3 -m pytest tests/test_proxy.py tests/test_embed_proxy.py -v
+```
+Expected: all PASS including 3 new streaming tests
+
+**Step 5: Run full suite**
+
+```bash
+python3 -m pytest --timeout=120 -x -q
+```
+Expected: all existing tests still pass
+
+**Step 6: Commit**
+
+```bash
+git add ollama_queue/api.py tests/test_proxy.py
+git commit -m "feat: proxy streaming passthrough — StreamingResponse + NDJSON line buffering"
+```
+
+---
+
+### Task 1 (Batch 0): iptables intercept mode — patcher + API
+
+**Files:**
+- Create: `ollama_queue/intercept.py`
+- Modify: `ollama_queue/api.py`
+- Create: `tests/test_intercept.py`
+
+**Step 1: Write the failing tests**
+
+```python
+# tests/test_intercept.py
+from unittest.mock import patch, MagicMock
+import pytest
+from ollama_queue.intercept import (
+    enable_intercept, disable_intercept, get_intercept_status,
+    _rule_present,
+)
+
+def test_enable_intercept_runs_iptables(monkeypatch):
+    with patch("ollama_queue.intercept.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0)
+        result = enable_intercept(uid=1000, queue_port=7683)
+    assert result["enabled"] is True
+    assert mock_run.called
+    cmd = " ".join(mock_run.call_args[0][0])
+    assert "11434" in cmd
+    assert "7683" in cmd
+    assert "uid-owner" in cmd
+
+def test_disable_intercept_removes_rule(monkeypatch):
+    with patch("ollama_queue.intercept.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0)
+        disable_intercept(uid=1000, queue_port=7683)
+    cmd = " ".join(mock_run.call_args[0][0])
+    assert "-D" in cmd  # DELETE not APPEND
+
+def test_rule_present_parses_iptables_output():
+    sample = (
+        "Chain OUTPUT (policy ACCEPT)\n"
+        "target  prot  opt  source  destination\n"
+        "REDIRECT tcp  --  anywhere  anywhere  tcp dpt:11434 owner UID match !1000 redir ports 7683\n"
+    )
+    with patch("ollama_queue.intercept.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout=sample)
+        assert _rule_present(uid=1000, queue_port=7683) is True
+
+def test_rule_not_present_when_absent():
+    with patch("ollama_queue.intercept.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout="Chain OUTPUT\n")
+        assert _rule_present(uid=1000, queue_port=7683) is False
+
+def test_enable_intercept_fails_on_non_linux():
+    with patch("ollama_queue.intercept.platform.system", return_value="Darwin"):
+        result = enable_intercept(uid=1000, queue_port=7683)
+    assert result["enabled"] is False
+    assert "linux" in result["error"].lower()
+```
+
+**Step 2: Run to verify fails**
+
+```bash
+python3 -m pytest tests/test_intercept.py -v
+```
+Expected: FAIL — module not found
+
+**Step 3: Create `ollama_queue/intercept.py`**
+
+```python
+"""iptables intercept mode — redirect :11434 → :7683 at the network layer."""
+
+from __future__ import annotations
+
+import logging
+import os
+import platform
+import subprocess
+
+_log = logging.getLogger(__name__)
+_OLLAMA_PORT = 11434
+
+
+def enable_intercept(uid: int, queue_port: int = 7683) -> dict:
+    """Add iptables REDIRECT rule. Returns status dict."""
+    if platform.system() != "Linux":
+        return {"enabled": False, "error": "iptables intercept is Linux-only"}
+
+    rule = _build_rule("-A", uid, queue_port)
+    try:
+        result = subprocess.run(
+            ["sudo", "iptables", "-t", "nat"] + rule,
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode != 0:
+            return {"enabled": False, "error": result.stderr.strip()}
+        _persist_rules()
+        return {"enabled": True, "uid": uid, "queue_port": queue_port}
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return {"enabled": False, "error": str(e)}
+
+
+def disable_intercept(uid: int, queue_port: int = 7683) -> dict:
+    """Remove iptables REDIRECT rule."""
+    if platform.system() != "Linux":
+        return {"enabled": False, "error": "Linux-only"}
+
+    rule = _build_rule("-D", uid, queue_port)
+    try:
+        subprocess.run(
+            ["sudo", "iptables", "-t", "nat"] + rule,
+            capture_output=True, timeout=10,
+        )
+        return {"enabled": False}
+    except Exception as e:
+        _log.warning("disable_intercept failed: %s", e)
+        return {"enabled": False, "error": str(e)}
+
+
+def get_intercept_status(uid: int, queue_port: int = 7683) -> dict:
+    """Return current intercept status — verifies iptables, not just DB flag."""
+    present = _rule_present(uid, queue_port)
+    return {"enabled": present, "uid": uid, "rule_present": present}
+
+
+def _rule_present(uid: int, queue_port: int) -> bool:
+    """Check if our redirect rule exists in iptables OUTPUT chain."""
+    try:
+        result = subprocess.run(
+            ["sudo", "iptables", "-t", "nat", "-L", "OUTPUT", "-n", "--line-numbers"],
+            capture_output=True, text=True, timeout=5,
+        )
+        return str(queue_port) in result.stdout and str(uid) in result.stdout
+    except Exception:
+        return False
+
+
+def _build_rule(action: str, uid: int, queue_port: int) -> list[str]:
+    return [
+        action, "OUTPUT",
+        "-p", "tcp",
+        "--dport", str(_OLLAMA_PORT),
+        "-m", "owner", "!", "--uid-owner", str(uid),
+        "-j", "REDIRECT", "--to-port", str(queue_port),
+    ]
+
+
+def _persist_rules() -> None:
+    """Save iptables rules so they survive reboot (best-effort)."""
+    try:
+        result = subprocess.run(["sudo", "iptables-save"],
+                                 capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            with open("/etc/iptables/rules.v4", "w") as f:
+                f.write(result.stdout)
+    except Exception:
+        _log.debug("iptables-save failed — rules will not persist across reboot")
+```
+
+**Step 4: Add API endpoints to `api.py`**
+
+```python
+from ollama_queue.intercept import enable_intercept, disable_intercept, get_intercept_status
+
+@app.post("/api/consumers/intercept/enable")
+def intercept_enable():
+    import platform as _plat
+    if _plat.system() != "Linux":
+        raise HTTPException(status_code=422, detail="iptables intercept is Linux-only")
+    included = [c for c in db.list_consumers() if c.get("status") in ("included", "patched")]
+    if not included:
+        raise HTTPException(status_code=422,
+            detail="Include at least one consumer before enabling intercept mode")
+    uid = os.getuid()
+    result = enable_intercept(uid=uid, queue_port=7683)
+    if not result.get("enabled"):
+        raise HTTPException(status_code=422, detail=result.get("error", "iptables failed"))
+    db.set_setting("intercept_mode_enabled", "1")
+    db.set_setting("intercept_mode_uid", str(uid))
+    return result
+
+
+@app.post("/api/consumers/intercept/disable")
+def intercept_disable():
+    uid = int(db.get_setting("intercept_mode_uid") or os.getuid())
+    result = disable_intercept(uid=uid, queue_port=7683)
+    db.set_setting("intercept_mode_enabled", "0")
+    return result
+
+
+@app.get("/api/consumers/intercept/status")
+def intercept_status():
+    uid = int(db.get_setting("intercept_mode_uid") or os.getuid())
+    return get_intercept_status(uid=uid, queue_port=7683)
+```
+
+**Step 5: Run all tests**
+
+```bash
+python3 -m pytest tests/test_intercept.py tests/test_consumers_api.py -v
+python3 -m pytest --timeout=120 -x -q
+```
+Expected: all PASS
+
+**Step 6: Commit**
+
+```bash
+git add ollama_queue/intercept.py ollama_queue/api.py tests/test_intercept.py
+git commit -m "feat: iptables intercept mode — transparent :11434→:7683 redirect"
+```
+
+---
+
+### Task 2 (Batch 0): Intercept mode SPA banner
+
+**Files:**
+- Modify: `src/pages/Consumers.jsx`
+- Modify: `src/store.js`
+- Modify: `src/index.css`
+
+**Step 1: Add to `store.js`**
+
+```javascript
+export const interceptStatus = signal({ enabled: false, rule_present: false });
+
+export async function fetchInterceptStatus() {
+  try {
+    const res = await fetch(`${API}/consumers/intercept/status`);
+    if (res.ok) interceptStatus.value = await res.json();
+  } catch (e) { console.error('fetchInterceptStatus failed:', e); }
+}
+
+export async function enableIntercept() {
+  const res = await fetch(`${API}/consumers/intercept/enable`, { method: 'POST' });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  await fetchInterceptStatus();
+  return res.json();
+}
+
+export async function disableIntercept() {
+  const res = await fetch(`${API}/consumers/intercept/disable`, { method: 'POST' });
+  if (res.ok) await fetchInterceptStatus();
+}
+```
+
+**Step 2: Add InterceptBanner component to `Consumers.jsx`**
+
+```jsx
+// What it shows: System-wide iptables intercept mode status + enable/disable toggle.
+// Decision it drives: Lets user activate comprehensive Ollama MITM that catches
+//   hardcoded URLs env-var patching can't reach.
+import { fetchInterceptStatus, interceptStatus,
+         enableIntercept, disableIntercept } from '../store.js';
+
+function InterceptBanner() {
+  const [fb, run] = useActionFeedback();
+  const status = interceptStatus.value;
+
+  useEffect(() => { fetchInterceptStatus(); }, []);
+
+  return (
+    <div class={`intercept-banner ${status.enabled ? 'intercept-banner--active' : ''}`}>
+      <div class="intercept-banner__info">
+        <strong>Intercept Mode</strong>
+        <span>Redirect ALL :11434 traffic through queue — catches hardcoded URLs
+          that env-var patching can't reach. Streaming fully supported.</span>
+        <span class="intercept-badge">
+          {status.enabled ? '● Active' : '○ Disabled'}
+          {status.enabled && !status.rule_present && ' ⚠ Rule missing — re-enable'}
+        </span>
+      </div>
+      <div class="intercept-banner__action">
+        {status.enabled ? (
+          <button
+            class={`action-fb--${fb.phase}`}
+            onClick={() => run('Disabling…', disableIntercept, 'Intercept disabled')}
+            disabled={fb.phase === 'loading'}
+          >
+            {fb.phase === 'loading' ? fb.msg : 'Disable intercept'}
+          </button>
+        ) : (
+          <button
+            class={`action-fb--${fb.phase}`}
+            onClick={() => run('Enabling…', enableIntercept, 'Intercept active')}
+            disabled={fb.phase === 'loading'}
+          >
+            {fb.phase === 'loading' ? fb.msg : 'Enable intercept mode'}
+          </button>
+        )}
+        {fb.phase === 'error' && <span class="action-fb--error">{fb.msg}</span>}
+        <small>⓪ Requires sudo · Linux only</small>
+      </div>
+    </div>
+  );
+}
+```
+
+Add `<InterceptBanner />` to `Consumers.jsx` below the wizard banner.
+
+**Step 3: Add CSS**
+
+```css
+.intercept-banner {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 0.75rem 1rem; margin-bottom: 1rem;
+  border: 1px solid var(--color-border, #dee2e6); border-radius: 4px;
+  background: var(--color-surface, #f8f9fa);
+}
+.intercept-banner--active {
+  border-color: var(--color-success, #198754);
+  background: var(--color-success-bg, #d1e7dd);
+}
+.intercept-banner__info { display: flex; flex-direction: column; gap: 0.25rem; }
+.intercept-banner__action { display: flex; flex-direction: column; align-items: flex-end; gap: 0.25rem; }
+.intercept-badge { font-weight: 600; }
+```
+
+**Step 4: Build and verify**
+
+```bash
+npm run build 2>&1 | tail -5
+python3 -m pytest --timeout=120 -x -q
+```
+
+**Step 5: Commit**
+
+```bash
+git add src/pages/Consumers.jsx src/store.js src/index.css
+git commit -m "feat: intercept mode SPA banner with enable/disable toggle"
+```
 
 ---
 
