@@ -1590,6 +1590,7 @@ def _judge_one_target(
         source_item_id=source_item_id,
         target_item_id=str(target["id"]),
         is_same_cluster=1 if is_same else 0,
+        target_cluster_id=str(target.get("cluster_id") or target.get("cluster_seed") or ""),
         row_type="judge",
         principle=principle,
         judge_reasoning=scores.get("judge_reasoning"),

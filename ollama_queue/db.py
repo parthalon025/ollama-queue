@@ -139,6 +139,7 @@ class Database:
         self._add_column_if_missing(conn, "eval_runs", "data_source_token", "TEXT")
         self._add_column_if_missing(conn, "eval_runs", "analysis_md", "TEXT")
         self._add_column_if_missing(conn, "eval_prompt_templates", "is_contrastive", "INTEGER DEFAULT 0")
+        self._add_column_if_missing(conn, "eval_results", "target_cluster_id", "TEXT")
 
     def initialize(self) -> None:
         """Create all tables and seed defaults."""
@@ -353,6 +354,7 @@ class Database:
                 judge_reasoning          TEXT,
                 target_item_id           TEXT NOT NULL,
                 is_same_cluster          INTEGER NOT NULL,
+                target_cluster_id        TEXT,
                 row_type                 TEXT NOT NULL DEFAULT 'judge',
                 score_transfer           INTEGER,
                 score_precision          INTEGER,
