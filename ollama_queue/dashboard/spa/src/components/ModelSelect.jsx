@@ -1,4 +1,3 @@
-import { h } from 'preact';
 import { useState, useEffect, useRef } from 'preact/hooks';
 // What it shows: A combo-box for picking an LLM model name — shows installed
 //   Ollama models (or a curated OpenAI list) with size, loaded status, and
@@ -28,6 +27,7 @@ function formatBytes(bytes) {
 export default function ModelSelect({ value, onChange, backend = 'ollama', placeholder, class: extraClass, disabled }) {
   const [open, setOpen]           = useState(false);
   const [activeIdx, setActiveIdx] = useState(-1);
+  const [loading, setLoading]     = useState(false);
   const wrapRef  = useRef(null);
   const inputRef = useRef(null);
 
@@ -36,8 +36,9 @@ export default function ModelSelect({ value, onChange, backend = 'ollama', place
 
   // Fetch installed models on first open if not yet loaded
   useEffect(() => {
-    if (open && backend === 'ollama' && installedModels.length === 0) {
-      fetchModels();
+    if (open && backend === 'ollama' && installedModels.length === 0 && !loading) {
+      setLoading(true);
+      fetchModels().finally(() => setLoading(false));
     }
   }, [open, backend]);
 
@@ -133,7 +134,7 @@ export default function ModelSelect({ value, onChange, backend = 'ollama', place
 
       {open && (
         <div class="model-select__dropdown">
-          {backend === 'ollama' && installedModels.length === 0 ? (
+          {loading ? (
             <div class="model-select__loading">Loading models…</div>
           ) : list.length === 0 ? (
             <div class="model-select__empty">No matching models</div>
