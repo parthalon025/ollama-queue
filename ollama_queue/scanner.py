@@ -18,6 +18,31 @@ _SOURCE_EXTENSIONS = {".py", ".js", ".ts", ".rb", ".go", ".rs", ".sh"}
 _OLLAMA_11434_PATTERN = re.compile(
     r'(OLLAMA_HOST|OLLAMA_BASE_URL|ollama[._]host|base_url)\s*[=:]\s*["\']?' r"(localhost|127\.0\.0\.1):" + _OLLAMA_PORT
 )
+# Valid column names in the consumers table — used to strip transient scanner fields before DB write.
+_DB_CONSUMER_COLS = frozenset(
+    {
+        "name",
+        "type",
+        "platform",
+        "source_label",
+        "status",
+        "streaming_confirmed",
+        "streaming_suspect",
+        "is_managed_job",
+        "patch_type",
+        "restart_policy",
+        "patch_applied",
+        "patch_path",
+        "patch_snippet",
+        "health_status",
+        "health_checked_at",
+        "request_count",
+        "last_seen",
+        "last_live_seen",
+        "detected_at",
+        "onboarded_at",
+    }
+)
 
 
 def detect_platform() -> str:
@@ -215,7 +240,7 @@ def deadlock_check(name: str, cmdline: str, db) -> bool:
     """Phase 4: True if process matches a managed recurring job (deadlock risk)."""
     try:
         conn = db._connect()
-        rows = conn.execute("SELECT name, command FROM recurring_jobs WHERE is_active = 1").fetchall()
+        rows = conn.execute("SELECT name, command FROM recurring_jobs WHERE enabled = 1").fetchall()
         for row in rows:
             if row["name"] in name or name in row["name"]:
                 return True
@@ -263,7 +288,8 @@ def run_scan(db, search_dirs: list[str] | None = None) -> list[dict]:
         consumer.setdefault("type", "unknown")
         consumer.setdefault("platform", plat)
 
-        db.upsert_consumer(consumer)
+        db_record = {k: v for k, v in consumer.items() if k in _DB_CONSUMER_COLS}
+        db.upsert_consumer(db_record)
         results.append(consumer)
 
     return results
