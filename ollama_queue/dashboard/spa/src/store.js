@@ -550,17 +550,17 @@ export async function fetchInterceptStatus() {
 
 export async function enableIntercept() {
   const res = await fetch(`${API}/consumers/intercept/enable`, { method: 'POST' });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `HTTP ${res.status}`);
-  }
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.detail || `HTTP ${res.status}`);
   await fetchInterceptStatus();
-  return res.json();
+  return body;
 }
 
 export async function disableIntercept() {
   const res = await fetch(`${API}/consumers/intercept/disable`, { method: 'POST' });
-  if (res.ok) await fetchInterceptStatus();
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.detail || `HTTP ${res.status}`);
+  await fetchInterceptStatus();
 }
 
 // ── Consumers signals ─────────────────────────────────────────────────────────

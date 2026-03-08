@@ -464,7 +464,7 @@ def create_app(db: Database) -> FastAPI:
                     )
                     break
         except Exception:
-            _log.debug("request_count tracking failed for source=%s", source)
+            _log.warning("request_count tracking failed for source=%s", source, exc_info=True)
 
         model = body.get("model", "")
 
@@ -580,7 +580,7 @@ def create_app(db: Database) -> FastAPI:
                     )
                     break
         except Exception:
-            _log.debug("request_count tracking failed for source=%s", source)
+            _log.warning("request_count tracking failed for source=%s", source, exc_info=True)
 
         model = body.get("model", "")
 
@@ -2287,11 +2287,15 @@ def create_app(db: Database) -> FastAPI:
         )
 
         if result.get("status") == "patched":
-            _threading.Thread(
-                target=check_health,
-                args=({**consumer, "id": consumer_id}, db),
-                daemon=True,
-            ).start()
+            _health_consumer = {**consumer, "id": consumer_id}
+
+            def _run_health_check() -> None:
+                try:
+                    check_health(_health_consumer, db)
+                except Exception:
+                    _log.error("Health check failed for consumer %d", consumer_id, exc_info=True)
+
+            _threading.Thread(target=_run_health_check, daemon=True).start()
 
         return db.get_consumer(consumer_id)
 
@@ -2308,7 +2312,11 @@ def create_app(db: Database) -> FastAPI:
         consumer = db.get_consumer(consumer_id)
         if not consumer:
             raise HTTPException(status_code=404, detail="Consumer not found")
-        revert_consumer(consumer)
+        try:
+            revert_consumer(consumer)
+        except Exception as e:
+            _log.error("revert_consumer failed for consumer %d: %s", consumer_id, e, exc_info=True)
+            raise HTTPException(status_code=500, detail=f"File revert failed: {e}") from e
         db.update_consumer(consumer_id, status="discovered", patch_applied=0, health_status="unknown")
         return db.get_consumer(consumer_id)
 
@@ -2327,6 +2335,12 @@ def create_app(db: Database) -> FastAPI:
 
         if _plat.system() != "Linux":
             raise HTTPException(status_code=422, detail="iptables intercept is Linux-only")
+        included = [c for c in db.list_consumers() if c.get("status") in ("patched", "included")]
+        if not included:
+            raise HTTPException(
+                status_code=422,
+                detail="Include at least one consumer before enabling intercept mode.",
+            )
         uid = os.getuid()
         result = enable_intercept(uid=uid, queue_port=7683)
         if not result.get("enabled"):
@@ -2339,6 +2353,8 @@ def create_app(db: Database) -> FastAPI:
     def intercept_disable():
         uid = int(db.get_setting("intercept_mode_uid") or os.getuid())
         result = disable_intercept(uid=uid, queue_port=7683)
+        if result.get("error"):
+            raise HTTPException(status_code=500, detail=result["error"])
         db.set_setting("intercept_mode_enabled", "0")
         return result
 
@@ -2371,7 +2387,13 @@ def create_app(db: Database) -> FastAPI:
     # Auto-scan for Ollama consumers on startup (daemon thread — won't block shutdown)
     import threading as _threading
 
-    _threading.Thread(target=lambda: run_scan(db), daemon=True).start()
+    def _startup_scan() -> None:
+        try:
+            run_scan(db)
+        except Exception:
+            _log.error("Startup consumer scan failed", exc_info=True)
+
+    _threading.Thread(target=_startup_scan, daemon=True).start()
 
     return app
 

@@ -1399,14 +1399,16 @@ class Database:
             return cur.lastrowid
 
     def list_consumers(self) -> list[dict]:
-        conn = self._connect()
-        rows = conn.execute("SELECT * FROM consumers ORDER BY detected_at DESC").fetchall()
-        return [dict(r) for r in rows]
+        with self._lock:
+            conn = self._connect()
+            rows = conn.execute("SELECT * FROM consumers ORDER BY detected_at DESC").fetchall()
+            return [dict(r) for r in rows]
 
     def get_consumer(self, consumer_id: int) -> dict | None:
-        conn = self._connect()
-        row = conn.execute("SELECT * FROM consumers WHERE id = ?", (consumer_id,)).fetchone()
-        return dict(row) if row else None
+        with self._lock:
+            conn = self._connect()
+            row = conn.execute("SELECT * FROM consumers WHERE id = ?", (consumer_id,)).fetchone()
+            return dict(row) if row else None
 
     def update_consumer(self, consumer_id: int, **kwargs) -> None:
         with self._lock:

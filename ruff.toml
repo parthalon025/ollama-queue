@@ -44,6 +44,10 @@ ignore = [
 "scripts/*.py" = ["S603", "S607"]
 # iptables intercept — subprocess calls use known system binaries, not user input
 "ollama_queue/intercept.py" = ["S603", "S607", "RUF005"]
+# Consumer scanner — runs ss/lsof/netstat with hardcoded args, not user input
+"ollama_queue/scanner.py" = ["S603", "S607"]
+# Consumer patcher — runs systemctl with service name from DB, not user input
+"ollama_queue/patcher.py" = ["S603", "S607"]
 
 [lint.mccabe]
 max-complexity = 10

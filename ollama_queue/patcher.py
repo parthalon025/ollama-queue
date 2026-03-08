@@ -125,24 +125,30 @@ def _patch_toml(path: pathlib.Path) -> None:
 
 def _reload_systemd() -> None:
     try:
-        subprocess.run(  # noqa: S603
-            ["systemctl", "--user", "daemon-reload"],  # noqa: S607
+        result = subprocess.run(
+            ["systemctl", "--user", "daemon-reload"],
             capture_output=True,
+            text=True,
             timeout=10,
         )
+        if result.returncode != 0:
+            _log.error("daemon-reload exited %d: %s", result.returncode, result.stderr.strip())
     except Exception:
-        _log.warning("daemon-reload failed", exc_info=True)
+        _log.error("daemon-reload failed", exc_info=True)
 
 
 def _restart_service(name: str) -> None:
     try:
-        subprocess.run(  # noqa: S603
-            ["systemctl", "--user", "restart", name],  # noqa: S607
+        result = subprocess.run(
+            ["systemctl", "--user", "restart", name],
             capture_output=True,
+            text=True,
             timeout=30,
         )
+        if result.returncode != 0:
+            _log.error("restart %s exited %d: %s", name, result.returncode, result.stderr.strip())
     except Exception:
-        _log.warning("restart %s failed", name, exc_info=True)
+        _log.error("restart %s failed", name, exc_info=True)
 
 
 def check_health(consumer: dict, db, plat: str | None = None) -> dict:
@@ -177,16 +183,16 @@ def _port_has_process(port: str, name: str, plat: str) -> bool:
     """Check if a named process has a connection on the given port."""
     try:
         if plat == "linux":
-            result = subprocess.run(  # noqa: S603
-                ["ss", "-tp"],  # noqa: S607
+            result = subprocess.run(
+                ["ss", "-tp"],
                 capture_output=True,
                 text=True,
                 timeout=5,
             )
             return f":{port}" in result.stdout and name.split(".")[0] in result.stdout
         if plat == "macos":
-            result = subprocess.run(  # noqa: S603
-                ["lsof", f"-i:{port}"],  # noqa: S607
+            result = subprocess.run(
+                ["lsof", f"-i:{port}"],
                 capture_output=True,
                 text=True,
                 timeout=5,

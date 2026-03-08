@@ -38,15 +38,19 @@ def disable_intercept(uid: int, queue_port: int = 7683) -> dict:
 
     rule = _build_rule("-D", uid, queue_port)
     try:
-        subprocess.run(
+        result = subprocess.run(
             ["sudo", "iptables", "-t", "nat"] + rule,
             capture_output=True,
+            text=True,
             timeout=10,
         )
+        if result.returncode != 0:
+            _log.error("disable_intercept: iptables exited %d: %s", result.returncode, result.stderr.strip())
+            return {"enabled": True, "error": result.stderr.strip()}
         return {"enabled": False}
-    except Exception as e:
-        _log.warning("disable_intercept failed: %s", e)
-        return {"enabled": False, "error": str(e)}
+    except (OSError, subprocess.TimeoutExpired) as e:
+        _log.error("disable_intercept failed: %s", e)
+        return {"enabled": True, "error": str(e)}
 
 
 def get_intercept_status(uid: int, queue_port: int = 7683) -> dict:

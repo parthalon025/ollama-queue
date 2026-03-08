@@ -69,13 +69,14 @@ def live_scan(plat: str | None = None) -> list[dict]:
 
 
 def _live_scan_linux() -> list[dict]:
-    result = subprocess.run(  # noqa: S603
-        ["ss", "-tp"],  # noqa: S607
+    result = subprocess.run(
+        ["ss", "-tp"],
         capture_output=True,
         text=True,
         timeout=10,
     )
     if result.returncode != 0:
+        _log.warning("_live_scan_linux: ss exited %d: %s", result.returncode, result.stderr.strip())
         return []
     consumers = []
     for line in result.stdout.splitlines():
@@ -96,13 +97,14 @@ def _live_scan_linux() -> list[dict]:
 
 
 def _live_scan_macos() -> list[dict]:
-    result = subprocess.run(  # noqa: S603
-        ["lsof", f"-i:{_OLLAMA_PORT}", "-sTCP:ESTABLISHED"],  # noqa: S607
+    result = subprocess.run(
+        ["lsof", f"-i:{_OLLAMA_PORT}", "-sTCP:ESTABLISHED"],
         capture_output=True,
         text=True,
         timeout=10,
     )
     if result.returncode != 0:
+        _log.warning("_live_scan_macos: lsof exited %d: %s", result.returncode, result.stderr.strip())
         return []
     consumers = []
     for line in result.stdout.splitlines()[1:]:  # skip header
@@ -121,13 +123,14 @@ def _live_scan_macos() -> list[dict]:
 
 
 def _live_scan_windows() -> list[dict]:
-    result = subprocess.run(  # noqa: S603
-        ["netstat", "-ano"],  # noqa: S607
+    result = subprocess.run(
+        ["netstat", "-ano"],
         capture_output=True,
         text=True,
         timeout=10,
     )
     if result.returncode != 0:
+        _log.warning("_live_scan_windows: netstat exited %d: %s", result.returncode, result.stderr.strip())
         return []
     consumers = []
     for line in result.stdout.splitlines():
@@ -239,8 +242,9 @@ def stream_check(source_dir: str | None = None, has_source: bool = True) -> dict
 def deadlock_check(name: str, cmdline: str, db) -> bool:
     """Phase 4: True if process matches a managed recurring job (deadlock risk)."""
     try:
-        conn = db._connect()
-        rows = conn.execute("SELECT name, command FROM recurring_jobs WHERE enabled = 1").fetchall()
+        with db._lock:
+            conn = db._connect()
+            rows = conn.execute("SELECT name, command FROM recurring_jobs WHERE enabled = 1").fetchall()
         for row in rows:
             if row["name"] in name or name in row["name"]:
                 return True
