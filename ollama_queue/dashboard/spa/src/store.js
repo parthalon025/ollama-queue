@@ -563,6 +563,60 @@ export async function disableIntercept() {
   if (res.ok) await fetchInterceptStatus();
 }
 
+// ── Consumers signals ─────────────────────────────────────────────────────────
+
+// What it shows: List of detected Ollama-calling services and scan progress state.
+// Decision it drives: User sees which services need to be routed through the queue.
+export const consumers = signal([]);
+export const consumersScanning = signal(false);
+
+export async function fetchConsumers() {
+  try {
+    const res = await fetch(`${API}/consumers`);
+    if (res.ok) consumers.value = await res.json();
+  } catch (e) { console.error('fetchConsumers failed:', e); }
+}
+
+export async function scanConsumers() {
+  consumersScanning.value = true;
+  try {
+    const res = await fetch(`${API}/consumers/scan`, { method: 'POST' });
+    if (res.ok) consumers.value = await res.json();
+  } finally {
+    consumersScanning.value = false;
+  }
+}
+
+export async function includeConsumer(id, opts = {}) {
+  const res = await fetch(`${API}/consumers/${id}/include`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ restart_policy: 'deferred', ...opts }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  await fetchConsumers();
+  return res.json();
+}
+
+export async function ignoreConsumer(id) {
+  const res = await fetch(`${API}/consumers/${id}/ignore`, { method: 'POST' });
+  if (res.ok) await fetchConsumers();
+}
+
+export async function revertConsumer(id) {
+  const res = await fetch(`${API}/consumers/${id}/revert`, { method: 'POST' });
+  if (res.ok) await fetchConsumers();
+}
+
+export async function fetchConsumerHealth(id) {
+  const res = await fetch(`${API}/consumers/${id}/health`);
+  if (res.ok) return res.json();
+  return null;
+}
+
 async function fetchAll() {
     fetchStatus();
     fetchDLQ(); // populate DLQ badge on first load
