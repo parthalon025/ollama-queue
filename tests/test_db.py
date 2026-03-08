@@ -840,24 +840,24 @@ class TestEvalSchema:
         assert self.EVAL_TABLES.issubset(tables)
 
     def test_seed_eval_defaults_inserts_templates(self, db):
-        """seed_eval_defaults() inserts system prompt templates (3 original + contrastive)."""
+        """seed_eval_defaults() inserts system prompt templates (3 original + contrastive + multistage)."""
         conn = db._connect()
         count = conn.execute("SELECT COUNT(*) FROM eval_prompt_templates").fetchone()[0]
-        assert count == 4
+        assert count == 5
 
     def test_seed_eval_defaults_inserts_variants(self, db):
-        """seed_eval_defaults() inserts system variants (A-G)."""
+        """seed_eval_defaults() inserts system variants (A-H)."""
         conn = db._connect()
         count = conn.execute("SELECT COUNT(*) FROM eval_variants").fetchone()[0]
-        assert count == 7
+        assert count == 8
 
     def test_seed_eval_defaults_idempotent(self, db):
         """Running seed_eval_defaults() twice produces no duplicates and no errors."""
         db.seed_eval_defaults()
         db.seed_eval_defaults()
         conn = db._connect()
-        assert conn.execute("SELECT COUNT(*) FROM eval_prompt_templates").fetchone()[0] == 4
-        assert conn.execute("SELECT COUNT(*) FROM eval_variants").fetchone()[0] == 7
+        assert conn.execute("SELECT COUNT(*) FROM eval_prompt_templates").fetchone()[0] == 5
+        assert conn.execute("SELECT COUNT(*) FROM eval_variants").fetchone()[0] == 8
 
     def test_eval_settings_all_seeded(self, db):
         """All 12 eval.* settings keys are present after initialize()."""
@@ -947,24 +947,24 @@ class TestEvalSchema:
         assert conn.execute("SELECT COUNT(*) FROM eval_results WHERE run_id = ?", (run_id,)).fetchone()[0] == 0
 
     def test_template_ids_match_expected(self, db):
-        """Seeded templates include original 3 + contrastive."""
+        """Seeded templates include original 3 + contrastive + contrastive-multistage."""
         conn = db._connect()
         rows = conn.execute("SELECT id FROM eval_prompt_templates ORDER BY id").fetchall()
         ids = {r[0] for r in rows}
-        assert ids == {"fewshot", "zero-shot-causal", "chunked", "contrastive"}
+        assert ids == {"fewshot", "zero-shot-causal", "chunked", "contrastive", "contrastive-multistage"}
 
     def test_variant_ids_match_expected(self, db):
-        """Seeded variants include A-G."""
+        """Seeded variants include A-H."""
         conn = db._connect()
         rows = conn.execute("SELECT id FROM eval_variants ORDER BY id").fetchall()
         ids = {r[0] for r in rows}
-        assert ids == {"A", "B", "C", "D", "E", "F", "G"}
+        assert ids == {"A", "B", "C", "D", "E", "F", "G", "H"}
 
     def test_recommended_variants_include_contrastive(self, db):
-        """Variants D, E, F, G are marked is_recommended=1."""
+        """Variants D, E, F, G, H are marked is_recommended=1."""
         conn = db._connect()
         rows = conn.execute("SELECT id FROM eval_variants WHERE is_recommended = 1 ORDER BY id").fetchall()
-        assert [r[0] for r in rows] == ["D", "E", "F", "G"]
+        assert [r[0] for r in rows] == ["D", "E", "F", "G", "H"]
 
     def test_variant_a_uses_fewshot_template(self, db):
         """Variant A must reference the fewshot prompt template."""

@@ -612,6 +612,69 @@ def _build_contrastive_prompt(
     )
 
 
+def _build_self_critique_prompt(
+    principle: str,
+    diff_cluster_items: list[dict],
+) -> str:
+    """Build a self-critique prompt that tests if a principle is too general.
+
+    Presents the principle alongside unrelated lessons and asks the model
+    to refine it if it would match those lessons too.
+    """
+    diff_lines = []
+    for i, item in enumerate(diff_cluster_items, 1):
+        t = item.get("title") or ""
+        o = item.get("one_liner") or ""
+        diff_lines.append(f"  {i}. {t} — {o}")
+    diff_block = "\n".join(diff_lines)
+
+    return (
+        f'You previously extracted this principle: "{principle}"\n\n'
+        "Here are UNRELATED lessons from different failure categories:\n"
+        f"{diff_block}\n\n"
+        "Question: Does this principle also apply to ANY of the "
+        "unrelated lessons above?\n\n"
+        "If YES — the principle is too general. Rewrite it to be more "
+        "specific, so it ONLY matches the original failure type and NOT "
+        "the unrelated ones.\n"
+        "If NO — the principle is specific enough. Return it unchanged.\n\n"
+        "Return ONLY the (possibly refined) principle. One sentence. "
+        "Causal form: '<pattern> causes <consequence> when <condition>'\n"
+        "No explanation."
+    )
+
+
+def _self_critique(
+    *,
+    principle: str,
+    diff_cluster_items: list[dict],
+    model: str,
+    temperature: float,
+    num_ctx: int,
+    http_base: str,
+    source: str,
+) -> str:
+    """Run self-critique pass. Returns refined principle or original."""
+    if not diff_cluster_items:
+        return principle
+
+    critique_prompt = _build_self_critique_prompt(principle, diff_cluster_items)
+    refined, _ = _call_proxy(
+        http_base=http_base,
+        model=model,
+        prompt=critique_prompt,
+        temperature=temperature,
+        num_ctx=num_ctx,
+        timeout=180,
+        source=source,
+        priority=2,
+    )
+
+    if refined and len(refined.strip()) > 10:
+        return refined.strip()
+    return principle
+
+
 # ---------------------------------------------------------------------------
 # Judge prompt construction
 # ---------------------------------------------------------------------------
@@ -1226,6 +1289,20 @@ def _generate_one(
         priority=2,
     )
     generation_time_s = round(time.monotonic() - t0, 1)
+
+    # Self-critique pass: refine if principle is too general
+    is_multi_stage = bool(template.get("is_multi_stage"))
+    if text and is_multi_stage and diff_cluster_items:
+        text = _self_critique(
+            principle=text,
+            diff_cluster_items=diff_cluster_items,
+            model=variant["model"],
+            temperature=variant.get("temperature", 0.6),
+            num_ctx=variant.get("num_ctx", 8192),
+            http_base=http_base,
+            source=f"eval-run-{run_id}-critique",
+        )
+
     insert_eval_result(
         db,
         run_id=run_id,
@@ -1233,7 +1310,7 @@ def _generate_one(
         source_item_id=str(source_item["id"]),
         target_item_id=str(source_item["id"]),
         is_same_cluster=0,
-        row_type="generate",  # matches progress query and DB row_type='judge' convention
+        row_type="generate",
         principle=text,
         generation_time_s=generation_time_s,
         queue_job_id=queue_job_id,

@@ -139,6 +139,7 @@ class Database:
         self._add_column_if_missing(conn, "eval_runs", "data_source_token", "TEXT")
         self._add_column_if_missing(conn, "eval_runs", "analysis_md", "TEXT")
         self._add_column_if_missing(conn, "eval_prompt_templates", "is_contrastive", "INTEGER DEFAULT 0")
+        self._add_column_if_missing(conn, "eval_prompt_templates", "is_multi_stage", "INTEGER DEFAULT 0")
         self._add_column_if_missing(conn, "eval_results", "target_cluster_id", "TEXT")
 
     def initialize(self) -> None:
@@ -292,6 +293,7 @@ class Database:
                 examples        TEXT,
                 is_chunked      INTEGER DEFAULT 0,
                 is_contrastive  INTEGER DEFAULT 0,
+                is_multi_stage  INTEGER DEFAULT 0,
                 is_system       INTEGER DEFAULT 1,
                 created_at      TEXT NOT NULL
             );
@@ -494,7 +496,21 @@ class Database:
             ),
         )
 
-        # 5 system variants A-E
+        # Contrastive + self-critique template
+        conn.execute(
+            """INSERT OR IGNORE INTO eval_prompt_templates
+               (id, label, instruction, is_chunked, is_contrastive, is_multi_stage, is_system, created_at)
+               VALUES (?, ?, ?, 0, 1, 1, 1, ?)""",
+            (
+                "contrastive-multistage",
+                "Compare, distinguish, then self-critique",
+                "You are extracting a principle that distinguishes one failure pattern from others. "
+                "You will see examples from the SAME failure cluster and from DIFFERENT clusters.",
+                created_at,
+            ),
+        )
+
+        # System variants A-H
         variants = [
             ("A", "Baseline", "fewshot", "deepseek-r1:8b", 0.7, 4096, 0, 1),
             ("B", "Causal reasoning", "zero-shot-causal", "deepseek-r1:8b", 0.6, 8192, 0, 1),
@@ -503,6 +519,7 @@ class Database:
             ("E", "Grouped + large model", "chunked", "qwen3:14b", 0.6, 8192, 1, 1),
             ("F", "Contrastive", "contrastive", "deepseek-r1:8b", 0.6, 8192, 1, 1),
             ("G", "Contrastive + large model", "contrastive", "qwen3:14b", 0.6, 8192, 1, 1),
+            ("H", "Contrastive + self-critique", "contrastive-multistage", "deepseek-r1:8b", 0.6, 8192, 1, 1),
         ]
         for var_id, label, tmpl_id, model, temperature, num_ctx, is_recommended, is_system in variants:
             conn.execute(
