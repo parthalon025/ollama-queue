@@ -1,4 +1,5 @@
 import { h } from 'preact';
+import { useState } from 'preact/hooks';
 
 // NOTE: all .map() callbacks use descriptive names (job, slot, laneIdx) — never 'h'
 // as that shadows the JSX factory esbuild injects.
@@ -88,6 +89,20 @@ export function buildDensityBuckets(jobs, now, windowSecs) {
     return buckets;
 }
 
+export function buildBucketJobIds(jobs, now, windowSecs, bucketCount) {
+    const bucketSecs = windowSecs / bucketCount;
+    return Array.from({ length: bucketCount }, (_, i) => {
+        const bucketStart = now + i * bucketSecs;
+        const bucketEnd = bucketStart + bucketSecs;
+        const ids = new Set();
+        for (const job of jobs) {
+            const jobEnd = job.next_run + (job.estimated_duration || 600);
+            if (job.next_run < bucketEnd && jobEnd > bucketStart) ids.add(job.id);
+        }
+        return ids;
+    });
+}
+
 export function getConflictingPairs(jobs) {
     const pairs = [];
     for (let i = 0; i < jobs.length; i++) {
@@ -149,6 +164,7 @@ export function loadMapSlotColor(score) {
 
 export function GanttChart({ jobs, tick, windowHours = 24, loadMapSlots = [], suggestSlots = [] }) {
     void tick;
+    const [selectedBucketIdx, setSelectedBucketIdx] = useState(null);
     const now = Date.now() / 1000;
     const windowSecs = windowHours * 3600;
     const windowEnd = now + windowSecs;
@@ -169,6 +185,11 @@ export function GanttChart({ jobs, tick, windowHours = 24, loadMapSlots = [], su
         ? alignLoadMapToNow(loadMapSlots, now).slice(0, bucketCount)
         : buildDensityBuckets(jobs.filter(job => job.next_run < windowEnd), now, windowSecs);
 
+    const bucketJobIds = buildBucketJobIds(
+        jobs.filter(job => job.next_run < windowEnd),
+        now, windowSecs, bucketCount
+    );
+
     // Convert midnight-anchored absolute slot indices to now-aligned display indices.
     // Include seconds so slot boundary matches alignLoadMapToNow exactly.
     const _nowDate = new Date(now * 1000);
@@ -183,6 +204,33 @@ export function GanttChart({ jobs, tick, windowHours = 24, loadMapSlots = [], su
 
     return (
         <div style={{ position: 'relative', width: '100%' }}>
+            {/* Bucket selection label — shows time range and active job count for selected density bucket */}
+            {selectedBucketIdx !== null && (() => {
+                const bucketSecs = windowSecs / bucketCount;
+                const bucketStart = now + selectedBucketIdx * bucketSecs;
+                const bucketEnd = bucketStart + bucketSecs;
+                const activeIds = bucketJobIds[selectedBucketIdx] || new Set();
+                const startStr = new Date(bucketStart * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                const endStr = new Date(bucketEnd * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                return (
+                    <div style={{
+                        fontFamily: 'var(--font-mono)', fontSize: 'var(--type-micro)',
+                        color: 'var(--accent)', marginBottom: '0.2rem',
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    }}>
+                        <span>{startStr} – {endStr} · {activeIds.size} job{activeIds.size !== 1 ? 's' : ''} active</span>
+                        <button
+                            onClick={() => setSelectedBucketIdx(null)}
+                            style={{
+                                background: 'none', border: 'none', cursor: 'pointer',
+                                color: 'var(--text-tertiary)', fontSize: 'var(--type-micro)',
+                                fontFamily: 'var(--font-mono)', padding: '0 4px',
+                            }}
+                        >✕ clear</button>
+                    </div>
+                );
+            })()}
+
             {/* Load density strip — priority-weighted load_map or job-count fallback */}
             {(() => {
                 const hasPinned = densityBuckets.some(s => s >= LOAD_MAP_PIN_SCORE);
@@ -202,12 +250,15 @@ export function GanttChart({ jobs, tick, windowHours = 24, loadMapSlots = [], su
                     >
                         {densityBuckets.map((score, bucketIdx) => {
                             const isSuggested = suggestDisplayIndices.has(bucketIdx);
+                            const isSelected = bucketIdx === selectedBucketIdx;
                             return (
                                 <div
                                     key={bucketIdx}
+                                    onClick={() => setSelectedBucketIdx(isSelected ? null : bucketIdx)}
                                     style={{
                                         flex: 1,
                                         position: 'relative',
+                                        cursor: 'pointer',
                                         background: useLoadMap
                                             ? loadMapSlotColor(score)
                                             : (score === 0
@@ -218,7 +269,7 @@ export function GanttChart({ jobs, tick, windowHours = 24, loadMapSlots = [], su
                                                         ? 'rgba(99,179,237,0.55)'
                                                         : 'rgba(99,179,237,0.9)'),
                                         borderRight: bucketIdx < densityBuckets.length - 1 ? '1px solid var(--border-subtle)' : 'none',
-                                        outline: isSuggested ? '2px solid rgba(52,211,153,0.9)' : 'none',
+                                        outline: isSelected ? '2px solid var(--accent)' : isSuggested ? '2px solid rgba(52,211,153,0.9)' : 'none',
                                         outlineOffset: '-2px',
                                     }}
                                     title={isSuggested
@@ -336,6 +387,7 @@ export function GanttChart({ jobs, tick, windowHours = 24, loadMapSlots = [], su
                 })()}
 
                 {laneJobs.map(job => {
+                    const isDimmed = selectedBucketIdx !== null && !(bucketJobIds[selectedBucketIdx]?.has(job.id));
                     const startOffset = Math.max(0, job.next_run - now);
                     const duration = job.estimated_duration || 600;
                     const leftPct = (startOffset / windowSecs) * 100;
@@ -363,7 +415,8 @@ export function GanttChart({ jobs, tick, windowHours = 24, loadMapSlots = [], su
                                 top: job._lane * laneHeight + 4,
                                 height: laneHeight - 8,
                                 background: color,
-                                opacity: 0.85,
+                                opacity: isDimmed ? 0.15 : 0.85,
+                                transition: 'opacity 0.2s ease',
                                 borderRadius: 'var(--radius)',
                                 borderLeft: isHeavy ? '3px solid var(--status-warning)' : undefined,
                                 outline: conflictIds.has(job.id) ? '2px solid var(--status-error)' : undefined,
