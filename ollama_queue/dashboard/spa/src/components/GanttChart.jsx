@@ -1,4 +1,6 @@
-import { h } from 'preact';
+import { h, Fragment } from 'preact';
+import { useState } from 'preact/hooks';
+import { fetchJobRuns } from '../store';
 
 // NOTE: all .map() callbacks use descriptive names (job, slot, laneIdx) — never 'h'
 // as that shadows the JSX factory esbuild injects.
@@ -88,6 +90,20 @@ export function buildDensityBuckets(jobs, now, windowSecs) {
     return buckets;
 }
 
+export function buildBucketJobIds(jobs, now, windowSecs, bucketCount) {
+    const bucketSecs = windowSecs / bucketCount;
+    return Array.from({ length: bucketCount }, (_, i) => {
+        const bucketStart = now + i * bucketSecs;
+        const bucketEnd = bucketStart + bucketSecs;
+        const ids = new Set();
+        for (const job of jobs) {
+            const jobEnd = job.next_run + (job.estimated_duration || 600);
+            if (job.next_run < bucketEnd && jobEnd > bucketStart) ids.add(job.id);
+        }
+        return ids;
+    });
+}
+
 export function getConflictingPairs(jobs) {
     const pairs = [];
     for (let i = 0; i < jobs.length; i++) {
@@ -147,8 +163,126 @@ export function loadMapSlotColor(score) {
     return `rgba(99,179,237,${opacity.toFixed(2)})`;
 }
 
-export function GanttChart({ jobs, tick, windowHours = 24, loadMapSlots = [], suggestSlots = [] }) {
+function _relativeTime(ts) {
+    if (!ts) return '—';
+    const diff = Math.floor(Date.now() / 1000 - ts);
+    if (diff < 60) return `${diff}s`;
+    if (diff < 3600) return `${Math.floor(diff / 60)}m`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
+    return `${Math.floor(diff / 86400)}d`;
+}
+
+function _fmtInterval(seconds) {
+    if (!seconds) return '—';
+    if (seconds % 86400 === 0) return `${seconds / 86400}d`;
+    if (seconds % 3600 === 0) return `${seconds / 3600}h`;
+    if (seconds % 60 === 0) return `${seconds / 60}m`;
+    return `${seconds}s`;
+}
+
+// What it shows: Full details for a tapped/clicked Gantt bar — name, description, program,
+//   model, start time, last run, history dots (last 5 runs), and action buttons.
+// Decision it drives: User can see everything about a job and trigger it without leaving
+//   the schedule view. Works on touch screens where title tooltips don't work.
+function BarDetailCard({ job, runs, runsLoading, onClose, onRunJob, onScrollToJob }) {
+    const { label: runLabel, color: runColor } = runStatus(job.last_run, job.interval_seconds);
+    const startStr = new Date(job.next_run * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const lastRunStr = job.last_run ? `${_relativeTime(job.last_run)} ago` : 'never';
+    const modelStr = job.model || job.model_profile || 'default';
+    const isMobile = typeof window !== 'undefined' && window.innerWidth <= 640;
+
+    const cardStyle = isMobile ? {
+        position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 100,
+        background: 'var(--bg-surface-raised)',
+        borderTop: '1px solid var(--border-subtle)',
+        borderRadius: 'var(--radius) var(--radius) 0 0',
+        padding: '1rem',
+        boxShadow: '0 -4px 24px rgba(0,0,0,0.4)',
+        animation: 'slideUp 0.15s ease-out',
+    } : {
+        position: 'absolute', zIndex: 50,
+        bottom: '110%', left: '50%', transform: 'translateX(-50%)',
+        background: 'var(--bg-surface-raised)',
+        border: '1px solid var(--border-subtle)',
+        borderRadius: 'var(--radius)',
+        padding: '0.75rem 1rem',
+        minWidth: 260, maxWidth: 320,
+        boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
+        whiteSpace: 'normal',
+    };
+
+    return (
+        <div style={cardStyle} onClick={evt => evt.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.4rem' }}>
+                <div>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 'var(--type-body)', color: 'var(--text-primary)' }}>
+                        {job.name}
+                    </div>
+                    {job.description && (
+                        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-micro)', color: 'var(--text-secondary)', marginTop: '0.15rem', lineHeight: 1.4 }}>
+                            {job.description}
+                        </div>
+                    )}
+                </div>
+                <span style={{ fontSize: 'var(--type-micro)', color: runColor, whiteSpace: 'nowrap', marginLeft: '0.5rem' }}>
+                    {runLabel} ●
+                </span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.2rem 1rem', fontFamily: 'var(--font-mono)', fontSize: 'var(--type-micro)', marginBottom: '0.4rem' }}>
+                {[
+                    ['program', job.source || '—'],
+                    ['model', modelStr],
+                    ['starts', startStr],
+                    ['runs', `~${formatDuration(job.estimated_duration)}`],
+                    ['last ran', lastRunStr],
+                    ['interval', _fmtInterval(job.interval_seconds)],
+                ].map(([k, v]) => (
+                    <Fragment key={k}>
+                        <span style={{ color: 'var(--text-tertiary)' }}>{k}</span>
+                        <span style={{ color: 'var(--text-primary)' }}>{v}</span>
+                    </Fragment>
+                ))}
+            </div>
+            {job.model_profile === 'heavy' && (
+                <div style={{ fontSize: 'var(--type-micro)', color: 'var(--status-warning)', marginBottom: '0.35rem', fontFamily: 'var(--font-mono)' }}>
+                    ⚠ large model — needs ≥16GB VRAM
+                </div>
+            )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.5rem', fontFamily: 'var(--font-mono)', fontSize: 'var(--type-micro)', color: 'var(--text-tertiary)' }}>
+                <span>history</span>
+                {runsLoading ? <span>…</span> : (runs && runs.length > 0) ? (
+                    runs.slice(0, 5).map((run, idx) => (
+                        <span key={idx} title={run.status} style={{ color: run.status === 'completed' ? 'var(--status-healthy)' : 'var(--status-error)' }}>
+                            {run.status === 'completed' ? '✓' : '✗'}
+                        </span>
+                    ))
+                ) : <span>no history yet</span>}
+            </div>
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <button style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-micro)', background: 'var(--accent)', color: 'var(--accent-text)', border: 'none', borderRadius: 'var(--radius)', padding: '3px 10px', cursor: 'pointer' }}
+                    onClick={() => { onRunJob(job.id); onClose(); }}>
+                    ▶ Run now
+                </button>
+                <button style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-micro)', background: 'none', color: 'var(--accent)', border: '1px solid var(--accent)', borderRadius: 'var(--radius)', padding: '3px 10px', cursor: 'pointer' }}
+                    onClick={() => { onScrollToJob(job.id); onClose(); }}>
+                    → job
+                </button>
+                <button style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono)', fontSize: 'var(--type-micro)', background: 'none', color: 'var(--text-tertiary)', border: 'none', cursor: 'pointer', padding: '3px 6px' }}
+                    onClick={onClose}>✕</button>
+            </div>
+        </div>
+    );
+}
+
+export function GanttChart({
+    jobs, tick, windowHours = 24, loadMapSlots = [], suggestSlots = [],
+    onRunJob = () => {}, onScrollToJob = () => {},
+}) {
     void tick;
+    const [selectedBucketIdx, setSelectedBucketIdx] = useState(null);
+    const [selectedBarId, setSelectedBarId] = useState(null);
+    const [barRuns, setBarRuns] = useState({});
+    const [barRunsLoading, setBarRunsLoading] = useState(false);
     const now = Date.now() / 1000;
     const windowSecs = windowHours * 3600;
     const windowEnd = now + windowSecs;
@@ -169,6 +303,27 @@ export function GanttChart({ jobs, tick, windowHours = 24, loadMapSlots = [], su
         ? alignLoadMapToNow(loadMapSlots, now).slice(0, bucketCount)
         : buildDensityBuckets(jobs.filter(job => job.next_run < windowEnd), now, windowSecs);
 
+    const bucketJobIds = buildBucketJobIds(
+        jobs.filter(job => job.next_run < windowEnd),
+        now, windowSecs, bucketCount
+    );
+
+    async function handleBarClick(job) {
+        if (selectedBarId === job.id) { setSelectedBarId(null); return; }
+        setSelectedBarId(job.id);
+        if (!barRuns[job.id]) {
+            setBarRunsLoading(true);
+            try {
+                const runs = await fetchJobRuns(job.id, 5);
+                setBarRuns(prev => ({ ...prev, [job.id]: runs }));
+            } catch (err) {
+                console.error('fetchJobRuns failed:', err);
+            } finally {
+                setBarRunsLoading(false);
+            }
+        }
+    }
+
     // Convert midnight-anchored absolute slot indices to now-aligned display indices.
     // Include seconds so slot boundary matches alignLoadMapToNow exactly.
     const _nowDate = new Date(now * 1000);
@@ -183,6 +338,33 @@ export function GanttChart({ jobs, tick, windowHours = 24, loadMapSlots = [], su
 
     return (
         <div style={{ position: 'relative', width: '100%' }}>
+            {/* Bucket selection label — shows time range and active job count for selected density bucket */}
+            {selectedBucketIdx !== null && (() => {
+                const bucketSecs = windowSecs / bucketCount;
+                const bucketStart = now + selectedBucketIdx * bucketSecs;
+                const bucketEnd = bucketStart + bucketSecs;
+                const activeIds = bucketJobIds[selectedBucketIdx] || new Set();
+                const startStr = new Date(bucketStart * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                const endStr = new Date(bucketEnd * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                return (
+                    <div style={{
+                        fontFamily: 'var(--font-mono)', fontSize: 'var(--type-micro)',
+                        color: 'var(--accent)', marginBottom: '0.2rem',
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    }}>
+                        <span>{startStr} – {endStr} · {activeIds.size} job{activeIds.size !== 1 ? 's' : ''} active</span>
+                        <button
+                            onClick={() => setSelectedBucketIdx(null)}
+                            style={{
+                                background: 'none', border: 'none', cursor: 'pointer',
+                                color: 'var(--text-tertiary)', fontSize: 'var(--type-micro)',
+                                fontFamily: 'var(--font-mono)', padding: '0 4px',
+                            }}
+                        >✕ clear</button>
+                    </div>
+                );
+            })()}
+
             {/* Load density strip — priority-weighted load_map or job-count fallback */}
             {(() => {
                 const hasPinned = densityBuckets.some(s => s >= LOAD_MAP_PIN_SCORE);
@@ -202,12 +384,15 @@ export function GanttChart({ jobs, tick, windowHours = 24, loadMapSlots = [], su
                     >
                         {densityBuckets.map((score, bucketIdx) => {
                             const isSuggested = suggestDisplayIndices.has(bucketIdx);
+                            const isSelected = bucketIdx === selectedBucketIdx;
                             return (
                                 <div
                                     key={bucketIdx}
+                                    onClick={() => setSelectedBucketIdx(isSelected ? null : bucketIdx)}
                                     style={{
                                         flex: 1,
                                         position: 'relative',
+                                        cursor: 'pointer',
                                         background: useLoadMap
                                             ? loadMapSlotColor(score)
                                             : (score === 0
@@ -218,7 +403,7 @@ export function GanttChart({ jobs, tick, windowHours = 24, loadMapSlots = [], su
                                                         ? 'rgba(99,179,237,0.55)'
                                                         : 'rgba(99,179,237,0.9)'),
                                         borderRight: bucketIdx < densityBuckets.length - 1 ? '1px solid var(--border-subtle)' : 'none',
-                                        outline: isSuggested ? '2px solid rgba(52,211,153,0.9)' : 'none',
+                                        outline: isSelected ? '2px solid var(--accent)' : isSuggested ? '2px solid rgba(52,211,153,0.9)' : 'none',
                                         outlineOffset: '-2px',
                                     }}
                                     title={isSuggested
@@ -248,14 +433,17 @@ export function GanttChart({ jobs, tick, windowHours = 24, loadMapSlots = [], su
             </div>
 
             {/* Chart area */}
-            <div style={{
-                position: 'relative',
-                height: chartHeight,
-                background: 'var(--bg-inset)',
-                border: '1px solid var(--border-subtle)',
-                borderRadius: 'var(--radius)',
-                overflow: 'hidden',
-            }}>
+            <div
+                onClick={() => setSelectedBarId(null)}
+                style={{
+                    position: 'relative',
+                    height: chartHeight,
+                    background: 'var(--bg-inset)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: 'var(--radius)',
+                    overflow: 'hidden',
+                }}
+            >
                 {/* Lane dividers */}
                 {Array.from({ length: laneCount }, (_, laneIdx) => (
                     <div key={laneIdx} style={{
@@ -336,6 +524,7 @@ export function GanttChart({ jobs, tick, windowHours = 24, loadMapSlots = [], su
                 })()}
 
                 {laneJobs.map(job => {
+                    const isDimmed = selectedBucketIdx !== null && !(bucketJobIds[selectedBucketIdx]?.has(job.id));
                     const startOffset = Math.max(0, job.next_run - now);
                     const duration = job.estimated_duration || 600;
                     const leftPct = (startOffset / windowSecs) * 100;
@@ -356,6 +545,7 @@ export function GanttChart({ jobs, tick, windowHours = 24, loadMapSlots = [], su
                         <div
                             key={job.id}
                             title={buildTooltip(job, isConcurrent)}
+                            onClick={evt => { evt.stopPropagation(); handleBarClick(job); }}
                             style={{
                                 position: 'absolute',
                                 left: `${Math.min(leftPct, 99.5)}%`,
@@ -363,17 +553,18 @@ export function GanttChart({ jobs, tick, windowHours = 24, loadMapSlots = [], su
                                 top: job._lane * laneHeight + 4,
                                 height: laneHeight - 8,
                                 background: color,
-                                opacity: 0.85,
+                                opacity: isDimmed ? 0.15 : 0.85,
+                                transition: 'opacity 0.2s ease',
                                 borderRadius: 'var(--radius)',
                                 borderLeft: isHeavy ? '3px solid var(--status-warning)' : undefined,
                                 outline: conflictIds.has(job.id) ? '2px solid var(--status-error)' : undefined,
                                 outlineOffset: conflictIds.has(job.id) ? '-2px' : undefined,
-                                overflow: 'hidden',
+                                overflow: 'visible',
                                 display: 'flex',
                                 alignItems: 'center',
                                 paddingLeft: isHeavy ? '0.3rem' : '0.4rem',
                                 gap: '0.3rem',
-                                cursor: 'default',
+                                cursor: 'pointer',
                             }}
                         >
                             <span style={{
@@ -441,6 +632,16 @@ export function GanttChart({ jobs, tick, windowHours = 24, loadMapSlots = [], su
                                     />
                                 );
                             })()}
+                            {selectedBarId === job.id && (
+                                <BarDetailCard
+                                    job={job}
+                                    runs={barRuns[job.id] || null}
+                                    runsLoading={barRunsLoading}
+                                    onClose={() => setSelectedBarId(null)}
+                                    onRunJob={onRunJob}
+                                    onScrollToJob={onScrollToJob}
+                                />
+                            )}
                         </div>
                     );
                 })}
@@ -457,16 +658,13 @@ export function GanttChart({ jobs, tick, windowHours = 24, loadMapSlots = [], su
                 color:
             </span>
             {[
-                { color: 'var(--accent)',      label: 'aria'     },
-                { color: '#f97316',            label: 'telegram' },
-                { color: '#a78bfa',            label: 'notion'   },
-                { color: 'var(--text-tertiary)', label: 'other'  },
-            ].map(({ color, label }) => (
+                { color: 'var(--accent)',        label: 'aria',     symbol: '◆' },
+                { color: '#f97316',              label: 'telegram', symbol: '●' },
+                { color: '#a78bfa',              label: 'notion',   symbol: '▲' },
+                { color: 'var(--text-tertiary)', label: 'other',    symbol: '·' },
+            ].map(({ color, label, symbol }) => (
                 <span key={label} style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                    <span style={{
-                        display: 'inline-block', width: 10, height: 10,
-                        borderRadius: 2, background: color, opacity: 0.85, flexShrink: 0,
-                    }} />
+                    <span style={{ color }}>{symbol}</span>
                     {label}
                 </span>
             ))}
