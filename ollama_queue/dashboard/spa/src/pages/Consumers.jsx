@@ -1,0 +1,119 @@
+// src/pages/Consumers.jsx
+// What it shows: All detected Ollama-calling services with their patch status, streaming risk,
+//   request counts, and intercept mode control.
+// Decision it drives: User decides which services to route through the queue,
+//   applies patches, and optionally enables system-wide iptables interception.
+import { h } from 'preact';
+import { useEffect } from 'preact/hooks';
+import { useActionFeedback } from '../hooks/useActionFeedback.js';
+import {
+  consumers, consumersScanning,
+  fetchConsumers, scanConsumers,
+  fetchInterceptStatus, interceptStatus,
+  enableIntercept, disableIntercept,
+} from '../store.js';
+import { ConsumerRow } from '../components/consumers/ConsumerRow.jsx';
+
+// What it shows: System-wide iptables intercept mode status + enable/disable toggle.
+// Decision it drives: Lets user activate comprehensive Ollama MITM that catches
+//   hardcoded URLs env-var patching can't reach.
+function InterceptBanner() {
+  const [fb, run] = useActionFeedback();
+  const status = interceptStatus.value;
+
+  useEffect(() => { fetchInterceptStatus(); }, []);
+
+  return (
+    <div class={`intercept-banner ${status.enabled ? 'intercept-banner--active' : ''}`}>
+      <div class="intercept-banner__info">
+        <strong>Intercept Mode</strong>
+        <span>Redirect ALL :11434 traffic through queue — catches hardcoded URLs
+          that env-var patching can&apos;t reach. Streaming fully supported.</span>
+        <span class="intercept-badge">
+          {status.enabled ? '● Active' : '○ Disabled'}
+          {status.enabled && !status.rule_present && ' ⚠ Rule missing — re-enable'}
+        </span>
+      </div>
+      <div class="intercept-banner__action">
+        {status.enabled ? (
+          <button
+            class={`action-fb--${fb.phase}`}
+            onClick={() => run('Disabling…', disableIntercept, () => 'Intercept disabled')}
+            disabled={fb.phase === 'loading'}
+          >
+            {fb.phase === 'loading' ? fb.msg : 'Disable intercept'}
+          </button>
+        ) : (
+          <button
+            class={`action-fb--${fb.phase}`}
+            onClick={() => run('Enabling…', enableIntercept, () => 'Intercept active')}
+            disabled={fb.phase === 'loading'}
+          >
+            {fb.phase === 'loading' ? fb.msg : 'Enable intercept mode'}
+          </button>
+        )}
+        {fb.phase === 'error' && <span class="action-fb--error">{fb.msg}</span>}
+        <small>Requires sudo · Linux only</small>
+      </div>
+    </div>
+  );
+}
+
+export default function Consumers() {
+  const [scanFb, runScan] = useActionFeedback();
+
+  useEffect(() => { fetchConsumers(); }, []);
+
+  const list = consumers.value;
+  const newlyDiscovered = list.filter(consumer => consumer.status === 'discovered');
+  const showWizard = newlyDiscovered.length > 0 && list.every(consumer => consumer.status === 'discovered');
+
+  return (
+    <div class="consumers-page">
+      <InterceptBanner />
+
+      <div class="consumers-header">
+        <h2 style="margin:0">Consumers</h2>
+        <button
+          class={`action-fb--${scanFb.phase}`}
+          onClick={() => runScan('Scanning…', scanConsumers, () => `Found ${consumers.value.length} consumer(s)`)}
+          disabled={consumersScanning.value || scanFb.phase === 'loading'}
+        >
+          {scanFb.phase === 'loading' ? 'Scanning…' : 'Scan Now'}
+        </button>
+      </div>
+
+      {scanFb.phase === 'error' && <div class="action-fb--error">{scanFb.msg}</div>}
+
+      {showWizard && (
+        <div class="consumers-wizard-banner">
+          <strong>{newlyDiscovered.length} service{newlyDiscovered.length > 1 ? 's' : ''} detected calling Ollama directly.</strong>
+          {' '}Review below and include or ignore each one.
+        </div>
+      )}
+
+      {list.length === 0 ? (
+        <div class="consumers-empty">
+          <p>No Ollama consumers detected. Click <strong>Scan Now</strong> to search.</p>
+        </div>
+      ) : (
+        <table class="consumers-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Type</th>
+              <th>Streaming?</th>
+              <th>Requests</th>
+              <th>Last Seen</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {list.map(consumer => <ConsumerRow key={consumer.id} consumer={consumer} />)}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}

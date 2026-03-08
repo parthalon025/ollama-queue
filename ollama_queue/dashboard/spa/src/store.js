@@ -534,6 +534,99 @@ export async function refreshQueue() {
     }
 }
 
+// ── Intercept mode state ──────────────────────────────────────────────────────
+
+// What it shows: Whether iptables intercept mode is enabled and whether the rule is live.
+// Decision it drives: User sees at a glance if all :11434 traffic is being routed through
+//   the queue; enables or disables MITM interception for services with hardcoded Ollama URLs.
+export const interceptStatus = signal({ enabled: false, rule_present: false });
+
+export async function fetchInterceptStatus() {
+  try {
+    const res = await fetch(`${API}/consumers/intercept/status`);
+    if (!res.ok) { console.warn('fetchInterceptStatus: HTTP', res.status); return; }
+    interceptStatus.value = await res.json();
+  } catch (e) { console.error('fetchInterceptStatus failed:', e); }
+}
+
+export async function enableIntercept() {
+  const res = await fetch(`${API}/consumers/intercept/enable`, { method: 'POST' });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.detail || `HTTP ${res.status}`);
+  await fetchInterceptStatus();
+  return body;
+}
+
+export async function disableIntercept() {
+  const res = await fetch(`${API}/consumers/intercept/disable`, { method: 'POST' });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.detail || `HTTP ${res.status}`);
+  await fetchInterceptStatus();
+}
+
+// ── Consumers signals ─────────────────────────────────────────────────────────
+
+// What it shows: List of detected Ollama-calling services and scan progress state.
+// Decision it drives: User sees which services need to be routed through the queue.
+export const consumers = signal([]);
+export const consumersScanning = signal(false);
+
+export async function fetchConsumers() {
+  const res = await fetch(`${API}/consumers`);
+  if (!res.ok) throw new Error(`Failed to load consumers: HTTP ${res.status}`);
+  consumers.value = await res.json();
+}
+
+export async function scanConsumers() {
+  consumersScanning.value = true;
+  try {
+    const res = await fetch(`${API}/consumers/scan`, { method: 'POST' });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.detail || `Scan failed: HTTP ${res.status}`);
+    consumers.value = body;
+  } finally {
+    consumersScanning.value = false;
+  }
+}
+
+export async function includeConsumer(id, opts = {}) {
+  const res = await fetch(`${API}/consumers/${id}/include`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ restart_policy: 'deferred', ...opts }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  await fetchConsumers();
+  return res.json();
+}
+
+export async function ignoreConsumer(id) {
+  const res = await fetch(`${API}/consumers/${id}/ignore`, { method: 'POST' });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  await fetchConsumers();
+}
+
+export async function revertConsumer(id) {
+  const res = await fetch(`${API}/consumers/${id}/revert`, { method: 'POST' });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  await fetchConsumers();
+}
+
+export async function fetchConsumerHealth(id) {
+  const res = await fetch(`${API}/consumers/${id}/health`);
+  if (!res.ok) throw new Error(`Health check failed: HTTP ${res.status}`);
+  return res.json();
+}
+
 async function fetchAll() {
     fetchStatus();
     fetchDLQ(); // populate DLQ badge on first load

@@ -19,15 +19,32 @@ from fastapi import Body, FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from starlette.background import BackgroundTask
+from starlette.responses import StreamingResponse
 
 # Simple TTL cache for catalog search results
 _catalog_cache: dict[str, tuple[list, float]] = {}  # query -> (results, expires_at)
 _CATALOG_CACHE_TTL = 300.0  # 5 minutes
 
+# HTTP hop-by-hop headers that must not be forwarded to clients.
+_hop_by_hop = frozenset(
+    [
+        "connection",
+        "keep-alive",
+        "transfer-encoding",
+        "te",
+        "trailer",
+        "upgrade",
+    ]
+)
+
 from ollama_queue.burst import _default_detector as _burst_detector
 from ollama_queue.db import DEFAULTS, Database
 from ollama_queue.estimator import DurationEstimator
+from ollama_queue.intercept import disable_intercept, enable_intercept, get_intercept_status
 from ollama_queue.models import OllamaModels
+from ollama_queue.patcher import check_health, patch_consumer, revert_consumer
+from ollama_queue.scanner import run_scan
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
 PROXY_WAIT_TIMEOUT = 300
@@ -121,6 +138,12 @@ class RecurringJobUpdate(BaseModel):
     check_command: str | None = None
     max_runs: int | None = None
     description: str | None = None
+
+
+class ConsumerIncludeRequest(BaseModel):
+    restart_policy: str = "deferred"
+    force_streaming_override: bool = False
+    system_confirm: bool = False
 
 
 _JOB_DESCRIPTION_CONTEXT = (
@@ -367,6 +390,34 @@ def create_app(db: Database) -> FastAPI:
 
     # --- Proxy ---
 
+    async def _iter_ndjson(rp_resp, release_fn=None):
+        """Yield complete NDJSON lines from a streaming httpx response.
+
+        Buffers aiter_raw() output — chunks are NOT guaranteed line-aligned.
+        Calls release_fn() when done=true final chunk is seen (releases proxy claim).
+        """
+        buffer = b""
+        try:
+            async for raw in rp_resp.aiter_raw():
+                buffer += raw
+                while b"\n" in buffer:
+                    line, buffer = buffer.split(b"\n", 1)
+                    line = line.strip()
+                    if not line:
+                        continue
+                    yield line + b"\n"
+                    try:
+                        if json.loads(line).get("done") and release_fn:
+                            release_fn()
+                            release_fn = None
+                    except (ValueError, AttributeError):
+                        pass
+            if buffer.strip():
+                yield buffer
+        finally:
+            if release_fn:
+                release_fn()
+
     async def _proxy_ollama_request(
         endpoint: str,
         command: str,
@@ -399,6 +450,21 @@ def create_app(db: Database) -> FastAPI:
         priority = body.pop("_priority", 0)
         source = body.pop("_source", "proxy")
         req_timeout = body.pop("_timeout", 600)  # default matches default_timeout_seconds; callers may override
+
+        # Track request against known consumer for health monitoring
+        try:
+            for _row in db.list_consumers():
+                if _row.get("source_label") == source and _row.get("status") in ("patched", "included"):
+                    import time as _time_mod
+
+                    db.update_consumer(
+                        _row["id"],
+                        request_count=(_row["request_count"] or 0) + 1,
+                        last_seen=int(_time_mod.time()),
+                    )
+                    break
+        except Exception:
+            _log.warning("request_count tracking failed for source=%s", source, exc_info=True)
 
         model = body.get("model", "")
 
@@ -473,15 +539,108 @@ def create_app(db: Database) -> FastAPI:
           _priority: int (default 0) — job priority (lower = higher priority)
           _source: str (default "proxy") — caller identifier for history/debugging
           _timeout: int (default 600) — request timeout in seconds; increase for slow reasoning models
+
+        Streaming: if the caller sets stream=True, the response is a StreamingResponse of
+        NDJSON chunks exactly as Ollama emits them. If stream is absent or False, the
+        existing single-JSON-blob path is used unchanged.
         """
-        body["stream"] = False  # MVP: no streaming; prevents resp.json() failure on NDJSON
-        return await _proxy_ollama_request(
-            endpoint="/api/generate",
+        is_streaming = body.get("stream", False)
+
+        if not is_streaming:
+            # Non-streaming path: preserve existing behaviour exactly.
+            body["stream"] = False
+            return await _proxy_ollama_request(
+                endpoint="/api/generate",
+                command="proxy:/api/generate",
+                body=body,
+                resource_profile="ollama",
+                extract_stdout_fn=lambda r: str(r.get("response", ""))[:500],
+                error_prefix="Ollama request failed",
+            )
+
+        # --- Streaming path ---
+        state = db.get_daemon_state()
+        if state and state.get("state") == "paused_manual":
+            raise HTTPException(status_code=503, detail="Queue is manually paused")
+
+        priority = body.pop("_priority", 0)
+        source = body.pop("_source", "proxy")
+        req_timeout = body.pop("_timeout", 600)
+
+        # Track request against known consumer for health monitoring (streaming path)
+        try:
+            for _row in db.list_consumers():
+                if _row.get("source_label") == source and _row.get("status") in ("patched", "included"):
+                    import time as _time_mod
+
+                    db.update_consumer(
+                        _row["id"],
+                        request_count=(_row["request_count"] or 0) + 1,
+                        last_seen=int(_time_mod.time()),
+                    )
+                    break
+        except Exception:
+            _log.warning("request_count tracking failed for source=%s", source, exc_info=True)
+
+        model = body.get("model", "")
+
+        waited = 0.0
+        claimed = False
+        while waited < PROXY_WAIT_TIMEOUT:
+            claimed = db.try_claim_for_proxy()
+            if claimed:
+                break
+            await asyncio.sleep(PROXY_POLL_INTERVAL)
+            waited += PROXY_POLL_INTERVAL
+
+        if not claimed:
+            raise HTTPException(status_code=504, detail="Timed out waiting for queue turn")
+
+        job_id = db.submit_job(
             command="proxy:/api/generate",
-            body=body,
+            model=model,
+            priority=priority,
+            timeout=req_timeout,
+            source=source,
             resource_profile="ollama",
-            extract_stdout_fn=lambda r: str(r.get("response", ""))[:500],
-            error_prefix="Ollama request failed",
+        )
+        db.start_job(job_id)
+
+        try:
+            # Use build_request + send(stream=True) so httpx doesn't buffer the body.
+            async_client = httpx.AsyncClient(timeout=httpx.Timeout(None))
+            rp_req = async_client.build_request("POST", f"{OLLAMA_URL}/api/generate", json=body)
+            rp_resp = await async_client.send(rp_req, stream=True)
+        except Exception as e:
+            _log.error("proxy:/api/generate streaming setup failed for job %d: %s", job_id, e, exc_info=True)
+            db.complete_job(
+                job_id, exit_code=1, stdout_tail="", stderr_tail=str(e)[:500], outcome_reason=f"proxy error: {e}"
+            )
+            db.release_proxy_claim()
+            raise HTTPException(status_code=502, detail=f"Ollama request failed: {e}") from e
+
+        def _release():
+            try:
+                db.complete_job(job_id, exit_code=0, stdout_tail="(streaming)", stderr_tail="", outcome_reason=None)
+            except Exception:
+                _log.exception("complete_job failed for streaming job %d", job_id)
+            try:
+                db.release_proxy_claim()
+            except Exception:
+                _log.exception("release_proxy_claim failed for streaming job %d", job_id)
+
+        headers = {k: v for k, v in rp_resp.headers.items() if k.lower() not in _hop_by_hop}
+
+        async def _close_streaming_resources():
+            await rp_resp.aclose()
+            await async_client.aclose()
+
+        return StreamingResponse(
+            _iter_ndjson(rp_resp, release_fn=_release),
+            status_code=rp_resp.status_code,
+            headers=headers,
+            media_type="application/x-ndjson",
+            background=BackgroundTask(_close_streaming_resources),
         )
 
     @app.post("/api/embed")
@@ -2073,6 +2232,140 @@ def create_app(db: Database) -> FastAPI:
 
         return JSONResponse(content={"run_id": new_run_id}, status_code=201)
 
+    # --- Consumer CRUD endpoints ---
+
+    @app.get("/api/consumers")
+    def list_consumers():
+        return db.list_consumers()
+
+    @app.post("/api/consumers/scan")
+    def scan_consumers():
+        return run_scan(db)
+
+    @app.post("/api/consumers/{consumer_id}/include")
+    def include_consumer(consumer_id: int, body: ConsumerIncludeRequest):
+        import threading as _threading
+        import time as _time
+
+        consumer = db.get_consumer(consumer_id)
+        if not consumer:
+            raise HTTPException(status_code=404, detail="Consumer not found")
+
+        if consumer.get("is_managed_job"):
+            raise HTTPException(
+                status_code=409,
+                detail="Managed queue job — including would cause a deadlock (Lesson #1733)",
+            )
+
+        if consumer.get("platform") == "windows":
+            raise HTTPException(
+                status_code=422,
+                detail="Auto-patch not supported on Windows. Use the generated snippet.",
+            )
+
+        if consumer.get("streaming_confirmed") and not body.force_streaming_override:
+            raise HTTPException(
+                status_code=422,
+                detail="Streaming detected. Proxy forces stream=False. Send force_streaming_override=true to confirm.",
+            )
+
+        patch_path = consumer.get("patch_path", "")
+        if patch_path.startswith("/etc/systemd/system") and not body.system_confirm:
+            raise HTTPException(
+                status_code=422,
+                detail="System path requires explicit confirmation. Send system_confirm=true.",
+            )
+
+        try:
+            result = patch_consumer({**consumer, "restart_policy": body.restart_policy})
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Patch failed: {e}") from e
+        db.update_consumer(
+            consumer_id,
+            status=result.get("status", "patched"),
+            patch_applied=1 if result.get("patch_applied") else 0,
+            patch_type=result.get("patch_type"),
+            patch_snippet=result.get("patch_snippet"),
+            onboarded_at=int(_time.time()),
+        )
+
+        if result.get("status") == "patched":
+            _health_consumer = {**consumer, "id": consumer_id}
+
+            def _run_health_check() -> None:
+                try:
+                    check_health(_health_consumer, db)
+                except Exception:
+                    _log.error("Health check failed for consumer %d", consumer_id, exc_info=True)
+
+            _threading.Thread(target=_run_health_check, daemon=True).start()
+
+        return db.get_consumer(consumer_id)
+
+    @app.post("/api/consumers/{consumer_id}/ignore")
+    def ignore_consumer(consumer_id: int):
+        consumer = db.get_consumer(consumer_id)
+        if not consumer:
+            raise HTTPException(status_code=404, detail="Consumer not found")
+        db.update_consumer(consumer_id, status="ignored")
+        return db.get_consumer(consumer_id)
+
+    @app.post("/api/consumers/{consumer_id}/revert")
+    def revert_consumer_endpoint(consumer_id: int):
+        consumer = db.get_consumer(consumer_id)
+        if not consumer:
+            raise HTTPException(status_code=404, detail="Consumer not found")
+        try:
+            revert_consumer(consumer)
+        except Exception as e:
+            _log.error("revert_consumer failed for consumer %d: %s", consumer_id, e, exc_info=True)
+            raise HTTPException(status_code=500, detail=f"File revert failed: {e}") from e
+        db.update_consumer(consumer_id, status="discovered", patch_applied=0, health_status="unknown")
+        return db.get_consumer(consumer_id)
+
+    @app.get("/api/consumers/{consumer_id}/health")
+    def consumer_health(consumer_id: int):
+        consumer = db.get_consumer(consumer_id)
+        if not consumer:
+            raise HTTPException(status_code=404, detail="Consumer not found")
+        return check_health(consumer, db)
+
+    # --- Intercept mode endpoints ---
+
+    @app.post("/api/consumers/intercept/enable")
+    def intercept_enable():
+        import platform as _plat
+
+        if _plat.system() != "Linux":
+            raise HTTPException(status_code=422, detail="iptables intercept is Linux-only")
+        included = [c for c in db.list_consumers() if c.get("status") in ("patched", "included")]
+        if not included:
+            raise HTTPException(
+                status_code=422,
+                detail="Include at least one consumer before enabling intercept mode.",
+            )
+        uid = os.getuid()
+        result = enable_intercept(uid=uid, queue_port=7683)
+        if not result.get("enabled"):
+            raise HTTPException(status_code=422, detail=result.get("error", "iptables failed"))
+        db.set_setting("intercept_mode_enabled", "1")
+        db.set_setting("intercept_mode_uid", str(uid))
+        return result
+
+    @app.post("/api/consumers/intercept/disable")
+    def intercept_disable():
+        uid = int(db.get_setting("intercept_mode_uid") or os.getuid())
+        result = disable_intercept(uid=uid, queue_port=7683)
+        if result.get("error"):
+            raise HTTPException(status_code=500, detail=result["error"])
+        db.set_setting("intercept_mode_enabled", "0")
+        return result
+
+    @app.get("/api/consumers/intercept/status")
+    def intercept_status():
+        uid = int(db.get_setting("intercept_mode_uid") or os.getuid())
+        return get_intercept_status(uid=uid, queue_port=7683)
+
     # --- Static files for SPA ---
     spa_dir = Path(__file__).parent / "dashboard" / "spa" / "dist"
     if spa_dir.exists():
@@ -2093,6 +2386,17 @@ def create_app(db: Database) -> FastAPI:
             )
 
         app.mount("/ui", StaticFiles(directory=str(spa_dir), html=True), name="ui")
+
+    # Auto-scan for Ollama consumers on startup (daemon thread — won't block shutdown)
+    import threading as _threading
+
+    def _startup_scan() -> None:
+        try:
+            run_scan(db)
+        except Exception:
+            _log.error("Startup consumer scan failed", exc_info=True)
+
+    _threading.Thread(target=_startup_scan, daemon=True).start()
 
     return app
 

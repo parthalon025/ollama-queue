@@ -1,5 +1,6 @@
 """Tests for the /api/generate proxy endpoint."""
 
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -62,33 +63,90 @@ def test_generate_proxy_rejects_when_paused(client):
     assert resp.status_code == 503
 
 
-def test_generate_proxy_forces_stream_false(client):
-    """Proxy forces stream=false even if caller sets stream=true."""
+def test_generate_proxy_non_stream_unchanged(client):
+    """stream=False (or absent) still returns a single JSON response as before."""
     mock_response = MagicMock()
     mock_response.status_code = 200
-    mock_response.json.return_value = {"response": "ok", "done": True}
+    mock_response.json.return_value = {"response": "Hello!", "done": True}
     mock_response.raise_for_status = MagicMock()
 
-    with patch("ollama_queue.api.httpx.AsyncClient") as mock_client_cls:
+    with patch("ollama_queue.api.httpx.AsyncClient") as mock_cls:
         mock_client = AsyncMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.post = AsyncMock(return_value=mock_response)
-        mock_client_cls.return_value = mock_client
+        mock_cls.return_value = mock_client
+
+        resp = client.post("/api/generate", json={"model": "llama3.2:3b", "prompt": "hello"})
+
+    assert resp.status_code == 200
+    assert resp.json()["response"] == "Hello!"
+
+
+def test_generate_proxy_streams_ndjson_when_stream_true(client):
+    """stream=True returns chunked NDJSON, not a single JSON blob."""
+    chunks = [
+        json.dumps({"response": "He", "done": False}).encode() + b"\n",
+        json.dumps({"response": "llo", "done": True, "eval_count": 5}).encode() + b"\n",
+    ]
+
+    async def fake_aiter_raw():
+        for chunk in chunks:
+            yield chunk
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.aiter_raw = fake_aiter_raw
+    mock_resp.aclose = AsyncMock()
+
+    with patch("ollama_queue.api.httpx.AsyncClient") as mock_cls:
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.send = AsyncMock(return_value=mock_resp)
+        mock_cls.return_value = mock_client
 
         resp = client.post(
             "/api/generate",
-            json={
-                "model": "test",
-                "prompt": "hello",
-                "stream": True,  # Should be overridden
-            },
+            json={"model": "llama3.2:3b", "prompt": "hello", "stream": True},
         )
 
-    # Verify stream was forced to False in the forwarded body
-    called_kwargs = mock_client.post.call_args[1]
-    called_json = called_kwargs.get("json")
-    assert called_json["stream"] is False
+    assert resp.status_code == 200
+    lines = [ln for ln in resp.content.split(b"\n") if ln.strip()]
+    assert len(lines) == 2
+    assert json.loads(lines[0])["done"] is False
+    assert json.loads(lines[1])["done"] is True
+
+
+def test_generate_proxy_buffers_misaligned_chunks(client):
+    """aiter_raw chunks that split across JSON lines are reassembled correctly."""
+    full = json.dumps({"response": "ok", "done": True}).encode() + b"\n"
+    part1, part2 = full[:10], full[10:]
+
+    async def fake_aiter_raw():
+        yield part1
+        yield part2
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.aiter_raw = fake_aiter_raw
+    mock_resp.aclose = AsyncMock()
+
+    with patch("ollama_queue.api.httpx.AsyncClient") as mock_cls:
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.send = AsyncMock(return_value=mock_resp)
+        mock_cls.return_value = mock_client
+
+        resp = client.post(
+            "/api/generate",
+            json={"model": "llama3.2:3b", "prompt": "hi", "stream": True},
+        )
+
+    lines = [ln for ln in resp.content.split(b"\n") if ln.strip()]
+    assert len(lines) == 1
+    assert json.loads(lines[0])["done"] is True
 
 
 def test_generate_proxy_releases_on_error(client, db):
