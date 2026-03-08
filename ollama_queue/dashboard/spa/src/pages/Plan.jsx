@@ -8,7 +8,7 @@ import {
     generateJobDescription,
 } from '../store';
 import { useActionFeedback } from '../hooks/useActionFeedback.js';
-import { GanttChart } from '../components/GanttChart';
+import { GanttChart, runStatus } from '../components/GanttChart';
 import { ModelBadge } from '../components/ModelBadge';
 import LoadMapStrip from '../components/LoadMapStrip.jsx';
 import AddRecurringJobModal from '../components/AddRecurringJobModal.jsx';
@@ -149,7 +149,21 @@ function groupNextDue(groupJobs) {
 
 // --- Table layout ---
 
-const COLUMNS = ['Name', 'Model', 'GPU Mem', 'Repeats', 'Priority', 'Due In', 'Est. Time', '\u2713', 'Limit', '\u{1F4CC}', 'On', ''];
+const COLUMN_DEFS = [
+    { label: 'Name',      title: 'Job name — set when the recurring job was created' },
+    { label: 'Model',     title: 'Ollama model this job uses (overrides the system default)' },
+    { label: 'GPU Mem',   title: 'Memory profile: light · standard · heavy. Heavy needs ≥16GB VRAM and cannot overlap another heavy job' },
+    { label: 'Repeats',   title: 'How often this job runs — interval (e.g. 4h) or cron expression' },
+    { label: 'Priority',  title: '1=highest, 10=lowest. Lower number dequeues first when multiple jobs are waiting' },
+    { label: 'Due In',    title: 'Time until the next scheduled run' },
+    { label: 'Est. Time', title: 'Estimated run duration based on recent run history' },
+    { label: '\u2713',    title: 'Number of completed successful runs' },
+    { label: 'Limit',     title: 'Max retry attempts before the job is moved to the Dead Letter Queue (DLQ)' },
+    { label: '\u{1F4CC}', title: "Pinned slot — the rebalancer will not move this job's scheduled run time" },
+    { label: 'On',        title: 'Enable or disable this recurring job' },
+    { label: '',          title: undefined },
+];
+const COLUMNS = COLUMN_DEFS.map(d => d.label);
 const COL_COUNT = COLUMNS.length;
 
 const STATUS_COLORS = {
@@ -176,9 +190,12 @@ const inputStyle = {
 };
 
 
+const isMobileScreen = () => typeof window !== 'undefined' && window.innerWidth <= 640;
+
 export default function Plan() {
     const [tick, setTick] = useState(0);
     const [search, setSearch] = useState('');
+    const [ganttExpanded, setGanttExpanded] = useState(false);
 
     // Action feedback hooks — one per distinct action type, all declared before any early returns
     const [deleteFb, deleteAct] = useActionFeedback();
@@ -208,6 +225,7 @@ export default function Plan() {
     const [generatingDescId, setGeneratingDescId] = useState(null);
 
     const refreshingRef = useRef(false);
+    const jobRowRefs = useRef({});
     const debouncedSearch = useDebounce(search, 300);
 
     useEffect(() => {
@@ -227,6 +245,13 @@ export default function Plan() {
             clearInterval(refreshInterval);
         };
     }, []);
+
+    useEffect(() => {
+        if (!ganttExpanded) return;
+        function onKey(evt) { if (evt.key === 'Escape') setGanttExpanded(false); }
+        document.addEventListener('keydown', onKey);
+        return () => document.removeEventListener('keydown', onKey);
+    }, [ganttExpanded]);
 
     // --- Handlers ---
 
@@ -410,6 +435,16 @@ export default function Plan() {
         );
     }
 
+    function handleScrollToJob(rjId) {
+        const el = jobRowRefs.current[rjId];
+        if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            el.style.outline = '2px solid var(--accent)';
+            setTimeout(() => { if (el) el.style.outline = ''; }, 1500);
+        }
+        if (expandedJobId !== rjId) toggleJobDetail(rjId);
+    }
+
     // --- Derived data ---
 
     // Reference tick for per-second countdown updates
@@ -430,6 +465,10 @@ export default function Plan() {
         : jobs;
 
     const groups = groupJobsByTag(visibleJobs);
+
+    const lateJobs = jobs.filter(rj =>
+        rj.enabled && runStatus(rj.last_run, rj.interval_seconds).label === 'running behind'
+    );
 
     // --- Render helpers ---
 
@@ -513,6 +552,7 @@ export default function Plan() {
 
         return (
             <tr key={rj.id}
+                ref={el => { if (el) jobRowRefs.current[rj.id] = el; else delete jobRowRefs.current[rj.id]; }}
                 style={{
                     borderBottom: isExpanded ? 'none' : '1px solid var(--border-subtle)',
                     cursor: 'pointer',
@@ -984,58 +1024,76 @@ export default function Plan() {
                 </div>
             )}
 
-            {/* ρ traffic intensity indicator */}
+            {/* ρ traffic intensity — visual bar shows daily load vs 0.80 warn threshold */}
+            {/* What it shows: How full the day's schedule is (0=empty, 1=non-stop). */}
+            {/* Decision: Keep below 0.80 — above that queue wait times grow sharply (Kingman's formula). */}
             {jobs.length > 0 && (() => {
                 const rho = computeRho(jobs);
                 const { label, color } = rhoStatus(rho);
+                const fillPct = Math.min(rho, 1) * 100;
                 return (
-                    <div style={{
-                        display: 'flex', alignItems: 'center', gap: '0.5rem',
-                        marginBottom: '0.4rem',
-                    }}>
-                        <span style={{
-                            fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)',
-                            color: 'var(--text-tertiary)',
-                        }}>
-                            Daily load
-                        </span>
-                        <span style={{
-                            fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)',
-                            fontWeight: 700, color,
-                            background: 'var(--bg-surface-raised)',
-                            border: `1px solid ${color}`,
-                            borderRadius: 'var(--radius)',
-                            padding: '1px 6px',
-                            letterSpacing: '0.02em',
-                        }}
-                            title={`How packed is your daily schedule? 0.0 = nothing scheduled, 1.0 = queue running non-stop. Keep below 0.80 to avoid jobs piling up and waiting for each other. Current: ${rho.toFixed(2)}`}
-                            aria-label={`Traffic intensity: ${rho.toFixed(2)}, status: ${label}`}
-                        >
-                            load {rho.toFixed(2)} — {label}
-                        </span>
-                        <button
-                            class="t-btn t-btn--ghost"
-                            style={{ marginLeft: 'auto', fontSize: 'var(--type-label)', padding: '1px 8px' }}
-                            disabled={suggestLoading}
-                            onClick={async () => {
-                                if (suggestSlots !== null) { setSuggestSlots(null); return; }
-                                setSuggestLoading(true);
-                                try {
-                                    const data = await fetchSuggestTime(5, 3);
-                                    setSuggestSlots(data.suggestions || []);
-                                } catch (e) {
-                                    console.error('fetchSuggestTime failed:', e);
-                                } finally {
-                                    setSuggestLoading(false);
-                                }
-                            }}
-                            title="Find the best time windows to add a new recurring job — highlights the quietest slots on the chart above"
-                        >
-                            {suggestLoading ? '…'
-                                : suggestSlots === null ? 'Find best slot'
-                                : suggestSlots.length === 0 ? 'No open slots found'
-                                : 'Clear suggestions'}
-                        </button>
+                    <div style={{ marginBottom: '0.4rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.3rem' }}>
+                            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>
+                                Daily load
+                            </span>
+                            <div style={{
+                                position: 'relative', flex: 1, height: 8,
+                                background: 'var(--bg-inset)',
+                                border: '1px solid var(--border-subtle)',
+                                borderRadius: 'var(--radius)',
+                                minWidth: 80,
+                            }}>
+                                <div style={{
+                                    position: 'absolute', left: 0, top: 0, bottom: 0,
+                                    width: `${fillPct}%`,
+                                    background: color,
+                                    borderRadius: 'var(--radius)',
+                                    transition: 'width 0.4s ease, background 0.3s ease',
+                                }} />
+                                <div
+                                    aria-hidden="true"
+                                    title="Warning threshold — keep below 0.80 to avoid job pile-up"
+                                    style={{
+                                        position: 'absolute', left: '80%', top: -3, bottom: -3,
+                                        width: 1, borderLeft: '1px dashed var(--status-warning)', zIndex: 2,
+                                    }}
+                                />
+                                <span style={{
+                                    position: 'absolute', left: '80%', top: -16,
+                                    transform: 'translateX(-50%)',
+                                    fontFamily: 'var(--font-mono)', fontSize: 'var(--type-micro)',
+                                    color: 'var(--status-warning)', whiteSpace: 'nowrap', pointerEvents: 'none',
+                                }}>0.80</span>
+                            </div>
+                            <span
+                                style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', fontWeight: 700, color, whiteSpace: 'nowrap' }}
+                                title={`How packed is your daily schedule? 0.0 = nothing scheduled, 1.0 = queue running non-stop. Keep below 0.80 to avoid jobs piling up and waiting for each other. Current: ${rho.toFixed(2)}`}
+                                aria-label={`Traffic intensity: ${rho.toFixed(2)}, status: ${label}`}
+                            >
+                                {rho.toFixed(2)} — {label}
+                            </span>
+                            <button
+                                class="t-btn t-btn--ghost"
+                                style={{ fontSize: 'var(--type-label)', padding: '1px 8px', whiteSpace: 'nowrap' }}
+                                disabled={suggestLoading}
+                                onClick={async () => {
+                                    if (suggestSlots !== null) { setSuggestSlots(null); return; }
+                                    setSuggestLoading(true);
+                                    try {
+                                        const data = await fetchSuggestTime(5, 3);
+                                        setSuggestSlots(data.suggestions || []);
+                                    } catch (e) {
+                                        console.error('fetchSuggestTime failed:', e);
+                                    } finally {
+                                        setSuggestLoading(false);
+                                    }
+                                }}
+                                title="Find the best time windows to add a new recurring job — highlights the quietest slots on the chart above"
+                            >
+                                {suggestLoading ? '…' : suggestSlots === null ? 'Find best slot' : suggestSlots.length === 0 ? 'No open slots found' : 'Clear suggestions'}
+                            </button>
+                        </div>
                     </div>
                 );
             })()}
@@ -1043,18 +1101,60 @@ export default function Plan() {
             {/* Load map density strip — 48-slot daily load visualization */}
             <LoadMapStrip data={loadMap.value} />
 
-            {/* Gantt timeline — each bar is one scheduled job; width = expected run time; color = source program */}
+            {/* Gantt timeline — tap/click bars for details; ⤢ expands to full screen on mobile */}
             <div class="t-frame" data-label="Next 24 hours">
-                <p style={{
-                    margin: '0 0 0.6rem 0',
-                    fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)',
-                    color: 'var(--text-tertiary)', lineHeight: 1.5,
-                }}>
-                    Each bar is a scheduled job. Bar width shows how long it&apos;s expected to run.
-                    Color shows which program runs it. Hover any bar to see the model, command, and description.
-                </p>
-                <GanttChart jobs={jobs} tick={tick} windowHours={24} loadMapSlots={loadMap.value?.slots || []} suggestSlots={suggestSlots || []} />
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
+                    <p style={{ margin: 0, fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', lineHeight: 1.5, flex: 1 }}>
+                        Each bar is a scheduled job. Bar width shows how long it&apos;s expected to run.
+                        Color shows which program runs it. Tap or hover any bar for details.
+                    </p>
+                    <button
+                        title="Expand to full screen — on mobile this shows a 6-hour window with wider bars"
+                        onClick={() => setGanttExpanded(true)}
+                        style={{
+                            background: 'none', border: '1px solid var(--border-subtle)',
+                            borderRadius: 'var(--radius)', cursor: 'pointer',
+                            color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)',
+                            fontSize: 'var(--type-label)', padding: '2px 7px', marginLeft: '0.5rem', flexShrink: 0,
+                        }}
+                    >⤢</button>
+                </div>
+                <GanttChart
+                    jobs={jobs}
+                    tick={tick}
+                    windowHours={24}
+                    loadMapSlots={loadMap.value?.slots || []}
+                    suggestSlots={suggestSlots || []}
+                    onRunJob={id => { const rj = jobs.find(j => j.id === id); if (rj) handleRunNow(rj); }}
+                    onScrollToJob={handleScrollToJob}
+                />
             </div>
+
+            {ganttExpanded && (
+                <div
+                    style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'var(--bg-base)', overflowY: 'auto', padding: '1rem' }}
+                    onClick={evt => { if (evt.target === evt.currentTarget) setGanttExpanded(false); }}
+                >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 'var(--type-headline)', color: 'var(--text-primary)' }}>
+                            Schedule {isMobileScreen() ? '(next 6h)' : '(next 24h)'}
+                        </span>
+                        <button
+                            onClick={() => setGanttExpanded(false)}
+                            style={{ background: 'none', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius)', cursor: 'pointer', color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', fontSize: 'var(--type-body)', padding: '3px 10px' }}
+                        >✕ close</button>
+                    </div>
+                    <GanttChart
+                        jobs={jobs}
+                        tick={tick}
+                        windowHours={isMobileScreen() ? 6 : 24}
+                        loadMapSlots={loadMap.value?.slots || []}
+                        suggestSlots={suggestSlots || []}
+                        onRunJob={id => { const rj = jobs.find(j => j.id === id); if (rj) handleRunNow(rj); }}
+                        onScrollToJob={id => { setGanttExpanded(false); handleScrollToJob(id); }}
+                    />
+                </div>
+            )}
 
             {jobs.length === 0 ? (
                 <div class="t-frame" style={{ textAlign: 'center', padding: '2rem',
@@ -1086,6 +1186,34 @@ export default function Plan() {
                             No jobs match "{debouncedSearch}"
                         </p>
                     )}
+                    {lateJobs.length > 0 && (
+                        <div style={{
+                            display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap',
+                            padding: '0.4rem 0.75rem',
+                            background: 'rgba(251,146,60,0.08)',
+                            border: '1px solid var(--status-warning)',
+                            borderRadius: 'var(--radius)',
+                            fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)',
+                            marginBottom: '0.25rem',
+                        }}>
+                            <span style={{ color: 'var(--status-warning)', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                                ⚠ {lateJobs.length} job{lateJobs.length > 1 ? 's' : ''} running behind schedule —
+                            </span>
+                            {lateJobs.map((rj, idx) => (
+                                <span key={rj.id}>
+                                    <button
+                                        onClick={() => handleScrollToJob(rj.id)}
+                                        style={{
+                                            background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+                                            fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)',
+                                            color: 'var(--accent)', textDecoration: 'underline',
+                                        }}
+                                    >{rj.name}</button>
+                                    {idx < lateJobs.length - 1 ? ', ' : ''}
+                                </span>
+                            ))}
+                        </div>
+                    )}
                     <div class="t-frame" style={{ padding: 0, overflowX: 'auto' }}>
                         <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
                             <table style={{ width: '100%', minWidth: 700, borderCollapse: 'collapse',
@@ -1093,9 +1221,9 @@ export default function Plan() {
                                 <thead>
                                     <tr style={{ borderBottom: '1px solid var(--border-subtle)',
                                                  background: 'var(--bg-surface-raised)' }}>
-                                        {COLUMNS.map(col => (
-                                            <th key={col} style={{
-                                                textAlign: col === 'Name' ? 'left' : 'center',
+                                        {COLUMN_DEFS.map(({ label, title }) => (
+                                            <th key={label || 'actions'} title={title} style={{
+                                                textAlign: label === 'Name' ? 'left' : 'center',
                                                 padding: '0.5rem 0.75rem',
                                                 fontSize: 'var(--type-label)',
                                                 color: 'var(--text-secondary)',
@@ -1104,11 +1232,12 @@ export default function Plan() {
                                                 letterSpacing: '0.05em',
                                                 fontFamily: 'var(--font-mono)',
                                                 whiteSpace: 'nowrap',
-                                                ...(col === 'Name' ? {
+                                                cursor: title ? 'help' : undefined,
+                                                ...(label === 'Name' ? {
                                                     position: 'sticky', left: 0,
                                                     background: 'var(--bg-surface-raised)', zIndex: 1,
                                                 } : {}),
-                                            }}>{col}</th>
+                                            }}>{label}</th>
                                         ))}
                                     </tr>
                                 </thead>
