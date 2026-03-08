@@ -19,10 +19,24 @@ from fastapi import Body, FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from starlette.background import BackgroundTask
+from starlette.responses import StreamingResponse
 
 # Simple TTL cache for catalog search results
 _catalog_cache: dict[str, tuple[list, float]] = {}  # query -> (results, expires_at)
 _CATALOG_CACHE_TTL = 300.0  # 5 minutes
+
+# HTTP hop-by-hop headers that must not be forwarded to clients.
+_hop_by_hop = frozenset(
+    [
+        "connection",
+        "keep-alive",
+        "transfer-encoding",
+        "te",
+        "trailer",
+        "upgrade",
+    ]
+)
 
 from ollama_queue.burst import _default_detector as _burst_detector
 from ollama_queue.db import DEFAULTS, Database
@@ -367,6 +381,34 @@ def create_app(db: Database) -> FastAPI:
 
     # --- Proxy ---
 
+    async def _iter_ndjson(rp_resp, release_fn=None):
+        """Yield complete NDJSON lines from a streaming httpx response.
+
+        Buffers aiter_raw() output — chunks are NOT guaranteed line-aligned.
+        Calls release_fn() when done=true final chunk is seen (releases proxy claim).
+        """
+        buffer = b""
+        try:
+            async for raw in rp_resp.aiter_raw():
+                buffer += raw
+                while b"\n" in buffer:
+                    line, buffer = buffer.split(b"\n", 1)
+                    line = line.strip()
+                    if not line:
+                        continue
+                    yield line + b"\n"
+                    try:
+                        if json.loads(line).get("done") and release_fn:
+                            release_fn()
+                            release_fn = None
+                    except (ValueError, AttributeError):
+                        pass
+            if buffer.strip():
+                yield buffer
+        finally:
+            if release_fn:
+                release_fn()
+
     async def _proxy_ollama_request(
         endpoint: str,
         command: str,
@@ -473,15 +515,88 @@ def create_app(db: Database) -> FastAPI:
           _priority: int (default 0) — job priority (lower = higher priority)
           _source: str (default "proxy") — caller identifier for history/debugging
           _timeout: int (default 600) — request timeout in seconds; increase for slow reasoning models
+
+        Streaming: if the caller sets stream=True, the response is a StreamingResponse of
+        NDJSON chunks exactly as Ollama emits them. If stream is absent or False, the
+        existing single-JSON-blob path is used unchanged.
         """
-        body["stream"] = False  # MVP: no streaming; prevents resp.json() failure on NDJSON
-        return await _proxy_ollama_request(
-            endpoint="/api/generate",
+        is_streaming = body.get("stream", False)
+
+        if not is_streaming:
+            # Non-streaming path: preserve existing behaviour exactly.
+            body["stream"] = False
+            return await _proxy_ollama_request(
+                endpoint="/api/generate",
+                command="proxy:/api/generate",
+                body=body,
+                resource_profile="ollama",
+                extract_stdout_fn=lambda r: str(r.get("response", ""))[:500],
+                error_prefix="Ollama request failed",
+            )
+
+        # --- Streaming path ---
+        state = db.get_daemon_state()
+        if state and state.get("state") == "paused_manual":
+            raise HTTPException(status_code=503, detail="Queue is manually paused")
+
+        priority = body.pop("_priority", 0)
+        source = body.pop("_source", "proxy")
+        req_timeout = body.pop("_timeout", 600)
+        model = body.get("model", "")
+
+        waited = 0.0
+        claimed = False
+        while waited < PROXY_WAIT_TIMEOUT:
+            claimed = db.try_claim_for_proxy()
+            if claimed:
+                break
+            await asyncio.sleep(PROXY_POLL_INTERVAL)
+            waited += PROXY_POLL_INTERVAL
+
+        if not claimed:
+            raise HTTPException(status_code=504, detail="Timed out waiting for queue turn")
+
+        job_id = db.submit_job(
             command="proxy:/api/generate",
-            body=body,
+            model=model,
+            priority=priority,
+            timeout=req_timeout,
+            source=source,
             resource_profile="ollama",
-            extract_stdout_fn=lambda r: str(r.get("response", ""))[:500],
-            error_prefix="Ollama request failed",
+        )
+        db.start_job(job_id)
+
+        try:
+            # Use build_request + send(stream=True) so httpx doesn't buffer the body.
+            async_client = httpx.AsyncClient(timeout=httpx.Timeout(None))
+            rp_req = async_client.build_request("POST", f"{OLLAMA_URL}/api/generate", json=body)
+            rp_resp = await async_client.send(rp_req, stream=True)
+        except Exception as e:
+            _log.error("proxy:/api/generate streaming setup failed for job %d: %s", job_id, e, exc_info=True)
+            db.complete_job(
+                job_id, exit_code=1, stdout_tail="", stderr_tail=str(e)[:500], outcome_reason=f"proxy error: {e}"
+            )
+            db.release_proxy_claim()
+            raise HTTPException(status_code=502, detail=f"Ollama request failed: {e}") from e
+
+        def _release():
+            try:
+                db.complete_job(job_id, exit_code=0, stdout_tail="(streaming)", stderr_tail="", outcome_reason=None)
+            except Exception:
+                _log.exception("complete_job failed for streaming job %d", job_id)
+            try:
+                db.release_proxy_claim()
+            except Exception:
+                _log.exception("release_proxy_claim failed for streaming job %d", job_id)
+
+        headers = {k: v for k, v in rp_resp.headers.items() if k.lower() not in _hop_by_hop}
+
+        return StreamingResponse(
+            _iter_ndjson(rp_resp, release_fn=_release),
+            status_code=rp_resp.status_code,
+            headers=headers,
+            media_type="application/x-ndjson",
+            background=BackgroundTask(rp_resp.aclose),
         )
 
     @app.post("/api/embed")
