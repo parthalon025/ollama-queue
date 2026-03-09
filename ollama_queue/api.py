@@ -1939,6 +1939,23 @@ def create_app(db: Database) -> FastAPI:
         _threading_analyze.Thread(target=_run_analysis, daemon=True).start()
         return {"ok": True, "run_id": run_id, "message": "Analysis started in background"}
 
+    @app.get("/api/eval/runs/{run_id}/analysis")
+    def get_eval_run_analysis(run_id: int):
+        """Return pre-computed structured analysis for a run.
+
+        # What it shows: Per-item breakdown, failure cases, and bootstrap CIs from analysis_json.
+        # Decision it drives: Shows which items are hardest, which pairs are misclassified,
+        #   and how confident we should be in F1 scores — without needing another Ollama call.
+        """
+        with db._lock:
+            conn = db._connect()
+            row = conn.execute("SELECT analysis_json FROM eval_runs WHERE id = ?", (run_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, f"Run {run_id} not found")
+        if not row["analysis_json"]:
+            return {"status": "not_computed"}
+        return json.loads(row["analysis_json"])
+
     @app.get("/api/eval/runs/{run_id}/confusion")
     def get_eval_run_confusion(run_id: int):
         """Returns cluster confusion matrix for a completed eval run.

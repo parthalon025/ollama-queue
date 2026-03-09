@@ -1121,3 +1121,48 @@ class TestConfusionMatrixEndpoint:
         assert data["flagged"][0]["source"] == "A"
         assert data["flagged"][0]["target"] == "B"
         assert data["flagged"][0]["avg_transfer"] == 4.0
+
+
+# ---------------------------------------------------------------------------
+# GET /api/eval/runs/{id}/analysis
+# ---------------------------------------------------------------------------
+
+
+def test_get_analysis_returns_stored_json(client_and_db):
+    """GET /api/eval/runs/{id}/analysis returns stored analysis_json."""
+    client, db = client_and_db
+    with db._lock:
+        conn = db._connect()
+        conn.execute(
+            "INSERT INTO eval_runs (id, data_source_url, variants, variant_id, status, analysis_json) "
+            "VALUES (1, 'http://localhost', '[\"A\"]', 'A', 'complete', ?)",
+            ('{"per_item": [], "failures": [], "confidence_intervals": {}}',),
+        )
+        conn.commit()
+    resp = client.get("/api/eval/runs/1/analysis")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "per_item" in data
+    assert "failures" in data
+
+
+def test_get_analysis_not_computed(client_and_db):
+    """GET /api/eval/runs/{id}/analysis returns status when analysis_json is NULL."""
+    client, db = client_and_db
+    with db._lock:
+        conn = db._connect()
+        conn.execute(
+            "INSERT INTO eval_runs (id, data_source_url, variants, variant_id, status) "
+            "VALUES (1, 'http://localhost', '[\"A\"]', 'A', 'complete')"
+        )
+        conn.commit()
+    resp = client.get("/api/eval/runs/1/analysis")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "not_computed"
+
+
+def test_get_analysis_not_found(client):
+    """GET /api/eval/runs/999/analysis returns 404."""
+    resp = client.get("/api/eval/runs/999/analysis")
+    assert resp.status_code == 404
