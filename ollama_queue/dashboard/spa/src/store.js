@@ -123,6 +123,22 @@ export async function fetchEvalSettings() {
   } catch (e) { console.error('fetchEvalSettings failed:', e); }
 }
 
+// What it shows: Cross-run F1 stdev and stable/unstable badge data per variant
+// Decision it drives: Tells the user whether a variant's quality is consistent enough to trust
+export const evalStability = signal({});
+
+// What it shows: nothing — fetches cross-run stability data per variant
+// Decision it drives: provides stdev/stable badge data to VariantStabilityTable
+export async function fetchVariantStability() {
+  try {
+    const res = await fetch(`${API}/eval/variants/stability`);
+    if (!res.ok) return;
+    evalStability.value = await res.json();
+  } catch (err) {
+    console.warn('fetchVariantStability failed:', err);
+  }
+}
+
 // What it shows: nothing — fetches structured analysis for one run
 // Decision it drives: provides CI, per-item breakdown, and failure data to RunRow
 export async function fetchRunAnalysis(runId) {
