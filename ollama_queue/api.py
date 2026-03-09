@@ -47,7 +47,7 @@ from ollama_queue.patcher import check_health, patch_consumer, revert_consumer
 from ollama_queue.scanner import run_scan
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
-PROXY_WAIT_TIMEOUT = 300
+PROXY_WAIT_TIMEOUT = 600
 PROXY_POLL_INTERVAL = 0.5
 
 
@@ -182,7 +182,7 @@ def _call_generate_description(rj_id: int, name: str, tag: str | None, command: 
         "action is involved, not generic. Do not start with 'This job'."
     )
     payload = {
-        "model": "qwen3:8b",
+        "model": "qwen3.5:9b",
         "prompt": prompt,
         "temperature": 0.2,
         "stream": False,
@@ -822,7 +822,7 @@ def create_app(db: Database) -> FastAPI:
 
     @app.post("/api/schedule/{rj_id}/generate-description")
     def generate_description(rj_id: int):
-        """Ask local Ollama (qwen3:8b) to write a layman description for this recurring job.
+        """Ask local Ollama (qwen3.5:9b) to write a layman description for this recurring job.
 
         Plain English: The caller waits while the AI model writes 2 plain-English sentences
         about what the job does. The description is saved to the DB and returned so the UI
