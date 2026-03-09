@@ -29,19 +29,19 @@ scripts/
   migrate_timers.py            # Migrate 8 of 10 systemd timers to recurring jobs (--dry-run / --execute)
   migrate_dlq_max_retries.py   # Add max_retries column to existing dlq table (idempotent)
 tests/
-  test_db.py               # 99 tests
+  test_db.py               # 105 tests
   test_eval_engine.py      # 100 tests
   test_api.py              # 58 tests (incl. proxy priority, batch schedule, suggest endpoint)
-  test_daemon.py           # 62 tests
+  test_daemon.py           # 66 tests
   test_api_eval_runs.py    # 57 tests
   test_api_eval_variants.py # 31 tests
-  test_scheduler.py        # 28 tests
+  test_scheduler.py        # 36 tests
   test_cli.py              # 27 tests
   test_stall.py            # 24 tests
-  test_health.py           # 18 tests
+  test_health.py           # 20 tests
   test_api_eval_settings.py # 25 tests
-  test_models.py           # 16 tests
-  test_estimator.py        # 12 tests
+  test_models.py           # 19 tests
+  test_estimator.py        # 14 tests
   test_embed_proxy.py      # 12 tests
   test_proxy.py            # 8 tests
   test_dlq.py              # 8 tests
@@ -60,7 +60,7 @@ tests/
 cd ~/Documents/projects/ollama-queue
 source .venv/bin/activate
 
-# Run tests (638 total)
+# Run tests (719 total)
 pytest
 
 # Start the server (daemon + API + dashboard)
@@ -193,6 +193,10 @@ This applies to: component files, store transformations in `store.js`, computed 
 - **`GET /api/eval/trends` returns `variants` as an object keyed by variant id, not an array** — SPA components must not iterate `variants` directly with `.map()`. Call `normalizeTrends()` in `store.js` before assigning to `evalTrends.value`; this converts the object to an array (with `id` attached), aggregates `trend_direction`/`completed_runs`/`judge_reliability`/`item_count_growing` at the top level, and normalises `started_at` ISO strings to unix `timestamp` fields. Any new Trends-tab component must consume the normalised shape, not the raw API response.
 - **`INSERT OR IGNORE` skips pre-existing seeded rows — always pair with `UPDATE WHERE column IS NULL` backfill** — when adding a new column to a table that has seeded rows (e.g. `eval_variants` system variants A–H + M), `ALTER TABLE ADD COLUMN` sets the column to NULL on existing rows. The seed `INSERT OR IGNORE` then silently skips those rows, leaving the new column unpopulated. Always follow the migration with `UPDATE <table> SET <column> = <value> WHERE <column> IS NULL` to backfill pre-existing rows.
 - **`poll_once()` must not clobber the proxy sentinel** — the daemon's "set idle" transitions (`job is None`, `cannot admit`) must guard against `current_job_id == -1`. If a proxy is in-flight, omit `current_job_id` from the `update_daemon_state()` call; only the proxy's own `release_proxy_claim()` should clear it. Without this guard, the daemon clears the sentinel every 5s poll cycle, allowing multiple concurrent proxy requests that leave jobs permanently stuck in `status='running'`. Fix: `daemon.py` guard at every `update_daemon_state(state='idle', current_job_id=None)` call site. (#67)
+- **`OllamaModels._list_local_cache` is class-level** — tests that mock `list_local()` must call `OllamaModels._invalidate_list_cache()` in teardown, or the 60s cached result bleeds into subsequent tests and causes false positives.
+- **`HealthMonitor` now has `__init__`** — if subclassing or constructing directly in tests, call `super().__init__()` to initialise `_vram_cache`. Missing this raises `AttributeError` on the first `get_vram_pct()` call.
+- **`_reload_systemd()` and `_restart_service()` return `bool`** — callers that previously ignored the return value should check it and log or raise on `False`. Silent failures from these calls were masking systemd and service restart errors.
+- **`get_pending_jobs()` defaults to `exclude_sentinel=True`** — pass `exclude_sentinel=False` at any call site that intentionally needs proxy sentinel jobs (command LIKE `'proxy:%'`) included in the result. The default is safe for all normal dequeue paths.
 
 ## Design Doc
 
