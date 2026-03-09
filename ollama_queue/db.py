@@ -151,6 +151,7 @@ class Database:
         self._add_column_if_missing(conn, "eval_results", "mechanism_target", "TEXT")
         self._add_column_if_missing(conn, "eval_results", "mechanism_fix", "TEXT")
         self._add_column_if_missing(conn, "eval_runs", "judge_mode", "TEXT DEFAULT 'rubric'")
+        self._add_column_if_missing(conn, "eval_variants", "description", "TEXT")
 
     def initialize(self) -> None:
         """Create all tables and seed defaults."""
@@ -319,6 +320,7 @@ class Database:
                 is_production       INTEGER DEFAULT 0,
                 is_system           INTEGER DEFAULT 0,
                 is_active           INTEGER DEFAULT 1,
+                description         TEXT,
                 created_at          TEXT NOT NULL
             );
 
@@ -521,24 +523,149 @@ class Database:
             ),
         )
 
-        # System variants A-H
+        # Mechanism extraction template — captures root-cause trigger/failure/consequence chains
+        conn.execute(
+            """INSERT OR IGNORE INTO eval_prompt_templates
+               (id, label, instruction, is_chunked, is_system, created_at)
+               VALUES (?, ?, ?, 0, 1, ?)""",
+            (
+                "mechanism",
+                "Extract root-cause mechanism",
+                "You are extracting the root-cause mechanism behind a failure. "
+                "Identify: (1) the trigger — what condition activated the failure, "
+                "(2) the failure — what went wrong, and (3) the consequence — what impact it caused. "
+                "Express as a transferable rule that prevents recurrence.",
+                created_at,
+            ),
+        )
+
+        # System variants A-H + M
         variants = [
-            ("A", "Baseline", "fewshot", "deepseek-r1:8b", 0.7, 4096, 0, 1),
-            ("B", "Causal reasoning", "zero-shot-causal", "deepseek-r1:8b", 0.6, 8192, 0, 1),
-            ("C", "Grouped context", "chunked", "deepseek-r1:8b", 0.6, 8192, 0, 1),
-            ("D", "Causal + large model", "zero-shot-causal", "qwen3:14b", 0.6, 8192, 1, 1),
-            ("E", "Grouped + large model", "chunked", "qwen3:14b", 0.6, 8192, 1, 1),
-            ("F", "Contrastive", "contrastive", "deepseek-r1:8b", 0.6, 8192, 1, 1),
-            ("G", "Contrastive + large model", "contrastive", "qwen3:14b", 0.6, 8192, 1, 1),
-            ("H", "Contrastive + self-critique", "contrastive-multistage", "deepseek-r1:8b", 0.6, 8192, 1, 1),
+            (
+                "A",
+                "Baseline",
+                "fewshot",
+                "deepseek-r1:8b",
+                0.7,
+                4096,
+                0,
+                1,
+                "Control config — few-shot examples anchor the output format. "
+                "Smallest context window. Compare all others against this.",
+            ),
+            (
+                "B",
+                "Causal reasoning",
+                "zero-shot-causal",
+                "deepseek-r1:8b",
+                0.6,
+                8192,
+                0,
+                1,
+                "Asks the model to reason about why a failure happened, not just what happened. "
+                "No examples — pure reasoning.",
+            ),
+            (
+                "C",
+                "Grouped context",
+                "chunked",
+                "deepseek-r1:8b",
+                0.6,
+                8192,
+                0,
+                1,
+                "Splits each lesson into small chunks before generating. "
+                "Prevents the model from losing context in long lessons.",
+            ),
+            (
+                "D",
+                "Causal + large model",
+                "zero-shot-causal",
+                "qwen3:14b",
+                0.6,
+                8192,
+                1,
+                1,
+                "Same causal reasoning as B but with a 14B model. "
+                "Tests whether more model capacity improves principle quality.",
+            ),
+            (
+                "E",
+                "Grouped + large model",
+                "chunked",
+                "qwen3:14b",
+                0.6,
+                8192,
+                1,
+                1,
+                "Chunked input with the 14B model — combines the focused context of C with the capacity of D.",
+            ),
+            (
+                "F",
+                "Contrastive",
+                "contrastive",
+                "deepseek-r1:8b",
+                0.6,
+                8192,
+                1,
+                1,
+                "Asks the model to state when the principle does NOT apply. Sharper scope reduces false positives.",
+            ),
+            (
+                "G",
+                "Contrastive + large model",
+                "contrastive",
+                "qwen3:14b",
+                0.6,
+                8192,
+                1,
+                1,
+                "Contrastive prompt with the 14B model. "
+                "Tests whether a bigger model follows scope constraints more precisely.",
+            ),
+            (
+                "H",
+                "Contrastive + self-critique",
+                "contrastive-multistage",
+                "deepseek-r1:8b",
+                0.6,
+                8192,
+                1,
+                1,
+                "Two-pass: first extract the abstract pattern, then distill a principle. "
+                "Most deliberate output, slowest (2x LLM calls).",
+            ),
+            (
+                "M",
+                "Mechanism extraction",
+                "mechanism",
+                "qwen3:8b",
+                0.6,
+                8192,
+                0,
+                1,
+                "Captures root-cause mechanisms (trigger -> failure -> consequence) "
+                "instead of surface rules. Orthogonal approach.",
+            ),
         ]
-        for var_id, label, tmpl_id, model, temperature, num_ctx, is_recommended, is_system in variants:
+        for var_id, label, tmpl_id, model, temperature, num_ctx, is_recommended, is_system, description in variants:
             conn.execute(
                 """INSERT OR IGNORE INTO eval_variants
                    (id, label, prompt_template_id, model, temperature, num_ctx,
-                    is_recommended, is_system, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (var_id, label, tmpl_id, model, temperature, num_ctx, is_recommended, is_system, created_at),
+                    is_recommended, is_system, description, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    var_id,
+                    label,
+                    tmpl_id,
+                    model,
+                    temperature,
+                    num_ctx,
+                    is_recommended,
+                    is_system,
+                    description,
+                    created_at,
+                ),
             )
 
     # --- Jobs ---

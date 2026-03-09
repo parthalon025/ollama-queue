@@ -840,24 +840,24 @@ class TestEvalSchema:
         assert self.EVAL_TABLES.issubset(tables)
 
     def test_seed_eval_defaults_inserts_templates(self, db):
-        """seed_eval_defaults() inserts system prompt templates (3 original + contrastive + multistage)."""
+        """seed_eval_defaults() inserts system prompt templates (3 original + contrastive + multistage + mechanism)."""
         conn = db._connect()
         count = conn.execute("SELECT COUNT(*) FROM eval_prompt_templates").fetchone()[0]
-        assert count == 5
+        assert count == 6
 
     def test_seed_eval_defaults_inserts_variants(self, db):
-        """seed_eval_defaults() inserts system variants (A-H)."""
+        """seed_eval_defaults() inserts system variants (A-H + M)."""
         conn = db._connect()
         count = conn.execute("SELECT COUNT(*) FROM eval_variants").fetchone()[0]
-        assert count == 8
+        assert count == 9
 
     def test_seed_eval_defaults_idempotent(self, db):
         """Running seed_eval_defaults() twice produces no duplicates and no errors."""
         db.seed_eval_defaults()
         db.seed_eval_defaults()
         conn = db._connect()
-        assert conn.execute("SELECT COUNT(*) FROM eval_prompt_templates").fetchone()[0] == 5
-        assert conn.execute("SELECT COUNT(*) FROM eval_variants").fetchone()[0] == 8
+        assert conn.execute("SELECT COUNT(*) FROM eval_prompt_templates").fetchone()[0] == 6
+        assert conn.execute("SELECT COUNT(*) FROM eval_variants").fetchone()[0] == 9
 
     def test_eval_settings_all_seeded(self, db):
         """All 12 eval.* settings keys are present after initialize()."""
@@ -947,18 +947,18 @@ class TestEvalSchema:
         assert conn.execute("SELECT COUNT(*) FROM eval_results WHERE run_id = ?", (run_id,)).fetchone()[0] == 0
 
     def test_template_ids_match_expected(self, db):
-        """Seeded templates include original 3 + contrastive + contrastive-multistage."""
+        """Seeded templates include original 3 + contrastive + contrastive-multistage + mechanism."""
         conn = db._connect()
         rows = conn.execute("SELECT id FROM eval_prompt_templates ORDER BY id").fetchall()
         ids = {r[0] for r in rows}
-        assert ids == {"fewshot", "zero-shot-causal", "chunked", "contrastive", "contrastive-multistage"}
+        assert ids == {"fewshot", "zero-shot-causal", "chunked", "contrastive", "contrastive-multistage", "mechanism"}
 
     def test_variant_ids_match_expected(self, db):
-        """Seeded variants include A-H."""
+        """Seeded variants include A-H plus M (mechanism extraction)."""
         conn = db._connect()
         rows = conn.execute("SELECT id FROM eval_variants ORDER BY id").fetchall()
         ids = {r[0] for r in rows}
-        assert ids == {"A", "B", "C", "D", "E", "F", "G", "H"}
+        assert ids == {"A", "B", "C", "D", "E", "F", "G", "H", "M"}
 
     def test_recommended_variants_include_contrastive(self, db):
         """Variants D, E, F, G, H are marked is_recommended=1."""
@@ -1056,3 +1056,18 @@ class TestEvalV2Schema:
         assert row[4] == "uncaught exception"
         assert row[5] == "cleanup handler"
         assert row[6] == "symmetric teardown"
+
+
+def test_eval_variants_have_description(tmp_path):
+    from ollama_queue.db import Database
+
+    db = Database(tmp_path / "q.db")
+    db.initialize()
+    with db._lock:
+        conn = db._connect()
+        variants = conn.execute("SELECT id, description FROM eval_variants WHERE is_system = 1").fetchall()
+    assert len(variants) == 9
+    for row in variants:
+        assert (
+            row["description"] is not None and len(row["description"]) > 10
+        ), f"Variant {row['id']} has missing or empty description"
