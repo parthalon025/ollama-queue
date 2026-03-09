@@ -602,7 +602,7 @@ class TestComputeMaxWorkers:
         monkeypatch.setattr(d, "_compute_max_workers", lambda: 7)
         monkeypatch.setattr(d, "_free_vram_mb", lambda: 8000.0)
         monkeypatch.setattr(d, "_free_ram_mb", lambda: 16000.0)
-        monkeypatch.setattr(d, "_can_admit", lambda job: True)
+        monkeypatch.setattr(d, "_can_admit", lambda job, settings=None: True)
         db.submit_job("echo hi", "qwen2.5:7b", 5, 60, "test")
         with (
             patch.object(
@@ -1331,3 +1331,26 @@ class TestProxySentinelPreservation:
 
         state = daemon.db.get_daemon_state()
         assert state["current_job_id"] == -1, "poll_once() must not clear the proxy sentinel when admission is denied"
+
+
+# --- T_A1: Settings batch-fetch ---
+
+
+def test_poll_once_calls_get_all_settings_once(daemon):
+    """get_all_settings called once per poll, not per sub-method."""
+    with (
+        patch.object(daemon.db, "get_all_settings", wraps=daemon.db.get_all_settings) as mock_gs,
+        patch.object(daemon.db, "get_setting") as mock_single,
+    ):
+        daemon.poll_once()
+    # get_setting should NOT be called for settings that are now batch-fetched
+    calls = [c.args[0] for c in mock_single.call_args_list]
+    batch_fetched = {
+        "entropy_alert_sigma",
+        "entropy_suspend_low_priority",
+        "cpu_offload_efficiency",
+        "min_model_vram_mb",
+    }
+    for key in batch_fetched:
+        assert key not in calls, f"get_setting('{key}') called individually — should use batch"
+    assert mock_gs.call_count >= 1
