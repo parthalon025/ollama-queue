@@ -152,6 +152,47 @@ class Database:
         self._add_column_if_missing(conn, "eval_results", "mechanism_fix", "TEXT")
         self._add_column_if_missing(conn, "eval_runs", "judge_mode", "TEXT DEFAULT 'rubric'")
         self._add_column_if_missing(conn, "eval_variants", "description", "TEXT")
+        # Backfill descriptions for system variants that existed before the column was added.
+        # INSERT OR IGNORE skips rows that already exist, so existing rows need an explicit UPDATE.
+        _system_descriptions = {
+            "A": (
+                "Control config — few-shot examples anchor the output format. "
+                "Smallest context window. Compare all others against this."
+            ),
+            "B": (
+                "Asks the model to reason about why a failure happened, not just what happened. "
+                "No examples — pure reasoning."
+            ),
+            "C": (
+                "Splits each lesson into small chunks before generating. "
+                "Prevents the model from losing context in long lessons."
+            ),
+            "D": (
+                "Same causal reasoning as B but with a 14B model. "
+                "Tests whether more model capacity improves principle quality."
+            ),
+            "E": ("Chunked input with the 14B model — combines the focused context of C " "with the capacity of D."),
+            "F": (
+                "Asks the model to state when the principle does NOT apply. " "Sharper scope reduces false positives."
+            ),
+            "G": (
+                "Contrastive prompt with the 14B model. "
+                "Tests whether a bigger model follows scope constraints more precisely."
+            ),
+            "H": (
+                "Two-pass: first extract the abstract pattern, then distill a principle. "
+                "Most deliberate output, slowest (2x LLM calls)."
+            ),
+            "M": (
+                "Captures root-cause mechanisms (trigger -> failure -> consequence) "
+                "instead of surface rules. Orthogonal approach."
+            ),
+        }
+        for _var_id, _desc in _system_descriptions.items():
+            conn.execute(
+                "UPDATE eval_variants SET description = ? WHERE id = ? AND description IS NULL",
+                (_desc, _var_id),
+            )
 
     def initialize(self) -> None:
         """Create all tables and seed defaults."""
@@ -639,7 +680,7 @@ class Database:
                 "M",
                 "Mechanism extraction",
                 "mechanism",
-                "qwen3:8b",
+                "qwen3.5:9b",
                 0.6,
                 8192,
                 0,
