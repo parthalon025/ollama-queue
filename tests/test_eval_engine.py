@@ -1356,3 +1356,359 @@ class TestCheckAutoPromote:
         db.set_setting("eval.auto_promote", True)
         # No run exists — should log and return without raising
         check_auto_promote(db, 9999, "http://localhost:7683")  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# Bayesian fusion functions (Task 17: ported from lessons-db/eval.py)
+# ---------------------------------------------------------------------------
+
+
+class TestBuildPairedJudgePrompt:
+    """Tests for paired tournament prompt construction."""
+
+    def test_contains_both_targets(self):
+        """Prompt must contain content from both same-group and diff-group targets."""
+        from ollama_queue.eval_engine import build_paired_judge_prompt
+
+        same = {"title": "Resource cleanup failure", "one_liner": "Handles not closed", "description": "..."}
+        diff = {"title": "Naming convention bug", "one_liner": "Wrong label", "description": "..."}
+        prompt, _ = build_paired_judge_prompt("Resources must be released symmetrically", same, diff)
+        assert "Resource cleanup failure" in prompt
+        assert "Naming convention bug" in prompt
+        assert "PRINCIPLE:" in prompt
+        assert "TARGET A:" in prompt
+        assert "TARGET B:" in prompt
+
+    def test_position_randomization(self):
+        """Different position seeds produce different A/B orderings."""
+        from ollama_queue.eval_engine import build_paired_judge_prompt
+
+        same = {"title": "Same", "one_liner": "s", "description": ""}
+        diff = {"title": "Diff", "one_liner": "d", "description": ""}
+        _, same_is_a_0 = build_paired_judge_prompt("principle", same, diff, position_seed=0)
+        _, same_is_a_1 = build_paired_judge_prompt("principle", same, diff, position_seed=1)
+        # Seeds 0 (even->swap) and 1 (odd->no swap) produce opposite orderings
+        assert same_is_a_0 != same_is_a_1
+
+    def test_returns_tuple(self):
+        """Returns (str, bool) tuple."""
+        from ollama_queue.eval_engine import build_paired_judge_prompt
+
+        same = {"title": "T", "one_liner": "O", "description": "D"}
+        diff = {"title": "T2", "one_liner": "O2", "description": "D2"}
+        result = build_paired_judge_prompt("principle", same, diff, position_seed=1)
+        assert isinstance(result, tuple)
+        assert len(result) == 2
+        assert isinstance(result[0], str)
+        assert isinstance(result[1], bool)
+
+
+class TestParsePairedJudge:
+    """Tests for paired judge response parsing."""
+
+    def test_valid_answers(self):
+        """Parses A, B, NEITHER correctly."""
+        from ollama_queue.eval_engine import parse_paired_judge
+
+        assert parse_paired_judge("A") == "A"
+        assert parse_paired_judge("B") == "B"
+        assert parse_paired_judge("NEITHER") == "NEITHER"
+
+    def test_strips_think_tags(self):
+        """Think tags are removed before parsing."""
+        from ollama_queue.eval_engine import parse_paired_judge
+
+        assert parse_paired_judge("<THINK>reasoning here</THINK>A") == "A"
+
+    def test_case_insensitive(self):
+        """Handles lowercase and mixed case."""
+        from ollama_queue.eval_engine import parse_paired_judge
+
+        assert parse_paired_judge("a") == "A"
+        assert parse_paired_judge("b - because it matches") == "B"
+        assert parse_paired_judge("Neither applies well") == "NEITHER"
+
+    def test_none_on_empty(self):
+        """Returns None on empty or unparseable input."""
+        from ollama_queue.eval_engine import parse_paired_judge
+
+        assert parse_paired_judge("") is None
+        assert parse_paired_judge(None) is None
+
+
+class TestMechanismExtraction:
+    """Tests for mechanism extraction prompt + parser."""
+
+    def test_prompt_contains_both_lessons(self):
+        """Mechanism prompt includes content from both lessons."""
+        from ollama_queue.eval_engine import build_mechanism_extraction_prompt
+
+        a = {"title": "Lesson A", "one_liner": "Bug A", "description": "Details A"}
+        b = {"title": "Lesson B", "one_liner": "Bug B", "description": "Details B"}
+        prompt = build_mechanism_extraction_prompt(a, b)
+        assert "Lesson A" in prompt
+        assert "Lesson B" in prompt
+        assert "TRIGGER:" in prompt
+        assert "TARGET:" in prompt
+        assert "FIX:" in prompt
+
+    def test_parse_valid_triplet(self):
+        """Parses a valid TRIGGER/TARGET/FIX response."""
+        from ollama_queue.eval_engine import parse_mechanism_triplet
+
+        response = "TRIGGER: uncaught exception\nTARGET: cleanup handler\nFIX: symmetric teardown"
+        result = parse_mechanism_triplet(response)
+        assert result is not None
+        assert result["trigger"] == "uncaught exception"
+        assert result["target"] == "cleanup handler"
+        assert result["fix"] == "symmetric teardown"
+
+    def test_parse_none_response(self):
+        """Returns None for NONE or empty responses."""
+        from ollama_queue.eval_engine import parse_mechanism_triplet
+
+        assert parse_mechanism_triplet("NONE") is None
+        assert parse_mechanism_triplet("") is None
+        assert parse_mechanism_triplet(None) is None
+
+
+class TestSignalExtractors:
+    """Tests for log-likelihood ratio signal extractors."""
+
+    def test_paired_signal_signs(self):
+        """Same -> positive, diff -> negative, neither -> zero."""
+        from ollama_queue.eval_engine import compute_paired_signal
+
+        assert compute_paired_signal("same") > 0
+        assert compute_paired_signal("diff") < 0
+        assert compute_paired_signal("neither") == 0.0
+
+    def test_embedding_signal_signs(self):
+        """High similarity -> positive, low -> negative."""
+        from ollama_queue.eval_engine import compute_embedding_signal
+
+        assert compute_embedding_signal(0.8) > 0
+        assert compute_embedding_signal(0.1) < 0
+
+    def test_scope_signal_signs(self):
+        """High overlap -> positive, zero overlap -> negative, empty -> uninformative."""
+        from ollama_queue.eval_engine import compute_scope_signal
+
+        assert compute_scope_signal({"python", "web"}, {"python", "web"}) > 0
+        assert compute_scope_signal({"python"}, {"java"}) < 0
+        assert compute_scope_signal(set(), {"python"}) == 0.0
+
+    def test_mechanism_signal_signs(self):
+        """Match -> positive, no match -> negative, None -> uninformative."""
+        from ollama_queue.eval_engine import compute_mechanism_signal
+
+        assert compute_mechanism_signal(True) > 0
+        assert compute_mechanism_signal(False) < 0
+        assert compute_mechanism_signal(None) == 0.0
+
+
+class TestComputeTransferPosterior:
+    """Tests for Bayesian fusion posterior computation."""
+
+    def test_prior_with_no_evidence(self):
+        """All-zero signals should produce the prior probability (0.25)."""
+        from ollama_queue.eval_engine import compute_transfer_posterior
+
+        posterior = compute_transfer_posterior(0.0, 0.0, 0.0, 0.0)
+        assert abs(posterior - 0.25) < 0.01
+
+    def test_strong_positive_evidence(self):
+        """Strong same-group paired signal should push posterior above 0.5."""
+        from ollama_queue.eval_engine import compute_transfer_posterior
+
+        posterior = compute_transfer_posterior(2.5, 0.0, 0.0, 0.0)
+        assert posterior > 0.5
+
+    def test_strong_negative_evidence(self):
+        """Strong diff-group paired signal should push posterior well below 0.25."""
+        from ollama_queue.eval_engine import compute_transfer_posterior
+
+        posterior = compute_transfer_posterior(-2.5, 0.0, 0.0, 0.0)
+        assert posterior < 0.1
+
+    def test_bounded_zero_to_one(self):
+        """Posterior is always in [0, 1]."""
+        from ollama_queue.eval_engine import compute_transfer_posterior
+
+        # Maximum positive evidence
+        p = compute_transfer_posterior(2.5, 1.5, 1.0, 2.0)
+        assert 0.0 <= p <= 1.0
+        # Maximum negative evidence
+        p = compute_transfer_posterior(-2.5, -1.5, -0.5, -1.5)
+        assert 0.0 <= p <= 1.0
+
+
+class TestComputeBayesianMetrics:
+    """Tests for Bayesian AUC and separation metrics."""
+
+    def test_separation_positive_with_discriminating_posteriors(self):
+        """Same-group posteriors higher than diff-group -> positive separation."""
+        from ollama_queue.eval_engine import compute_bayesian_metrics
+
+        scored = [
+            {"variant": "A", "is_same_group": True, "posterior": 0.8},
+            {"variant": "A", "is_same_group": True, "posterior": 0.9},
+            {"variant": "A", "is_same_group": False, "posterior": 0.2},
+            {"variant": "A", "is_same_group": False, "posterior": 0.1},
+        ]
+        metrics = compute_bayesian_metrics(scored)
+        assert "A" in metrics
+        assert metrics["A"]["separation"] > 0
+        assert metrics["A"]["auc"] > 0.5
+
+    def test_indistinguishable_posteriors(self):
+        """Equal posteriors for same/diff -> no separation, AUC near 0.5."""
+        from ollama_queue.eval_engine import compute_bayesian_metrics
+
+        scored = [
+            {"variant": "B", "is_same_group": True, "posterior": 0.5},
+            {"variant": "B", "is_same_group": False, "posterior": 0.5},
+        ]
+        metrics = compute_bayesian_metrics(scored)
+        assert abs(metrics["B"]["separation"]) < 0.01
+        assert abs(metrics["B"]["auc"] - 0.5) < 0.01
+
+    def test_per_variant_grouping(self):
+        """Metrics computed independently per variant."""
+        from ollama_queue.eval_engine import compute_bayesian_metrics
+
+        scored = [
+            {"variant": "A", "is_same_group": True, "posterior": 0.9},
+            {"variant": "A", "is_same_group": True, "posterior": 0.85},
+            {"variant": "A", "is_same_group": False, "posterior": 0.1},
+            {"variant": "A", "is_same_group": False, "posterior": 0.15},
+            {"variant": "B", "is_same_group": True, "posterior": 0.55},
+            {"variant": "B", "is_same_group": True, "posterior": 0.45},
+            {"variant": "B", "is_same_group": False, "posterior": 0.4},
+            {"variant": "B", "is_same_group": False, "posterior": 0.5},
+        ]
+        metrics = compute_bayesian_metrics(scored)
+        assert "A" in metrics
+        assert "B" in metrics
+        # A has clear separation, B has overlapping posteriors -> A has higher AUC
+        assert metrics["A"]["auc"] > metrics["B"]["auc"]
+
+
+class TestJudgeModeParameter:
+    """Tests for judge_mode parameter acceptance in _judge_one_target."""
+
+    def test_rubric_mode_accepted(self, tmp_path):
+        """_judge_one_target accepts judge_mode='rubric' without error."""
+        from ollama_queue.db import Database
+        from ollama_queue.eval_engine import _judge_one_target, create_eval_run
+
+        db = Database(str(tmp_path / "test.db"))
+        db.initialize()
+        run_id = create_eval_run(db, variant_id="A")
+
+        target = {"id": "42", "title": "Test", "one_liner": "Bug", "description": "Details"}
+
+        with patch("ollama_queue.eval_engine._call_proxy") as mock_proxy:
+            mock_proxy.return_value = (
+                '{"transfer": 4, "precision": 3, "actionability": 3, "reasoning": "ok"}',
+                0.5,
+            )
+            _judge_one_target(
+                db=db,
+                run_id=run_id,
+                variant="A",
+                source_item_id="1",
+                principle="Test principle",
+                target=target,
+                is_same=True,
+                judge_model="test-model",
+                judge_temperature=0.1,
+                source_tag="test",
+                http_base="http://localhost:7683",
+                judge_mode="rubric",
+            )
+        # Verify the result was stored
+        with db._lock:
+            conn = db._connect()
+            row = conn.execute("SELECT score_transfer FROM eval_results WHERE run_id = ?", (run_id,)).fetchone()
+        assert row is not None
+        assert row[0] == 4
+
+    def test_bayesian_mode_stores_posterior(self, tmp_path):
+        """_judge_one_target with judge_mode='bayesian' stores score_posterior."""
+        from ollama_queue.db import Database
+        from ollama_queue.eval_engine import _judge_one_target, create_eval_run
+
+        db = Database(str(tmp_path / "test.db"))
+        db.initialize()
+        run_id = create_eval_run(db, variant_id="A")
+
+        same = {"id": "42", "title": "Same", "one_liner": "S", "description": ""}
+        diff = {"id": "99", "title": "Diff", "one_liner": "D", "description": ""}
+
+        with patch("ollama_queue.eval_engine._call_proxy") as mock_proxy:
+            mock_proxy.return_value = ("A", 0.3)
+            _judge_one_target(
+                db=db,
+                run_id=run_id,
+                variant="A",
+                source_item_id="1",
+                principle="Test principle",
+                target=same,
+                is_same=True,
+                judge_model="test-model",
+                judge_temperature=0.1,
+                source_tag="test",
+                http_base="http://localhost:7683",
+                judge_mode="bayesian",
+                diff_target=diff,
+            )
+        with db._lock:
+            conn = db._connect()
+            row = conn.execute(
+                "SELECT score_paired_winner, score_posterior FROM eval_results WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+        assert row is not None
+        assert row[0] in ("same", "diff", "neither")
+        assert row[1] is not None  # posterior was computed and stored
+        assert 0.0 <= row[1] <= 1.0
+
+    def test_tournament_mode_stores_winner(self, tmp_path):
+        """_judge_one_target with judge_mode='tournament' stores paired winner but no posterior."""
+        from ollama_queue.db import Database
+        from ollama_queue.eval_engine import _judge_one_target, create_eval_run
+
+        db = Database(str(tmp_path / "test.db"))
+        db.initialize()
+        run_id = create_eval_run(db, variant_id="A")
+
+        same = {"id": "42", "title": "Same", "one_liner": "S", "description": ""}
+        diff = {"id": "99", "title": "Diff", "one_liner": "D", "description": ""}
+
+        with patch("ollama_queue.eval_engine._call_proxy") as mock_proxy:
+            mock_proxy.return_value = ("B", 0.3)
+            _judge_one_target(
+                db=db,
+                run_id=run_id,
+                variant="A",
+                source_item_id="1",
+                principle="Test principle",
+                target=same,
+                is_same=True,
+                judge_model="test-model",
+                judge_temperature=0.1,
+                source_tag="test",
+                http_base="http://localhost:7683",
+                judge_mode="tournament",
+                diff_target=diff,
+            )
+        with db._lock:
+            conn = db._connect()
+            row = conn.execute(
+                "SELECT score_paired_winner, score_posterior FROM eval_results WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+        assert row is not None
+        assert row[0] in ("same", "diff", "neither")
+        assert row[1] is None  # tournament mode does not compute posterior
