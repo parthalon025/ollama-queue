@@ -427,3 +427,49 @@ def test_variant_stability_empty(client):
     resp = client.get("/api/eval/variants/stability")
     assert resp.status_code == 200
     assert resp.json() == {}
+
+
+# --- Variant Diff ---
+
+
+def test_variant_diff(client_and_db):
+    """GET /api/eval/variants/A/diff/B returns config differences."""
+    client, db = client_and_db
+    with db._lock:
+        conn = db._connect()
+        conn.execute(
+            "INSERT OR REPLACE INTO eval_variants "
+            "(id, label, prompt_template_id, model, temperature, num_ctx, is_system, created_at) "
+            "VALUES ('TEST_A', 'Test A', 'zero-shot-causal', 'qwen2.5:7b', 0.6, 4096, 1, datetime('now'))"
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO eval_variants "
+            "(id, label, prompt_template_id, model, temperature, num_ctx, is_system, created_at) "
+            "VALUES ('TEST_B', 'Test B', 'zero-shot-causal', 'qwen3:14b', 0.8, 8192, 1, datetime('now'))"
+        )
+        conn.commit()
+    resp = client.get("/api/eval/variants/TEST_A/diff/TEST_B")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "changes" in data
+    assert len(data["changes"]) >= 2
+
+
+def test_variant_diff_identical(client_and_db):
+    client, db = client_and_db
+    with db._lock:
+        conn = db._connect()
+        conn.execute(
+            "INSERT OR REPLACE INTO eval_variants "
+            "(id, label, prompt_template_id, model, temperature, num_ctx, is_system, created_at) "
+            "VALUES ('TEST_X', 'Test X', 'zero-shot-causal', 'qwen2.5:7b', 0.6, 4096, 1, datetime('now'))"
+        )
+        conn.commit()
+    resp = client.get("/api/eval/variants/TEST_X/diff/TEST_X")
+    assert resp.status_code == 200
+    assert resp.json()["changes"] == []
+
+
+def test_variant_diff_not_found(client):
+    resp = client.get("/api/eval/variants/NOPE/diff/ALSO_NOPE")
+    assert resp.status_code == 404

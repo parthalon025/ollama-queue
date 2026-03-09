@@ -1236,6 +1236,30 @@ def create_app(db: Database) -> FastAPI:
 
         return compute_variant_stability(run_metrics)
 
+    @app.get("/api/eval/variants/{variant_a}/diff/{variant_b}")
+    def get_variant_diff(variant_a: str, variant_b: str):
+        """Compare two variant configs and return human-readable differences.
+
+        # What it shows: List of config changes between two variants (model, temperature, etc.).
+        # Decision it drives: Helps the user understand what changed between variants
+        #   to interpret why one performs better than another.
+        """
+        from ollama_queue.eval_analysis import describe_config_diff
+
+        with db._lock:
+            conn = db._connect()
+            row_a = conn.execute("SELECT * FROM eval_variants WHERE id = ?", (variant_a,)).fetchone()
+            row_b = conn.execute("SELECT * FROM eval_variants WHERE id = ?", (variant_b,)).fetchone()
+
+        if not row_a or not row_b:
+            missing = variant_a if not row_a else variant_b
+            raise HTTPException(404, f"Variant '{missing}' not found")
+
+        config_a = dict(row_a)
+        config_b = dict(row_b)
+        changes = describe_config_diff(config_a, config_b)
+        return {"changes": changes}
+
     @app.get("/api/eval/variants/{variant_id}/history")
     def eval_variant_history(variant_id: str):
         """Returns F1/recall/precision history across completed eval_runs for one variant.
