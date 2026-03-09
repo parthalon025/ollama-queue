@@ -2327,7 +2327,7 @@ class TestItemTitlePopulation:
             conn.execute(
                 "INSERT INTO eval_results (run_id, variant, source_item_id, source_item_title, "
                 "target_item_id, is_same_cluster, row_type) "
-                "VALUES (1, 'A', '42', 'Silent failure in logging', '42', 0, 'generation')"
+                "VALUES (1, 'A', '42', 'Silent failure in logging', '42', 0, 'generate')"
             )
             conn.commit()
             row = conn.execute("SELECT source_item_title FROM eval_results WHERE run_id = 1").fetchone()
