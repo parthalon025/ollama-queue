@@ -48,6 +48,19 @@ function fmtPct(val) {
   return `${Math.round(val * 100)}%`;
 }
 
+// Converts AI-generated markdown prose to readable plain text.
+// Handles: ## headers → bold label, **x** → x, - bullet → • bullet.
+// No library needed — analysis_md is structured prose, not full markdown.
+function simpleRenderMd(text) {
+  if (!text) return '';
+  return text
+    .replace(/^#{1,3} (.+)$/gm, '[$1]')       // ## Header → [Header]
+    .replace(/\*\*(.+?)\*\*/g, '$1')            // **bold** → bold
+    .replace(/^- (.+)$/gm, '• $1')             // - item → • item
+    .replace(/\n{3,}/g, '\n\n')                // collapse 3+ blank lines
+    .trim();
+}
+
 export default function RunRow({ run }) {
   const [level, setLevel] = useState(1); // 1 | 2 | 3
   const [repeatFb, repeatAct] = useActionFeedback();
@@ -336,17 +349,17 @@ export default function RunRow({ run }) {
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', marginBottom: '0.4rem' }}>
                 Analysis
               </div>
-              <pre style={{
+              <div style={{
                 fontFamily: 'var(--font-body)',
                 fontSize: 'var(--type-body)',
                 color: 'var(--text-primary)',
-                whiteSpace: 'pre-wrap',
+                whiteSpace: 'pre-line',
                 wordBreak: 'break-word',
                 margin: 0,
                 lineHeight: 1.6,
               }}>
-                {analysis_md}
-              </pre>
+                {simpleRenderMd(analysis_md)}
+              </div>
             </div>
           )}
 
