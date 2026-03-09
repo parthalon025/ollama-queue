@@ -1312,6 +1312,13 @@ body {
 .eval-readiness--needs_prime { background: var(--status-warn, #2a2010); color: var(--status-warn-text, #c8a040); }
 .eval-readiness--offline { background: var(--status-error-subtle, #2a1010); color: var(--status-error, #c84040); }
 
+.eval-variant-description {
+  font-family: var(--font-mono);
+  font-size: var(--type-label);
+  color: var(--text-tertiary);
+  line-height: 1.5;
+}
+
 @keyframes slideUp {
     from { transform: translateY(100%); }
     to   { transform: translateY(0); }

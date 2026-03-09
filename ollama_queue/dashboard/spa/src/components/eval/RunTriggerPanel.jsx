@@ -218,7 +218,7 @@ export default function RunTriggerPanel({ defaultCollapsed }) {
                         )}
                       </div>
                       {variant.description && (
-                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', lineHeight: 1.4 }}>
+                        <span class="eval-variant-description">
                           {variant.description}
                         </span>
                       )}
@@ -250,7 +250,7 @@ export default function RunTriggerPanel({ defaultCollapsed }) {
                         )}
                       </div>
                       {variant.description && (
-                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', lineHeight: 1.4 }}>
+                        <span class="eval-variant-description">
                           {variant.description}
                         </span>
                       )}
