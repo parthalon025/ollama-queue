@@ -1956,6 +1956,24 @@ def create_app(db: Database) -> FastAPI:
             return {"status": "not_computed"}
         return json.loads(row["analysis_json"])
 
+    @app.post("/api/eval/runs/{run_id}/reanalyze")
+    def reanalyze_eval_run(run_id: int):
+        """Recompute structured analysis for a completed run (synchronous).
+
+        # What it shows: N/A — write-only; triggers recomputation of analysis_json.
+        # Decision it drives: Lets the user refresh analysis after threshold changes
+        #   or when analysis wasn't computed during the original run.
+        """
+        from ollama_queue import eval_engine as _ee
+
+        run = _ee.get_eval_run(db, run_id)
+        if not run:
+            raise HTTPException(404, f"Run {run_id} not found")
+        if run["status"] != "complete":
+            raise HTTPException(400, f"Run must be complete (current: {run['status']})")
+        _ee.compute_run_analysis(run_id, db)
+        return {"ok": True}
+
     @app.get("/api/eval/runs/{run_id}/confusion")
     def get_eval_run_confusion(run_id: int):
         """Returns cluster confusion matrix for a completed eval run.

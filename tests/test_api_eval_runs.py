@@ -1166,3 +1166,53 @@ def test_get_analysis_not_found(client):
     """GET /api/eval/runs/999/analysis returns 404."""
     resp = client.get("/api/eval/runs/999/analysis")
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# POST /api/eval/runs/{id}/reanalyze
+# ---------------------------------------------------------------------------
+
+
+def test_reanalyze_computes_analysis(client_and_db):
+    """POST /api/eval/runs/{id}/reanalyze recomputes analysis_json."""
+    client, db = client_and_db
+    with db._lock:
+        conn = db._connect()
+        conn.execute(
+            "INSERT INTO eval_runs (id, data_source_url, variants, variant_id, status) "
+            "VALUES (1, 'http://localhost', '[\"A\"]', 'A', 'complete')"
+        )
+        for i in range(12):
+            conn.execute(
+                "INSERT INTO eval_results "
+                "(run_id, variant, source_item_id, target_item_id, "
+                "is_same_cluster, score_transfer, row_type, source_cluster_id, target_cluster_id) "
+                "VALUES (1, 'A', ?, ?, ?, ?, 'judge', 'c1', ?)",
+                (str(i), str(i + 100), 1 if i < 6 else 0, 4 if i % 2 == 0 else 2, "c1" if i < 6 else "c2"),
+            )
+        conn.commit()
+    resp = client.post("/api/eval/runs/1/reanalyze")
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+    with db._lock:
+        conn = db._connect()
+        row = conn.execute("SELECT analysis_json FROM eval_runs WHERE id = 1").fetchone()
+    assert row["analysis_json"] is not None
+
+
+def test_reanalyze_not_found(client):
+    resp = client.post("/api/eval/runs/999/reanalyze")
+    assert resp.status_code == 404
+
+
+def test_reanalyze_not_complete(client_and_db):
+    client, db = client_and_db
+    with db._lock:
+        conn = db._connect()
+        conn.execute(
+            "INSERT INTO eval_runs (id, data_source_url, variants, variant_id, status) "
+            "VALUES (1, 'http://localhost', '[\"A\"]', 'A', 'generating')"
+        )
+        conn.commit()
+    resp = client.post("/api/eval/runs/1/reanalyze")
+    assert resp.status_code == 400
