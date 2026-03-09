@@ -3,7 +3,7 @@ import { useState } from 'preact/hooks';
 import { EVAL_TRANSLATIONS } from './translations.js';
 import ResultsTable from './ResultsTable.jsx';
 import ConfusionMatrix from './ConfusionMatrix.jsx';
-import { API, evalActiveRun, evalSubTab, evalVariants, fetchEvalRuns, fetchEvalVariants, startEvalPoll } from '../../store.js';
+import { API, evalActiveRun, evalSubTab, evalVariants, fetchEvalRuns, fetchEvalVariants, fetchRunAnalysis, startEvalPoll } from '../../store.js';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
 // What it shows: A single eval run row with 3-level progressive disclosure.
 //   L1: status dot, winner config, quality score, date, item count.
@@ -66,6 +66,11 @@ export default function RunRow({ run }) {
   const [repeatFb, repeatAct] = useActionFeedback();
   const [analyzeFb, analyzeAct] = useActionFeedback();
   const [promoteFb, promoteAct] = useActionFeedback();
+  const [reanalyzeFb, reanalyzeAct] = useActionFeedback();
+  const [analysis, setAnalysis] = useState(null);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [showBreakdown, setShowBreakdown] = useState(false);
+  const [showAllItems, setShowAllItems] = useState(false);
 
   const {
     id,
@@ -173,7 +178,16 @@ export default function RunRow({ run }) {
   const judgeCallCount = item_count ?? 0;
 
   function toggleLevel(next) {
-    setLevel(level === next ? 1 : next);
+    const newLevel = level === next ? 1 : next;
+    setLevel(newLevel);
+    // Fetch structured analysis when expanding to L2 for complete runs
+    if (newLevel >= 2 && !analysis && status === 'complete') {
+      setAnalysisLoading(true);
+      fetchRunAnalysis(id).then(data => {
+        setAnalysis(data);
+        setAnalysisLoading(false);
+      });
+    }
   }
 
   const [tooltip, setTooltip] = useState(null);
@@ -276,7 +290,9 @@ export default function RunRow({ run }) {
                           </td>
                           {metricKeys.map(metric => (
                             <td key={metric} style={{ padding: '4px 8px', textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-secondary)' }}>
-                              {vm[metric] != null ? fmtPct(vm[metric]) : '—'}
+                              {metric === 'f1' && analysis?.confidence_intervals?.[vid]
+                                ? `${fmtPct(vm[metric])} ±${Math.round((analysis.confidence_intervals[vid].high - analysis.confidence_intervals[vid].low) / 2 * 100)}`
+                                : (vm[metric] != null ? fmtPct(vm[metric]) : '—')}
                             </td>
                           ))}
                         </tr>

@@ -123,6 +123,19 @@ export async function fetchEvalSettings() {
   } catch (e) { console.error('fetchEvalSettings failed:', e); }
 }
 
+// What it shows: nothing — fetches structured analysis for one run
+// Decision it drives: provides CI, per-item breakdown, and failure data to RunRow
+export async function fetchRunAnalysis(runId) {
+  try {
+    const res = await fetch(`${API}/eval/runs/${runId}/analysis`);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (err) {
+    console.warn('fetchRunAnalysis failed:', err);
+    return null;
+  }
+}
+
 // Normalize raw /eval/trends response so components receive consistent shapes:
 //  - variants: object keyed by id → array with id field attached
 //  - each run: started_at ISO string → timestamp (unix seconds) added
