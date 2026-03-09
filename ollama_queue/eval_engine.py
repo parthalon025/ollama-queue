@@ -247,7 +247,7 @@ def _check_auto_promote_inner(db: Database, run_id: int) -> None:  # noqa: PLR09
         _log.info("check_auto_promote: run %d has no winner_variant, skipping", run_id)
         return
 
-    # Parse winner F1 from metrics
+    # Parse metrics from run
     metrics_raw = run.get("metrics")
     try:
         parsed_metrics = json.loads(metrics_raw) if isinstance(metrics_raw, str) else (metrics_raw or {})
@@ -255,25 +255,49 @@ def _check_auto_promote_inner(db: Database, run_id: int) -> None:  # noqa: PLR09
         _log.warning("check_auto_promote: run %d metrics unparseable, skipping", run_id)
         return
 
-    winner_f1 = (parsed_metrics.get(winner_variant) or {}).get("f1")
-    if winner_f1 is None:
-        _log.info("check_auto_promote: run %d winner %s has no F1, skipping", run_id, winner_variant)
+    # Determine quality metric based on judge_mode
+    judge_mode = run.get("judge_mode", "rubric")
+    is_bayesian = judge_mode in ("bayesian", "tournament")
+
+    if is_bayesian:
+        quality_metric = "auc"
+        quality_threshold = float(db.get_setting("eval.auc_threshold") or 0.85)
+    else:
+        quality_metric = "f1"
+        quality_threshold = float(db.get_setting("eval.f1_threshold") or 0.75)
+
+    winner_quality = (parsed_metrics.get(winner_variant) or {}).get(quality_metric)
+    if winner_quality is None:
+        _log.info("check_auto_promote: run %d winner %s has no %s, skipping", run_id, winner_variant, quality_metric)
         return
 
-    # Gate 1: F1 >= threshold
-    f1_threshold = float(db.get_setting("eval.f1_threshold") or 0.75)
-    if winner_f1 < f1_threshold:
+    # Gate 1: quality metric >= threshold
+    if winner_quality < quality_threshold:
         _log.info(
-            "check_auto_promote: run %d winner F1=%.3f < threshold %.3f, skipping",
+            "check_auto_promote: run %d winner %s=%.3f < threshold %.3f, skipping",
             run_id,
-            winner_f1,
-            f1_threshold,
+            quality_metric,
+            winner_quality,
+            quality_threshold,
         )
         return
 
-    # Gate 2: F1 > production_F1 + min_improvement
+    # Bayesian-specific gate: posterior separation must exceed minimum
+    if is_bayesian:
+        min_separation = float(db.get_setting("eval.min_posterior_separation") or 0.4)
+        winner_separation = (parsed_metrics.get(winner_variant) or {}).get("separation")
+        if winner_separation is None or winner_separation < min_separation:
+            _log.info(
+                "check_auto_promote: run %d winner separation=%s < min %.3f, skipping",
+                run_id,
+                winner_separation,
+                min_separation,
+            )
+            return
+
+    # Gate 2: quality > production_quality + min_improvement
     min_improvement = float(db.get_setting("eval.auto_promote_min_improvement") or 0.05)
-    production_f1: float | None = None
+    production_quality: float | None = None
 
     with db._lock:
         conn = db._connect()
@@ -291,7 +315,7 @@ def _check_auto_promote_inner(db: Database, run_id: int) -> None:  # noqa: PLR09
         if prod_run_row is not None:
             try:
                 m = json.loads(prod_run_row["metrics"]) if isinstance(prod_run_row["metrics"], str) else {}
-                production_f1 = (m.get(prod_id) or {}).get("f1")
+                production_quality = (m.get(prod_id) or {}).get(quality_metric)
             except (json.JSONDecodeError, TypeError):
                 _log.warning(
                     "check_auto_promote: production metrics unparseable for variant %s — gate 2 skipped as unsafe",
@@ -299,13 +323,15 @@ def _check_auto_promote_inner(db: Database, run_id: int) -> None:  # noqa: PLR09
                 )
                 return
 
-        if production_f1 is not None and winner_f1 <= production_f1 + min_improvement:
+        if production_quality is not None and winner_quality <= production_quality + min_improvement:
             _log.info(
-                "check_auto_promote: run %d winner F1=%.3f not enough improvement over "
-                "production F1=%.3f (need +%.3f), skipping",
+                "check_auto_promote: run %d winner %s=%.3f not enough improvement over "
+                "production %s=%.3f (need +%.3f), skipping",
                 run_id,
-                winner_f1,
-                production_f1,
+                quality_metric,
+                winner_quality,
+                quality_metric,
+                production_quality,
                 min_improvement,
             )
             return
@@ -352,13 +378,14 @@ def _check_auto_promote_inner(db: Database, run_id: int) -> None:  # noqa: PLR09
         for row in recent_rows:
             try:
                 m = json.loads(row["metrics"]) if isinstance(row["metrics"], str) else {}
-                row_f1 = (m.get(winner_variant) or {}).get("f1")
-                if row_f1 is None or row_f1 < f1_threshold:
+                row_quality = (m.get(winner_variant) or {}).get(quality_metric)
+                if row_quality is None or row_quality < quality_threshold:
                     _log.info(
-                        "check_auto_promote: variant %s stability check failed (F1=%s < %.3f), skipping",
+                        "check_auto_promote: variant %s stability check failed (%s=%s < %.3f), skipping",
                         winner_variant,
-                        row_f1,
-                        f1_threshold,
+                        quality_metric,
+                        row_quality,
+                        quality_threshold,
                     )
                     return
             except (json.JSONDecodeError, TypeError):
@@ -367,9 +394,18 @@ def _check_auto_promote_inner(db: Database, run_id: int) -> None:  # noqa: PLR09
 
     # All gates passed — auto-promote
     prod_str = (
-        f", +{winner_f1 - production_f1:.2f} over production={production_f1:.2f}" if production_f1 is not None else ""
+        f", +{winner_quality - production_quality:.2f} over production={production_quality:.2f}"
+        if production_quality is not None
+        else ""
     )
-    _log.info("Auto-promoting variant %s (F1=%.2f%s) for run %d", winner_variant, winner_f1, prod_str, run_id)
+    _log.info(
+        "Auto-promoting variant %s (%s=%.2f%s) for run %d",
+        winner_variant,
+        quality_metric,
+        winner_quality,
+        prod_str,
+        run_id,
+    )
     do_promote_eval_run(db, run_id)
 
 

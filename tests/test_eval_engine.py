@@ -1358,6 +1358,104 @@ class TestCheckAutoPromote:
         check_auto_promote(db, 9999, "http://localhost:7683")  # must not raise
 
 
+class TestCheckAutoPromoteBayesian:
+    """Tests for Bayesian-mode auto-promote: uses AUC + separation instead of F1."""
+
+    @pytest.fixture
+    def db_with_bayesian_run(self, tmp_path):
+        """Create a DB with a complete bayesian run that has AUC=0.90, separation=0.5."""
+        from ollama_queue.db import Database
+
+        db = Database(str(tmp_path / "test.db"))
+        db.initialize()
+        db.set_setting("eval.auto_promote", True)
+        db.set_setting("eval.auc_threshold", 0.85)
+        db.set_setting("eval.min_posterior_separation", 0.4)
+        db.set_setting("eval.auto_promote_min_improvement", 0.05)
+        db.set_setting("eval.error_budget", 0.30)
+        db.set_setting("eval.stability_window", 0)
+        import json
+
+        run_id = create_eval_run(db, variant_id="A")
+        metrics = json.dumps(
+            {
+                "A": {
+                    "auc": 0.90,
+                    "same_mean_posterior": 0.85,
+                    "diff_mean_posterior": 0.35,
+                    "separation": 0.50,
+                    "calibration_error": 0.02,
+                }
+            }
+        )
+        update_eval_run(
+            db,
+            run_id,
+            status="complete",
+            winner_variant="A",
+            metrics=metrics,
+            item_count=10,
+            error_budget=0.30,
+            judge_mode="bayesian",
+        )
+        return db, run_id
+
+    def test_bayesian_promotes_when_auc_and_separation_pass(self, db_with_bayesian_run):
+        """Bayesian auto-promote succeeds when AUC >= threshold AND separation >= min."""
+        db, run_id = db_with_bayesian_run
+        with patch("ollama_queue.eval_engine.do_promote_eval_run") as mock_promote:
+            mock_promote.return_value = {"ok": True, "run_id": run_id, "variant_id": "A", "label": "Config A"}
+            check_auto_promote(db, run_id, "http://localhost:7683")
+        mock_promote.assert_called_once_with(db, run_id)
+
+    def test_bayesian_skips_when_auc_below_threshold(self, db_with_bayesian_run):
+        """Bayesian auto-promote fails when AUC < threshold."""
+        db, run_id = db_with_bayesian_run
+        db.set_setting("eval.auc_threshold", 0.95)  # raise bar above AUC=0.90
+        with patch("ollama_queue.eval_engine.do_promote_eval_run") as mock_promote:
+            check_auto_promote(db, run_id, "http://localhost:7683")
+        mock_promote.assert_not_called()
+
+    def test_bayesian_skips_when_separation_below_min(self, db_with_bayesian_run):
+        """Bayesian auto-promote fails when separation < min_posterior_separation."""
+        db, run_id = db_with_bayesian_run
+        db.set_setting("eval.min_posterior_separation", 0.6)  # raise bar above separation=0.50
+        with patch("ollama_queue.eval_engine.do_promote_eval_run") as mock_promote:
+            check_auto_promote(db, run_id, "http://localhost:7683")
+        mock_promote.assert_not_called()
+
+    def test_legacy_still_uses_f1(self, tmp_path):
+        """Legacy auto-promote (rubric/binary) still uses F1, not AUC."""
+        from ollama_queue.db import Database
+
+        db = Database(str(tmp_path / "test.db"))
+        db.initialize()
+        db.set_setting("eval.auto_promote", True)
+        db.set_setting("eval.f1_threshold", 0.75)
+        db.set_setting("eval.auto_promote_min_improvement", 0.05)
+        db.set_setting("eval.error_budget", 0.30)
+        db.set_setting("eval.stability_window", 0)
+        import json
+
+        run_id = create_eval_run(db, variant_id="A")
+        # Legacy run: has F1 but no AUC — should use F1 path
+        metrics = json.dumps({"A": {"f1": 0.85, "precision": 0.9, "recall": 0.8, "actionability": 0.8}})
+        update_eval_run(
+            db,
+            run_id,
+            status="complete",
+            winner_variant="A",
+            metrics=metrics,
+            item_count=10,
+            error_budget=0.30,
+            # No judge_mode set — defaults to 'rubric'
+        )
+        with patch("ollama_queue.eval_engine.do_promote_eval_run") as mock_promote:
+            mock_promote.return_value = {"ok": True, "run_id": run_id, "variant_id": "A", "label": "Config A"}
+            check_auto_promote(db, run_id, "http://localhost:7683")
+        mock_promote.assert_called_once_with(db, run_id)
+
+
 # ---------------------------------------------------------------------------
 # Bayesian fusion functions (Task 17: ported from lessons-db/eval.py)
 # ---------------------------------------------------------------------------
