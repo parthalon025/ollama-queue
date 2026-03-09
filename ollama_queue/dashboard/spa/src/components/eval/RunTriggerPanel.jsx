@@ -19,6 +19,13 @@ import ModelSelect from '../ModelSelect.jsx';
 
 // NOTE: All .map() callbacks use descriptive parameter names — never 'h' (shadows JSX factory)
 
+const JUDGE_MODE_DESCRIPTIONS = {
+  bayesian: 'Uses multiple signals (paired comparisons, embeddings, scope, mechanism) — most accurate. Recommended for final decisions.',
+  tournament: 'Head-to-head comparisons between configs — good for ranking when testing 3+ variants.',
+  binary: 'Simple YES/NO per principle — fastest, least compute. Use for quick sanity checks.',
+  rubric: '1–5 scores — legacy mode. Less reliable than Bayesian; kept for backward compatibility.',
+};
+
 export default function RunTriggerPanel({ defaultCollapsed }) {
   // Read signals at top of render — Preact subscription pattern
   const variants = evalVariants.value;
@@ -349,6 +356,11 @@ export default function RunTriggerPanel({ defaultCollapsed }) {
             {activeTooltip === 'judge_mode_selector' && (
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--accent)', marginTop: '0.25rem', lineHeight: 1.5 }}>
                 {EVAL_TRANSLATIONS.judge_mode_selector.tooltip}
+              </div>
+            )}
+            {judgeMode && JUDGE_MODE_DESCRIPTIONS[judgeMode] && (
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', marginTop: '0.25rem', lineHeight: 1.5 }}>
+                {JUDGE_MODE_DESCRIPTIONS[judgeMode]}
               </div>
             )}
           </div>
