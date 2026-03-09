@@ -2,6 +2,7 @@ import { h } from 'preact';
 import { useState } from 'preact/hooks';
 import { EVAL_TRANSLATIONS } from './translations.js';
 import ResultsTable from './ResultsTable.jsx';
+import ConfusionMatrix from './ConfusionMatrix.jsx';
 import { API, evalActiveRun, evalSubTab, fetchEvalRuns, fetchEvalVariants, startEvalPoll } from '../../store.js';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
 // What it shows: A single eval run row with 3-level progressive disclosure.
@@ -348,6 +349,9 @@ export default function RunRow({ run }) {
               </pre>
             </div>
           )}
+
+          {/* Confusion matrix — shows cross-cluster principle bleed for completed runs */}
+          {status === 'complete' && <ConfusionMatrix runId={id} />}
 
           {/* Action buttons */}
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
