@@ -1383,7 +1383,7 @@ def create_app(db: Database) -> FastAPI:
         with db._lock:
             conn = db._connect()
             runs = conn.execute(
-                """SELECT id, started_at, metrics, item_ids, item_count
+                """SELECT id, started_at, metrics, item_ids, item_count, judge_mode
                    FROM eval_runs WHERE status = 'complete' ORDER BY id ASC"""
             ).fetchall()
             # Fetch agreement counts inside the same lock to avoid racing with
@@ -1418,6 +1418,7 @@ def create_app(db: Database) -> FastAPI:
                         "recall": var_metrics.get("recall"),
                         "precision": var_metrics.get("precision"),
                         "item_count": run_row["item_count"],
+                        "judge_mode": run_row["judge_mode"],
                     }
                 )
 
@@ -1708,7 +1709,7 @@ def create_app(db: Database) -> FastAPI:
                 """SELECT id, status, variants, variant_id, winner_variant, metrics,
                           item_count, item_ids, started_at, completed_at,
                           judge_model, analysis_md, error, label, scheduled_by,
-                          error_budget, run_mode
+                          error_budget, run_mode, judge_mode
                    FROM eval_runs
                    ORDER BY id DESC
                    LIMIT ? OFFSET ?""",
@@ -1737,6 +1738,7 @@ def create_app(db: Database) -> FastAPI:
                     "started_at": r.get("started_at"),
                     "completed_at": r.get("completed_at"),
                     "judge_model": r.get("judge_model"),
+                    "judge_mode": r.get("judge_mode"),
                     "analysis_md": r.get("analysis_md"),
                     "error": r.get("error"),
                     "label": r.get("label"),
@@ -1809,6 +1811,16 @@ def create_app(db: Database) -> FastAPI:
         judge_model = body.get("judge_model")
         if judge_model and isinstance(judge_model, str):
             _ee.update_eval_run(db, run_id, judge_model=judge_model)
+
+        # Persist judge_mode from request body (default: "bayesian")
+        judge_mode = body.get("judge_mode", "bayesian")
+        valid_judge_modes = ("rubric", "binary", "tournament", "bayesian")
+        if judge_mode not in valid_judge_modes:
+            raise HTTPException(
+                status_code=400,
+                detail=f"judge_mode must be one of: {', '.join(valid_judge_modes)}",
+            )
+        _ee.update_eval_run(db, run_id, judge_mode=judge_mode)
 
         # Run the session in a background thread — NOT as a queued job.
         # Running as a queued job would deadlock: the daemon sets current_job_id while
