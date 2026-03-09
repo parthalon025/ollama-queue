@@ -296,6 +296,9 @@ export default function RunTriggerPanel({ defaultCollapsed }) {
                 {EVAL_TRANSLATIONS.per_cluster.tooltip}
               </div>
             )}
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', marginTop: '0.15rem' }}>
+              1–20 · higher = slower but more reliable results
+            </div>
           </div>
 
           {/* Judge model */}
