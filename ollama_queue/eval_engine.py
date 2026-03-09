@@ -1031,6 +1031,9 @@ def compute_metrics(results: list[dict]) -> dict[str, dict[str, Any]]:
             for cid, cpairs in sorted(by_cluster.items()):
                 csame = [p for p in cpairs if p["is_same_cluster"]]
                 cdiff = [p for p in cpairs if not p["is_same_cluster"]]
+                # Skip clusters with no same-cluster pairs (would show misleading metrics)
+                if not csame:
+                    continue
                 per_cluster[cid] = _compute_f1_block(csame, cdiff, cpairs)
             m["per_cluster"] = per_cluster
 

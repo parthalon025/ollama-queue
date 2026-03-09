@@ -508,6 +508,23 @@ class TestComputeMetricsPerCluster:
         assert metrics["A"]["per_cluster"]["C1"]["sample_count"] == 2
         assert metrics["A"]["per_cluster"]["C2"]["sample_count"] == 1
 
+    def test_per_cluster_skips_no_same_cluster_pairs(self):
+        """Clusters with only diff-cluster pairs should not appear in per_cluster."""
+        results = [
+            # C1: has both same and diff — should appear
+            self._make_result("A", True, 5, "C1"),
+            self._make_result("A", False, 1, "C1"),
+            # C2: only diff-cluster pairs — should be skipped
+            self._make_result("A", False, 2, "C2"),
+            self._make_result("A", False, 3, "C2"),
+        ]
+        metrics = compute_metrics(results)
+        assert "per_cluster" in metrics["A"]
+        assert "C1" in metrics["A"]["per_cluster"]
+        assert (
+            "C2" not in metrics["A"]["per_cluster"]
+        ), "Cluster with 0 same-cluster pairs should not appear in per_cluster breakdown"
+
 
 # ---------------------------------------------------------------------------
 # Reproducibility — same seed + same items = same order
