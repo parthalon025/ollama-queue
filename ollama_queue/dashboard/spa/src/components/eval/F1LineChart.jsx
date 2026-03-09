@@ -1,7 +1,9 @@
 import { h } from 'preact';
 import { useRef, useEffect } from 'preact/hooks';
 import uPlot from 'uplot';
-// What it shows: F1 score over time for each eval variant as a line chart.
+// What it shows: Quality score over time for each eval variant as a line chart.
+//   Detects judge_mode from trend data: plots AUC for bayesian/tournament runs,
+//   F1 for legacy (rubric/binary) runs.
 // Decision it drives: User sees which variant is improving and at what rate,
 //   helping them decide which config to promote or investigate.
 
@@ -24,7 +26,7 @@ function resolveColor(varStr) {
 }
 
 // Inner chart component — only rendered when we have data
-function ChartCanvas({ variants, itemSetsDiffer }) {
+function ChartCanvas({ variants, itemSetsDiffer, metricKey, yAxisLabel }) {
   const containerRef = useRef(null);
   const chartRef     = useRef(null);
 
@@ -46,7 +48,7 @@ function ChartCanvas({ variants, itemSetsDiffer }) {
 
     const seriesData = variants.map(vari => {
       const runMap = {};
-      (vari.runs || []).forEach(run => { runMap[run.timestamp] = run.f1; });
+      (vari.runs || []).forEach(run => { runMap[run.timestamp] = run[metricKey]; });
       return xValues.map(ts => runMap[ts] ?? null);
     });
 
@@ -97,7 +99,7 @@ function ChartCanvas({ variants, itemSetsDiffer }) {
           font:   `10px ${fontMono}`,
           ticks:  { stroke: gridColor, width: 1 },
           size:   50,
-          label:  'Quality Score (0–100%, higher is better)',
+          label:  yAxisLabel,
           values: (_u, vals) => vals.map(v => v == null ? '' : (v * 100).toFixed(0) + '%'),
         },
       ],
@@ -112,7 +114,7 @@ function ChartCanvas({ variants, itemSetsDiffer }) {
     return () => {
       if (chartRef.current) { chartRef.current.destroy(); chartRef.current = null; }
     };
-  }, [variants, itemSetsDiffer]);
+  }, [variants, itemSetsDiffer, metricKey, yAxisLabel]);
 
   // Resize observer keeps the chart filling its container
   useEffect(() => {
@@ -126,7 +128,7 @@ function ChartCanvas({ variants, itemSetsDiffer }) {
     return () => ro.disconnect();
   }, []);
 
-  return <div ref={containerRef} role="img" aria-label="F1 quality score over time per variant" />;
+  return <div ref={containerRef} role="img" aria-label={`${yAxisLabel} over time per variant`} />;
 }
 
 export default function F1LineChart() {
@@ -143,6 +145,16 @@ export default function F1LineChart() {
 
   const itemSetsDiffer = !!trends.item_sets_differ;
 
+  // Detect whether any variant's runs use bayesian/tournament judge_mode.
+  // If so, plot AUC instead of F1.
+  const hasBayesian = (trends.variants || []).some(vari =>
+    (vari.runs || []).some(entry => entry.judge_mode === 'bayesian' || entry.judge_mode === 'tournament')
+  );
+  const metricKey = hasBayesian ? 'auc' : 'f1';
+  const yAxisLabel = hasBayesian
+    ? 'Discrimination Score (AUC, 0–100%)'
+    : 'Quality Score (0–100%, higher is better)';
+
   return (
     <div class="t-frame eval-f1-chart" data-label="Quality Score Over Time">
       {itemSetsDiffer && (
@@ -150,7 +162,7 @@ export default function F1LineChart() {
           ⚠ The set of lessons tested changed between runs — score differences may reflect different data, not a real improvement in quality.
         </div>
       )}
-      <ChartCanvas variants={trends.variants} itemSetsDiffer={itemSetsDiffer} />
+      <ChartCanvas variants={trends.variants} itemSetsDiffer={itemSetsDiffer} metricKey={metricKey} yAxisLabel={yAxisLabel} />
       <div class="eval-f1-chart__legend" aria-hidden="true">
         {/* uPlot renders its own legend above the chart */}
       </div>
