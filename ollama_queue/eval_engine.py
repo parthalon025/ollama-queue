@@ -2096,6 +2096,27 @@ def _judge_one_target(
     )
 
 
+def _fetch_v2_scored_rows(db: Database, run_id: int) -> list[dict]:
+    """Fetch V2 scored rows with paired/Bayesian columns for tournament and fusion metrics."""
+    with db._lock:
+        conn = db._connect()
+        return [
+            dict(r)
+            for r in conn.execute(
+                """SELECT variant, is_same_cluster AS is_same_group,
+                          score_paired_winner, score_posterior,
+                          score_embedding_sim, score_mechanism_match,
+                          mechanism_trigger, mechanism_target, mechanism_fix,
+                          principle
+                   FROM eval_results
+                   WHERE run_id = ?
+                     AND row_type = 'judge'
+                     AND error IS NULL""",
+                (run_id,),
+            ).fetchall()
+        ]
+
+
 def _fetch_scored_rows(db: Database, run_id: int) -> list[dict]:
     """Fetch all scored eval_results for a run (effective scores, no errors)."""
     with db._lock:
@@ -2320,8 +2341,18 @@ def run_eval_judge(
         _log.info("run_eval_judge: persisted %d judge pairs for run_id=%d", len(judge_pairs), run_id)
 
     scored_rows = _fetch_scored_rows(db, run_id)
-    metrics = compute_metrics(scored_rows)
-    winner = max(metrics.keys(), key=lambda v: metrics[v]["f1"]) if metrics else None
+    if judge_mode in ("tournament", "bayesian"):
+        # V2 metrics: use paired/Bayesian metrics instead of F1
+        v2_rows = _fetch_v2_scored_rows(db, run_id)
+        metrics = compute_tournament_metrics(v2_rows) if judge_mode == "tournament" else {}
+        bayesian_m = compute_bayesian_metrics(v2_rows) if judge_mode == "bayesian" else {}
+        # Merge bayesian AUC into metrics for winner selection
+        for vid, bm in bayesian_m.items():
+            metrics.setdefault(vid, {}).update(bm)
+        winner = max(metrics.keys(), key=lambda v: metrics[v].get("auc", 0)) if metrics else None
+    else:
+        metrics = compute_metrics(scored_rows)
+        winner = max(metrics.keys(), key=lambda v: metrics[v]["f1"]) if metrics else None
     report_md = render_report(run_id, metrics, db)
 
     # Persist full metrics snapshot and completion timestamp for trend analysis

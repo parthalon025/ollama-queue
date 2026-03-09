@@ -2082,10 +2082,10 @@ def create_app(db: Database) -> FastAPI:
                 """INSERT INTO eval_runs
                    (data_source_url, variants, per_cluster, status, run_mode,
                     item_ids, seed, judge_model, judge_backend, error_budget,
-                    started_at)
+                    judge_mode, started_at)
                    VALUES (?, ?, ?, 'queued', ?,
                            ?, ?, ?, ?, ?,
-                           ?)""",
+                           ?, ?)""",
                 (
                     orig["data_source_url"],
                     orig["variants"],
@@ -2096,6 +2096,7 @@ def create_app(db: Database) -> FastAPI:
                     orig.get("judge_model"),
                     orig.get("judge_backend"),
                     orig.get("error_budget") or 0.30,
+                    orig.get("judge_mode") or "rubric",
                     started_at,
                 ),
             )
@@ -2184,6 +2185,10 @@ def create_app(db: Database) -> FastAPI:
             seed=run.get("seed"),
             item_ids=run.get("item_ids"),
         )
+
+        # Propagate judge_mode from original run (or allow override from body)
+        rerun_judge_mode = body.get("judge_mode") or run.get("judge_mode") or "rubric"
+        _ee.update_eval_run(db, new_run_id, judge_mode=rerun_judge_mode)
 
         # Copy gen_results from original run so run_eval_judge can find them.
         # Without this the new run has no eval_results rows and judge produces empty metrics.
