@@ -369,12 +369,6 @@ export default function RunRow({ run }) {
                 {promoteFb.msg && <div class={`action-fb action-fb--${promoteFb.phase}`}>{promoteFb.msg}</div>}
               </div>
             )}
-            <button class="t-btn t-btn-secondary" style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }}>
-              Score again
-            </button>
-            <button class="t-btn t-btn-secondary" style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }}>
-              Export
-            </button>
             {status === 'complete' && (
               <div>
                 <button
