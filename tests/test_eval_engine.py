@@ -2337,3 +2337,66 @@ class TestItemTitlePopulation:
                 "SELECT target_item_title FROM eval_results WHERE run_id = 1 AND row_type = 'judge'"
             ).fetchone()
         assert row["target_item_title"] == "Race condition in worker"
+
+
+class TestComputeRunAnalysis:
+    """Verify compute_run_analysis stores structured analysis in eval_runs."""
+
+    def test_stores_analysis_json(self, tmp_path):
+        from ollama_queue.db import Database
+        from ollama_queue.eval_engine import compute_run_analysis
+
+        db = Database(tmp_path / "q.db")
+        db.initialize()
+        with db._lock:
+            conn = db._connect()
+            conn.execute(
+                "INSERT INTO eval_runs (id, data_source_url, variants, variant_id, status) "
+                "VALUES (1, 'http://localhost:7685', '[\"A\"]', 'A', 'complete')"
+            )
+            for i, (same, score) in enumerate(
+                [
+                    (1, 5),
+                    (1, 2),
+                    (0, 1),
+                    (0, 4),
+                    (1, 4),
+                    (1, 4),
+                    (0, 1),
+                    (0, 1),
+                    (1, 3),
+                    (1, 1),
+                    (0, 2),
+                    (0, 5),
+                ]
+            ):
+                conn.execute(
+                    "INSERT INTO eval_results "
+                    "(run_id, variant, source_item_id, target_item_id, "
+                    "is_same_cluster, score_transfer, row_type, "
+                    "source_cluster_id, target_cluster_id) "
+                    "VALUES (1, 'A', ?, ?, ?, ?, 'judge', 'c1', ?)",
+                    (str(i), str(i + 100), same, score, "c1" if same else "c2"),
+                )
+            conn.commit()
+
+        compute_run_analysis(1, db)
+
+        with db._lock:
+            conn = db._connect()
+            row = conn.execute("SELECT analysis_json FROM eval_runs WHERE id = 1").fetchone()
+        analysis = json.loads(row["analysis_json"])
+        assert "per_item" in analysis
+        assert "failures" in analysis
+        assert "confidence_intervals" in analysis
+        assert "computed_at" in analysis
+        assert "positive_threshold" in analysis
+
+    def test_failure_does_not_raise(self, tmp_path):
+        from ollama_queue.db import Database
+        from ollama_queue.eval_engine import compute_run_analysis
+
+        db = Database(tmp_path / "q.db")
+        db.initialize()
+        # Run doesn't exist — should log and return, not raise
+        compute_run_analysis(999, db)  # no exception
