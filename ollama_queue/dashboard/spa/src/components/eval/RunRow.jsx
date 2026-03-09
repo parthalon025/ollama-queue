@@ -3,7 +3,7 @@ import { useState } from 'preact/hooks';
 import { EVAL_TRANSLATIONS } from './translations.js';
 import ResultsTable from './ResultsTable.jsx';
 import ConfusionMatrix from './ConfusionMatrix.jsx';
-import { API, evalActiveRun, evalSubTab, evalVariants, fetchEvalRuns, fetchEvalVariants, startEvalPoll } from '../../store.js';
+import { API, evalActiveRun, evalSubTab, evalVariants, fetchEvalRuns, fetchEvalVariants, fetchRunAnalysis, startEvalPoll } from '../../store.js';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
 // What it shows: A single eval run row with 3-level progressive disclosure.
 //   L1: status dot, winner config, quality score, date, item count.
@@ -66,6 +66,11 @@ export default function RunRow({ run }) {
   const [repeatFb, repeatAct] = useActionFeedback();
   const [analyzeFb, analyzeAct] = useActionFeedback();
   const [promoteFb, promoteAct] = useActionFeedback();
+  const [reanalyzeFb, reanalyzeAct] = useActionFeedback();
+  const [analysis, setAnalysis] = useState(null);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [showBreakdown, setShowBreakdown] = useState(false);
+  const [showAllItems, setShowAllItems] = useState(false);
 
   const {
     id,
@@ -173,7 +178,16 @@ export default function RunRow({ run }) {
   const judgeCallCount = item_count ?? 0;
 
   function toggleLevel(next) {
-    setLevel(level === next ? 1 : next);
+    const newLevel = level === next ? 1 : next;
+    setLevel(newLevel);
+    // Fetch structured analysis when expanding to L2 for complete runs
+    if (newLevel >= 2 && !analysis && status === 'complete') {
+      setAnalysisLoading(true);
+      fetchRunAnalysis(id).then(data => {
+        setAnalysis(data);
+        setAnalysisLoading(false);
+      });
+    }
   }
 
   const [tooltip, setTooltip] = useState(null);
@@ -276,7 +290,9 @@ export default function RunRow({ run }) {
                           </td>
                           {metricKeys.map(metric => (
                             <td key={metric} style={{ padding: '4px 8px', textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-secondary)' }}>
-                              {vm[metric] != null ? fmtPct(vm[metric]) : '—'}
+                              {metric === 'f1' && analysis?.confidence_intervals?.[vid]
+                                ? `${fmtPct(vm[metric])} ±${Math.round((analysis.confidence_intervals[vid].high - analysis.confidence_intervals[vid].low) / 2 * 100)}`
+                                : (vm[metric] != null ? fmtPct(vm[metric]) : '—')}
                             </td>
                           ))}
                         </tr>
@@ -349,6 +365,99 @@ export default function RunRow({ run }) {
           {winnerVariantRow?.model && (
             <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', marginBottom: '0.25rem' }}>
               Winner model: {winnerVariantRow.model}
+            </div>
+          )}
+
+          {/* Per-item breakdown — shows which items were hardest for this variant */}
+          {status === 'complete' && analysis?.per_item?.length > 0 && analysis.per_item[0]?.status !== 'no_cluster_data' && (
+            <div style={{
+              marginBottom: '0.75rem',
+              padding: '0.75rem',
+              background: 'var(--bg-raised)',
+              borderRadius: '4px',
+              borderLeft: '2px solid var(--accent)',
+            }}>
+              <div style={{
+                fontFamily: 'var(--font-mono)',
+                fontSize: 'var(--type-label)',
+                color: 'var(--text-tertiary)',
+                marginBottom: '0.4rem',
+                cursor: 'pointer',
+              }} onClick={() => setShowBreakdown(prev => !prev)}>
+                Item Difficulty ({analysis.per_item.length} items) {showBreakdown ? '\u25B2' : '\u25BC'}
+              </div>
+              {showBreakdown && (
+                <table class="eval-metrics-table" style={{ fontSize: 'var(--type-body)' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ textAlign: 'left' }}>Item</th>
+                      <th>F1</th>
+                      <th>TP</th>
+                      <th>FN</th>
+                      <th>FP</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(showAllItems ? analysis.per_item : analysis.per_item.slice(0, 5)).map((item, idx) => (
+                      <tr key={idx} style={{
+                        background: item.f1 < 0.5 ? 'rgba(239,68,68,0.08)' : 'transparent',
+                      }}>
+                        <td style={{ textAlign: 'left', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {item.source_item_title || item.source_item_id}
+                        </td>
+                        <td style={{ textAlign: 'center', fontFamily: 'var(--font-mono)' }}>{fmtPct(item.f1)}</td>
+                        <td style={{ textAlign: 'center' }}>{item.tp}</td>
+                        <td style={{ textAlign: 'center', color: item.fn > 0 ? 'var(--status-error)' : 'inherit' }}>{item.fn}</td>
+                        <td style={{ textAlign: 'center', color: item.fp > 0 ? 'var(--status-error)' : 'inherit' }}>{item.fp}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              {showBreakdown && analysis.per_item.length > 5 && (
+                <button
+                  style={{ marginTop: '0.3rem', fontSize: 'var(--type-label)', color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer' }}
+                  onClick={() => setShowAllItems(prev => !prev)}
+                >
+                  {showAllItems ? 'Show top 5' : `Show all ${analysis.per_item.length} items`}
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Analysis not computed indicator */}
+          {status === 'complete' && analysis?.status === 'not_computed' && (
+            <div style={{
+              marginBottom: '0.75rem',
+              padding: '0.5rem 0.75rem',
+              background: 'var(--bg-raised)',
+              borderRadius: '4px',
+              fontSize: 'var(--type-label)',
+              color: 'var(--text-tertiary)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+            }}>
+              Analysis not computed
+              <button
+                style={{ fontSize: 'var(--type-label)', color: 'var(--accent)', background: 'none', border: '1px solid var(--accent)', borderRadius: '3px', padding: '2px 8px', cursor: 'pointer' }}
+                disabled={reanalyzeFb.phase === 'loading'}
+                onClick={() => reanalyzeAct(
+                  'Computing\u2026',
+                  async () => {
+                    const res = await fetch(`${API}/eval/runs/${id}/reanalyze`, { method: 'POST' });
+                    if (!res.ok) throw new Error('Reanalyze failed');
+                    return await res.json();
+                  },
+                  () => {
+                    fetchRunAnalysis(id).then(data => setAnalysis(data));
+                    return 'Analysis computed';
+                  }
+                )}
+              >
+                {reanalyzeFb.phase === 'loading' ? 'Computing\u2026' : 'Compute'}
+              </button>
+              {reanalyzeFb.msg && <span class={`action-fb action-fb--${reanalyzeFb.phase}`}>{reanalyzeFb.msg}</span>}
             </div>
           )}
 

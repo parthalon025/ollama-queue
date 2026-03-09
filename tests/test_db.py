@@ -1071,3 +1071,28 @@ def test_eval_variants_have_description(tmp_path):
         assert (
             row["description"] is not None and len(row["description"]) > 10
         ), f"Variant {row['id']} has missing or empty description"
+
+
+def test_eval_results_has_title_columns(tmp_path):
+    """Verify source_item_title and target_item_title columns exist."""
+    from ollama_queue.db import Database
+
+    db = Database(tmp_path / "q.db")
+    db.initialize()
+    with db._lock:
+        conn = db._connect()
+        cols = [row[1] for row in conn.execute("PRAGMA table_info(eval_results)").fetchall()]
+    assert "source_item_title" in cols
+    assert "target_item_title" in cols
+
+
+def test_eval_runs_has_analysis_json(tmp_path):
+    """Verify analysis_json column exists on eval_runs."""
+    from ollama_queue.db import Database
+
+    db = Database(tmp_path / "q.db")
+    db.initialize()
+    with db._lock:
+        conn = db._connect()
+        cols = [row[1] for row in conn.execute("PRAGMA table_info(eval_runs)").fetchall()]
+    assert "analysis_json" in cols

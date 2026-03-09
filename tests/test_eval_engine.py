@@ -508,6 +508,23 @@ class TestComputeMetricsPerCluster:
         assert metrics["A"]["per_cluster"]["C1"]["sample_count"] == 2
         assert metrics["A"]["per_cluster"]["C2"]["sample_count"] == 1
 
+    def test_per_cluster_skips_no_same_cluster_pairs(self):
+        """Clusters with only diff-cluster pairs should not appear in per_cluster."""
+        results = [
+            # C1: has both same and diff — should appear
+            self._make_result("A", True, 5, "C1"),
+            self._make_result("A", False, 1, "C1"),
+            # C2: only diff-cluster pairs — should be skipped
+            self._make_result("A", False, 2, "C2"),
+            self._make_result("A", False, 3, "C2"),
+        ]
+        metrics = compute_metrics(results)
+        assert "per_cluster" in metrics["A"]
+        assert "C1" in metrics["A"]["per_cluster"]
+        assert (
+            "C2" not in metrics["A"]["per_cluster"]
+        ), "Cluster with 0 same-cluster pairs should not appear in per_cluster breakdown"
+
 
 # ---------------------------------------------------------------------------
 # Reproducibility — same seed + same items = same order
@@ -2291,3 +2308,112 @@ class TestVerticalIntegrationV2:
         assert run["report_md"] is not None
         assert len(run["report_md"]) > 0
         assert "Evaluation Report" in run["report_md"]
+
+
+class TestItemTitlePopulation:
+    """Verify that source/target item titles are stored in eval_results."""
+
+    def test_generation_stores_source_title(self, tmp_path):
+        from ollama_queue.db import Database
+
+        db = Database(tmp_path / "q.db")
+        db.initialize()
+        with db._lock:
+            conn = db._connect()
+            conn.execute(
+                "INSERT INTO eval_runs (id, data_source_url, variants, variant_id, status) "
+                "VALUES (1, 'http://localhost:7685', '[\"A\"]', 'A', 'generating')"
+            )
+            conn.execute(
+                "INSERT INTO eval_results (run_id, variant, source_item_id, source_item_title, "
+                "target_item_id, is_same_cluster, row_type) "
+                "VALUES (1, 'A', '42', 'Silent failure in logging', '42', 0, 'generate')"
+            )
+            conn.commit()
+            row = conn.execute("SELECT source_item_title FROM eval_results WHERE run_id = 1").fetchone()
+        assert row["source_item_title"] == "Silent failure in logging"
+
+    def test_judge_stores_target_title(self, tmp_path):
+        from ollama_queue.db import Database
+
+        db = Database(tmp_path / "q.db")
+        db.initialize()
+        with db._lock:
+            conn = db._connect()
+            conn.execute(
+                "INSERT INTO eval_runs (id, data_source_url, variants, variant_id, status) "
+                "VALUES (1, 'http://localhost:7685', '[\"A\"]', 'A', 'judging')"
+            )
+            conn.execute(
+                "INSERT INTO eval_results (run_id, variant, source_item_id, target_item_id, "
+                "target_item_title, is_same_cluster, row_type) "
+                "VALUES (1, 'A', '42', '99', 'Race condition in worker', 1, 'judge')"
+            )
+            conn.commit()
+            row = conn.execute(
+                "SELECT target_item_title FROM eval_results WHERE run_id = 1 AND row_type = 'judge'"
+            ).fetchone()
+        assert row["target_item_title"] == "Race condition in worker"
+
+
+class TestComputeRunAnalysis:
+    """Verify compute_run_analysis stores structured analysis in eval_runs."""
+
+    def test_stores_analysis_json(self, tmp_path):
+        from ollama_queue.db import Database
+        from ollama_queue.eval_engine import compute_run_analysis
+
+        db = Database(tmp_path / "q.db")
+        db.initialize()
+        with db._lock:
+            conn = db._connect()
+            conn.execute(
+                "INSERT INTO eval_runs (id, data_source_url, variants, variant_id, status) "
+                "VALUES (1, 'http://localhost:7685', '[\"A\"]', 'A', 'complete')"
+            )
+            for i, (same, score) in enumerate(
+                [
+                    (1, 5),
+                    (1, 2),
+                    (0, 1),
+                    (0, 4),
+                    (1, 4),
+                    (1, 4),
+                    (0, 1),
+                    (0, 1),
+                    (1, 3),
+                    (1, 1),
+                    (0, 2),
+                    (0, 5),
+                ]
+            ):
+                conn.execute(
+                    "INSERT INTO eval_results "
+                    "(run_id, variant, source_item_id, target_item_id, "
+                    "is_same_cluster, score_transfer, row_type, "
+                    "source_cluster_id, target_cluster_id) "
+                    "VALUES (1, 'A', ?, ?, ?, ?, 'judge', 'c1', ?)",
+                    (str(i), str(i + 100), same, score, "c1" if same else "c2"),
+                )
+            conn.commit()
+
+        compute_run_analysis(1, db)
+
+        with db._lock:
+            conn = db._connect()
+            row = conn.execute("SELECT analysis_json FROM eval_runs WHERE id = 1").fetchone()
+        analysis = json.loads(row["analysis_json"])
+        assert "per_item" in analysis
+        assert "failures" in analysis
+        assert "confidence_intervals" in analysis
+        assert "computed_at" in analysis
+        assert "positive_threshold" in analysis
+
+    def test_failure_does_not_raise(self, tmp_path):
+        from ollama_queue.db import Database
+        from ollama_queue.eval_engine import compute_run_analysis
+
+        db = Database(tmp_path / "q.db")
+        db.initialize()
+        # Run doesn't exist — should log and return, not raise
+        compute_run_analysis(999, db)  # no exception

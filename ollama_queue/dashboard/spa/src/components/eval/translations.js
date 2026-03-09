@@ -38,4 +38,37 @@ export const EVAL_TRANSLATIONS = {
   separation:          { label: 'Score Gap',                   tooltip: 'Difference between same-category and diff-category average scores. Larger = better discrimination. Minimum recommended: 0.4.' },
   auc_threshold:       { label: 'Minimum AUC to Promote (Bayesian)',     tooltip: 'A Bayesian/tournament configuration must reach at least this AUC before it can be promoted to production.' },
   min_posterior_separation: { label: 'Minimum Score Gap (Bayesian)',      tooltip: 'The gap between same-category and different-category scores must be at least this large to auto-promote.' },
+  // Analysis features (2026-03-09)
+  positive_threshold: {
+    label: 'Match Threshold',
+    tooltip: 'Transfer score at or above this value counts as a positive match. Default: 3 (on 1\u20135 scale).',
+  },
+  item_difficulty: {
+    label: 'Item Difficulty',
+    tooltip: 'Shows which test items were hardest \u2014 sorted by F1, worst first. Low F1 means the principle failed to transfer for that item.',
+  },
+  confidence_interval: {
+    label: 'Confidence Range',
+    tooltip: '95% bootstrap confidence interval \u2014 if you ran this eval 100 times with different samples, F1 would fall in this range 95 times.',
+  },
+  stability_stdev: {
+    label: 'Score Consistency',
+    tooltip: 'Standard deviation of F1 across recent runs. Below 10% = stable (trustworthy). Above 10% = unstable (fix sampling before optimizing prompts).',
+  },
+  config_diff: {
+    label: 'Config Differences',
+    tooltip: 'What changed between two variant configurations \u2014 model, temperature, context window, prompt template.',
+  },
+  false_positive: {
+    label: 'False Positive',
+    tooltip: 'The principle matched an unrelated item (different cluster) \u2014 it is too broad.',
+  },
+  false_negative: {
+    label: 'False Negative',
+    tooltip: 'The principle missed a related item (same cluster) \u2014 it is too narrow.',
+  },
+  analysis_not_computed: {
+    label: 'Analysis Not Computed',
+    tooltip: 'Structured analysis has not been computed for this run. Click Compute to generate per-item breakdown, failure cases, and confidence intervals.',
+  },
 };

@@ -308,3 +308,19 @@ def test_can_save_auto_promote_settings(client_and_db):
     data = resp2.json()
     assert data["eval.auto_promote"] is True
     assert data["eval.auto_promote_min_improvement"] == pytest.approx(0.10)
+
+
+def test_positive_threshold_setting(client_and_db):
+    """Verify eval.positive_threshold is a valid setting with default 3."""
+    client, _db = client_and_db
+    resp = client.get("/api/eval/settings")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data.get("eval.positive_threshold") == 3
+    # Set it
+    resp = client.put("/api/eval/settings", json={"eval.positive_threshold": 4})
+    assert resp.status_code == 200
+    # Read it back
+    resp = client.get("/api/eval/settings")
+    data = resp.json()
+    assert data.get("eval.positive_threshold") == 4

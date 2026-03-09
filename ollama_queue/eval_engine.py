@@ -1031,6 +1031,9 @@ def compute_metrics(results: list[dict]) -> dict[str, dict[str, Any]]:
             for cid, cpairs in sorted(by_cluster.items()):
                 csame = [p for p in cpairs if p["is_same_cluster"]]
                 cdiff = [p for p in cpairs if not p["is_same_cluster"]]
+                # Skip clusters with no same-cluster pairs (would show misleading metrics)
+                if not csame:
+                    continue
                 per_cluster[cid] = _compute_f1_block(csame, cdiff, cpairs)
             m["per_cluster"] = per_cluster
 
@@ -1450,7 +1453,101 @@ def render_report(run_id: int, metrics: dict[str, dict[str, float]], db: Databas
 
 
 # ---------------------------------------------------------------------------
-# Post-run Ollama analysis
+# Post-run structured analysis (analysis_json)
+# ---------------------------------------------------------------------------
+
+
+def compute_run_analysis(run_id: int, db: Database) -> None:
+    """Compute structured analysis and store as analysis_json on eval_runs.
+
+    Never raises — all exceptions caught and logged (same pattern as
+    check_auto_promote).
+    """
+    try:
+        _compute_run_analysis_inner(run_id, db)
+    except Exception:
+        _log.exception("compute_run_analysis failed for run %s (non-fatal)", run_id)
+
+
+def _compute_run_analysis_inner(run_id: int, db: Database) -> None:
+    """Inner implementation — may raise."""
+    from ollama_queue.eval_analysis import (
+        bootstrap_f1_ci,
+        compute_per_item_breakdown,
+        extract_failure_cases,
+    )
+
+    with db._lock:
+        conn = db._connect()
+        run = conn.execute("SELECT * FROM eval_runs WHERE id = ?", (run_id,)).fetchone()
+        if not run:
+            _log.warning("compute_run_analysis: run %s not found", run_id)
+            return
+
+        rows = conn.execute(
+            "SELECT * FROM eval_results WHERE run_id = ? AND row_type = 'judge' AND error IS NULL",
+            (run_id,),
+        ).fetchall()
+
+    if not rows:
+        _log.info("compute_run_analysis: no scored rows for run %s", run_id)
+        return
+
+    scored = [dict(r) for r in rows]
+
+    # Read positive threshold from settings
+    threshold = 3
+    try:
+        with db._lock:
+            conn = db._connect()
+            row = conn.execute("SELECT value FROM settings WHERE key = 'eval.positive_threshold'").fetchone()
+            if row:
+                threshold = int(json.loads(row["value"]))
+    except Exception:
+        _log.debug("compute_run_analysis: could not read positive_threshold, using default=%d", threshold)
+
+    # Parse variant IDs from run
+    variants_raw = run["variants"]
+    try:
+        variant_ids = json.loads(variants_raw) if isinstance(variants_raw, str) else [variants_raw]
+    except (json.JSONDecodeError, TypeError):
+        variant_ids = []
+
+    # Compute all three analysis types
+    per_item = compute_per_item_breakdown(scored, positive_threshold=threshold)
+    failures = extract_failure_cases(scored, positive_threshold=threshold)
+    ci: dict[str, Any] = {}
+    for vid in variant_ids:
+        result = bootstrap_f1_ci(scored, vid, positive_threshold=threshold, seed=run_id)
+        if result is not None:
+            ci[vid] = result
+
+    analysis: dict[str, Any] = {
+        "computed_at": datetime.now(UTC).isoformat(),
+        "positive_threshold": threshold,
+        "per_item": per_item,
+        "failures": failures,
+        "confidence_intervals": ci,
+    }
+
+    with db._lock:
+        conn = db._connect()
+        conn.execute(
+            "UPDATE eval_runs SET analysis_json = ? WHERE id = ?",
+            (json.dumps(analysis), run_id),
+        )
+        conn.commit()
+
+    _log.info(
+        "compute_run_analysis: stored analysis for run %s (%d items, %d failures)",
+        run_id,
+        len(per_item),
+        len(failures),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Post-run Ollama analysis (analysis_md)
 # ---------------------------------------------------------------------------
 
 
@@ -1774,6 +1871,7 @@ def _generate_one(
         run_id=run_id,
         variant=variant_id,
         source_item_id=str(source_item["id"]),
+        source_item_title=source_item.get("title") or source_item.get("one_liner", ""),
         target_item_id=str(source_item["id"]),
         is_same_cluster=0,
         row_type="generate",
@@ -2095,6 +2193,7 @@ def _judge_one_target(
     run_id: int,
     variant: str,
     source_item_id: str,
+    source_item_title: str = "",
     principle: str,
     target: dict,
     is_same: bool,
@@ -2191,7 +2290,9 @@ def _judge_one_target(
         run_id=run_id,
         variant=variant,
         source_item_id=source_item_id,
+        source_item_title=source_item_title,
         target_item_id=str(target["id"]),
+        target_item_title=target.get("title") or target.get("one_liner", ""),
         is_same_cluster=1 if is_same else 0,
         target_cluster_id=str(target.get("cluster_id") or target.get("cluster_seed") or ""),
         source_cluster_id=source_cluster_id,
@@ -2373,6 +2474,7 @@ def run_eval_judge(
             continue
 
         source_cid = str(source_item.get("cluster_id") or source_item.get("cluster_seed") or "")
+        _source_title = source_item.get("title") or source_item.get("one_liner", "")
         same_targets, diff_targets = _select_judge_targets(
             source_item_id=source_item_id,
             source_cid=source_cid,
@@ -2395,6 +2497,7 @@ def run_eval_judge(
                         run_id=run_id,
                         variant=gen_result["variant"],
                         source_item_id=source_item_id,
+                        source_item_title=_source_title,
                         principle=principle,
                         target=same_t,
                         is_same=True,
@@ -2427,6 +2530,7 @@ def run_eval_judge(
                             run_id=run_id,
                             variant=gen_result["variant"],
                             source_item_id=source_item_id,
+                            source_item_title=_source_title,
                             principle=principle,
                             target=target,
                             is_same=is_same,
@@ -2509,6 +2613,7 @@ def run_eval_session(
         # failures here are logged but never change the completed run record)
         run = get_eval_run(db, run_id)
         if run is not None and run.get("status") == "complete":
+            compute_run_analysis(run_id, db)
             generate_eval_analysis(db, run_id, http_base)
             check_auto_promote(db, run_id, http_base)
     except Exception as exc:

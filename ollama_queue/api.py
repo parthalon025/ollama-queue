@@ -1200,6 +1200,66 @@ def create_app(db: Database) -> FastAPI:
         row = _get_eval_variant(conn, new_id)
         return JSONResponse(content=row, status_code=201)
 
+    @app.get("/api/eval/variants/stability")
+    def get_variant_stability(data_source: str | None = None):
+        """Compute cross-run F1 stability per variant (live query).
+
+        # What it shows: Mean F1, standard deviation, and stable/unstable badge per variant
+        #   across the last 20 completed runs.
+        # Decision it drives: Identifies variants with inconsistent performance across runs,
+        #   signaling unreliable configs that may need more data or different prompts.
+        """
+        from ollama_queue.eval_analysis import compute_variant_stability
+
+        with db._lock:
+            conn = db._connect()
+            if data_source:
+                rows = conn.execute(
+                    "SELECT metrics FROM eval_runs WHERE status = 'complete' AND data_source_url = ? "
+                    "ORDER BY id DESC LIMIT 20",
+                    (data_source,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT metrics FROM eval_runs WHERE status = 'complete' " "ORDER BY id DESC LIMIT 20",
+                ).fetchall()
+
+        run_metrics = []
+        for row in rows:
+            try:
+                metrics = json.loads(row["metrics"]) if isinstance(row["metrics"], str) else (row["metrics"] or {})
+            except (json.JSONDecodeError, TypeError):
+                continue
+            for vid, vm in metrics.items():
+                if isinstance(vm, dict) and "f1" in vm:
+                    run_metrics.append({"variant": vid, "f1": vm["f1"]})
+
+        return compute_variant_stability(run_metrics)
+
+    @app.get("/api/eval/variants/{variant_a}/diff/{variant_b}")
+    def get_variant_diff(variant_a: str, variant_b: str):
+        """Compare two variant configs and return human-readable differences.
+
+        # What it shows: List of config changes between two variants (model, temperature, etc.).
+        # Decision it drives: Helps the user understand what changed between variants
+        #   to interpret why one performs better than another.
+        """
+        from ollama_queue.eval_analysis import describe_config_diff
+
+        with db._lock:
+            conn = db._connect()
+            row_a = conn.execute("SELECT * FROM eval_variants WHERE id = ?", (variant_a,)).fetchone()
+            row_b = conn.execute("SELECT * FROM eval_variants WHERE id = ?", (variant_b,)).fetchone()
+
+        if not row_a or not row_b:
+            missing = variant_a if not row_a else variant_b
+            raise HTTPException(404, f"Variant '{missing}' not found")
+
+        config_a = dict(row_a)
+        config_b = dict(row_b)
+        changes = describe_config_diff(config_a, config_b)
+        return {"changes": changes}
+
     @app.get("/api/eval/variants/{variant_id}/history")
     def eval_variant_history(variant_id: str):
         """Returns F1/recall/precision history across completed eval_runs for one variant.
@@ -1602,6 +1662,7 @@ def create_app(db: Database) -> FastAPI:
             "analysis_model",
             "auto_promote",
             "auto_promote_min_improvement",
+            "positive_threshold",
         }
 
         # Validation rules — validate ALL before writing any
@@ -1642,6 +1703,8 @@ def create_app(db: Database) -> FastAPI:
                 not isinstance(value, int | float) or not (0.0 <= float(value) <= 1.0)
             ):
                 validation_errors.append(f"auto_promote_min_improvement must be 0.0-1.0, got {value!r}")
+            elif bare_key == "positive_threshold" and (not isinstance(value, int) or not (1 <= value <= 5)):
+                validation_errors.append(f"positive_threshold must be an integer 1-5, got {value!r}")
 
         if validation_errors:
             raise HTTPException(status_code=422, detail=validation_errors)
@@ -1939,6 +2002,41 @@ def create_app(db: Database) -> FastAPI:
         _threading_analyze.Thread(target=_run_analysis, daemon=True).start()
         return {"ok": True, "run_id": run_id, "message": "Analysis started in background"}
 
+    @app.get("/api/eval/runs/{run_id}/analysis")
+    def get_eval_run_analysis(run_id: int):
+        """Return pre-computed structured analysis for a run.
+
+        # What it shows: Per-item breakdown, failure cases, and bootstrap CIs from analysis_json.
+        # Decision it drives: Shows which items are hardest, which pairs are misclassified,
+        #   and how confident we should be in F1 scores — without needing another Ollama call.
+        """
+        with db._lock:
+            conn = db._connect()
+            row = conn.execute("SELECT analysis_json FROM eval_runs WHERE id = ?", (run_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, f"Run {run_id} not found")
+        if not row["analysis_json"]:
+            return {"status": "not_computed"}
+        return json.loads(row["analysis_json"])
+
+    @app.post("/api/eval/runs/{run_id}/reanalyze")
+    def reanalyze_eval_run(run_id: int):
+        """Recompute structured analysis for a completed run (synchronous).
+
+        # What it shows: N/A — write-only; triggers recomputation of analysis_json.
+        # Decision it drives: Lets the user refresh analysis after threshold changes
+        #   or when analysis wasn't computed during the original run.
+        """
+        from ollama_queue import eval_engine as _ee
+
+        run = _ee.get_eval_run(db, run_id)
+        if not run:
+            raise HTTPException(404, f"Run {run_id} not found")
+        if run["status"] != "complete":
+            raise HTTPException(400, f"Run must be complete (current: {run['status']})")
+        _ee.compute_run_analysis(run_id, db)
+        return {"ok": True}
+
     @app.get("/api/eval/runs/{run_id}/confusion")
     def get_eval_run_confusion(run_id: int):
         """Returns cluster confusion matrix for a completed eval run.
@@ -1999,12 +2097,19 @@ def create_app(db: Database) -> FastAPI:
         return {"matrix": matrix, "flagged": flagged, "clusters": clusters}
 
     @app.get("/api/eval/runs/{run_id}/results")
-    def get_eval_run_results(run_id: int, row_type: str | None = None):
-        """Returns all eval_results rows for an eval run, with optional row_type filter.
+    def get_eval_run_results(
+        run_id: int,
+        row_type: str | None = None,
+        classification: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ):
+        """Returns eval_results rows for an eval run with optional filters.
 
         # What it shows: Per-item judge scores for one run — source, target, scores, errors.
         # Decision it drives: Lets the user drill into which items scored well or poorly
         #   to identify weak spots in a variant's principle transfer.
+        #   classification param filters to tp/tn/fp/fn error classes.
         """
         from ollama_queue import eval_engine as _ee
 
@@ -2012,18 +2117,44 @@ def create_app(db: Database) -> FastAPI:
         if run is None:
             raise HTTPException(status_code=404, detail=f"Eval run {run_id} not found")
 
+        where_clauses = ["run_id = ?"]
+        params: list = [run_id]
+
+        if row_type:
+            where_clauses.append("row_type = ?")
+            params.append(row_type)
+
+        # Classification filter (tp/tn/fp/fn) — requires judge rows with scores
+        if classification in ("fp", "fn", "tp", "tn"):
+            threshold = 3
+            try:
+                with db._lock:
+                    conn2 = db._connect()
+                    t_row = conn2.execute("SELECT value FROM settings WHERE key = 'eval.positive_threshold'").fetchone()
+                    if t_row:
+                        threshold = int(json.loads(t_row["value"]))
+            except Exception:
+                _log.debug("get_eval_run_results: could not read positive_threshold, using default=%d", threshold)
+            score_col = "COALESCE(override_score_transfer, score_transfer)"
+            if classification == "fp":
+                where_clauses.append(f"(is_same_cluster = 0 OR is_same_cluster IS NULL) AND {score_col} >= ?")
+            elif classification == "fn":
+                where_clauses.append(f"is_same_cluster = 1 AND {score_col} < ?")
+            elif classification == "tp":
+                where_clauses.append(f"is_same_cluster = 1 AND {score_col} >= ?")
+            elif classification == "tn":
+                where_clauses.append(f"(is_same_cluster = 0 OR is_same_cluster IS NULL) AND {score_col} < ?")
+            params.append(threshold)
+
+        where_sql = " AND ".join(where_clauses)
+        params.extend([limit, offset])
+
         with db._lock:
             conn = db._connect()
-            if row_type:
-                rows = conn.execute(
-                    "SELECT * FROM eval_results WHERE run_id = ? AND row_type = ? ORDER BY id",
-                    (run_id, row_type),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT * FROM eval_results WHERE run_id = ? ORDER BY id",
-                    (run_id,),
-                ).fetchall()
+            rows = conn.execute(
+                f"SELECT * FROM eval_results WHERE {where_sql} ORDER BY id LIMIT ? OFFSET ?",
+                params,
+            ).fetchall()
         return [dict(r) for r in rows]
 
     @app.get("/api/eval/runs/{run_id}/progress")
