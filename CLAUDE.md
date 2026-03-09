@@ -34,7 +34,7 @@ tests/
   test_api.py              # 58 tests (incl. proxy priority, batch schedule, suggest endpoint)
   test_daemon.py           # 62 tests
   test_api_eval_runs.py    # 57 tests
-  test_api_eval_variants.py # 30 tests
+  test_api_eval_variants.py # 31 tests
   test_scheduler.py        # 28 tests
   test_cli.py              # 27 tests
   test_stall.py            # 24 tests
@@ -115,7 +115,7 @@ Sidebar nav (desktop) + bottom tab bar (mobile). 6 views: **Now** (2-column comm
 
 Route IDs: `now` | `plan` | `history` | `models` | `settings` | `eval` | `consumers`. Sidebar: 200px desktop, 64px icon-only (768–1023px), hidden on mobile. CSS classes: `layout-root`, `layout-sidebar`, `layout-main`, `now-grid`, `history-top-grid`, `mobile-bottom-nav`.
 
-**Eval tab** (4 sub-views): Runs (run list + active progress + repeat + judge-rerun + per-run analysis panel with Analyze/Re-analyze button), Variants (prompt variant CRUD + stability table), Trends (F1 line chart + trend summary), Settings (judge defaults + data source + scheduling mode + setup checklist + `eval.analysis_model` — empty string means use judge model). Eval state: `evalActiveRun`, `evalSubTab`, `fetchEvalRuns` in `store.js`. Key invariants: `repeat` starts a background thread (not just a DB row); `judge-rerun` copies gen_results from source run before judging; cancel sets `completed_at`; all fetch calls check `res.ok`; `generate_eval_analysis()` runs automatically after each eval run completes and stores markdown to `eval_runs.analysis_md`.
+**Eval tab** (4 sub-views): Runs (run list + active progress + repeat + judge-rerun + per-run analysis panel with `simpleRenderMd()` + Analyze/Re-analyze button; winner label shows variant label + model name), Variants (prompt variant CRUD + stability table; `latest_f1` score shown inline; two-click inline delete replaces `confirm()` dialog; `description` field shown per row), Trends (F1 line chart + trend summary), Settings (judge defaults + data source + scheduling mode + setup checklist [2 gates: data source connected + first run exists] + `eval.analysis_model` — empty string means use judge model; judge mode inline description; "1–20" range hint on Lessons per Group; variant descriptions shown in checkbox list; alert()-based tooltips replaced with inline reveal). `eval_variants` rows have a `description TEXT` column; `GET /api/eval/variants` includes `description` in response; live DB migration backfills pre-existing rows via `UPDATE WHERE description IS NULL`. Eval state: `evalActiveRun`, `evalSubTab`, `fetchEvalRuns` in `store.js`. Key invariants: `repeat` starts a background thread (not just a DB row); `judge-rerun` copies gen_results from source run before judging; cancel sets `completed_at`; all fetch calls check `res.ok`; `generate_eval_analysis()` runs automatically after each eval run completes and stores markdown to `eval_runs.analysis_md`.
 
 ### UI Layman Comments (always required)
 
@@ -191,6 +191,7 @@ This applies to: component files, store transformations in `store.js`, computed 
 - **Consumer `patch_path` may be empty** — `revert_consumer()` must check `patch_path` before calling `Path(patch_path).exists()`. An empty string produces a false-positive hit on the current directory.
 - **scanner.py and patcher.py use `subprocess` with known system binaries** — `S603`/`S607` (bandit/ruff subprocess rules) are suppressed via `per-file-ignores` in `ruff.toml`, matching the same pattern as `daemon.py`. Do not add inline `# noqa` comments — they will be flagged as RUF100 (redundant) if the per-file-ignore is already in effect.
 - **`GET /api/eval/trends` returns `variants` as an object keyed by variant id, not an array** — SPA components must not iterate `variants` directly with `.map()`. Call `normalizeTrends()` in `store.js` before assigning to `evalTrends.value`; this converts the object to an array (with `id` attached), aggregates `trend_direction`/`completed_runs`/`judge_reliability`/`item_count_growing` at the top level, and normalises `started_at` ISO strings to unix `timestamp` fields. Any new Trends-tab component must consume the normalised shape, not the raw API response.
+- **`INSERT OR IGNORE` skips pre-existing seeded rows — always pair with `UPDATE WHERE column IS NULL` backfill** — when adding a new column to a table that has seeded rows (e.g. `eval_variants` system variants A–H + M), `ALTER TABLE ADD COLUMN` sets the column to NULL on existing rows. The seed `INSERT OR IGNORE` then silently skips those rows, leaving the new column unpopulated. Always follow the migration with `UPDATE <table> SET <column> = <value> WHERE <column> IS NULL` to backfill pre-existing rows.
 
 ## Design Doc
 

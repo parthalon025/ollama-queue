@@ -185,7 +185,7 @@ curl -X POST http://localhost:7683/api/consumers/intercept/disable
 The eval pipeline lets you A/B test prompt variants against a sample dataset, score them with an LLM judge, and promote the winner to production.
 
 **Concepts:**
-- **Variants** — named prompt templates (A through E) stored in the DB. Edit in the dashboard or via API.
+- **Variants** — named prompt templates (9 system variants: A–H + M) stored in the DB, each with a plain-English description. Edit in the dashboard or via API.
 - **Eval runs** — execute all variants against the dataset; the judge scores each response (F1/recall/precision).
 - **LLM judge** — any locally-available Ollama model. Default: `deepseek-r1:8b`. Configurable per eval session.
 - **Auto-promote** — when enabled, the winning variant is promoted automatically if it clears three gates: F1 ≥ threshold, F1 improvement over current production ≥ minimum, and error budget not exceeded.
