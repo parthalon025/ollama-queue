@@ -5,6 +5,7 @@ import logging
 import signal as _signal
 import time
 from concurrent.futures import ThreadPoolExecutor
+from typing import ClassVar
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -1267,3 +1268,66 @@ class TestEntropyComputation:
         import math
 
         assert all(v >= 0.0 and math.isfinite(v) for v in daemon._entropy_history)
+
+
+class TestProxySentinelPreservation:
+    """The daemon poll must not clobber the proxy sentinel (current_job_id=-1).
+
+    Root cause: when no pending queue jobs exist, poll_once() set
+    state='idle', current_job_id=None unconditionally — overwriting the -1
+    sentinel held by an in-flight proxy /api/generate request.  This allowed
+    the daemon to see "no proxy running" and a second proxy could claim the
+    slot, defeating serialisation entirely.
+    """
+
+    _HEALTHY: ClassVar[dict] = {
+        "ram_pct": 30.0,
+        "swap_pct": 5.0,
+        "load_avg": 0.5,
+        "cpu_count": 4,
+        "vram_pct": 20.0,
+        "ollama_model": None,
+    }
+
+    def test_poll_preserves_proxy_sentinel_when_queue_empty(self, daemon):
+        """poll_once() with no pending jobs must leave current_job_id=-1 intact."""
+        # Simulate a proxy that has already claimed the slot
+        daemon.db.try_claim_for_proxy()
+        state_before = daemon.db.get_daemon_state()
+        assert state_before["current_job_id"] == -1, "precondition: sentinel must be set"
+
+        with patch.object(daemon.health, "check", return_value=self._HEALTHY):
+            daemon.poll_once()
+
+        state_after = daemon.db.get_daemon_state()
+        assert (
+            state_after["current_job_id"] == -1
+        ), "poll_once() must not clear the proxy sentinel when no regular jobs are pending"
+
+    def test_poll_sets_idle_current_job_id_null_when_no_proxy(self, daemon):
+        """poll_once() with no pending jobs and no proxy claim sets current_job_id=None."""
+        with patch.object(daemon.health, "check", return_value=self._HEALTHY):
+            daemon.poll_once()
+
+        state = daemon.db.get_daemon_state()
+        assert state["state"] == "idle"
+        assert state["current_job_id"] is None
+
+    def test_poll_preserves_sentinel_when_cannot_admit(self, daemon):
+        """poll_once() that skips admission (resource-constrained) must preserve sentinel."""
+        # Submit a job so the daemon reaches the admission check
+        daemon.db.submit_job("echo hi", "qwen2.5:7b", 5, 60, "test")
+
+        # Claim proxy sentinel before the poll
+        daemon.db.try_claim_for_proxy()
+        assert daemon.db.get_daemon_state()["current_job_id"] == -1
+
+        # Patch _can_admit to return False so the daemon bails at step 8
+        with (
+            patch.object(daemon.health, "check", return_value=self._HEALTHY),
+            patch.object(daemon, "_can_admit", return_value=False),
+        ):
+            daemon.poll_once()
+
+        state = daemon.db.get_daemon_state()
+        assert state["current_job_id"] == -1, "poll_once() must not clear the proxy sentinel when admission is denied"

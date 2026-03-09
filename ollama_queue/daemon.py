@@ -621,8 +621,13 @@ class Daemon:
         job = self._dequeue_next_job(pending_jobs, estimates, now)
 
         # 5. If no job -> set idle, return
+        # Guard: don't clobber an in-flight proxy claim (current_job_id=-1 sentinel).
+        # The proxy's release_proxy_claim() owns that transition back to NULL.
         if job is None:
-            self.db.update_daemon_state(state="idle", last_poll_at=now, current_job_id=None)
+            if state.get("current_job_id") == -1:
+                self.db.update_daemon_state(state="idle", last_poll_at=now)
+            else:
+                self.db.update_daemon_state(state="idle", last_poll_at=now, current_job_id=None)
             return
 
         # 6. Evaluate health -> if pause needed, update state, return
@@ -672,8 +677,12 @@ class Daemon:
             _log.info("Queue resuming from %s", current_state)
 
         # 8. Admit and dispatch
+        # Guard: don't clobber proxy sentinel (same reason as step 5).
         if not self._can_admit(job):
-            self.db.update_daemon_state(state="idle", last_poll_at=now, current_job_id=None)
+            if state.get("current_job_id") == -1:
+                self.db.update_daemon_state(state="idle", last_poll_at=now)
+            else:
+                self.db.update_daemon_state(state="idle", last_poll_at=now, current_job_id=None)
             return
 
         # Preemption: if new job is priority 1-2, check if we should preempt a running job
@@ -1202,7 +1211,8 @@ class Daemon:
                 except Exception:
                     _log.exception("Unexpected error in poll_once(); attempting state recovery")
                     try:
-                        self.db.update_daemon_state(state="idle", current_job_id=None, last_poll_at=time.time())
+                        # Don't clear current_job_id here — a proxy may be holding the sentinel.
+                        self.db.update_daemon_state(state="idle", last_poll_at=time.time())
                     except Exception:
                         _log.exception("State recovery also failed; daemon loop continues")
 
