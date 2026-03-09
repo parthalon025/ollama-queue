@@ -266,6 +266,56 @@ export default function RunRow({ run }) {
             );
           })()}
 
+          {/* Posterior Separation — visual bar comparison for Bayesian/tournament runs.
+              Shows same-category (green) vs diff-category (red) average posteriors
+              so the user can see the discrimination gap at a glance. */}
+          {isBayesian && winnerMetrics && winnerMetrics.same_mean_posterior != null && (
+            <div style={{ marginBottom: '0.75rem', padding: '0.5rem 0' }}>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', marginBottom: '0.25rem' }}>
+                Posterior Separation (winner)
+              </div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', marginBottom: '0.5rem' }}>
+                Green bar = same-category avg, red bar = different-category avg. Wider gap = better discrimination.
+              </div>
+              {/* Same-category bar (green) */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '4px' }}>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-secondary)', width: '80px', textAlign: 'right', flexShrink: 0 }}>
+                  Same
+                </span>
+                <div style={{ flex: 1, background: 'var(--bg-raised)', borderRadius: '3px', height: '16px', position: 'relative' }}>
+                  <div style={{
+                    width: `${Math.round((winnerMetrics.same_mean_posterior ?? 0) * 100)}%`,
+                    height: '100%',
+                    background: 'var(--status-healthy)',
+                    borderRadius: '3px',
+                    opacity: 0.7,
+                  }} />
+                </div>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-secondary)', width: '40px', flexShrink: 0 }}>
+                  {fmtPct(winnerMetrics.same_mean_posterior)}
+                </span>
+              </div>
+              {/* Diff-category bar (red) */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-secondary)', width: '80px', textAlign: 'right', flexShrink: 0 }}>
+                  Different
+                </span>
+                <div style={{ flex: 1, background: 'var(--bg-raised)', borderRadius: '3px', height: '16px', position: 'relative' }}>
+                  <div style={{
+                    width: `${Math.round((winnerMetrics.diff_mean_posterior ?? 0) * 100)}%`,
+                    height: '100%',
+                    background: 'var(--status-error)',
+                    borderRadius: '3px',
+                    opacity: 0.7,
+                  }} />
+                </div>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-secondary)', width: '40px', flexShrink: 0 }}>
+                  {fmtPct(winnerMetrics.diff_mean_posterior)}
+                </span>
+              </div>
+            </div>
+          )}
+
           {/* Scorer info */}
           {judge_model && (
             <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', marginBottom: '0.5rem' }}>
