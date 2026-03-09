@@ -3,7 +3,7 @@ import { useState } from 'preact/hooks';
 import { EVAL_TRANSLATIONS } from './translations.js';
 import ResultsTable from './ResultsTable.jsx';
 import ConfusionMatrix from './ConfusionMatrix.jsx';
-import { API, evalActiveRun, evalSubTab, fetchEvalRuns, fetchEvalVariants, startEvalPoll } from '../../store.js';
+import { API, evalActiveRun, evalSubTab, evalVariants, fetchEvalRuns, fetchEvalVariants, startEvalPoll } from '../../store.js';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
 // What it shows: A single eval run row with 3-level progressive disclosure.
 //   L1: status dot, winner config, quality score, date, item count.
@@ -79,6 +79,14 @@ export default function RunRow({ run }) {
     item_ids,
     analysis_md,
   } = run;
+
+  // Look up winner variant label for display. Falls back to bare ID if variants not loaded yet.
+  const winnerVariantRow = winner_variant
+    ? (evalVariants.value || []).find(v => v.id === winner_variant)
+    : null;
+  const winnerLabel = winnerVariantRow
+    ? `${winner_variant} — ${winnerVariantRow.label}`
+    : winner_variant;
 
   // Bayesian/tournament runs use AUC as primary quality metric instead of F1
   const isBayesian = judge_mode === 'bayesian' || judge_mode === 'tournament';
@@ -191,7 +199,7 @@ export default function RunRow({ run }) {
           </span>
           {winner_variant && (
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-primary)' }}>
-              Winner: Config {winner_variant}
+              Winner: {winnerLabel}
             </span>
           )}
           {winnerQuality != null && (
@@ -334,6 +342,13 @@ export default function RunRow({ run }) {
           {judge_model && (
             <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', marginBottom: '0.5rem' }}>
               Scorer: {judge_model} · {judgeCallCount} items
+            </div>
+          )}
+
+          {/* Winner model — shown when we can resolve the winning variant's model from evalVariants */}
+          {winnerVariantRow?.model && (
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', marginBottom: '0.25rem' }}>
+              Winner model: {winnerVariantRow.model}
             </div>
           )}
 
