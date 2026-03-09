@@ -214,14 +214,21 @@ def do_promote_eval_run(db: Database, run_id: int) -> dict:
 def check_auto_promote(db: Database, run_id: int, http_base: str) -> None:
     """Check whether a completed eval run qualifies for auto-promotion.
 
-    Three-gate criteria (all must pass):
+    Gate criteria depend on judge_mode:
+
+    **Legacy (rubric/binary):**
     1. Winner F1 >= eval.f1_threshold
     2. Winner F1 > production_F1 + eval.auto_promote_min_improvement
-       (gate skipped if no production variant exists)
     3. error_budget_used <= eval.error_budget
 
-    Optional stability gate: winner must have cleared f1_threshold in the
-    last eval.stability_window completed runs (if stability_window > 0).
+    **Bayesian/tournament:**
+    1. Winner AUC >= eval.auc_threshold (default 0.85)
+    1b. Winner separation >= eval.min_posterior_separation (default 0.4)
+    2. Winner AUC > production_AUC + eval.auto_promote_min_improvement
+    3. error_budget_used <= eval.error_budget
+
+    Optional stability gate: winner must have cleared the quality threshold
+    in the last eval.stability_window completed runs (if stability_window > 0).
 
     NEVER raises — all errors are logged and the function returns silently.
     Same contract as generate_eval_analysis.

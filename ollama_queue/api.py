@@ -1410,17 +1410,20 @@ def create_app(db: Database) -> FastAPI:
                 if not isinstance(var_metrics, dict):
                     continue
                 variant_runs.setdefault(var_id, [])
-                variant_runs[var_id].append(
-                    {
-                        "run_id": run_row["id"],
-                        "started_at": run_row["started_at"],
-                        "f1": var_metrics.get("f1"),
-                        "recall": var_metrics.get("recall"),
-                        "precision": var_metrics.get("precision"),
-                        "item_count": run_row["item_count"],
-                        "judge_mode": run_row["judge_mode"],
-                    }
-                )
+                entry = {
+                    "run_id": run_row["id"],
+                    "started_at": run_row["started_at"],
+                    "f1": var_metrics.get("f1"),
+                    "recall": var_metrics.get("recall"),
+                    "precision": var_metrics.get("precision"),
+                    "item_count": run_row["item_count"],
+                    "judge_mode": run_row["judge_mode"],
+                    "auc": var_metrics.get("auc"),
+                    "separation": var_metrics.get("separation"),
+                    "same_mean_posterior": var_metrics.get("same_mean_posterior"),
+                    "diff_mean_posterior": var_metrics.get("diff_mean_posterior"),
+                }
+                variant_runs[var_id].append(entry)
 
         # Judge agreement: fraction of eval_results where score_transfer > 1
         # (query already executed inside db._lock above to avoid data race)
@@ -1434,25 +1437,29 @@ def create_app(db: Database) -> FastAPI:
         for var_id, run_list in variant_runs.items():
             # Limit to last 10 runs
             recent = run_list[-10:]
-            f1_values = [r["f1"] for r in recent if r["f1"] is not None]
-            latest_f1 = f1_values[-1] if f1_values else None
 
-            # Stability: 1 - stddev(last 3 F1s) if >= 3 runs
+            # Use AUC as the quality metric for bayesian/tournament runs, F1 for legacy
+            has_bayesian = any(r.get("judge_mode") in ("bayesian", "tournament") for r in recent)
+            quality_key = "auc" if has_bayesian else "f1"
+            quality_values = [r[quality_key] for r in recent if r.get(quality_key) is not None]
+            latest_quality = quality_values[-1] if quality_values else None
+
+            # Stability: 1 - stddev(last 3 quality scores) if >= 3 runs
             stability = None
-            if len(f1_values) >= 3:
-                last3 = f1_values[-3:]
+            if len(quality_values) >= 3:
+                last3 = quality_values[-3:]
                 try:
                     stability = round(max(0.0, 1.0 - statistics.stdev(last3)), 4)
                 except statistics.StatisticsError:
                     stability = None
 
-            # Trend direction: slope of F1 values
+            # Trend direction: slope of quality values
             trend_direction = "stable"
-            if len(f1_values) >= 2:
-                n = len(f1_values)
+            if len(quality_values) >= 2:
+                n = len(quality_values)
                 x_mean = (n - 1) / 2
-                y_mean = sum(f1_values) / n
-                numerator = sum((i - x_mean) * (f1_values[i] - y_mean) for i in range(n))
+                y_mean = sum(quality_values) / n
+                numerator = sum((i - x_mean) * (quality_values[i] - y_mean) for i in range(n))
                 denominator = sum((i - x_mean) ** 2 for i in range(n))
                 slope = numerator / denominator if denominator != 0 else 0.0
                 if slope > 0.02:
@@ -1464,7 +1471,7 @@ def create_app(db: Database) -> FastAPI:
                 "runs": recent,
                 "stability": stability,
                 "trend_direction": trend_direction,
-                "latest_f1": latest_f1,
+                "latest_f1": latest_quality,
                 "judge_agreement_rate": agreement_by_variant.get(var_id),
             }
 
