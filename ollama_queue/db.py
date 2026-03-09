@@ -141,6 +141,15 @@ class Database:
         self._add_column_if_missing(conn, "eval_prompt_templates", "is_contrastive", "INTEGER DEFAULT 0")
         self._add_column_if_missing(conn, "eval_prompt_templates", "is_multi_stage", "INTEGER DEFAULT 0")
         self._add_column_if_missing(conn, "eval_results", "target_cluster_id", "TEXT")
+        # Eval V2: Bayesian fusion columns
+        self._add_column_if_missing(conn, "eval_results", "score_paired_winner", "TEXT")  # 'same'/'diff'/'neither'
+        self._add_column_if_missing(conn, "eval_results", "score_mechanism_match", "INTEGER")  # 0/1/NULL
+        self._add_column_if_missing(conn, "eval_results", "score_embedding_sim", "REAL")
+        self._add_column_if_missing(conn, "eval_results", "score_posterior", "REAL")
+        self._add_column_if_missing(conn, "eval_results", "mechanism_trigger", "TEXT")
+        self._add_column_if_missing(conn, "eval_results", "mechanism_target", "TEXT")
+        self._add_column_if_missing(conn, "eval_results", "mechanism_fix", "TEXT")
+        self._add_column_if_missing(conn, "eval_runs", "judge_mode", "TEXT DEFAULT 'rubric'")
 
     def initialize(self) -> None:
         """Create all tables and seed defaults."""
