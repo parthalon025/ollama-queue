@@ -37,6 +37,7 @@ export default function RunTriggerPanel({ defaultCollapsed }) {
   // null = not checked yet, 'checking', 'ready', 'needs_prime', 'offline'
   const [readiness, setReadiness] = useState(null);
   const [primeFb, primeAct] = useActionFeedback();
+  const [activeTooltip, setActiveTooltip] = useState(null);
 
   // Helper: run the readiness check and update banner state.
   // Called on open (via useEffect) and on Retry button click.
@@ -241,74 +242,95 @@ export default function RunTriggerPanel({ defaultCollapsed }) {
           </div>
 
           {/* Per-cluster items */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <label style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-secondary)' }}>
-              {EVAL_TRANSLATIONS.per_cluster.label}
-            </label>
-            <input
-              type="number"
-              min="1"
-              max="20"
-              value={perCluster}
-              onInput={e => setPerCluster(e.target.value)}
-              class="t-input eval-num-input"
-            />
-            <button
-              type="button"
-              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', fontSize: 'var(--type-label)', fontFamily: 'var(--font-mono)' }}
-              onClick={() => alert(EVAL_TRANSLATIONS.per_cluster.tooltip)}
-              aria-label="Info about items per group"
-            >
-              ?
-            </button>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <label style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-secondary)' }}>
+                {EVAL_TRANSLATIONS.per_cluster.label}
+              </label>
+              <input
+                type="number"
+                min="1"
+                max="20"
+                value={perCluster}
+                onInput={e => setPerCluster(e.target.value)}
+                class="t-input eval-num-input"
+              />
+              <button
+                type="button"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', fontSize: 'var(--type-label)', fontFamily: 'var(--font-mono)' }}
+                onClick={() => setActiveTooltip(activeTooltip === 'per_cluster' ? null : 'per_cluster')}
+                aria-label="Info about items per group"
+              >
+                ?
+              </button>
+            </div>
+            {activeTooltip === 'per_cluster' && (
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--accent)', marginTop: '0.25rem', lineHeight: 1.5 }}>
+                {EVAL_TRANSLATIONS.per_cluster.tooltip}
+              </div>
+            )}
           </div>
 
           {/* Judge model */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <label style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
-              {EVAL_TRANSLATIONS.judge_model.label}
-            </label>
-            <ModelSelect
-              value={judgeModel}
-              onChange={val => setJudgeModel(val)}
-              backend={evalSettings.value['eval.judge_backend'] ?? 'ollama'}
-              placeholder="deepseek-r1:8b"
-              class="t-input"
-            />
-            <button
-              type="button"
-              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', fontSize: 'var(--type-label)', fontFamily: 'var(--font-mono)' }}
-              onClick={() => alert(EVAL_TRANSLATIONS.judge_model.tooltip)}
-              aria-label="Info about scorer AI"
-            >
-              ?
-            </button>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <label style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                {EVAL_TRANSLATIONS.judge_model.label}
+              </label>
+              <ModelSelect
+                value={judgeModel}
+                onChange={val => setJudgeModel(val)}
+                backend={evalSettings.value['eval.judge_backend'] ?? 'ollama'}
+                placeholder="deepseek-r1:8b"
+                class="t-input"
+              />
+              <button
+                type="button"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', fontSize: 'var(--type-label)', fontFamily: 'var(--font-mono)' }}
+                onClick={() => setActiveTooltip(activeTooltip === 'judge_model' ? null : 'judge_model')}
+                aria-label="Info about scorer AI"
+              >
+                ?
+              </button>
+            </div>
+            {activeTooltip === 'judge_model' && (
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--accent)', marginTop: '0.25rem', lineHeight: 1.5 }}>
+                {EVAL_TRANSLATIONS.judge_model.tooltip}
+              </div>
+            )}
           </div>
 
           {/* Judge mode — which scoring strategy to use for evaluating generated principles */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <label style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
-              {EVAL_TRANSLATIONS.judge_mode_selector.label}
-            </label>
-            <select
-              value={judgeMode}
-              onChange={e => setJudgeMode(e.target.value)}
-              class="t-input"
-              style={{ flex: 1 }}
-            >
-              <option value="bayesian">Bayesian Fusion (recommended)</option>
-              <option value="tournament">Paired Tournament</option>
-              <option value="binary">Binary YES/NO</option>
-              <option value="rubric">Rubric 1-5 (legacy)</option>
-            </select>
-            <button
-              type="button"
-              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', fontSize: 'var(--type-label)', fontFamily: 'var(--font-mono)' }}
-              onClick={() => alert(EVAL_TRANSLATIONS.judge_mode_selector.tooltip)}
-              aria-label="Info about scoring strategy"
-            >
-              ?
-            </button>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <label style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                {EVAL_TRANSLATIONS.judge_mode_selector.label}
+              </label>
+              <select
+                value={judgeMode}
+                onChange={e => setJudgeMode(e.target.value)}
+                class="t-input"
+                style={{ flex: 1 }}
+              >
+                <option value="bayesian">Bayesian Fusion (recommended)</option>
+                <option value="tournament">Paired Tournament</option>
+                <option value="binary">Binary YES/NO</option>
+                <option value="rubric">Rubric 1-5 (legacy)</option>
+              </select>
+              <button
+                type="button"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', fontSize: 'var(--type-label)', fontFamily: 'var(--font-mono)' }}
+                onClick={() => setActiveTooltip(activeTooltip === 'judge_mode_selector' ? null : 'judge_mode_selector')}
+                aria-label="Info about scoring strategy"
+              >
+                ?
+              </button>
+            </div>
+            {activeTooltip === 'judge_mode_selector' && (
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--accent)', marginTop: '0.25rem', lineHeight: 1.5 }}>
+                {EVAL_TRANSLATIONS.judge_mode_selector.tooltip}
+              </div>
+            )}
           </div>
 
           {/* Scheduling mode */}
