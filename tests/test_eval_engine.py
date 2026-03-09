@@ -444,6 +444,72 @@ class TestComputeMetricsEmpty:
 
 
 # ---------------------------------------------------------------------------
+# Per-cluster F1 breakdown
+# ---------------------------------------------------------------------------
+
+
+class TestComputeMetricsPerCluster:
+    def _make_result(self, variant, is_same, transfer, source_cluster_id, action=4):
+        return {
+            "variant": variant,
+            "is_same_cluster": is_same,
+            "effective_score_transfer": transfer,
+            "effective_score_precision": 3,
+            "effective_score_action": action,
+            "source_cluster_id": source_cluster_id,
+        }
+
+    def test_per_cluster_present_when_source_cluster_available(self):
+        results = [
+            self._make_result("A", True, 5, "ClusterX"),
+            self._make_result("A", False, 1, "ClusterX"),
+            self._make_result("A", True, 3, "ClusterY"),
+            self._make_result("A", False, 2, "ClusterY"),
+        ]
+        metrics = compute_metrics(results)
+        assert "per_cluster" in metrics["A"]
+        assert "ClusterX" in metrics["A"]["per_cluster"]
+        assert "ClusterY" in metrics["A"]["per_cluster"]
+
+    def test_per_cluster_absent_without_source_cluster(self):
+        results = [
+            {
+                "variant": "A",
+                "is_same_cluster": True,
+                "effective_score_transfer": 5,
+                "effective_score_precision": 3,
+                "effective_score_action": 4,
+            },
+        ]
+        metrics = compute_metrics(results)
+        assert "per_cluster" not in metrics["A"]
+
+    def test_per_cluster_f1_varies_by_cluster(self):
+        """Cluster with perfect scores should have higher F1 than cluster with poor scores."""
+        results = [
+            # ClusterX: high recall (transfer=5), low false positive (transfer=1)
+            self._make_result("A", True, 5, "ClusterX"),
+            self._make_result("A", False, 1, "ClusterX"),
+            # ClusterY: low recall (transfer=1), high false positive (transfer=5)
+            self._make_result("A", True, 1, "ClusterY"),
+            self._make_result("A", False, 5, "ClusterY"),
+        ]
+        metrics = compute_metrics(results)
+        pc = metrics["A"]["per_cluster"]
+        assert pc["ClusterX"]["f1"] > pc["ClusterY"]["f1"]
+
+    def test_per_cluster_sample_count(self):
+        results = [
+            self._make_result("A", True, 4, "C1"),
+            self._make_result("A", False, 2, "C1"),
+            self._make_result("A", True, 3, "C2"),
+        ]
+        metrics = compute_metrics(results)
+        assert metrics["A"]["per_cluster"]["C1"]["sample_count"] == 2
+        assert metrics["A"]["per_cluster"]["C2"]["sample_count"] == 1
+
+
+# ---------------------------------------------------------------------------
 # Reproducibility — same seed + same items = same order
 # ---------------------------------------------------------------------------
 

@@ -975,16 +975,33 @@ def parse_judge_response(raw: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def compute_metrics(results: list[dict]) -> dict[str, dict[str, float]]:
+def _compute_f1_block(same: list[dict], diff: list[dict], all_pairs: list[dict]) -> dict[str, float]:
+    """Compute F1/recall/precision/actionability from same- and diff-cluster pair lists."""
+    recall = sum(p["effective_score_transfer"] for p in same) / (len(same) * 5.0) if same else 0.0
+    precision = 1.0 - sum(p["effective_score_transfer"] for p in diff) / (len(diff) * 5.0) if diff else 0.0
+    f1 = 2.0 * recall * precision / (recall + precision) if (recall + precision) > 0 else 0.0
+    all_act = [p["effective_score_action"] for p in all_pairs]
+    actionability = sum(all_act) / len(all_act) if all_act else 0.0
+    return {
+        "f1": round(f1, 4),
+        "recall": round(recall, 4),
+        "precision": round(precision, 4),
+        "actionability": round(actionability, 4),
+        "sample_count": len(all_pairs),
+    }
+
+
+def compute_metrics(results: list[dict]) -> dict[str, dict[str, Any]]:
     """Compute per-variant F1, recall, precision, actionability from scored results.
 
     results: list of dicts with keys:
         variant, is_same_cluster,
         effective_score_transfer, effective_score_precision, effective_score_action
+        (optional) source_cluster_id — when present, per_cluster breakdown is included
 
     effective_score = COALESCE(override_score, score) — caller pre-computes this.
 
-    Returns: {variant_id: {f1, recall, precision, actionability, sample_count}}
+    Returns: {variant_id: {f1, recall, precision, actionability, sample_count, per_cluster?}}
 
     F1 definition (spec):
       recall    = avg transfer score on same_cluster pairs / 5.0
@@ -995,26 +1012,29 @@ def compute_metrics(results: list[dict]) -> dict[str, dict[str, float]]:
     for r in results:
         by_variant.setdefault(r["variant"], []).append(r)
 
-    metrics: dict[str, dict[str, float]] = {}
+    metrics: dict[str, dict[str, Any]] = {}
     for variant, pairs in by_variant.items():
         same = [p for p in pairs if p["is_same_cluster"]]
         diff = [p for p in pairs if not p["is_same_cluster"]]
 
-        recall = sum(p["effective_score_transfer"] for p in same) / (len(same) * 5.0) if same else 0.0
-        precision = 1.0 - sum(p["effective_score_transfer"] for p in diff) / (len(diff) * 5.0) if diff else 0.0
+        m = _compute_f1_block(same, diff, pairs)
 
-        f1 = 2.0 * recall * precision / (recall + precision) if (recall + precision) > 0 else 0.0
+        # Per-cluster breakdown (when source_cluster_id is available)
+        has_clusters = any(p.get("source_cluster_id") for p in pairs)
+        if has_clusters:
+            by_cluster: dict[str, list[dict]] = {}
+            for p in pairs:
+                cid = p.get("source_cluster_id") or ""
+                if cid:
+                    by_cluster.setdefault(cid, []).append(p)
+            per_cluster: dict[str, dict[str, float]] = {}
+            for cid, cpairs in sorted(by_cluster.items()):
+                csame = [p for p in cpairs if p["is_same_cluster"]]
+                cdiff = [p for p in cpairs if not p["is_same_cluster"]]
+                per_cluster[cid] = _compute_f1_block(csame, cdiff, cpairs)
+            m["per_cluster"] = per_cluster
 
-        all_act = [p["effective_score_action"] for p in pairs]
-        actionability = sum(all_act) / len(all_act) if all_act else 0.0
-
-        metrics[variant] = {
-            "f1": round(f1, 4),
-            "recall": round(recall, 4),
-            "precision": round(precision, 4),
-            "actionability": round(actionability, 4),
-            "sample_count": len(pairs),
-        }
+        metrics[variant] = m
 
     return metrics
 
@@ -1395,6 +1415,24 @@ def render_report(run_id: int, metrics: dict[str, dict[str, float]], db: Databas
             f"(Catches right: {wm['recall']:.2f}, Avoids false: {wm['precision']:.2f}, "
             f"Useful: {wm['actionability']:.2f})"
         )
+
+    # Per-cluster breakdown (if available)
+    first_m = next(iter(metrics.values()), {})
+    if not is_v2 and "per_cluster" in first_m:
+        lines.append("\n## Per-Cluster Breakdown\n")
+        lines.append("| Cluster | Quality (F1) | Catches Right (Recall)" " | Avoids False (Precision) | Samples |")
+        lines.append("|---------|-------------|------------------------|--------------------------|---------|")
+        # Use winner variant for the breakdown
+        winner_pc = metrics.get(winner, {}).get("per_cluster", {})
+        for cid in sorted(winner_pc.keys()):
+            cm = winner_pc[cid]
+            lines.append(
+                f"| {cid} "
+                f"| {cm['f1']:.2f} "
+                f"| {cm['recall']:.2f} "
+                f"| {cm['precision']:.2f} "
+                f"| {cm['sample_count']} |"
+            )
 
     # Variant config details from DB
     variant_row = get_eval_variant(db, winner)
@@ -2064,6 +2102,7 @@ def _judge_one_target(
     judge_temperature: float,
     source_tag: str,
     http_base: str,
+    source_cluster_id: str = "",
     judge_mode: str = "rubric",
     diff_target: dict | None = None,
 ) -> None:
@@ -2155,6 +2194,7 @@ def _judge_one_target(
         target_item_id=str(target["id"]),
         is_same_cluster=1 if is_same else 0,
         target_cluster_id=str(target.get("cluster_id") or target.get("cluster_seed") or ""),
+        source_cluster_id=source_cluster_id,
         row_type="judge",
         principle=principle,
         judge_reasoning=scores.get("judge_reasoning"),
@@ -2198,7 +2238,8 @@ def _fetch_scored_rows(db: Database, run_id: int) -> list[dict]:
                 """SELECT variant, is_same_cluster,
                           COALESCE(override_score_transfer, score_transfer) AS effective_score_transfer,
                           COALESCE(override_score_precision, score_precision) AS effective_score_precision,
-                          COALESCE(override_score_action, score_action) AS effective_score_action
+                          COALESCE(override_score_action, score_action) AS effective_score_action,
+                          source_cluster_id, target_cluster_id
                    FROM eval_results
                    WHERE run_id = ?
                      AND row_type = 'judge'
@@ -2361,6 +2402,7 @@ def run_eval_judge(
                         judge_temperature=judge_temperature,
                         source_tag=source_tag,
                         http_base=http_base,
+                        source_cluster_id=source_cid,
                         judge_mode=judge_mode,
                         diff_target=diff_t,
                     )
@@ -2392,6 +2434,7 @@ def run_eval_judge(
                             judge_temperature=judge_temperature,
                             source_tag=source_tag,
                             http_base=http_base,
+                            source_cluster_id=source_cid,
                             judge_mode=judge_mode,
                         )
                     except _ProxyDownError as exc:

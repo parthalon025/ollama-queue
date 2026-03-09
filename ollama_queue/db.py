@@ -141,6 +141,7 @@ class Database:
         self._add_column_if_missing(conn, "eval_prompt_templates", "is_contrastive", "INTEGER DEFAULT 0")
         self._add_column_if_missing(conn, "eval_prompt_templates", "is_multi_stage", "INTEGER DEFAULT 0")
         self._add_column_if_missing(conn, "eval_results", "target_cluster_id", "TEXT")
+        self._add_column_if_missing(conn, "eval_results", "source_cluster_id", "TEXT")
         # Eval V2: Bayesian fusion columns
         self._add_column_if_missing(conn, "eval_results", "score_paired_winner", "TEXT")  # 'same'/'diff'/'neither'
         self._add_column_if_missing(conn, "eval_results", "score_mechanism_match", "INTEGER")  # 0/1/NULL
@@ -366,6 +367,7 @@ class Database:
                 target_item_id           TEXT NOT NULL,
                 is_same_cluster          INTEGER NOT NULL,
                 target_cluster_id        TEXT,
+                source_cluster_id        TEXT,
                 row_type                 TEXT NOT NULL DEFAULT 'judge',
                 score_transfer           INTEGER,
                 score_precision          INTEGER,
