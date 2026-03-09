@@ -1071,3 +1071,76 @@ def test_eval_variants_have_description(tmp_path):
         assert (
             row["description"] is not None and len(row["description"]) > 10
         ), f"Variant {row['id']} has missing or empty description"
+
+
+class TestBatchSetRecurringNextRuns:
+    def test_updates_multiple_rows_in_one_call(self, db):
+        """batch_set_recurring_next_runs updates all supplied rows atomically."""
+        rj1 = db.add_recurring_job("j1", "echo a", interval_seconds=3600)
+        rj2 = db.add_recurring_job("j2", "echo b", interval_seconds=3600)
+        rj3 = db.add_recurring_job("j3", "echo c", interval_seconds=3600)
+        now = time.time()
+        updates = {rj1: now + 1000, rj2: now + 2000, rj3: now + 3000}
+        db.batch_set_recurring_next_runs(updates)
+        assert abs(db.get_recurring_job(rj1)["next_run"] - (now + 1000)) < 0.01
+        assert abs(db.get_recurring_job(rj2)["next_run"] - (now + 2000)) < 0.01
+        assert abs(db.get_recurring_job(rj3)["next_run"] - (now + 3000)) < 0.01
+
+    def test_empty_dict_is_noop(self, db):
+        """batch_set_recurring_next_runs with empty dict doesn't raise."""
+        db.batch_set_recurring_next_runs({})  # should not raise
+
+    def test_single_entry_works(self, db):
+        """Works correctly with a single-entry dict."""
+        rj = db.add_recurring_job("j1", "echo a", interval_seconds=3600)
+        now = time.time()
+        db.batch_set_recurring_next_runs({rj: now + 500})
+        assert abs(db.get_recurring_job(rj)["next_run"] - (now + 500)) < 0.01
+
+
+class TestGetPendingJobsSentinelFilter:
+    def test_excludes_proxy_sentinels_by_default(self, db):
+        """get_pending_jobs() hides proxy: sentinel jobs when exclude_sentinel=True (default)."""
+        db.submit_job("real-command", "m", 5, 60, "src")
+        # Inject a sentinel row directly (mimics try_claim_for_proxy internals)
+        with db._lock:
+            conn = db._connect()
+            conn.execute(
+                "INSERT INTO jobs (command, model, priority, timeout, source, status, submitted_at)"
+                " VALUES ('proxy:ollama', '', 0, 120, 'proxy', 'pending', ?)",
+                (time.time(),),
+            )
+            conn.commit()
+        pending = db.get_pending_jobs()
+        commands = [j["command"] for j in pending]
+        assert "proxy:ollama" not in commands
+        assert "real-command" in commands
+
+    def test_includes_proxy_sentinels_when_flag_false(self, db):
+        """get_pending_jobs(exclude_sentinel=False) returns all pending rows including proxy:."""
+        db.submit_job("real-command", "m", 5, 60, "src")
+        with db._lock:
+            conn = db._connect()
+            conn.execute(
+                "INSERT INTO jobs (command, model, priority, timeout, source, status, submitted_at)"
+                " VALUES ('proxy:ollama', '', 0, 120, 'proxy', 'pending', ?)",
+                (time.time(),),
+            )
+            conn.commit()
+        pending = db.get_pending_jobs(exclude_sentinel=False)
+        commands = [j["command"] for j in pending]
+        assert "proxy:ollama" in commands
+        assert "real-command" in commands
+
+    def test_default_behavior_unchanged_for_non_sentinel_jobs(self, db):
+        """Existing callers with normal jobs see identical behaviour — 3 jobs ordered by priority."""
+        db.submit_job("low", "m1", priority=10, timeout=600, source="a")
+        time.sleep(0.01)
+        db.submit_job("high", "m1", priority=1, timeout=600, source="b")
+        time.sleep(0.01)
+        db.submit_job("mid", "m1", priority=5, timeout=600, source="c")
+        pending = db.get_pending_jobs()
+        assert len(pending) == 3
+        assert pending[0]["command"] == "high"
+        assert pending[1]["command"] == "mid"
+        assert pending[2]["command"] == "low"

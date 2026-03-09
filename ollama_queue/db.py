@@ -879,13 +879,21 @@ class Database:
             conn.commit()
             return cur.rowcount > 0
 
-    def get_pending_jobs(self) -> list[dict]:
+    def get_pending_jobs(self, exclude_sentinel: bool = True) -> list[dict]:
+        """Return pending jobs ordered by priority then submission time.
+
+        Args:
+            exclude_sentinel: When True (default), omits proxy sentinel jobs
+                (command LIKE 'proxy:%'). Pass False only when you explicitly
+                need to inspect sentinel rows (e.g. proxy tests, recovery logic).
+        """
+        sentinel_clause = "AND command NOT LIKE 'proxy:%'" if exclude_sentinel else ""
         with self._lock:
             conn = self._connect()
             rows = conn.execute(
-                """SELECT * FROM jobs
+                f"""SELECT * FROM jobs
                    WHERE status = 'pending'
-                     AND command NOT LIKE 'proxy:%'
+                     {sentinel_clause}
                    ORDER BY priority ASC, submitted_at ASC"""
             ).fetchall()
             return [dict(r) for r in rows]
@@ -1442,6 +1450,23 @@ class Database:
             conn.execute(
                 "UPDATE recurring_jobs SET next_run = ? WHERE id = ?",
                 (next_run, rj_id),
+            )
+            conn.commit()
+
+    def batch_set_recurring_next_runs(self, updates: dict[int, float]) -> None:
+        """Update next_run for multiple recurring jobs in a single transaction.
+
+        Accepts a mapping of {recurring_job_id: next_run_timestamp}.
+        Uses executemany to reduce round-trips; all rows commit atomically.
+        No-op if updates is empty.
+        """
+        if not updates:
+            return
+        with self._lock:
+            conn = self._connect()
+            conn.executemany(
+                "UPDATE recurring_jobs SET next_run = ? WHERE id = ?",
+                [(next_run, rj_id) for rj_id, next_run in updates.items()],
             )
             conn.commit()
 
