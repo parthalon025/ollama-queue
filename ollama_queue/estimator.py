@@ -90,7 +90,7 @@ class DurationEstimator:
 
         return mean, 1.5  # unknown variance → conservative default
 
-    def queue_etas(self, queue_jobs: list[dict]) -> list[dict]:
+    def queue_etas(self, queue_jobs: list[dict], om: OllamaModels | None = None) -> list[dict]:
         """Given list of pending jobs, return ETAs for each, concurrency-aware.
 
         Embed-profile jobs don't consume a serial slot — they show concurrent=True
@@ -99,10 +99,14 @@ class DurationEstimator:
         Each job dict must have 'source' and 'model' keys.
         Returns list of dicts with 'estimated_start_offset', 'estimated_duration',
         and 'concurrent'.
+
+        om: optional OllamaModels instance to reuse (avoids re-instantiation on each call).
+            If None, a new instance is created.
         """
         results = []
         cumulative_offset: float = 0.0
-        om = OllamaModels()
+        if om is None:
+            om = OllamaModels()
 
         for job in queue_jobs:
             duration = self.estimate(job["source"], model=job.get("model"))

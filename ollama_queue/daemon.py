@@ -143,20 +143,24 @@ class Daemon:
 
     # --- Concurrency helpers ---
 
-    def _max_slots(self) -> int:
+    def _max_slots(self, settings: dict | None = None) -> int:
+        if settings is not None:
+            return max(1, int(settings.get("max_concurrent_jobs") or 1))
         return max(1, int(self.db.get_setting("max_concurrent_jobs") or 1))
 
-    def _shadow_hours(self) -> float:
+    def _shadow_hours(self, settings: dict | None = None) -> float:
+        if settings is not None:
+            return float(settings.get("concurrent_shadow_hours") or 24)
         return float(self.db.get_setting("concurrent_shadow_hours") or 24)
 
-    def _in_shadow_mode(self) -> bool:
-        if self._max_slots() <= 1:
+    def _in_shadow_mode(self, settings: dict | None = None) -> bool:
+        if self._max_slots(settings) <= 1:
             return False
         if self._concurrent_enabled_at is None:
             self._concurrent_enabled_at = time.time()
             return True
         elapsed_hours = (time.time() - self._concurrent_enabled_at) / 3600
-        return elapsed_hours < self._shadow_hours()
+        return elapsed_hours < self._shadow_hours(settings)
 
     def _compute_max_workers(self) -> int:
         """Compute max ThreadPoolExecutor workers based on available hardware resources.
@@ -240,7 +244,7 @@ class Daemon:
         models = self._ollama_models.list_local()
         return any(m["name"] == model_name for m in models)
 
-    def _can_admit(self, job: dict) -> bool:
+    def _can_admit(self, job: dict, settings: dict | None = None) -> bool:
         """Three-factor admission gate. Returns True if job can start now.
 
         Plain English: The bouncer. Before a job gets a worker thread, it must
@@ -291,9 +295,12 @@ class Daemon:
             return False
 
         # Already at capacity → block
-        if running_count >= self._max_slots():
+        if running_count >= self._max_slots(settings):
             _log.debug(
-                "_can_admit: job #%d blocked — at capacity (%d/%d slots)", job["id"], running_count, self._max_slots()
+                "_can_admit: job #%d blocked — at capacity (%d/%d slots)",
+                job["id"],
+                running_count,
+                self._max_slots(settings),
             )
             return False
 
@@ -305,7 +312,7 @@ class Daemon:
         # max_vram_mb: optional DB setting; if absent, skip the absolute VRAM check
         # (health.evaluate's vram_pct gate still applies below as a safety net).
         model_vram = self._ollama_models.estimate_vram_mb(model, self.db) if model else 0.0
-        max_vram_raw = self.db.get_setting("max_vram_mb")
+        max_vram_raw = settings.get("max_vram_mb") if settings is not None else self.db.get_setting("max_vram_mb")
         if max_vram_raw is not None:
             max_vram = float(max_vram_raw)
             resource_ok = (committed_vram + model_vram) <= max_vram * 0.8
@@ -317,8 +324,8 @@ class Daemon:
 
         # Health gate — reuse existing hysteresis logic
         snap = self.health.check()
-        settings = self.db.get_all_settings()
-        health_eval = self.health.evaluate(snap, settings, currently_paused=False)
+        _settings = settings if settings is not None else self.db.get_all_settings()
+        health_eval = self.health.evaluate(snap, _settings, currently_paused=False)
 
         if not resource_ok or health_eval["should_pause"]:
             _log.debug(
@@ -331,7 +338,7 @@ class Daemon:
             return False
 
         # Shadow mode — log but don't admit second job yet
-        if self._in_shadow_mode() and running_count > 0:
+        if self._in_shadow_mode(settings) and running_count > 0:
             _log.info(
                 "SHADOW: would admit concurrent job #%d (%s) — shadow mode active",
                 job["id"],
@@ -361,7 +368,7 @@ class Daemon:
 
         return -sum(w * log2(w) for w in priority_weights.values() if w > 0)
 
-    def _check_entropy(self, pending_jobs: list[dict], now: float) -> None:
+    def _check_entropy(self, pending_jobs: list[dict], now: float, settings: dict | None = None) -> None:
         """Compute entropy, update rolling baseline, log anomalies, set suspension."""
         entropy = self._compute_queue_entropy(pending_jobs, now)
         self._entropy_history.append(entropy)
@@ -370,7 +377,14 @@ class Daemon:
         if len(self._entropy_history) < 10:
             return
 
-        sigma = float(self.db.get_setting("entropy_alert_sigma") or 2.0)
+        sigma = float(
+            (
+                settings.get("entropy_alert_sigma")
+                if settings is not None
+                else self.db.get_setting("entropy_alert_sigma")
+            )
+            or 2.0
+        )
         mean_entropy = statistics.mean(self._entropy_history)
         std_entropy = statistics.stdev(self._entropy_history) if len(self._entropy_history) > 1 else 0.1
         if std_entropy == 0:
@@ -395,7 +409,11 @@ class Daemon:
                 alert_type,
             )
 
-            suspend_enabled = self.db.get_setting("entropy_suspend_low_priority")
+            suspend_enabled = (
+                settings.get("entropy_suspend_low_priority")
+                if settings is not None
+                else self.db.get_setting("entropy_suspend_low_priority")
+            )
             if alert_type == "critical_backlog" and suspend_enabled:
                 self._entropy_suspend_until = now + 60.0  # suspend p8-10 for 60s
                 _log.info("Suspended low-priority (p8-10) promotion for 60s due to critical_backlog")
@@ -601,9 +619,13 @@ class Daemon:
             _log.debug("Circuit breaker OPEN — skipping dequeue")
             return
 
+        # Fetch all settings once per poll cycle — reused by _check_entropy, health.evaluate,
+        # and _can_admit to avoid redundant per-method DB round-trips.
+        settings = self.db.get_all_settings()
+
         # 3c. Entropy anomaly detection
         try:
-            self._check_entropy(pending_jobs, now)
+            self._check_entropy(pending_jobs, now, settings)
         except Exception:
             _log.exception("Entropy check failed; continuing")
 
@@ -631,7 +653,7 @@ class Daemon:
             return
 
         # 6. Evaluate health -> if pause needed, update state, return
-        settings = self.db.get_all_settings()
+        # (settings already fetched above at 3b — reusing the same dict)
         currently_paused = current_state.startswith("paused")
         # Prune expired entries from recent job models (lock: written by worker threads)
         with self._recent_models_lock:
@@ -678,7 +700,7 @@ class Daemon:
 
         # 8. Admit and dispatch
         # Guard: don't clobber proxy sentinel (same reason as step 5).
-        if not self._can_admit(job):
+        if not self._can_admit(job, settings):
             if state.get("current_job_id") == -1:
                 self.db.update_daemon_state(state="idle", last_poll_at=now)
             else:
