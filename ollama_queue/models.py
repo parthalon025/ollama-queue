@@ -58,11 +58,31 @@ def _parse_size_bytes(size_str: str) -> int:
 class OllamaModels:
     """Interface to local Ollama model management."""
 
+    # Class-level cache shared across instances — models change rarely
+    _list_local_cache: tuple[float, list[dict]] | None = None
+    _LIST_LOCAL_TTL = 60.0  # seconds
+
+    @classmethod
+    def _invalidate_list_cache(cls) -> None:
+        """Call after pulling/deleting a model to force a fresh fetch."""
+        cls._list_local_cache = None
+
     def list_local(self) -> list[dict]:
-        """Run `ollama list` and return [{name, size_bytes, modified}].
+        """Run `ollama list` and return [{name, size_bytes, modified}] with 60s TTL cache.
 
         Returns empty list if ollama is not available.
         """
+        now = time.monotonic()
+        if OllamaModels._list_local_cache is not None:
+            ts, val = OllamaModels._list_local_cache
+            if now - ts < OllamaModels._LIST_LOCAL_TTL:
+                return val
+        result = self._fetch_list_local()
+        OllamaModels._list_local_cache = (now, result)
+        return result
+
+    def _fetch_list_local(self) -> list[dict]:
+        """Run `ollama list` and parse output (uncached)."""
         try:
             result = subprocess.run(
                 ["ollama", "list"],
@@ -315,20 +335,25 @@ class OllamaModels:
                 for line in proc.stdout:  # type: ignore[union-attr]
                     if "%" in line:
                         try:
-                            pct_str = [p for p in line.split() if p.endswith("%")]
-                            if pct_str:
-                                pct = float(pct_str[-1].strip("%"))
-                                with db._lock:
-                                    conn = db._connect()
-                                    conn.execute(
-                                        "UPDATE model_pulls SET progress_pct = ? WHERE id = ?",
-                                        (pct, pull_id),
-                                    )
-                                    conn.commit()
+                            pct_raw = next((p.rstrip("%") for p in line.split() if p.endswith("%")), None)
+                            if pct_raw is not None:
+                                pct = float(pct_raw)
+                                try:
+                                    with db._lock:
+                                        conn = db._connect()
+                                        conn.execute(
+                                            "UPDATE model_pulls SET progress_pct = ? WHERE id = ?",
+                                            (pct, pull_id),
+                                        )
+                                        conn.commit()
+                                except Exception as exc:
+                                    _log.error("Pull monitor: failed to update progress for %s: %s", model_name, exc)
                         except (ValueError, IndexError):
                             pass
                 proc.wait()
                 status = "completed" if proc.returncode == 0 else "failed"
+                if status == "completed":
+                    OllamaModels._invalidate_list_cache()
             except Exception as exc:
                 status = "failed"
                 _log.error("pull monitor error: %s", exc)

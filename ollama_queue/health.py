@@ -13,12 +13,17 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+import time
 
 _log = logging.getLogger(__name__)
 
 
 class HealthMonitor:
     """Reads system metrics and evaluates pause/resume/yield decisions."""
+
+    def __init__(self) -> None:
+        self._vram_cache: tuple[float, float | None] | None = None  # (timestamp, value)
+        self._VRAM_TTL = 5.0  # seconds
 
     def get_ram_pct(self) -> float:
         """Parse /proc/meminfo for RAM usage percentage."""
@@ -53,10 +58,22 @@ class HealthMonitor:
         return os.cpu_count() or 1
 
     def get_vram_pct(self) -> float | None:
-        """Query nvidia-smi for VRAM usage percentage.
+        """Query nvidia-smi for VRAM usage percentage, with TTL cache.
 
-        Returns None if nvidia-smi is not available or fails.
+        Returns cached value if within TTL window. Returns None if
+        nvidia-smi is not available or fails.
         """
+        now = time.monotonic()
+        if self._vram_cache is not None:
+            ts, val = self._vram_cache
+            if now - ts < self._VRAM_TTL:
+                return val
+        result = self._fetch_vram_pct()
+        self._vram_cache = (now, result)
+        return result
+
+    def _fetch_vram_pct(self) -> float | None:
+        """Query nvidia-smi for VRAM usage percentage (uncached)."""
         try:
             result = subprocess.run(
                 ["nvidia-smi", "--query-gpu=memory.used,memory.total", "--format=csv,noheader,nounits"],

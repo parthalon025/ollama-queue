@@ -25,8 +25,10 @@ class TestListLocal:
     def test_list_local_parses_names(self):
         from ollama_queue.models import OllamaModels
 
+        OllamaModels._list_local_cache = None
         with patch("subprocess.run", return_value=_mock_run(OLLAMA_LIST_OUTPUT)):
             models = OllamaModels().list_local()
+        OllamaModels._list_local_cache = None
         names = [m["name"] for m in models]
         assert "qwen2.5-coder:14b" in names
         assert "nomic-embed-text:latest" in names
@@ -35,8 +37,10 @@ class TestListLocal:
     def test_list_local_parses_size_bytes(self):
         from ollama_queue.models import OllamaModels
 
+        OllamaModels._list_local_cache = None
         with patch("subprocess.run", return_value=_mock_run(OLLAMA_LIST_OUTPUT)):
             models = OllamaModels().list_local()
+        OllamaModels._list_local_cache = None
         embed = next(m for m in models if "nomic" in m["name"])
         # 274 MB
         assert embed["size_bytes"] > 270_000_000
@@ -45,11 +49,14 @@ class TestListLocal:
     def test_list_local_returns_empty_on_failure(self):
         from ollama_queue.models import OllamaModels
 
+        # Clear class-level cache so we exercise the subprocess path
+        OllamaModels._list_local_cache = None
         mock = MagicMock()
         mock.returncode = 1
         mock.stdout = ""
         with patch("subprocess.run", return_value=mock):
             result = OllamaModels().list_local()
+        OllamaModels._list_local_cache = None  # Reset so other tests aren't affected
         assert result == []
 
 
@@ -105,8 +112,10 @@ class TestEstimateVram:
 
         db = Database(str(tmp_path / "q.db"))
         db.initialize()
+        OllamaModels._list_local_cache = None
         with patch("subprocess.run", return_value=_mock_run(OLLAMA_LIST_OUTPUT)):
             vram = OllamaModels().estimate_vram_mb("qwen2.5:7b", db)
+        OllamaModels._list_local_cache = None
         # 4.7 GB * 1.3 safety = ~6110 MB
         assert vram > 5000
         assert vram < 7000
@@ -117,11 +126,13 @@ class TestEstimateVram:
 
         db = Database(str(tmp_path / "q.db"))
         db.initialize()
+        OllamaModels._list_local_cache = None
         mock = MagicMock()
         mock.returncode = 1
         mock.stdout = ""
         with patch("subprocess.run", return_value=mock):
             vram = OllamaModels().estimate_vram_mb("unknown-model:latest", db)
+        OllamaModels._list_local_cache = None
         assert vram == pytest.approx(4000.0)
 
 
@@ -183,6 +194,58 @@ class TestMinEstimatedVram:
             result = OllamaModels().min_estimated_vram_mb(db)
         # Empty registry with no list_local data → hardcoded 2000 MB floor
         assert result == 2000
+
+
+# --- TTL cache tests ---
+
+
+def test_list_local_cached(monkeypatch):
+    """ollama list subprocess called at most once per TTL window."""
+    from ollama_queue.models import OllamaModels
+
+    # Clear any pre-existing class-level cache from other tests
+    OllamaModels._list_local_cache = None
+
+    call_count = 0
+
+    def fake_run(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        return type("R", (), {"returncode": 0, "stdout": "NAME\nqwen2.5:7b\n"})()
+
+    monkeypatch.setattr("ollama_queue.models.subprocess.run", fake_run)
+    om = OllamaModels()
+    om.list_local()
+    om.list_local()
+    om.list_local()
+    assert call_count == 1, "ollama list should be called once within TTL window"
+
+    # Cleanup: reset cache so other tests get a fresh fetch
+    OllamaModels._list_local_cache = None
+
+
+def test_invalidate_list_cache_forces_refetch(monkeypatch):
+    """After _invalidate_list_cache(), the next list_local() call fetches fresh data."""
+    from ollama_queue.models import OllamaModels
+
+    OllamaModels._list_local_cache = None
+
+    call_count = 0
+
+    def fake_run(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        return type("R", (), {"returncode": 0, "stdout": "NAME\nqwen2.5:7b\n"})()
+
+    monkeypatch.setattr("ollama_queue.models.subprocess.run", fake_run)
+    om = OllamaModels()
+    om.list_local()
+    assert call_count == 1
+    OllamaModels._invalidate_list_cache()
+    om.list_local()
+    assert call_count == 2, "After cache invalidation, subprocess should be called again"
+
+    OllamaModels._list_local_cache = None
 
 
 # --- Pull lifecycle tests (Task 3) ---
