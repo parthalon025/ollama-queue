@@ -196,23 +196,33 @@ export default function RunTriggerPanel({ defaultCollapsed }) {
                   </div>
                 )}
                 {systemVariants.map(variant => (
-                  <label key={variant.id} class="eval-checkbox-row">
+                  <label key={variant.id} class="eval-checkbox-row" style={{ alignItems: 'flex-start' }}>
                     <input
                       type="checkbox"
                       checked={selectedVariants.includes(variant.id)}
                       onChange={() => toggleVariant(variant.id)}
+                      style={{ marginTop: '2px' }}
                     />
-                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-primary)' }}>
-                      {variant.id} — {variant.label}
-                    </span>
-                    {variant.is_recommended ? (
-                      <span class="eval-badge eval-badge-recommended">★ Recommended</span>
-                    ) : null}
-                    {variant.latest_f1 != null && (
-                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', marginLeft: 'auto' }}>
-                        Score: {Math.round(variant.latest_f1 * 100)}%
-                      </span>
-                    )}
+                    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, gap: '2px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-primary)' }}>
+                          {variant.id} — {variant.label}
+                        </span>
+                        {variant.is_recommended ? (
+                          <span class="eval-badge eval-badge-recommended">★ Recommended</span>
+                        ) : null}
+                        {variant.latest_f1 != null && (
+                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', marginLeft: 'auto' }}>
+                            Score: {Math.round(variant.latest_f1 * 100)}%
+                          </span>
+                        )}
+                      </div>
+                      {variant.description && (
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', lineHeight: 1.4 }}>
+                          {variant.description}
+                        </span>
+                      )}
+                    </div>
                   </label>
                 ))}
                 {userVariants.length > 0 && (
@@ -221,20 +231,30 @@ export default function RunTriggerPanel({ defaultCollapsed }) {
                   </div>
                 )}
                 {userVariants.map(variant => (
-                  <label key={variant.id} class="eval-checkbox-row">
+                  <label key={variant.id} class="eval-checkbox-row" style={{ alignItems: 'flex-start' }}>
                     <input
                       type="checkbox"
                       checked={selectedVariants.includes(variant.id)}
                       onChange={() => toggleVariant(variant.id)}
+                      style={{ marginTop: '2px' }}
                     />
-                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-primary)' }}>
-                      {variant.label}
-                    </span>
-                    {variant.latest_f1 != null && (
-                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', marginLeft: 'auto' }}>
-                        Score: {Math.round(variant.latest_f1 * 100)}%
-                      </span>
-                    )}
+                    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, gap: '2px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-primary)' }}>
+                          {variant.label}
+                        </span>
+                        {variant.latest_f1 != null && (
+                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', marginLeft: 'auto' }}>
+                            Score: {Math.round(variant.latest_f1 * 100)}%
+                          </span>
+                        )}
+                      </div>
+                      {variant.description && (
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', lineHeight: 1.4 }}>
+                          {variant.description}
+                        </span>
+                      )}
+                    </div>
                   </label>
                 ))}
               </div>
