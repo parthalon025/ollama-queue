@@ -123,12 +123,57 @@ export async function fetchEvalSettings() {
   } catch (e) { console.error('fetchEvalSettings failed:', e); }
 }
 
+// Normalize raw /eval/trends response so components receive consistent shapes:
+//  - variants: object keyed by id → array with id field attached
+//  - each run: started_at ISO string → timestamp (unix seconds) added
+//  - trend_direction: aggregated across variants (regressing > stable > improving)
+//  - completed_runs, judge_reliability, item_count_growing: aggregated at top level
+function normalizeTrends(raw) {
+  const variantsArr = Object.entries(raw.variants || {}).map(([id, v]) => ({
+    id,
+    ...v,
+    runs: (v.runs || []).map(r => ({
+      ...r,
+      timestamp: r.timestamp ?? Math.floor(new Date(r.started_at).getTime() / 1000),
+    })),
+  }));
+
+  const dirs = variantsArr.map(v => v.trend_direction);
+  const overallDir = dirs.includes('regressing') ? 'regressing'
+    : dirs.includes('improving') ? 'improving'
+    : 'stable';
+
+  const completedRuns = variantsArr.reduce((s, v) => s + (v.runs || []).length, 0);
+
+  const reliabilities = variantsArr.map(v => v.judge_agreement_rate).filter(r => r != null);
+  const judgeReliability = reliabilities.length > 0
+    ? reliabilities.reduce((a, b) => a + b, 0) / reliabilities.length
+    : null;
+
+  const itemCountGrowing = variantsArr.some(v => {
+    const runs = v.runs || [];
+    for (let i = 1; i < runs.length; i++) {
+      if ((runs[i].item_count || 0) > (runs[i - 1].item_count || 0)) return true;
+    }
+    return false;
+  });
+
+  return {
+    ...raw,
+    variants: variantsArr,
+    trend_direction: overallDir,
+    completed_runs: completedRuns,
+    judge_reliability: judgeReliability,
+    item_count_growing: itemCountGrowing,
+  };
+}
+
 // What it shows: nothing — fetches F1 trend data per variant across completed runs
 // Decision it drives: keeps trend chart and stability table in sync with backend
 export async function fetchEvalTrends() {
   try {
     const res = await fetch(`${API}/eval/trends`);
-    if (res.ok) evalTrends.value = await res.json();
+    if (res.ok) evalTrends.value = normalizeTrends(await res.json());
   } catch (e) { console.error('fetchEvalTrends failed:', e); }
 }
 
