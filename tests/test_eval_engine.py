@@ -2291,3 +2291,49 @@ class TestVerticalIntegrationV2:
         assert run["report_md"] is not None
         assert len(run["report_md"]) > 0
         assert "Evaluation Report" in run["report_md"]
+
+
+class TestItemTitlePopulation:
+    """Verify that source/target item titles are stored in eval_results."""
+
+    def test_generation_stores_source_title(self, tmp_path):
+        from ollama_queue.db import Database
+
+        db = Database(tmp_path / "q.db")
+        db.initialize()
+        with db._lock:
+            conn = db._connect()
+            conn.execute(
+                "INSERT INTO eval_runs (id, data_source_url, variants, variant_id, status) "
+                "VALUES (1, 'http://localhost:7685', '[\"A\"]', 'A', 'generating')"
+            )
+            conn.execute(
+                "INSERT INTO eval_results (run_id, variant, source_item_id, source_item_title, "
+                "target_item_id, is_same_cluster, row_type) "
+                "VALUES (1, 'A', '42', 'Silent failure in logging', '42', 0, 'generation')"
+            )
+            conn.commit()
+            row = conn.execute("SELECT source_item_title FROM eval_results WHERE run_id = 1").fetchone()
+        assert row["source_item_title"] == "Silent failure in logging"
+
+    def test_judge_stores_target_title(self, tmp_path):
+        from ollama_queue.db import Database
+
+        db = Database(tmp_path / "q.db")
+        db.initialize()
+        with db._lock:
+            conn = db._connect()
+            conn.execute(
+                "INSERT INTO eval_runs (id, data_source_url, variants, variant_id, status) "
+                "VALUES (1, 'http://localhost:7685', '[\"A\"]', 'A', 'judging')"
+            )
+            conn.execute(
+                "INSERT INTO eval_results (run_id, variant, source_item_id, target_item_id, "
+                "target_item_title, is_same_cluster, row_type) "
+                "VALUES (1, 'A', '42', '99', 'Race condition in worker', 1, 'judge')"
+            )
+            conn.commit()
+            row = conn.execute(
+                "SELECT target_item_title FROM eval_results WHERE run_id = 1 AND row_type = 'judge'"
+            ).fetchone()
+        assert row["target_item_title"] == "Race condition in worker"

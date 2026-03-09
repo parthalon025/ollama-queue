@@ -1774,6 +1774,7 @@ def _generate_one(
         run_id=run_id,
         variant=variant_id,
         source_item_id=str(source_item["id"]),
+        source_item_title=source_item.get("title") or source_item.get("one_liner", ""),
         target_item_id=str(source_item["id"]),
         is_same_cluster=0,
         row_type="generate",
@@ -2095,6 +2096,7 @@ def _judge_one_target(
     run_id: int,
     variant: str,
     source_item_id: str,
+    source_item_title: str = "",
     principle: str,
     target: dict,
     is_same: bool,
@@ -2191,7 +2193,9 @@ def _judge_one_target(
         run_id=run_id,
         variant=variant,
         source_item_id=source_item_id,
+        source_item_title=source_item_title,
         target_item_id=str(target["id"]),
+        target_item_title=target.get("title") or target.get("one_liner", ""),
         is_same_cluster=1 if is_same else 0,
         target_cluster_id=str(target.get("cluster_id") or target.get("cluster_seed") or ""),
         source_cluster_id=source_cluster_id,
@@ -2373,6 +2377,7 @@ def run_eval_judge(
             continue
 
         source_cid = str(source_item.get("cluster_id") or source_item.get("cluster_seed") or "")
+        _source_title = source_item.get("title") or source_item.get("one_liner", "")
         same_targets, diff_targets = _select_judge_targets(
             source_item_id=source_item_id,
             source_cid=source_cid,
@@ -2395,6 +2400,7 @@ def run_eval_judge(
                         run_id=run_id,
                         variant=gen_result["variant"],
                         source_item_id=source_item_id,
+                        source_item_title=_source_title,
                         principle=principle,
                         target=same_t,
                         is_same=True,
@@ -2427,6 +2433,7 @@ def run_eval_judge(
                             run_id=run_id,
                             variant=gen_result["variant"],
                             source_item_id=source_item_id,
+                            source_item_title=_source_title,
                             principle=principle,
                             target=target,
                             is_same=is_same,
