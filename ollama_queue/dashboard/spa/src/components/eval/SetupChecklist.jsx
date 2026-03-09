@@ -1,14 +1,13 @@
 import { h } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
-// What it shows: A 4-step getting-started guide for first-time eval setup.
+// What it shows: A 2-step getting-started guide for first-time eval setup.
 //   Hidden once setup_complete=true is stored in eval settings.
-// Decision it drives: Guides new users through connecting a data source,
-//   verifying models, creating configs, and running their first eval — so
-//   they reach a working state without reading docs.
+// Decision it drives: Guides new users through connecting a data source
+//   and running their first eval — so they reach a working state without reading docs.
 
 import {
-  evalSettings, evalVariants, evalRuns, evalSubTab,
-  testDataSource, saveEvalSettings, currentTab,
+  evalSettings, evalRuns, evalSubTab,
+  testDataSource, saveEvalSettings,
 } from '../../store.js';
 
 // A single step row — shows a checkbox, title, detail, and action button
@@ -39,30 +38,14 @@ function Step({ number, complete, disabled, title, detail, actionLabel, onAction
 export default function SetupChecklist() {
   // Read signals at top of render body for Preact subscription
   const settings = evalSettings.value;
-  const variants = evalVariants.value;
   const runs     = evalRuns.value;
 
   const [step1Status, setStep1Status] = useState(null); // null | 'testing' | 'ok' | 'fail'
   const [step1Detail, setStep1Detail] = useState('');
 
-  // If setup already complete, render nothing
-  if (settings['eval.setup_complete'] === true || settings['eval.setup_complete'] === 'true') {
-    return null;
-  }
-
-  // Step 1: data source connected
+  // Step completion: 2 real, automatable gates
   const step1Complete = step1Status === 'ok';
-
-  // Step 2: models available — check if all unique variant models appear in the models list
-  // We don't have the full models signal here; treat as complete if step1 is done and
-  // user has clicked "Check models" (handled by navigation). Default: incomplete.
-  const step2Complete = false; // User must navigate to Models tab and confirm manually
-
-  // Step 3: user has created configs beyond system defaults (more than 5 variants)
-  const step3Complete = step2Complete && variants.length > 5;
-
-  // Step 4: at least one eval run exists
-  const step4Complete = step3Complete && runs.length > 0;
+  const step2Complete = step1Complete && runs.length > 0;
 
   // Auto-test on mount (step 1 auto-advances if datasource is reachable)
   useEffect(() => {
@@ -86,12 +69,17 @@ export default function SetupChecklist() {
     autoTest();
   }, []);
 
-  // When all 4 steps complete, mark setup done and hide
+  // When both steps complete, mark setup done and hide
   useEffect(() => {
-    if (step4Complete) {
+    if (step2Complete) {
       saveEvalSettings({ 'eval.setup_complete': true }).catch(() => {});
     }
-  }, [step4Complete]);
+  }, [step2Complete]);
+
+  // If setup already complete, render nothing
+  if (settings['eval.setup_complete'] === true || settings['eval.setup_complete'] === 'true') {
+    return null;
+  }
 
   async function handleStep1Action() {
     setStep1Status('testing');
@@ -112,23 +100,8 @@ export default function SetupChecklist() {
     }
   }
 
-  function handleStep2Action() {
-    // Navigate to Models tab
-    currentTab.value = 'models';
-  }
-
-  function handleStep3Action() {
-    // Navigate to Configurations sub-tab
-    evalSubTab.value = 'configurations';
-  }
-
-  function handleStep4Action() {
-    // Navigate to Runs sub-tab
-    evalSubTab.value = 'runs';
-  }
-
   return (
-    <div class="setup-checklist t-frame" data-label="Get Started — 4 Steps to Your First Quality Test">
+    <div class="setup-checklist t-frame" data-label="Get Started — 2 Steps to Your First Quality Test">
       <Step
         number={1}
         complete={step1Complete}
@@ -148,44 +121,16 @@ export default function SetupChecklist() {
         number={2}
         complete={step2Complete}
         disabled={!step1Complete}
-        title="Make sure the AI models are installed"
+        title="Start your first quality test"
         detail={
           !step1Complete
             ? 'Complete step 1 first.'
-            : 'Check that the AI models your configurations use are installed on this machine.'
-        }
-        actionLabel="Go to Models tab →"
-        onAction={handleStep2Action}
-      />
-      <Step
-        number={3}
-        complete={step3Complete}
-        disabled={!step2Complete}
-        title="Create configurations to compare"
-        detail={
-          !step2Complete
-            ? 'Complete step 2 first.'
-            : variants.length <= 5
-              ? 'Add at least one custom configuration to compare against the built-in defaults.'
-              : `${variants.length} configurations ready.`
-        }
-        actionLabel="Go to Configurations →"
-        onAction={handleStep3Action}
-      />
-      <Step
-        number={4}
-        complete={step4Complete}
-        disabled={!step3Complete}
-        title="Run your first quality test"
-        detail={
-          !step3Complete
-            ? 'Complete step 3 first.'
             : runs.length === 0
-              ? 'Start your first test to begin measuring how well your configurations perform.'
+              ? 'Start your first test to see which configurations perform best.'
               : `${runs.length} run${runs.length !== 1 ? 's' : ''} completed.`
         }
         actionLabel="Start first test →"
-        onAction={handleStep4Action}
+        onAction={() => { evalSubTab.value = 'runs'; }}
       />
     </div>
   );
