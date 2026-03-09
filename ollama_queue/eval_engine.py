@@ -1338,35 +1338,63 @@ def render_report(run_id: int, metrics: dict[str, dict[str, float]], db: Databas
         lines.append("_No scored pairs — metrics unavailable._\n")
         return "\n".join(lines) + "\n"
 
+    # Detect V2 (Bayesian/tournament) metrics by checking for 'auc' key
+    first_variant_metrics = next(iter(metrics.values()), {})
+    is_v2 = "auc" in first_variant_metrics
+
     # Summary table
     lines.append("## Summary\n")
-    lines.append(
-        "| Variant | Quality (F1) | Catches Right (Recall)"
-        " | Avoids False (Precision) | Useful (Actionability) | Samples |"
-    )
-    lines.append(
-        "|---------|-------------|------------------------|--------------------------|------------------------|---------|"
-    )
-    for vid in sorted(metrics.keys()):
-        m = metrics[vid]
+    if is_v2:
+        lines.append("| Variant | AUC | Separation | Same Mean Posterior" " | Diff Mean Posterior | Pairs |")
+        lines.append("|---------|-----|------------|--------------------" "|--------------------|-------|")
+        for vid in sorted(metrics.keys()):
+            m = metrics[vid]
+            lines.append(
+                f"| {vid} "
+                f"| {m.get('auc', 0):.3f} "
+                f"| {m.get('separation', 0):.3f} "
+                f"| {m.get('same_mean_posterior', 0):.3f} "
+                f"| {m.get('diff_mean_posterior', 0):.3f} "
+                f"| {m.get('pair_count', 0)} |"
+            )
+    else:
         lines.append(
-            f"| {vid} "
-            f"| {m['f1']:.2f} "
-            f"| {m['recall']:.2f} "
-            f"| {m['precision']:.2f} "
-            f"| {m['actionability']:.2f} "
-            f"| {m['sample_count']} |"
+            "| Variant | Quality (F1) | Catches Right (Recall)"
+            " | Avoids False (Precision) | Useful (Actionability) | Samples |"
         )
+        lines.append(
+            "|---------|-------------|------------------------|--------------------------|------------------------|---------|"
+        )
+        for vid in sorted(metrics.keys()):
+            m = metrics[vid]
+            lines.append(
+                f"| {vid} "
+                f"| {m['f1']:.2f} "
+                f"| {m['recall']:.2f} "
+                f"| {m['precision']:.2f} "
+                f"| {m['actionability']:.2f} "
+                f"| {m['sample_count']} |"
+            )
 
     # Winner
     lines.append("\n## Winner\n")
-    winner = max(metrics.keys(), key=lambda v: metrics[v]["f1"])
-    wm = metrics[winner]
-    lines.append(
-        f"**Variant {winner}** — Quality: {wm['f1']:.2f} "
-        f"(Catches right: {wm['recall']:.2f}, Avoids false: {wm['precision']:.2f}, "
-        f"Useful: {wm['actionability']:.2f})"
-    )
+    if is_v2:
+        winner = max(metrics.keys(), key=lambda v: metrics[v].get("auc", 0))
+        wm = metrics[winner]
+        lines.append(
+            f"**Variant {winner}** — AUC: {wm.get('auc', 0):.3f} "
+            f"(Separation: {wm.get('separation', 0):.3f}, "
+            f"Same posterior: {wm.get('same_mean_posterior', 0):.3f}, "
+            f"Diff posterior: {wm.get('diff_mean_posterior', 0):.3f})"
+        )
+    else:
+        winner = max(metrics.keys(), key=lambda v: metrics[v]["f1"])
+        wm = metrics[winner]
+        lines.append(
+            f"**Variant {winner}** — Quality: {wm['f1']:.2f} "
+            f"(Catches right: {wm['recall']:.2f}, Avoids false: {wm['precision']:.2f}, "
+            f"Useful: {wm['actionability']:.2f})"
+        )
 
     # Variant config details from DB
     variant_row = get_eval_variant(db, winner)
@@ -2147,7 +2175,7 @@ def _fetch_v2_scored_rows(db: Database, run_id: int) -> list[dict]:
             dict(r)
             for r in conn.execute(
                 """SELECT variant, is_same_cluster AS is_same_group,
-                          score_paired_winner, score_posterior,
+                          score_paired_winner, score_posterior AS posterior,
                           score_embedding_sim, score_mechanism_match,
                           mechanism_trigger, mechanism_target, mechanism_fix,
                           principle
