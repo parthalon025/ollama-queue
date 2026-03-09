@@ -152,6 +152,10 @@ class Database:
         self._add_column_if_missing(conn, "eval_results", "mechanism_fix", "TEXT")
         self._add_column_if_missing(conn, "eval_runs", "judge_mode", "TEXT DEFAULT 'rubric'")
         self._add_column_if_missing(conn, "eval_variants", "description", "TEXT")
+        # Eval analysis columns (2026-03-09)
+        self._add_column_if_missing(conn, "eval_results", "source_item_title", "TEXT")
+        self._add_column_if_missing(conn, "eval_results", "target_item_title", "TEXT")
+        self._add_column_if_missing(conn, "eval_runs", "analysis_json", "TEXT")
         # Backfill descriptions for system variants that existed before the column was added.
         # INSERT OR IGNORE skips rows that already exist, so existing rows need an explicit UPDATE.
         _system_descriptions = {
@@ -424,6 +428,9 @@ class Database:
                 error                    TEXT,
                 UNIQUE (run_id, variant, source_item_id, target_item_id, row_type)
             );
+
+            CREATE INDEX IF NOT EXISTS idx_eval_results_run_variant
+                ON eval_results(run_id, variant);
 
             CREATE TABLE IF NOT EXISTS judge_attempts (
                 id            TEXT PRIMARY KEY,
