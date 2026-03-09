@@ -19,6 +19,7 @@ ollama_queue/
   scanner.py          # 4-phase consumer detection: live (ss/lsof/netstat), static (config files), stream (streaming_confirmed flag), deadlock (queue-recursive call guard)
   patcher.py          # Config rewriter (systemd/env/yaml/toml) + health checker + backup/revert; patch_consumer(), revert_consumer(), check_health()
   intercept.py        # iptables REDIRECT intercept mode (Linux only); enable_intercept(), disable_intercept(), get_intercept_status()
+  eval_analysis.py    # Pure analysis functions (no DB/HTTP): per-item breakdown, failure cases, bootstrap CI, stability, config diff
   api.py              # FastAPI REST API (70+ endpoints including /api/generate + /api/embed proxy, eval pipeline, consumer management) + static SPA serving
   dashboard/
     spa/              # Preact SPA (built separately, served as static)
@@ -29,28 +30,29 @@ scripts/
   migrate_timers.py            # Migrate 8 of 10 systemd timers to recurring jobs (--dry-run / --execute)
   migrate_dlq_max_retries.py   # Add max_retries column to existing dlq table (idempotent)
 tests/
-  test_db.py               # 105 tests
-  test_eval_engine.py      # 100 tests
+  test_eval_engine.py      # 145 tests
+  test_db.py               # 107 tests
+  test_api_eval_runs.py    # 78 tests
+  test_daemon.py           # 65 tests
   test_api.py              # 58 tests (incl. proxy priority, batch schedule, suggest endpoint)
-  test_daemon.py           # 66 tests
-  test_api_eval_runs.py    # 57 tests
-  test_api_eval_variants.py # 31 tests
   test_scheduler.py        # 36 tests
+  test_api_eval_variants.py # 36 tests
   test_cli.py              # 27 tests
+  test_api_eval_settings.py # 27 tests
+  test_eval_analysis.py    # 26 tests
   test_stall.py            # 24 tests
-  test_health.py           # 20 tests
-  test_api_eval_settings.py # 25 tests
-  test_models.py           # 19 tests
-  test_estimator.py        # 14 tests
+  test_health.py           # 19 tests
+  test_models.py           # 18 tests
+  test_scanner.py          # 17 tests
+  test_estimator.py        # 12 tests
   test_embed_proxy.py      # 12 tests
-  test_proxy.py            # 8 tests
+  test_consumers_api.py    # 11 tests (API endpoints)
+  test_proxy.py            # 10 tests
   test_dlq.py              # 8 tests
   test_burst.py            # 7 tests
-  test_scanner.py          # 17 tests
   test_patcher.py          # 7 tests
   test_intercept.py        # 5 tests
   test_consumers.py        # 4 tests (DB layer)
-  test_consumers_api.py    # 11 tests (API endpoints)
 ```
 
 ## How to Run
@@ -60,7 +62,7 @@ tests/
 cd ~/Documents/projects/ollama-queue
 source .venv/bin/activate
 
-# Run tests (719 total)
+# Run tests (748 total)
 pytest
 
 # Start the server (daemon + API + dashboard)
@@ -115,7 +117,7 @@ Sidebar nav (desktop) + bottom tab bar (mobile). 6 views: **Now** (2-column comm
 
 Route IDs: `now` | `plan` | `history` | `models` | `settings` | `eval` | `consumers`. Sidebar: 200px desktop, 64px icon-only (768–1023px), hidden on mobile. CSS classes: `layout-root`, `layout-sidebar`, `layout-main`, `now-grid`, `history-top-grid`, `mobile-bottom-nav`.
 
-**Eval tab** (4 sub-views): Runs (run list + active progress + repeat + judge-rerun + per-run analysis panel with `simpleRenderMd()` + Analyze/Re-analyze button; winner label shows variant label + model name), Variants (prompt variant CRUD + stability table; `latest_f1` score shown inline; two-click inline delete replaces `confirm()` dialog; `description` field shown per row), Trends (F1 line chart + trend summary), Settings (judge defaults + data source + scheduling mode + setup checklist [2 gates: data source connected + first run exists] + `eval.analysis_model` — empty string means use judge model; judge mode inline description; "1–20" range hint on Lessons per Group; variant descriptions shown in checkbox list; alert()-based tooltips replaced with inline reveal). `eval_variants` rows have a `description TEXT` column; `GET /api/eval/variants` includes `description` in response; live DB migration backfills pre-existing rows via `UPDATE WHERE description IS NULL`. Eval state: `evalActiveRun`, `evalSubTab`, `fetchEvalRuns` in `store.js`. Key invariants: `repeat` starts a background thread (not just a DB row); `judge-rerun` copies gen_results from source run before judging; cancel sets `completed_at`; all fetch calls check `res.ok`; `generate_eval_analysis()` runs automatically after each eval run completes and stores markdown to `eval_runs.analysis_md`.
+**Eval tab** (4 sub-views): Runs (run list + active progress + repeat + judge-rerun + per-run analysis panel with `simpleRenderMd()` + Analyze/Re-analyze button; winner label shows variant label + model name; L2 shows bootstrap CI inline in metrics + per-item breakdown panel sorted worst-first + Compute/Re-analyze button for `analysis_json`; L3 ResultsTable has TP/TN/FP/FN filter tabs with classification from `eval.positive_threshold`), Variants (prompt variant CRUD + stability table with cross-run F1 stdev/stable badge from `/api/eval/variants/stability` + ConfigDiffPanel for side-by-side comparison via `/api/eval/variants/{a}/diff/{b}`; `latest_f1` score shown inline; two-click inline delete replaces `confirm()` dialog; `description` field shown per row), Trends (F1 line chart + trend summary), Settings (judge defaults + data source + scheduling mode + setup checklist [2 gates: data source connected + first run exists] + `eval.analysis_model` — empty string means use judge model; judge mode inline description; "1–20" range hint on Lessons per Group; variant descriptions shown in checkbox list; alert()-based tooltips replaced with inline reveal). `eval_variants` rows have a `description TEXT` column; `GET /api/eval/variants` includes `description` in response; live DB migration backfills pre-existing rows via `UPDATE WHERE description IS NULL`. Eval state: `evalActiveRun`, `evalSubTab`, `fetchEvalRuns` in `store.js`. Key invariants: `repeat` starts a background thread (not just a DB row); `judge-rerun` copies gen_results from source run before judging; cancel sets `completed_at`; all fetch calls check `res.ok`; `generate_eval_analysis()` runs automatically after each eval run completes and stores markdown to `eval_runs.analysis_md`; `compute_run_analysis()` stores structured `analysis_json` (per-item breakdown, failure cases, bootstrap CI) per run. `eval_analysis.py` is the pure analysis module (no DB/HTTP) — 5 public functions. Graceful no-cluster degradation: returns `{"status": "no_cluster_data"}` for projects without cluster labels.
 
 ### UI Layman Comments (always required)
 
@@ -155,6 +157,11 @@ This applies to: component files, store transformations in `store.js`, computed 
 - **Recurring job next_run after migration** — rebalancer sets `next_run` relative to now, not to original timer times. After running `migrate_timers.py`, manually set `next_run` values in the DB (use journal history to recover original times: `journalctl --user -u <name>.service`). Scheduled times: aria-full=23:30, morning=07:00, evening=21:00, aria-meta-learn=Mon 01:30, aria-suggest-automations=Sun 04:30, aria-organic-discovery=Sun 05:30, notion-vector-sync=+6h from last run.
 - **`burst_regime` column** — added post-v2. If upgrading a live DB, run `ALTER TABLE daemon_state ADD COLUMN burst_regime TEXT DEFAULT 'unknown'` before restarting. Missing column causes `Burst regime check failed` error every poll cycle.
 - **`analysis_md` column** — added post-v2. If upgrading a live DB, run `ALTER TABLE eval_runs ADD COLUMN analysis_md TEXT` before restarting.
+- **`analysis_json` column** — added for structured analysis. If upgrading a live DB, run `ALTER TABLE eval_runs ADD COLUMN analysis_json TEXT` before restarting. Also add title columns: `ALTER TABLE eval_results ADD COLUMN source_item_title TEXT; ALTER TABLE eval_results ADD COLUMN target_item_title TEXT`. Index: `CREATE INDEX IF NOT EXISTS idx_eval_results_run_variant ON eval_results(run_id, variant)`.
+- **`eval_analysis.py` is pure** — no DB, no HTTP, no side effects. Takes lists of dicts, returns lists of dicts. All DB access happens in `eval_engine.py:compute_run_analysis()`. Never import `db` or `api` into `eval_analysis`.
+- **`score_transfer=0` is valid, not missing** — `_get_score()` in `eval_analysis.py` uses `s if s is not None else fallback` (explicit None check). The `x or fallback` pattern treats 0 as falsy and silently drops valid zero scores. Same applies to any numeric field that can legitimately be 0.
+- **`eval.positive_threshold` setting** — integer 1-5, default 3. Controls TP/FP/FN classification in analysis and results API. Stored in settings table, read by `compute_run_analysis()` and `GET /api/eval/runs/{id}/results?classification=...`.
+- **`/api/eval/variants/stability` must register before `/{variant_id}`** — FastAPI matches routes in registration order. If the parameterized route `/{variant_id}` is registered first, `GET /stability` will match it with `variant_id="stability"` and return 404. Literal paths always go before parameterized paths.
 - **Shell scripts must exit 0 for "nothing to do"** — any non-zero exit code from a queued job is treated as failure. 3 consecutive failures open the circuit breaker, blocking all jobs. Scripts that check preconditions and bail early (e.g. "all work already done") must exit 0, not 1 or 2.
 - **Never submit a queue job that calls back through the proxy** — if a queue job calls `_call_proxy()` → `POST /api/generate`, it will deadlock because the daemon holds `current_job_id` for the running job, blocking `try_claim_for_proxy()`. Use `threading.Thread` for work that needs the proxy. Lesson #1733.
 - **`_recover_orphans()` must skip `proxy:` command sentinels** — proxy endpoints use sentinel jobs (`command LIKE 'proxy:%'`) to serialize Ollama access. On restart, these must be marked failed directly, not reset to pending, or the daemon will try to shell-execute them (exit 127 → DLQ). `get_pending_jobs()` also filters them out. Lessons #1734.
