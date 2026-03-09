@@ -839,25 +839,25 @@ class TestEvalSchema:
         tables = set(db.list_tables())
         assert self.EVAL_TABLES.issubset(tables)
 
-    def test_seed_eval_defaults_inserts_3_templates(self, db):
-        """seed_eval_defaults() inserts exactly 3 system prompt templates."""
+    def test_seed_eval_defaults_inserts_templates(self, db):
+        """seed_eval_defaults() inserts system prompt templates (3 original + contrastive + multistage)."""
         conn = db._connect()
         count = conn.execute("SELECT COUNT(*) FROM eval_prompt_templates").fetchone()[0]
-        assert count == 3
+        assert count == 5
 
-    def test_seed_eval_defaults_inserts_5_variants(self, db):
-        """seed_eval_defaults() inserts exactly 5 system variants (A-E)."""
+    def test_seed_eval_defaults_inserts_variants(self, db):
+        """seed_eval_defaults() inserts system variants (A-H)."""
         conn = db._connect()
         count = conn.execute("SELECT COUNT(*) FROM eval_variants").fetchone()[0]
-        assert count == 5
+        assert count == 8
 
     def test_seed_eval_defaults_idempotent(self, db):
         """Running seed_eval_defaults() twice produces no duplicates and no errors."""
         db.seed_eval_defaults()
         db.seed_eval_defaults()
         conn = db._connect()
-        assert conn.execute("SELECT COUNT(*) FROM eval_prompt_templates").fetchone()[0] == 3
-        assert conn.execute("SELECT COUNT(*) FROM eval_variants").fetchone()[0] == 5
+        assert conn.execute("SELECT COUNT(*) FROM eval_prompt_templates").fetchone()[0] == 5
+        assert conn.execute("SELECT COUNT(*) FROM eval_variants").fetchone()[0] == 8
 
     def test_eval_settings_all_seeded(self, db):
         """All 12 eval.* settings keys are present after initialize()."""
@@ -947,24 +947,24 @@ class TestEvalSchema:
         assert conn.execute("SELECT COUNT(*) FROM eval_results WHERE run_id = ?", (run_id,)).fetchone()[0] == 0
 
     def test_template_ids_match_expected(self, db):
-        """The 3 seeded templates have IDs: fewshot, zero-shot-causal, chunked."""
+        """Seeded templates include original 3 + contrastive + contrastive-multistage."""
         conn = db._connect()
         rows = conn.execute("SELECT id FROM eval_prompt_templates ORDER BY id").fetchall()
         ids = {r[0] for r in rows}
-        assert ids == {"fewshot", "zero-shot-causal", "chunked"}
+        assert ids == {"fewshot", "zero-shot-causal", "chunked", "contrastive", "contrastive-multistage"}
 
     def test_variant_ids_match_expected(self, db):
-        """The 5 seeded variants have IDs: A, B, C, D, E."""
+        """Seeded variants include A-H."""
         conn = db._connect()
         rows = conn.execute("SELECT id FROM eval_variants ORDER BY id").fetchall()
         ids = {r[0] for r in rows}
-        assert ids == {"A", "B", "C", "D", "E"}
+        assert ids == {"A", "B", "C", "D", "E", "F", "G", "H"}
 
-    def test_recommended_variants_are_d_and_e(self, db):
-        """Variants D and E are the only ones marked is_recommended=1."""
+    def test_recommended_variants_include_contrastive(self, db):
+        """Variants D, E, F, G, H are marked is_recommended=1."""
         conn = db._connect()
         rows = conn.execute("SELECT id FROM eval_variants WHERE is_recommended = 1 ORDER BY id").fetchall()
-        assert [r[0] for r in rows] == ["D", "E"]
+        assert [r[0] for r in rows] == ["D", "E", "F", "G", "H"]
 
     def test_variant_a_uses_fewshot_template(self, db):
         """Variant A must reference the fewshot prompt template."""
@@ -972,3 +972,87 @@ class TestEvalSchema:
         row = conn.execute("SELECT prompt_template_id FROM eval_variants WHERE id = 'A'").fetchone()
         assert row is not None
         assert row[0] == "fewshot"
+
+
+class TestEvalV2Schema:
+    """Tests for eval V2 Bayesian fusion schema columns."""
+
+    def test_eval_results_v2_columns_exist(self, db):
+        """All V2 columns exist on eval_results after initialize."""
+        conn = db._connect()
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(eval_results)").fetchall()}
+        v2_cols = {
+            "score_paired_winner",
+            "score_mechanism_match",
+            "score_embedding_sim",
+            "score_posterior",
+            "mechanism_trigger",
+            "mechanism_target",
+            "mechanism_fix",
+        }
+        assert v2_cols.issubset(cols), f"Missing: {v2_cols - cols}"
+
+    def test_eval_runs_judge_mode_column_exists(self, db):
+        """judge_mode column exists on eval_runs after initialize."""
+        conn = db._connect()
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(eval_runs)").fetchall()}
+        assert "judge_mode" in cols
+
+    def test_judge_mode_defaults_to_rubric(self, db):
+        """judge_mode defaults to 'rubric' for new rows."""
+        conn = db._connect()
+        conn.execute(
+            """INSERT INTO eval_runs
+               (data_source_url, variants, status, started_at)
+               VALUES ('http://localhost', 'A', 'queued', '2026-01-01')"""
+        )
+        conn.commit()
+        row = conn.execute("SELECT judge_mode FROM eval_runs ORDER BY id DESC LIMIT 1").fetchone()
+        assert row[0] == "rubric"
+
+    def test_v2_migration_is_idempotent(self, db):
+        """Running _run_migrations twice does not raise."""
+        conn = db._connect()
+        # First run already happened in initialize(). Run again explicitly.
+        db._run_migrations(conn)
+        # Verify columns still exist
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(eval_results)").fetchall()}
+        assert "score_posterior" in cols
+        assert "mechanism_trigger" in cols
+
+    def test_v2_columns_accept_values(self, db):
+        """V2 columns can be written to and read back."""
+        conn = db._connect()
+        conn.execute(
+            """INSERT INTO eval_runs
+               (data_source_url, variants, status, started_at, judge_mode)
+               VALUES ('http://localhost', 'A', 'queued', '2026-01-01', 'bayesian')"""
+        )
+        conn.commit()
+        run_id = conn.execute("SELECT id FROM eval_runs ORDER BY id DESC LIMIT 1").fetchone()[0]
+
+        conn.execute(
+            """INSERT INTO eval_results
+               (run_id, variant, source_item_id, target_item_id, is_same_cluster, row_type,
+                score_paired_winner, score_mechanism_match, score_embedding_sim, score_posterior,
+                mechanism_trigger, mechanism_target, mechanism_fix)
+               VALUES (?, 'A', '1', '2', 1, 'judge',
+                       'same', 1, 0.85, 0.92,
+                       'uncaught exception', 'cleanup handler', 'symmetric teardown')""",
+            (run_id,),
+        )
+        conn.commit()
+
+        row = conn.execute(
+            "SELECT score_paired_winner, score_mechanism_match, score_embedding_sim, "
+            "score_posterior, mechanism_trigger, mechanism_target, mechanism_fix "
+            "FROM eval_results WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()
+        assert row[0] == "same"
+        assert row[1] == 1
+        assert abs(row[2] - 0.85) < 1e-6
+        assert abs(row[3] - 0.92) < 1e-6
+        assert row[4] == "uncaught exception"
+        assert row[5] == "cleanup handler"
+        assert row[6] == "symmetric teardown"

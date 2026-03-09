@@ -983,11 +983,18 @@ def create_app(db: Database) -> FastAPI:
 
     @app.get("/api/eval/variants")
     def list_eval_variants():
-        """Returns all eval_variants rows with latest_f1 from the most recent complete run."""
-        conn = db._connect()
-        variants = [dict(r) for r in conn.execute("SELECT * FROM eval_variants ORDER BY created_at").fetchall()]
-        # Compute latest_f1 per variant from eval_runs.metrics (JSON column)
-        runs = conn.execute("SELECT metrics FROM eval_runs WHERE status = 'complete' ORDER BY id ASC").fetchall()
+        """Returns all eval_variants rows with latest quality score from the most recent complete run.
+
+        Uses AUC for bayesian/tournament runs, F1 for legacy runs. The key is always
+        ``latest_f1`` for backward compatibility with existing SPA consumers.
+        """
+        with db._lock:
+            conn = db._connect()
+            variants = [dict(r) for r in conn.execute("SELECT * FROM eval_variants ORDER BY created_at").fetchall()]
+            # Compute latest quality per variant from eval_runs.metrics (JSON column)
+            runs = conn.execute(
+                "SELECT metrics, judge_mode FROM eval_runs WHERE status = 'complete' ORDER BY id ASC"
+            ).fetchall()
         latest_f1: dict[str, float | None] = {}
         for run_row in runs:
             if not run_row["metrics"]:
@@ -996,9 +1003,14 @@ def create_app(db: Database) -> FastAPI:
                 metrics = json.loads(run_row["metrics"])
             except (ValueError, TypeError):
                 continue
+            is_bayesian = run_row["judge_mode"] in ("bayesian", "tournament")
             for var_id, var_metrics in metrics.items():
-                if isinstance(var_metrics, dict) and "f1" in var_metrics:
-                    latest_f1[var_id] = var_metrics["f1"]
+                if not isinstance(var_metrics, dict):
+                    continue
+                # Use AUC for bayesian/tournament runs, F1 for legacy
+                quality = var_metrics.get("auc") if is_bayesian else var_metrics.get("f1")
+                if quality is not None:
+                    latest_f1[var_id] = quality
         for v in variants:
             v["latest_f1"] = latest_f1.get(v["id"])
         return variants
@@ -1383,7 +1395,7 @@ def create_app(db: Database) -> FastAPI:
         with db._lock:
             conn = db._connect()
             runs = conn.execute(
-                """SELECT id, started_at, metrics, item_ids, item_count
+                """SELECT id, started_at, metrics, item_ids, item_count, judge_mode
                    FROM eval_runs WHERE status = 'complete' ORDER BY id ASC"""
             ).fetchall()
             # Fetch agreement counts inside the same lock to avoid racing with
@@ -1410,16 +1422,20 @@ def create_app(db: Database) -> FastAPI:
                 if not isinstance(var_metrics, dict):
                     continue
                 variant_runs.setdefault(var_id, [])
-                variant_runs[var_id].append(
-                    {
-                        "run_id": run_row["id"],
-                        "started_at": run_row["started_at"],
-                        "f1": var_metrics.get("f1"),
-                        "recall": var_metrics.get("recall"),
-                        "precision": var_metrics.get("precision"),
-                        "item_count": run_row["item_count"],
-                    }
-                )
+                entry = {
+                    "run_id": run_row["id"],
+                    "started_at": run_row["started_at"],
+                    "f1": var_metrics.get("f1"),
+                    "recall": var_metrics.get("recall"),
+                    "precision": var_metrics.get("precision"),
+                    "item_count": run_row["item_count"],
+                    "judge_mode": run_row["judge_mode"],
+                    "auc": var_metrics.get("auc"),
+                    "separation": var_metrics.get("separation"),
+                    "same_mean_posterior": var_metrics.get("same_mean_posterior"),
+                    "diff_mean_posterior": var_metrics.get("diff_mean_posterior"),
+                }
+                variant_runs[var_id].append(entry)
 
         # Judge agreement: fraction of eval_results where score_transfer > 1
         # (query already executed inside db._lock above to avoid data race)
@@ -1433,25 +1449,29 @@ def create_app(db: Database) -> FastAPI:
         for var_id, run_list in variant_runs.items():
             # Limit to last 10 runs
             recent = run_list[-10:]
-            f1_values = [r["f1"] for r in recent if r["f1"] is not None]
-            latest_f1 = f1_values[-1] if f1_values else None
 
-            # Stability: 1 - stddev(last 3 F1s) if >= 3 runs
+            # Use AUC as the quality metric for bayesian/tournament runs, F1 for legacy
+            has_bayesian = any(r.get("judge_mode") in ("bayesian", "tournament") for r in recent)
+            quality_key = "auc" if has_bayesian else "f1"
+            quality_values = [r[quality_key] for r in recent if r.get(quality_key) is not None]
+            latest_quality = quality_values[-1] if quality_values else None
+
+            # Stability: 1 - stddev(last 3 quality scores) if >= 3 runs
             stability = None
-            if len(f1_values) >= 3:
-                last3 = f1_values[-3:]
+            if len(quality_values) >= 3:
+                last3 = quality_values[-3:]
                 try:
                     stability = round(max(0.0, 1.0 - statistics.stdev(last3)), 4)
                 except statistics.StatisticsError:
                     stability = None
 
-            # Trend direction: slope of F1 values
+            # Trend direction: slope of quality values
             trend_direction = "stable"
-            if len(f1_values) >= 2:
-                n = len(f1_values)
+            if len(quality_values) >= 2:
+                n = len(quality_values)
                 x_mean = (n - 1) / 2
-                y_mean = sum(f1_values) / n
-                numerator = sum((i - x_mean) * (f1_values[i] - y_mean) for i in range(n))
+                y_mean = sum(quality_values) / n
+                numerator = sum((i - x_mean) * (quality_values[i] - y_mean) for i in range(n))
                 denominator = sum((i - x_mean) ** 2 for i in range(n))
                 slope = numerator / denominator if denominator != 0 else 0.0
                 if slope > 0.02:
@@ -1463,7 +1483,7 @@ def create_app(db: Database) -> FastAPI:
                 "runs": recent,
                 "stability": stability,
                 "trend_direction": trend_direction,
-                "latest_f1": latest_f1,
+                "latest_f1": latest_quality,
                 "judge_agreement_rate": agreement_by_variant.get(var_id),
             }
 
@@ -1708,7 +1728,7 @@ def create_app(db: Database) -> FastAPI:
                 """SELECT id, status, variants, variant_id, winner_variant, metrics,
                           item_count, item_ids, started_at, completed_at,
                           judge_model, analysis_md, error, label, scheduled_by,
-                          error_budget, run_mode
+                          error_budget, run_mode, judge_mode
                    FROM eval_runs
                    ORDER BY id DESC
                    LIMIT ? OFFSET ?""",
@@ -1737,6 +1757,7 @@ def create_app(db: Database) -> FastAPI:
                     "started_at": r.get("started_at"),
                     "completed_at": r.get("completed_at"),
                     "judge_model": r.get("judge_model"),
+                    "judge_mode": r.get("judge_mode"),
                     "analysis_md": r.get("analysis_md"),
                     "error": r.get("error"),
                     "label": r.get("label"),
@@ -1809,6 +1830,16 @@ def create_app(db: Database) -> FastAPI:
         judge_model = body.get("judge_model")
         if judge_model and isinstance(judge_model, str):
             _ee.update_eval_run(db, run_id, judge_model=judge_model)
+
+        # Persist judge_mode from request body (default: "bayesian")
+        judge_mode = body.get("judge_mode", "bayesian")
+        valid_judge_modes = ("rubric", "binary", "tournament", "bayesian")
+        if judge_mode not in valid_judge_modes:
+            raise HTTPException(
+                status_code=400,
+                detail=f"judge_mode must be one of: {', '.join(valid_judge_modes)}",
+            )
+        _ee.update_eval_run(db, run_id, judge_mode=judge_mode)
 
         # Run the session in a background thread — NOT as a queued job.
         # Running as a queued job would deadlock: the daemon sets current_job_id while
@@ -1907,6 +1938,65 @@ def create_app(db: Database) -> FastAPI:
 
         _threading_analyze.Thread(target=_run_analysis, daemon=True).start()
         return {"ok": True, "run_id": run_id, "message": "Analysis started in background"}
+
+    @app.get("/api/eval/runs/{run_id}/confusion")
+    def get_eval_run_confusion(run_id: int):
+        """Returns cluster confusion matrix for a completed eval run.
+
+        # What it shows: Cross-cluster transfer score heatmap — which cluster pairs
+        #   have principle "bleed" where principles from one cluster falsely match another.
+        # Decision it drives: Identifies ambiguous cluster boundaries that need either
+        #   merging (if semantically similar) or more discriminative prompts.
+        """
+        from ollama_queue import eval_engine as _ee
+
+        run = _ee.get_eval_run(db, run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail=f"Eval run {run_id} not found")
+
+        with db._lock:
+            conn = db._connect()
+            rows = [
+                dict(r)
+                for r in conn.execute(
+                    """SELECT source_cluster_id, target_cluster_id,
+                              COALESCE(override_score_transfer, score_transfer) AS transfer,
+                              is_same_cluster
+                       FROM eval_results
+                       WHERE run_id = ? AND row_type = 'judge'
+                         AND score_transfer IS NOT NULL AND error IS NULL
+                         AND source_cluster_id IS NOT NULL
+                         AND target_cluster_id IS NOT NULL""",
+                    (run_id,),
+                ).fetchall()
+            ]
+
+        if not rows:
+            return {"matrix": {}, "flagged": [], "clusters": []}
+
+        # Build (source, target) → [transfer scores]
+        buckets: dict[str, dict[str, list[int]]] = {}
+        for r in rows:
+            src = r["source_cluster_id"]
+            tgt = r["target_cluster_id"]
+            buckets.setdefault(src, {}).setdefault(tgt, []).append(r["transfer"])
+
+        clusters = sorted({r["source_cluster_id"] for r in rows} | {r["target_cluster_id"] for r in rows})
+
+        matrix: dict[str, dict[str, dict]] = {}
+        flagged: list[dict] = []
+        for src in clusters:
+            matrix[src] = {}
+            for tgt in clusters:
+                scores = buckets.get(src, {}).get(tgt, [])
+                if scores:
+                    avg = round(sum(scores) / len(scores), 2)
+                    matrix[src][tgt] = {"avg_transfer": avg, "count": len(scores)}
+                    if src != tgt and avg >= 3.0:
+                        flagged.append({"source": src, "target": tgt, "avg_transfer": avg, "count": len(scores)})
+
+        flagged.sort(key=lambda x: -x["avg_transfer"])
+        return {"matrix": matrix, "flagged": flagged, "clusters": clusters}
 
     @app.get("/api/eval/runs/{run_id}/results")
     def get_eval_run_results(run_id: int, row_type: str | None = None):
@@ -2070,10 +2160,10 @@ def create_app(db: Database) -> FastAPI:
                 """INSERT INTO eval_runs
                    (data_source_url, variants, per_cluster, status, run_mode,
                     item_ids, seed, judge_model, judge_backend, error_budget,
-                    started_at)
+                    judge_mode, started_at)
                    VALUES (?, ?, ?, 'queued', ?,
                            ?, ?, ?, ?, ?,
-                           ?)""",
+                           ?, ?)""",
                 (
                     orig["data_source_url"],
                     orig["variants"],
@@ -2084,6 +2174,7 @@ def create_app(db: Database) -> FastAPI:
                     orig.get("judge_model"),
                     orig.get("judge_backend"),
                     orig.get("error_budget") or 0.30,
+                    orig.get("judge_mode") or "rubric",
                     started_at,
                 ),
             )
@@ -2172,6 +2263,10 @@ def create_app(db: Database) -> FastAPI:
             seed=run.get("seed"),
             item_ids=run.get("item_ids"),
         )
+
+        # Propagate judge_mode from original run (or allow override from body)
+        rerun_judge_mode = body.get("judge_mode") or run.get("judge_mode") or "rubric"
+        _ee.update_eval_run(db, new_run_id, judge_mode=rerun_judge_mode)
 
         # Copy gen_results from original run so run_eval_judge can find them.
         # Without this the new run has no eval_results rows and judge produces empty metrics.

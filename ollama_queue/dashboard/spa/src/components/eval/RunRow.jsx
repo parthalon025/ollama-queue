@@ -2,6 +2,7 @@ import { h } from 'preact';
 import { useState } from 'preact/hooks';
 import { EVAL_TRANSLATIONS } from './translations.js';
 import ResultsTable from './ResultsTable.jsx';
+import ConfusionMatrix from './ConfusionMatrix.jsx';
 import { API, evalActiveRun, evalSubTab, fetchEvalRuns, fetchEvalVariants, startEvalPoll } from '../../store.js';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
 // What it shows: A single eval run row with 3-level progressive disclosure.
@@ -61,9 +62,13 @@ export default function RunRow({ run }) {
     item_count,
     started_at,
     judge_model,
+    judge_mode,
     item_ids,
     analysis_md,
   } = run;
+
+  // Bayesian/tournament runs use AUC as primary quality metric instead of F1
+  const isBayesian = judge_mode === 'bayesian' || judge_mode === 'tournament';
 
   // Only show Repeat button for runs that have reproducibility data persisted
   const canRepeat = Boolean(item_ids);
@@ -134,9 +139,12 @@ export default function RunRow({ run }) {
     parsedMetrics = typeof metrics === 'string' ? JSON.parse(metrics) : (metrics ?? {});
   } catch { parsedMetrics = {}; }
 
-  // Winner quality (F1)
+  // Winner quality — AUC for bayesian/tournament runs, F1 for legacy
   const winnerMetrics = winner_variant ? parsedMetrics[winner_variant] : null;
-  const winnerQuality = winnerMetrics?.f1 ?? null;
+  const winnerQuality = isBayesian
+    ? (winnerMetrics?.auc ?? null)
+    : (winnerMetrics?.f1 ?? null);
+  const winnerQualityLabel = isBayesian ? EVAL_TRANSLATIONS.auc.label : EVAL_TRANSLATIONS.f1.label;
 
   const variantIds = Object.keys(parsedMetrics);
 
@@ -175,7 +183,7 @@ export default function RunRow({ run }) {
           )}
           {winnerQuality != null && (
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--accent)' }}>
-              {EVAL_TRANSLATIONS.f1.label}: {fmtPct(winnerQuality)}
+              {winnerQualityLabel}: {fmtPct(winnerQuality)}
             </span>
           )}
           {started_at && (
@@ -197,57 +205,115 @@ export default function RunRow({ run }) {
       {/* L2 */}
       {level >= 2 && (
         <div class="eval-run-row-l2">
-          {/* Per-variant metric table */}
-          {variantIds.length > 0 && (
-            <div style={{ marginBottom: '0.75rem', overflowX: 'auto' }}>
-              <table class="eval-metrics-table">
-                <thead>
-                  <tr>
-                    <th style={{ padding: '4px 8px', fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', textAlign: 'left' }}>
-                      Config
-                    </th>
-                    {['f1', 'recall', 'precision', 'actionability'].map(metric => (
-                      <th key={metric} style={{ padding: '4px 8px', fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', textAlign: 'center', cursor: 'pointer' }}>
-                        {EVAL_TRANSLATIONS[metric]?.label ?? metric}
-                        {EVAL_TRANSLATIONS[metric]?.tooltip && (
-                          <button
-                            onClick={e => { e.stopPropagation(); handleTooltip(metric); }}
-                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', padding: '0 2px', fontSize: '0.7rem' }}
-                            aria-label={`Info about ${metric}`}
-                          >
-                            ?
-                          </button>
-                        )}
-                      </th>
-                    ))}
-                  </tr>
-                  {tooltip && EVAL_TRANSLATIONS[tooltip]?.tooltip && (
+          {/* Per-variant metric table — different columns for Bayesian vs legacy runs */}
+          {variantIds.length > 0 && (() => {
+            // Bayesian runs show AUC, Same-Category, Diff-Category, Score Gap
+            // Legacy runs show F1, Recall, Precision, Actionability
+            const metricKeys = isBayesian
+              ? ['auc', 'same_mean_posterior', 'diff_mean_posterior', 'separation']
+              : ['f1', 'recall', 'precision', 'actionability'];
+            const colCount = metricKeys.length + 1; // +1 for Config column
+            return (
+              <div style={{ marginBottom: '0.75rem', overflowX: 'auto' }}>
+                <table class="eval-metrics-table">
+                  <thead>
                     <tr>
-                      <td colSpan="5" style={{ padding: '4px 8px', fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--accent)', background: 'var(--bg-base)' }}>
-                        {EVAL_TRANSLATIONS[tooltip].tooltip}
-                      </td>
+                      <th style={{ padding: '4px 8px', fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', textAlign: 'left' }}>
+                        Config
+                      </th>
+                      {metricKeys.map(metric => (
+                        <th key={metric} style={{ padding: '4px 8px', fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', textAlign: 'center', cursor: 'pointer' }}>
+                          {EVAL_TRANSLATIONS[metric]?.label ?? metric}
+                          {EVAL_TRANSLATIONS[metric]?.tooltip && (
+                            <button
+                              onClick={e => { e.stopPropagation(); handleTooltip(metric); }}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', padding: '0 2px', fontSize: '0.7rem' }}
+                              aria-label={`Info about ${metric}`}
+                            >
+                              ?
+                            </button>
+                          )}
+                        </th>
+                      ))}
                     </tr>
-                  )}
-                </thead>
-                <tbody>
-                  {variantIds.map(vid => {
-                    const vm = parsedMetrics[vid] ?? {};
-                    const isWinner = vid === winner_variant;
-                    return (
-                      <tr key={vid} style={{ background: isWinner ? 'var(--accent-glow)' : 'transparent' }}>
-                        <td style={{ padding: '4px 8px', fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: isWinner ? 'var(--accent)' : 'var(--text-primary)' }}>
-                          {isWinner && '★ '}Config {vid}
+                    {tooltip && EVAL_TRANSLATIONS[tooltip]?.tooltip && (
+                      <tr>
+                        <td colSpan={colCount} style={{ padding: '4px 8px', fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--accent)', background: 'var(--bg-base)' }}>
+                          {EVAL_TRANSLATIONS[tooltip].tooltip}
                         </td>
-                        {['f1', 'recall', 'precision', 'actionability'].map(metric => (
-                          <td key={metric} style={{ padding: '4px 8px', textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-secondary)' }}>
-                            {vm[metric] != null ? fmtPct(vm[metric]) : '—'}
-                          </td>
-                        ))}
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                    )}
+                  </thead>
+                  <tbody>
+                    {variantIds.map(vid => {
+                      const vm = parsedMetrics[vid] ?? {};
+                      const isWinner = vid === winner_variant;
+                      return (
+                        <tr key={vid} style={{ background: isWinner ? 'var(--accent-glow)' : 'transparent' }}>
+                          <td style={{ padding: '4px 8px', fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: isWinner ? 'var(--accent)' : 'var(--text-primary)' }}>
+                            {isWinner && '★ '}Config {vid}
+                          </td>
+                          {metricKeys.map(metric => (
+                            <td key={metric} style={{ padding: '4px 8px', textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-secondary)' }}>
+                              {vm[metric] != null ? fmtPct(vm[metric]) : '—'}
+                            </td>
+                          ))}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })()}
+
+          {/* Posterior Separation — visual bar comparison for Bayesian/tournament runs.
+              Shows same-category (green) vs diff-category (red) average posteriors
+              so the user can see the discrimination gap at a glance. */}
+          {isBayesian && winnerMetrics && winnerMetrics.same_mean_posterior != null && (
+            <div style={{ marginBottom: '0.75rem', padding: '0.5rem 0' }}>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', marginBottom: '0.25rem' }}>
+                Posterior Separation (winner)
+              </div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', marginBottom: '0.5rem' }}>
+                Green bar = same-category avg, red bar = different-category avg. Wider gap = better discrimination.
+              </div>
+              {/* Same-category bar (green) */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '4px' }}>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-secondary)', width: '80px', textAlign: 'right', flexShrink: 0 }}>
+                  Same
+                </span>
+                <div style={{ flex: 1, background: 'var(--bg-raised)', borderRadius: '3px', height: '16px', position: 'relative' }}>
+                  <div style={{
+                    width: `${Math.round((winnerMetrics.same_mean_posterior ?? 0) * 100)}%`,
+                    height: '100%',
+                    background: 'var(--status-healthy)',
+                    borderRadius: '3px',
+                    opacity: 0.7,
+                  }} />
+                </div>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-secondary)', width: '40px', flexShrink: 0 }}>
+                  {fmtPct(winnerMetrics.same_mean_posterior)}
+                </span>
+              </div>
+              {/* Diff-category bar (red) */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-secondary)', width: '80px', textAlign: 'right', flexShrink: 0 }}>
+                  Different
+                </span>
+                <div style={{ flex: 1, background: 'var(--bg-raised)', borderRadius: '3px', height: '16px', position: 'relative' }}>
+                  <div style={{
+                    width: `${Math.round((winnerMetrics.diff_mean_posterior ?? 0) * 100)}%`,
+                    height: '100%',
+                    background: 'var(--status-error)',
+                    borderRadius: '3px',
+                    opacity: 0.7,
+                  }} />
+                </div>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-secondary)', width: '40px', flexShrink: 0 }}>
+                  {fmtPct(winnerMetrics.diff_mean_posterior)}
+                </span>
+              </div>
             </div>
           )}
 
@@ -283,6 +349,9 @@ export default function RunRow({ run }) {
               </pre>
             </div>
           )}
+
+          {/* Confusion matrix — shows cross-cluster principle bleed for completed runs */}
+          {status === 'complete' && <ConfusionMatrix runId={id} />}
 
           {/* Action buttons */}
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>

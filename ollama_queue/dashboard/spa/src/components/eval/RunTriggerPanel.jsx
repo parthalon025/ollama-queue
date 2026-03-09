@@ -28,6 +28,7 @@ export default function RunTriggerPanel({ defaultCollapsed }) {
   const [selectedVariants, setSelectedVariants] = useState([]);
   const [perCluster, setPerCluster] = useState(sett?.['eval.per_cluster'] ?? 4);
   const [judgeModel, setJudgeModel] = useState(sett?.['eval.judge_model'] ?? 'deepseek-r1:8b');
+  const [judgeMode, setJudgeMode] = useState(sett?.['eval.judge_mode'] ?? 'bayesian');
   const [runMode, setRunMode] = useState('batch');
   const [modeSubFields, setModeSubFields] = useState({});
   const [dryRun, setDryRun] = useState(false);
@@ -83,6 +84,7 @@ export default function RunTriggerPanel({ defaultCollapsed }) {
           variants: selectedVariants,
           per_cluster: parseInt(perCluster) || 4,
           judge_model: judgeModel,
+          judge_mode: judgeMode,
           run_mode: runMode,
           dry_run: dryRun,
           ...modeSubFields,
@@ -207,7 +209,7 @@ export default function RunTriggerPanel({ defaultCollapsed }) {
                     ) : null}
                     {variant.latest_f1 != null && (
                       <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', marginLeft: 'auto' }}>
-                        {EVAL_TRANSLATIONS.f1.label}: {Math.round(variant.latest_f1 * 100)}%
+                        Score: {Math.round(variant.latest_f1 * 100)}%
                       </span>
                     )}
                   </label>
@@ -229,7 +231,7 @@ export default function RunTriggerPanel({ defaultCollapsed }) {
                     </span>
                     {variant.latest_f1 != null && (
                       <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', marginLeft: 'auto' }}>
-                        {EVAL_TRANSLATIONS.f1.label}: {Math.round(variant.latest_f1 * 100)}%
+                        Score: {Math.round(variant.latest_f1 * 100)}%
                       </span>
                     )}
                   </label>
@@ -278,6 +280,32 @@ export default function RunTriggerPanel({ defaultCollapsed }) {
               style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', fontSize: 'var(--type-label)', fontFamily: 'var(--font-mono)' }}
               onClick={() => alert(EVAL_TRANSLATIONS.judge_model.tooltip)}
               aria-label="Info about scorer AI"
+            >
+              ?
+            </button>
+          </div>
+
+          {/* Judge mode — which scoring strategy to use for evaluating generated principles */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <label style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+              {EVAL_TRANSLATIONS.judge_mode_selector.label}
+            </label>
+            <select
+              value={judgeMode}
+              onChange={e => setJudgeMode(e.target.value)}
+              class="t-input"
+              style={{ flex: 1 }}
+            >
+              <option value="bayesian">Bayesian Fusion (recommended)</option>
+              <option value="tournament">Paired Tournament</option>
+              <option value="binary">Binary YES/NO</option>
+              <option value="rubric">Rubric 1-5 (legacy)</option>
+            </select>
+            <button
+              type="button"
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', fontSize: 'var(--type-label)', fontFamily: 'var(--font-mono)' }}
+              onClick={() => alert(EVAL_TRANSLATIONS.judge_mode_selector.tooltip)}
+              aria-label="Info about scoring strategy"
             >
               ?
             </button>

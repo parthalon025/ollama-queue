@@ -7,8 +7,10 @@ Orchestration is rewritten for the eval_runs / eval_results DB tables.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import math
 import random
 import re
 import time
@@ -212,14 +214,21 @@ def do_promote_eval_run(db: Database, run_id: int) -> dict:
 def check_auto_promote(db: Database, run_id: int, http_base: str) -> None:
     """Check whether a completed eval run qualifies for auto-promotion.
 
-    Three-gate criteria (all must pass):
+    Gate criteria depend on judge_mode:
+
+    **Legacy (rubric/binary):**
     1. Winner F1 >= eval.f1_threshold
     2. Winner F1 > production_F1 + eval.auto_promote_min_improvement
-       (gate skipped if no production variant exists)
     3. error_budget_used <= eval.error_budget
 
-    Optional stability gate: winner must have cleared f1_threshold in the
-    last eval.stability_window completed runs (if stability_window > 0).
+    **Bayesian/tournament:**
+    1. Winner AUC >= eval.auc_threshold (default 0.85)
+    1b. Winner separation >= eval.min_posterior_separation (default 0.4)
+    2. Winner AUC > production_AUC + eval.auto_promote_min_improvement
+    3. error_budget_used <= eval.error_budget
+
+    Optional stability gate: winner must have cleared the quality threshold
+    in the last eval.stability_window completed runs (if stability_window > 0).
 
     NEVER raises — all errors are logged and the function returns silently.
     Same contract as generate_eval_analysis.
@@ -245,7 +254,7 @@ def _check_auto_promote_inner(db: Database, run_id: int) -> None:  # noqa: PLR09
         _log.info("check_auto_promote: run %d has no winner_variant, skipping", run_id)
         return
 
-    # Parse winner F1 from metrics
+    # Parse metrics from run
     metrics_raw = run.get("metrics")
     try:
         parsed_metrics = json.loads(metrics_raw) if isinstance(metrics_raw, str) else (metrics_raw or {})
@@ -253,25 +262,49 @@ def _check_auto_promote_inner(db: Database, run_id: int) -> None:  # noqa: PLR09
         _log.warning("check_auto_promote: run %d metrics unparseable, skipping", run_id)
         return
 
-    winner_f1 = (parsed_metrics.get(winner_variant) or {}).get("f1")
-    if winner_f1 is None:
-        _log.info("check_auto_promote: run %d winner %s has no F1, skipping", run_id, winner_variant)
+    # Determine quality metric based on judge_mode
+    judge_mode = run.get("judge_mode", "rubric")
+    is_bayesian = judge_mode in ("bayesian", "tournament")
+
+    if is_bayesian:
+        quality_metric = "auc"
+        quality_threshold = float(db.get_setting("eval.auc_threshold") or 0.85)
+    else:
+        quality_metric = "f1"
+        quality_threshold = float(db.get_setting("eval.f1_threshold") or 0.75)
+
+    winner_quality = (parsed_metrics.get(winner_variant) or {}).get(quality_metric)
+    if winner_quality is None:
+        _log.info("check_auto_promote: run %d winner %s has no %s, skipping", run_id, winner_variant, quality_metric)
         return
 
-    # Gate 1: F1 >= threshold
-    f1_threshold = float(db.get_setting("eval.f1_threshold") or 0.75)
-    if winner_f1 < f1_threshold:
+    # Gate 1: quality metric >= threshold
+    if winner_quality < quality_threshold:
         _log.info(
-            "check_auto_promote: run %d winner F1=%.3f < threshold %.3f, skipping",
+            "check_auto_promote: run %d winner %s=%.3f < threshold %.3f, skipping",
             run_id,
-            winner_f1,
-            f1_threshold,
+            quality_metric,
+            winner_quality,
+            quality_threshold,
         )
         return
 
-    # Gate 2: F1 > production_F1 + min_improvement
+    # Bayesian-specific gate: posterior separation must exceed minimum
+    if is_bayesian:
+        min_separation = float(db.get_setting("eval.min_posterior_separation") or 0.4)
+        winner_separation = (parsed_metrics.get(winner_variant) or {}).get("separation")
+        if winner_separation is None or winner_separation < min_separation:
+            _log.info(
+                "check_auto_promote: run %d winner separation=%s < min %.3f, skipping",
+                run_id,
+                winner_separation,
+                min_separation,
+            )
+            return
+
+    # Gate 2: quality > production_quality + min_improvement
     min_improvement = float(db.get_setting("eval.auto_promote_min_improvement") or 0.05)
-    production_f1: float | None = None
+    production_quality: float | None = None
 
     with db._lock:
         conn = db._connect()
@@ -289,7 +322,7 @@ def _check_auto_promote_inner(db: Database, run_id: int) -> None:  # noqa: PLR09
         if prod_run_row is not None:
             try:
                 m = json.loads(prod_run_row["metrics"]) if isinstance(prod_run_row["metrics"], str) else {}
-                production_f1 = (m.get(prod_id) or {}).get("f1")
+                production_quality = (m.get(prod_id) or {}).get(quality_metric)
             except (json.JSONDecodeError, TypeError):
                 _log.warning(
                     "check_auto_promote: production metrics unparseable for variant %s — gate 2 skipped as unsafe",
@@ -297,13 +330,15 @@ def _check_auto_promote_inner(db: Database, run_id: int) -> None:  # noqa: PLR09
                 )
                 return
 
-        if production_f1 is not None and winner_f1 <= production_f1 + min_improvement:
+        if production_quality is not None and winner_quality <= production_quality + min_improvement:
             _log.info(
-                "check_auto_promote: run %d winner F1=%.3f not enough improvement over "
-                "production F1=%.3f (need +%.3f), skipping",
+                "check_auto_promote: run %d winner %s=%.3f not enough improvement over "
+                "production %s=%.3f (need +%.3f), skipping",
                 run_id,
-                winner_f1,
-                production_f1,
+                quality_metric,
+                winner_quality,
+                quality_metric,
+                production_quality,
                 min_improvement,
             )
             return
@@ -350,13 +385,14 @@ def _check_auto_promote_inner(db: Database, run_id: int) -> None:  # noqa: PLR09
         for row in recent_rows:
             try:
                 m = json.loads(row["metrics"]) if isinstance(row["metrics"], str) else {}
-                row_f1 = (m.get(winner_variant) or {}).get("f1")
-                if row_f1 is None or row_f1 < f1_threshold:
+                row_quality = (m.get(winner_variant) or {}).get(quality_metric)
+                if row_quality is None or row_quality < quality_threshold:
                     _log.info(
-                        "check_auto_promote: variant %s stability check failed (F1=%s < %.3f), skipping",
+                        "check_auto_promote: variant %s stability check failed (%s=%s < %.3f), skipping",
                         winner_variant,
-                        row_f1,
-                        f1_threshold,
+                        quality_metric,
+                        row_quality,
+                        quality_threshold,
                     )
                     return
             except (json.JSONDecodeError, TypeError):
@@ -365,9 +401,18 @@ def _check_auto_promote_inner(db: Database, run_id: int) -> None:  # noqa: PLR09
 
     # All gates passed — auto-promote
     prod_str = (
-        f", +{winner_f1 - production_f1:.2f} over production={production_f1:.2f}" if production_f1 is not None else ""
+        f", +{winner_quality - production_quality:.2f} over production={production_quality:.2f}"
+        if production_quality is not None
+        else ""
     )
-    _log.info("Auto-promoting variant %s (F1=%.2f%s) for run %d", winner_variant, winner_f1, prod_str, run_id)
+    _log.info(
+        "Auto-promoting variant %s (%s=%.2f%s) for run %d",
+        winner_variant,
+        quality_metric,
+        winner_quality,
+        prod_str,
+        run_id,
+    )
     do_promote_eval_run(db, run_id)
 
 
@@ -423,21 +468,32 @@ def build_generation_prompt(
     template: dict,
     source_item: dict,
     cluster_items: list[dict] | None = None,
+    diff_cluster_items: list[dict] | None = None,
 ) -> str:
     """Build the principle-extraction prompt for a given template + source item.
 
     template: row from eval_prompt_templates (id, label, instruction, format_spec,
-              examples, is_chunked)
+              examples, is_chunked, is_contrastive)
     source_item: {id, title, one_liner, description, cluster_id, category}
-    cluster_items: sibling items from same cluster — only used when template.is_chunked=1
+    cluster_items: sibling items from same cluster (chunked + contrastive)
+    diff_cluster_items: items from different clusters (contrastive only)
     """
     is_chunked = bool(template.get("is_chunked"))
+    is_contrastive = bool(template.get("is_contrastive"))
     instruction = template.get("instruction") or ""
     examples_raw = template.get("examples")
 
     title = source_item.get("title") or ""
     one_liner = source_item.get("one_liner") or ""
     description = (source_item.get("description") or "")[:500]
+
+    if is_contrastive and cluster_items and diff_cluster_items:
+        return _build_contrastive_prompt(
+            instruction,
+            source_item,
+            cluster_items,
+            diff_cluster_items,
+        )
 
     if is_chunked and cluster_items:
         return _build_chunked_prompt(instruction, source_item, cluster_items)
@@ -558,19 +614,176 @@ def _build_chunked_prompt(
     )
 
 
+def _build_contrastive_prompt(
+    instruction: str,
+    primary: dict,
+    same_cluster_items: list[dict],
+    diff_cluster_items: list[dict],
+) -> str:
+    """Contrastive variant: show same-cluster AND diff-cluster items.
+
+    Forces specificity by requiring the principle to be TRUE for same-cluster
+    items and FALSE/irrelevant for diff-cluster items.
+    """
+    same_lines = []
+    all_same = [primary, *same_cluster_items]
+    for i, item in enumerate(all_same, 1):
+        t = item.get("title") or ""
+        o = item.get("one_liner") or ""
+        same_lines.append(f"  {i}. {t} — {o}")
+    same_block = "\n".join(same_lines)
+
+    diff_lines = []
+    for i, item in enumerate(diff_cluster_items, 1):
+        t = item.get("title") or ""
+        o = item.get("one_liner") or ""
+        diff_lines.append(f"  {i}. {t} — {o}")
+    diff_block = "\n".join(diff_lines)
+
+    return (
+        f"{instruction}\n\n"
+        "SAME PATTERN (these lessons share the same structural failure):\n"
+        f"{same_block}\n\n"
+        "DIFFERENT PATTERNS (these are UNRELATED failure types):\n"
+        f"{diff_block}\n\n"
+        "Extract ONE structural principle that:\n"
+        "- Is TRUE for ALL lessons in the SAME PATTERN group\n"
+        "- Is FALSE or IRRELEVANT for the DIFFERENT PATTERNS group\n"
+        "- Names the structural pattern, not the technology\n\n"
+        "The principle must be specific enough to DISTINGUISH this failure type "
+        "from the others listed above.\n\n"
+        "Causal form: '<pattern> causes <consequence> when <condition>'\n"
+        "One sentence, 10-25 words. No technology names."
+    )
+
+
+def _build_self_critique_prompt(
+    principle: str,
+    diff_cluster_items: list[dict],
+) -> str:
+    """Build a self-critique prompt that tests if a principle is too general.
+
+    Presents the principle alongside unrelated lessons and asks the model
+    to refine it if it would match those lessons too.
+    """
+    diff_lines = []
+    for i, item in enumerate(diff_cluster_items, 1):
+        t = item.get("title") or ""
+        o = item.get("one_liner") or ""
+        diff_lines.append(f"  {i}. {t} — {o}")
+    diff_block = "\n".join(diff_lines)
+
+    return (
+        f'You previously extracted this principle: "{principle}"\n\n'
+        "Here are UNRELATED lessons from different failure categories:\n"
+        f"{diff_block}\n\n"
+        "Question: Does this principle also apply to ANY of the "
+        "unrelated lessons above?\n\n"
+        "If YES — the principle is too general. Rewrite it to be more "
+        "specific, so it ONLY matches the original failure type and NOT "
+        "the unrelated ones.\n"
+        "If NO — the principle is specific enough. Return it unchanged.\n\n"
+        "Return ONLY the (possibly refined) principle. One sentence. "
+        "Causal form: '<pattern> causes <consequence> when <condition>'\n"
+        "No explanation."
+    )
+
+
+def _self_critique(
+    *,
+    principle: str,
+    diff_cluster_items: list[dict],
+    model: str,
+    temperature: float,
+    num_ctx: int,
+    http_base: str,
+    source: str,
+) -> str:
+    """Run self-critique pass. Returns refined principle or original."""
+    if not diff_cluster_items:
+        return principle
+
+    critique_prompt = _build_self_critique_prompt(principle, diff_cluster_items)
+    refined, _ = _call_proxy(
+        http_base=http_base,
+        model=model,
+        prompt=critique_prompt,
+        temperature=temperature,
+        num_ctx=num_ctx,
+        timeout=180,
+        source=source,
+        priority=2,
+    )
+
+    if refined and len(refined.strip()) > 10:
+        return refined.strip()
+    return principle
+
+
 # ---------------------------------------------------------------------------
 # Judge prompt construction
 # ---------------------------------------------------------------------------
 
 
-def build_judge_prompt(principle: str, target_item: dict, is_same_cluster: bool) -> str:
-    """Build rubric-based scoring prompt for a (principle, target_item) pair.
+def _clean_principle(text: str) -> str:
+    """Strip Chain-of-Thought artifacts from a generated principle.
 
-    Asks the judge to score on transfer, precision, actionability (1-5 each)
-    and return a JSON object with those scores plus optional reasoning.
-    is_same_cluster is included in context so callers can verify understanding,
-    but is NOT passed to the judge (would bias the scoring).
+    deepseek-r1 often includes reasoning traces, lesson-by-lesson analysis,
+    and "This principle applies because..." explanations.  The judge should
+    score the principle statement alone, not the surrounding rationale.
     """
+    if not text:
+        return text
+
+    text = text.strip()
+
+    # 1. If text starts with CoT preamble, try to find actual principle below
+    cot_start = re.match(
+        r"^(okay|let me|let's|the lessons|here's|i'll|to analyze|looking at)",
+        text,
+        re.IGNORECASE,
+    )
+    if cot_start:
+        paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+        for para in paragraphs[1:]:
+            if para.startswith("*") or para.startswith("-"):
+                continue
+            if len(para) > 20:
+                text = para
+                break
+
+    # 2. Extract text after "**Principle:**" or "The principle is:" markers
+    marker = re.search(
+        r"(?:\*\*Principle:\*\*|The principle is:)\s*(.+?)(?:\n\n|$)",
+        text,
+        re.DOTALL,
+    )
+    if marker:
+        text = marker.group(1).strip()
+
+    # 3. Take only the first paragraph (strip trailing explanations)
+    if "\n\n" in text:
+        text = text.split("\n\n")[0].strip()
+
+    # 4. Strip markdown bold markers
+    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+
+    # 5. Strip trailing parenthetical explanations like "*(This principle...)"
+    text = re.sub(r"\s*\*?\(This principle\b.*", "", text, flags=re.DOTALL)
+
+    return text.strip()
+
+
+def build_judge_prompt(principle: str, target_item: dict, is_same_cluster: bool) -> str:
+    """Build rubric-based scoring prompt with calibration anchors.
+
+    Cleans CoT artifacts from the principle before embedding in the prompt.
+    Includes concrete scored examples so the judge's internal scale is
+    anchored, reducing score inflation on cross-cluster pairs.
+    is_same_cluster is available for caller verification but is NOT
+    passed to the judge (would bias the scoring).
+    """
+    principle = _clean_principle(principle)
     title = target_item.get("title") or ""
     one_liner = target_item.get("one_liner") or ""
     description = (target_item.get("description") or "")[:300]
@@ -583,14 +796,24 @@ def build_judge_prompt(principle: str, target_item: dict, is_same_cluster: bool)
         f"Title: {title}\n"
         f"One-liner: {one_liner}\n"
         f"Description: {description}\n\n"
-        "Score this (principle, target) pair on three criteria, each 1-5:\n\n"
-        "1. **Transfer Recognition** — does the principle help identify the "
-        "structural pattern in the target?\n"
-        "   1=No connection  3=Vague connection  5=Clear structural match\n\n"
-        "2. **Precision** — would this principle false-positive on unrelated lessons?\n"
-        "   1=Would match anything  3=Somewhat specific  5=Only matches structurally similar\n\n"
-        "3. **Actionability** — could an LLM use this principle to prevent this bug class?\n"
-        "   1=Too abstract to act on  3=Useful with context  5=Immediately actionable\n\n"
+        "Score this (principle, target) pair on three criteria, each 1-5.\n\n"
+        "## Scoring Guide with Examples\n\n"
+        "**Transfer Recognition** — does the principle structurally match the target?\n"
+        "  1 = No structural connection. E.g. principle about resource cleanup → target about naming conventions → 1\n"
+        "  3 = Vague thematic overlap but different mechanism. "
+        "E.g. error handling principle → logging gaps target → 3\n"
+        "  5 = Same structural pattern, different technology. "
+        "E.g. resource cleanup principle → unclosed DB connections → 5\n\n"
+        "**Precision** — would this principle false-positive on unrelated lessons?\n"
+        "  1 = So general it matches everything (e.g. 'always test your code')\n"
+        "  3 = Matches a broad category but not everything\n"
+        "  5 = Only matches lessons with the same specific structural failure\n\n"
+        "**Actionability** — could an LLM use this to prevent this class of bug?\n"
+        "  1 = Too abstract to act on (e.g. 'be careful with state')\n"
+        "  3 = Useful with additional context\n"
+        "  5 = Specific enough to implement a check or review step\n\n"
+        "IMPORTANT: Be skeptical. Most principles do NOT transfer to unrelated lessons. "
+        "Default to low transfer scores unless there is a clear structural match.\n\n"
         'Return ONLY a JSON object: {"transfer": N, "precision": N, "actionability": N, "reasoning": "one sentence"}\n'
         "No other text."
     )
@@ -752,16 +975,33 @@ def parse_judge_response(raw: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def compute_metrics(results: list[dict]) -> dict[str, dict[str, float]]:
+def _compute_f1_block(same: list[dict], diff: list[dict], all_pairs: list[dict]) -> dict[str, float]:
+    """Compute F1/recall/precision/actionability from same- and diff-cluster pair lists."""
+    recall = sum(p["effective_score_transfer"] for p in same) / (len(same) * 5.0) if same else 0.0
+    precision = 1.0 - sum(p["effective_score_transfer"] for p in diff) / (len(diff) * 5.0) if diff else 0.0
+    f1 = 2.0 * recall * precision / (recall + precision) if (recall + precision) > 0 else 0.0
+    all_act = [p["effective_score_action"] for p in all_pairs]
+    actionability = sum(all_act) / len(all_act) if all_act else 0.0
+    return {
+        "f1": round(f1, 4),
+        "recall": round(recall, 4),
+        "precision": round(precision, 4),
+        "actionability": round(actionability, 4),
+        "sample_count": len(all_pairs),
+    }
+
+
+def compute_metrics(results: list[dict]) -> dict[str, dict[str, Any]]:
     """Compute per-variant F1, recall, precision, actionability from scored results.
 
     results: list of dicts with keys:
         variant, is_same_cluster,
         effective_score_transfer, effective_score_precision, effective_score_action
+        (optional) source_cluster_id — when present, per_cluster breakdown is included
 
     effective_score = COALESCE(override_score, score) — caller pre-computes this.
 
-    Returns: {variant_id: {f1, recall, precision, actionability, sample_count}}
+    Returns: {variant_id: {f1, recall, precision, actionability, sample_count, per_cluster?}}
 
     F1 definition (spec):
       recall    = avg transfer score on same_cluster pairs / 5.0
@@ -772,25 +1012,328 @@ def compute_metrics(results: list[dict]) -> dict[str, dict[str, float]]:
     for r in results:
         by_variant.setdefault(r["variant"], []).append(r)
 
-    metrics: dict[str, dict[str, float]] = {}
+    metrics: dict[str, dict[str, Any]] = {}
     for variant, pairs in by_variant.items():
         same = [p for p in pairs if p["is_same_cluster"]]
         diff = [p for p in pairs if not p["is_same_cluster"]]
 
-        recall = sum(p["effective_score_transfer"] for p in same) / (len(same) * 5.0) if same else 0.0
-        precision = 1.0 - sum(p["effective_score_transfer"] for p in diff) / (len(diff) * 5.0) if diff else 0.0
+        m = _compute_f1_block(same, diff, pairs)
 
-        f1 = 2.0 * recall * precision / (recall + precision) if (recall + precision) > 0 else 0.0
+        # Per-cluster breakdown (when source_cluster_id is available)
+        has_clusters = any(p.get("source_cluster_id") for p in pairs)
+        if has_clusters:
+            by_cluster: dict[str, list[dict]] = {}
+            for p in pairs:
+                cid = p.get("source_cluster_id") or ""
+                if cid:
+                    by_cluster.setdefault(cid, []).append(p)
+            per_cluster: dict[str, dict[str, float]] = {}
+            for cid, cpairs in sorted(by_cluster.items()):
+                csame = [p for p in cpairs if p["is_same_cluster"]]
+                cdiff = [p for p in cpairs if not p["is_same_cluster"]]
+                per_cluster[cid] = _compute_f1_block(csame, cdiff, cpairs)
+            m["per_cluster"] = per_cluster
 
-        all_act = [p["effective_score_action"] for p in pairs]
-        actionability = sum(all_act) / len(all_act) if all_act else 0.0
+        metrics[variant] = m
 
-        metrics[variant] = {
-            "f1": round(f1, 4),
-            "recall": round(recall, 4),
-            "precision": round(precision, 4),
-            "actionability": round(actionability, 4),
-            "sample_count": len(pairs),
+    return metrics
+
+
+# ---------------------------------------------------------------------------
+# Paired tournament prompt + parser (ported from lessons-db/eval.py)
+# ---------------------------------------------------------------------------
+
+
+def build_paired_judge_prompt(
+    principle: str,
+    same_target: dict[str, Any],
+    diff_target: dict[str, Any],
+    position_seed: int | None = None,
+) -> tuple[str, bool]:
+    """Paired comparison prompt -- which target does the principle apply to more?
+
+    Randomizes A/B position to eliminate position bias.
+    Returns (prompt_text, same_is_a) where same_is_a indicates if the same-group
+    target was placed in position A.
+    """
+    principle = re.sub(r"<think>.*?</think>", "", principle, flags=re.DOTALL | re.IGNORECASE).strip()
+    principle = _clean_principle(principle)
+
+    if position_seed is None:
+        position_seed = int(hashlib.md5(principle.encode(), usedforsecurity=False).hexdigest()[:8], 16)
+    swap = position_seed % 2 == 0
+
+    target_a = diff_target if swap else same_target
+    target_b = same_target if swap else diff_target
+
+    def _fmt(t: dict[str, Any]) -> str:
+        title = t.get("title") or ""
+        one_liner = t.get("one_liner") or ""
+        desc = (t.get("description") or "")[:200]
+        return f"Title: {title}\nOne-liner: {one_liner}\nDescription: {desc}"
+
+    prompt = (
+        f'PRINCIPLE: "{principle}"\n\n'
+        f"TARGET A:\n{_fmt(target_a)}\n\n"
+        f"TARGET B:\n{_fmt(target_b)}\n\n"
+        "Which target does this principle apply to MORE specifically?\n"
+        "Consider the STRUCTURAL failure mechanism, not surface-level topic similarity.\n\n"
+        "Rules:\n"
+        "- Pick the target where the principle identifies the EXACT same bug class.\n"
+        "- If neither applies well, answer NEITHER.\n\n"
+        "Answer ONLY: A, B, or NEITHER"
+    )
+    same_is_a = not swap
+    return prompt, same_is_a
+
+
+def parse_paired_judge(response: str) -> str | None:
+    """Parse A/B/NEITHER from paired comparison response."""
+    if not response:
+        return None
+    text = response.strip().upper()
+    text = re.sub(r"<THINK>.*?</THINK>", "", text, flags=re.DOTALL).strip()
+    if text.startswith("A"):
+        return "A"
+    if text.startswith("B"):
+        return "B"
+    if "NEITHER" in text:
+        return "NEITHER"
+    for ch in ["A", "B"]:
+        if ch in text and len(text) < 30:
+            return ch
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Mechanism extraction prompt + parser (ported from lessons-db/eval.py)
+# ---------------------------------------------------------------------------
+
+
+def build_mechanism_extraction_prompt(lesson_a: dict, lesson_b: dict) -> str:
+    """Extract shared failure mechanism as a triplet from two lessons."""
+
+    def _fmt(lesson: dict) -> str:
+        return (
+            f"Title: {lesson.get('title', '')}\n"
+            f"One-liner: {lesson.get('one_liner', '')}\n"
+            f"Description: {(lesson.get('description', '') or '')[:300]}"
+        )
+
+    return (
+        "You are analyzing two software engineering lessons that share a failure pattern.\n\n"
+        f"LESSON A:\n{_fmt(lesson_a)}\n\n"
+        f"LESSON B:\n{_fmt(lesson_b)}\n\n"
+        "Extract the SPECIFIC structural mechanism these two lessons share.\n\n"
+        "Format your answer as exactly three lines:\n"
+        "TRIGGER: [what condition causes the bug, 3-10 words]\n"
+        "TARGET: [what component/resource breaks, 3-10 words]\n"
+        "FIX: [what structural change prevents it, 3-10 words]\n\n"
+        "Rules:\n"
+        "- Be SPECIFIC — 'error handling' is too vague. "
+        "'Uncaught exception in cleanup path' is specific.\n"
+        "- Name the MECHANISM, not the topic. Two lessons about 'testing' may have "
+        "completely different mechanisms.\n"
+        "- If these lessons do NOT share a specific mechanism, answer: NONE"
+    )
+
+
+def parse_mechanism_triplet(response: str) -> dict[str, str] | None:
+    """Parse TRIGGER/TARGET/FIX triplet from mechanism extraction response."""
+    if not response:
+        return None
+    text = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL | re.IGNORECASE).strip()
+    if "NONE" in text.upper() and len(text) < 50:
+        return None
+    trigger = re.search(r"TRIGGER:\s*(.+)", text, re.IGNORECASE)
+    target = re.search(r"TARGET:\s*(.+)", text, re.IGNORECASE)
+    fix = re.search(r"FIX:\s*(.+)", text, re.IGNORECASE)
+    if not trigger or not target or not fix:
+        return None
+    return {
+        "trigger": trigger.group(1).strip()[:100],
+        "target": target.group(1).strip()[:100],
+        "fix": fix.group(1).strip()[:100],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Signal extractors — log-likelihood ratios for Bayesian fusion
+# (ported from lessons-db/eval.py)
+# ---------------------------------------------------------------------------
+
+
+def compute_paired_signal(winner: str) -> float:
+    """Convert paired comparison outcome to log-likelihood ratio.
+
+    - "same": judge picked same-group target -> strong positive evidence
+    - "diff": judge picked diff-group target -> strong negative evidence
+    - "neither": judge couldn't decide -> uninformative
+    """
+    return {"same": 2.5, "diff": -2.5, "neither": 0.0}.get(winner, 0.0)
+
+
+def compute_embedding_signal(cosine_sim: float) -> float:
+    """Convert cosine similarity to log-likelihood ratio.
+
+    Thresholds calibrated from embedding AUC=0.707 baseline.
+    """
+    if cosine_sim >= 0.7:
+        return 1.5
+    elif cosine_sim >= 0.5:
+        return 0.5
+    elif cosine_sim >= 0.3:
+        return -0.5
+    else:
+        return -1.5
+
+
+def compute_scope_signal(principle_scopes: set, target_scopes: set) -> float:
+    """Convert scope tag overlap (Jaccard) to log-likelihood ratio.
+
+    Empty scope on either side -> uninformative (0.0).
+    """
+    if not principle_scopes or not target_scopes:
+        return 0.0
+    overlap = len(principle_scopes & target_scopes) / len(principle_scopes | target_scopes)
+    if overlap >= 0.5:
+        return 1.0
+    elif overlap > 0:
+        return 0.3
+    else:
+        return -0.5
+
+
+def compute_mechanism_signal(mechanism_match: bool | None) -> float:
+    """Convert mechanism-naming match to log-likelihood ratio.
+
+    None means mechanism data unavailable -> uninformative.
+    """
+    if mechanism_match is True:
+        return 2.0
+    elif mechanism_match is False:
+        return -1.5
+    else:
+        return 0.0
+
+
+# ---------------------------------------------------------------------------
+# Bayesian fusion — compute_transfer_posterior
+# (ported from lessons-db/eval.py)
+# ---------------------------------------------------------------------------
+
+# Prior: P(transfers) = 0.25 — most principles DON'T transfer to arbitrary targets
+_PRIOR_LOG_ODDS = math.log(0.25 / 0.75)  # approx -1.10
+
+
+def compute_transfer_posterior(
+    paired_signal: float,
+    embedding_signal: float,
+    scope_signal: float,
+    mechanism_signal: float,
+) -> float:
+    """Compute P(transfers | signals) via naive Bayes log-odds fusion.
+
+    Each signal is a log-likelihood ratio from an independent evidence source.
+    Combines via addition in log-odds space, then sigmoid to probability.
+    """
+    log_odds = _PRIOR_LOG_ODDS + paired_signal + embedding_signal + scope_signal + mechanism_signal
+    return 1.0 / (1.0 + math.exp(-log_odds))
+
+
+# ---------------------------------------------------------------------------
+# Tournament and Bayesian aggregate metrics
+# (ported from lessons-db/eval.py)
+# ---------------------------------------------------------------------------
+
+
+def compute_tournament_metrics(
+    tournament_results: list[dict[str, Any]],
+) -> dict[str, dict[str, float]]:
+    """Compute aggregate metrics from tournament results, grouped by variant.
+
+    Returns dict of variant_id -> metrics dict with:
+        mean_win_rate, discriminating_frac, principle_count,
+        comparison_count, total_wins, total_losses, total_neithers
+    """
+    from collections import defaultdict
+
+    by_variant: dict[str, list[dict]] = defaultdict(list)
+    for r in tournament_results:
+        by_variant[r["variant"]].append(r)
+
+    metrics: dict[str, dict[str, float]] = {}
+    for variant_id, results in sorted(by_variant.items()):
+        win_rates = [r["win_rate"] for r in results]
+        total_comparisons = sum(r["comparisons"] for r in results)
+        total_wins = sum(r["wins"] for r in results)
+        total_losses = sum(r["losses"] for r in results)
+        total_neithers = sum(r["neithers"] for r in results)
+
+        metrics[variant_id] = {
+            "mean_win_rate": sum(win_rates) / len(win_rates) if win_rates else 0.0,
+            "discriminating_frac": (sum(1 for wr in win_rates if wr > 0.5) / len(win_rates) if win_rates else 0.0),
+            "principle_count": len(results),
+            "comparison_count": total_comparisons,
+            "total_wins": total_wins,
+            "total_losses": total_losses,
+            "total_neithers": total_neithers,
+        }
+
+    return metrics
+
+
+def compute_bayesian_metrics(
+    scored_pairs: list[dict[str, Any]],
+) -> dict[str, dict[str, float]]:
+    """Compute AUC and separation metrics from Bayesian fusion posteriors.
+
+    Input: list of dicts with keys: variant, is_same_group (bool), posterior (float)
+    Output: per-variant metrics dict with:
+        same_mean_posterior, diff_mean_posterior, separation,
+        auc (Mann-Whitney U), calibration_error, pair_count
+    """
+    from collections import defaultdict
+
+    by_variant: dict[str, list[dict]] = defaultdict(list)
+    for entry in scored_pairs:
+        by_variant[entry["variant"]].append(entry)
+
+    metrics: dict[str, dict[str, float]] = {}
+    for variant_id, entries in sorted(by_variant.items()):
+        same_posteriors = [e["posterior"] for e in entries if e["is_same_group"]]
+        diff_posteriors = [e["posterior"] for e in entries if not e["is_same_group"]]
+
+        same_mean = sum(same_posteriors) / len(same_posteriors) if same_posteriors else 0.0
+        diff_mean = sum(diff_posteriors) / len(diff_posteriors) if diff_posteriors else 0.0
+
+        # AUC via Mann-Whitney U statistic
+        if same_posteriors and diff_posteriors:
+            u_count = 0
+            ties = 0
+            for s in same_posteriors:
+                for d in diff_posteriors:
+                    if s > d:
+                        u_count += 1
+                    elif s == d:
+                        ties += 1
+            auc = (u_count + 0.5 * ties) / (len(same_posteriors) * len(diff_posteriors))
+        else:
+            auc = 0.5  # degenerate: can't compute
+
+        # Calibration error
+        all_posteriors = [e["posterior"] for e in entries]
+        mean_posterior = sum(all_posteriors) / len(all_posteriors) if all_posteriors else 0.0
+        actual_positive_frac = len(same_posteriors) / len(entries) if entries else 0.0
+        calibration_error = abs(mean_posterior - actual_positive_frac)
+
+        metrics[variant_id] = {
+            "same_mean_posterior": same_mean,
+            "diff_mean_posterior": diff_mean,
+            "separation": same_mean - diff_mean,
+            "auc": auc,
+            "calibration_error": calibration_error,
+            "pair_count": len(entries),
         }
 
     return metrics
@@ -815,35 +1358,81 @@ def render_report(run_id: int, metrics: dict[str, dict[str, float]], db: Databas
         lines.append("_No scored pairs — metrics unavailable._\n")
         return "\n".join(lines) + "\n"
 
+    # Detect V2 (Bayesian/tournament) metrics by checking for 'auc' key
+    first_variant_metrics = next(iter(metrics.values()), {})
+    is_v2 = "auc" in first_variant_metrics
+
     # Summary table
     lines.append("## Summary\n")
-    lines.append(
-        "| Variant | Quality (F1) | Catches Right (Recall)"
-        " | Avoids False (Precision) | Useful (Actionability) | Samples |"
-    )
-    lines.append(
-        "|---------|-------------|------------------------|--------------------------|------------------------|---------|"
-    )
-    for vid in sorted(metrics.keys()):
-        m = metrics[vid]
+    if is_v2:
+        lines.append("| Variant | AUC | Separation | Same Mean Posterior" " | Diff Mean Posterior | Pairs |")
+        lines.append("|---------|-----|------------|--------------------" "|--------------------|-------|")
+        for vid in sorted(metrics.keys()):
+            m = metrics[vid]
+            lines.append(
+                f"| {vid} "
+                f"| {m.get('auc', 0):.3f} "
+                f"| {m.get('separation', 0):.3f} "
+                f"| {m.get('same_mean_posterior', 0):.3f} "
+                f"| {m.get('diff_mean_posterior', 0):.3f} "
+                f"| {m.get('pair_count', 0)} |"
+            )
+    else:
         lines.append(
-            f"| {vid} "
-            f"| {m['f1']:.2f} "
-            f"| {m['recall']:.2f} "
-            f"| {m['precision']:.2f} "
-            f"| {m['actionability']:.2f} "
-            f"| {m['sample_count']} |"
+            "| Variant | Quality (F1) | Catches Right (Recall)"
+            " | Avoids False (Precision) | Useful (Actionability) | Samples |"
         )
+        lines.append(
+            "|---------|-------------|------------------------|--------------------------|------------------------|---------|"
+        )
+        for vid in sorted(metrics.keys()):
+            m = metrics[vid]
+            lines.append(
+                f"| {vid} "
+                f"| {m['f1']:.2f} "
+                f"| {m['recall']:.2f} "
+                f"| {m['precision']:.2f} "
+                f"| {m['actionability']:.2f} "
+                f"| {m['sample_count']} |"
+            )
 
     # Winner
     lines.append("\n## Winner\n")
-    winner = max(metrics.keys(), key=lambda v: metrics[v]["f1"])
-    wm = metrics[winner]
-    lines.append(
-        f"**Variant {winner}** — Quality: {wm['f1']:.2f} "
-        f"(Catches right: {wm['recall']:.2f}, Avoids false: {wm['precision']:.2f}, "
-        f"Useful: {wm['actionability']:.2f})"
-    )
+    if is_v2:
+        winner = max(metrics.keys(), key=lambda v: metrics[v].get("auc", 0))
+        wm = metrics[winner]
+        lines.append(
+            f"**Variant {winner}** — AUC: {wm.get('auc', 0):.3f} "
+            f"(Separation: {wm.get('separation', 0):.3f}, "
+            f"Same posterior: {wm.get('same_mean_posterior', 0):.3f}, "
+            f"Diff posterior: {wm.get('diff_mean_posterior', 0):.3f})"
+        )
+    else:
+        winner = max(metrics.keys(), key=lambda v: metrics[v]["f1"])
+        wm = metrics[winner]
+        lines.append(
+            f"**Variant {winner}** — Quality: {wm['f1']:.2f} "
+            f"(Catches right: {wm['recall']:.2f}, Avoids false: {wm['precision']:.2f}, "
+            f"Useful: {wm['actionability']:.2f})"
+        )
+
+    # Per-cluster breakdown (if available)
+    first_m = next(iter(metrics.values()), {})
+    if not is_v2 and "per_cluster" in first_m:
+        lines.append("\n## Per-Cluster Breakdown\n")
+        lines.append("| Cluster | Quality (F1) | Catches Right (Recall)" " | Avoids False (Precision) | Samples |")
+        lines.append("|---------|-------------|------------------------|--------------------------|---------|")
+        # Use winner variant for the breakdown
+        winner_pc = metrics.get(winner, {}).get("per_cluster", {})
+        for cid in sorted(winner_pc.keys()):
+            cm = winner_pc[cid]
+            lines.append(
+                f"| {cid} "
+                f"| {cm['f1']:.2f} "
+                f"| {cm['recall']:.2f} "
+                f"| {cm['precision']:.2f} "
+                f"| {cm['sample_count']} |"
+            )
 
     # Variant config details from DB
     variant_row = get_eval_variant(db, winner)
@@ -1133,12 +1722,23 @@ def _generate_one(
 ) -> bool:
     """Generate a principle for one (variant, source_item) pair. Returns True on success."""
     is_chunked = bool(template.get("is_chunked"))
+    is_contrastive = bool(template.get("is_contrastive"))
     cluster_items: list[dict] = []
-    if is_chunked:
-        cid = str(source_item.get("cluster_id") or source_item.get("cluster_seed") or "")
+    diff_cluster_items: list[dict] = []
+
+    cid = str(source_item.get("cluster_id") or source_item.get("cluster_seed") or "")
+
+    if is_chunked or is_contrastive:
         cluster_items = [it for it in items_by_cluster.get(cid, []) if str(it["id"]) != str(source_item["id"])][:3]
 
-    prompt = build_generation_prompt(template, source_item, cluster_items)
+    if is_contrastive:
+        all_diff = []
+        for other_cid, other_items in sorted(items_by_cluster.items()):
+            if other_cid != cid:
+                all_diff.extend(other_items[:2])
+        diff_cluster_items = all_diff[:4]
+
+    prompt = build_generation_prompt(template, source_item, cluster_items, diff_cluster_items)
     t0 = time.monotonic()
     text, queue_job_id = _call_proxy(
         http_base=http_base,
@@ -1151,6 +1751,24 @@ def _generate_one(
         priority=2,
     )
     generation_time_s = round(time.monotonic() - t0, 1)
+
+    # Self-critique pass: refine if principle is too general
+    is_multi_stage = bool(template.get("is_multi_stage"))
+    if text and is_multi_stage and diff_cluster_items:
+        text = _self_critique(
+            principle=text,
+            diff_cluster_items=diff_cluster_items,
+            model=variant["model"],
+            temperature=variant.get("temperature", 0.6),
+            num_ctx=variant.get("num_ctx", 8192),
+            http_base=http_base,
+            source=f"eval-run-{run_id}-critique",
+        )
+
+    # Clean CoT artifacts before storing
+    if text:
+        text = _clean_principle(text)
+
     insert_eval_result(
         db,
         run_id=run_id,
@@ -1158,7 +1776,7 @@ def _generate_one(
         source_item_id=str(source_item["id"]),
         target_item_id=str(source_item["id"]),
         is_same_cluster=0,
-        row_type="generate",  # matches progress query and DB row_type='judge' convention
+        row_type="generate",
         principle=text,
         generation_time_s=generation_time_s,
         queue_job_id=queue_job_id,
@@ -1484,30 +2102,90 @@ def _judge_one_target(
     judge_temperature: float,
     source_tag: str,
     http_base: str,
+    source_cluster_id: str = "",
+    judge_mode: str = "rubric",
+    diff_target: dict | None = None,
 ) -> None:
-    """Call judge for one (principle, target) pair and store the result."""
-    judge_prompt = build_judge_prompt(principle, target, is_same)
+    """Call judge for one (principle, target) pair and store the result.
+
+    judge_mode controls the scoring approach:
+    - "rubric": existing 1-5 rubric scoring (default, backward compatible)
+    - "binary": YES/NO transfer match
+    - "tournament": paired A/B comparison (requires diff_target)
+    - "bayesian": paired comparison + signal fusion (requires diff_target)
+    """
     t0 = time.monotonic()
-    raw_response, _ = _call_proxy(
-        http_base=http_base,
-        model=judge_model,
-        prompt=judge_prompt,
-        temperature=judge_temperature,
-        num_ctx=4096,
-        timeout=180,
-        source=source_tag,
-        priority=2,
-    )
+    extra_cols: dict[str, Any] = {}
+
+    if judge_mode in ("tournament", "bayesian") and diff_target is not None:
+        # Paired comparison: same_target vs diff_target
+        prompt, same_is_a = build_paired_judge_prompt(principle, target, diff_target)
+        raw_response, _ = _call_proxy(
+            http_base=http_base,
+            model=judge_model,
+            prompt=prompt,
+            temperature=judge_temperature,
+            num_ctx=4096,
+            timeout=180,
+            source=source_tag,
+            priority=2,
+        )
+        answer = parse_paired_judge(raw_response) if raw_response else None
+
+        if answer is None:
+            paired_winner = "neither"
+        elif (answer == "A" and same_is_a) or (answer == "B" and not same_is_a):
+            paired_winner = "same"
+        elif (answer == "A" and not same_is_a) or (answer == "B" and same_is_a):
+            paired_winner = "diff"
+        else:
+            paired_winner = "neither"
+
+        extra_cols["score_paired_winner"] = paired_winner
+
+        # For bayesian mode: compute posterior from available signals
+        if judge_mode == "bayesian":
+            p_signal = compute_paired_signal(paired_winner)
+            # Embedding and scope signals default to 0 (uninformative) when not available
+            e_signal = 0.0
+            s_signal = 0.0
+            m_signal = 0.0
+            posterior = compute_transfer_posterior(p_signal, e_signal, s_signal, m_signal)
+            extra_cols["score_posterior"] = round(posterior, 4)
+
+        # Map paired winner to rubric-like transfer score for metrics compatibility
+        transfer_score = {"same": 5, "diff": 1, "neither": 3}.get(paired_winner, 1)
+        scores = {
+            "transfer": transfer_score,
+            "precision": 3,
+            "actionability": 3,
+            "reasoning": f"paired:{paired_winner}",
+            "judge_reasoning": raw_response or "",
+        }
+    else:
+        # Standard rubric or binary mode
+        judge_prompt = build_judge_prompt(principle, target, is_same)
+        raw_response, _ = _call_proxy(
+            http_base=http_base,
+            model=judge_model,
+            prompt=judge_prompt,
+            temperature=judge_temperature,
+            num_ctx=4096,
+            timeout=180,
+            source=source_tag,
+            priority=2,
+        )
+        _judge_fail: dict = {
+            "transfer": 1,
+            "precision": 1,
+            "actionability": 1,
+            "reasoning": "",
+            "judge_reasoning": "",
+            "error": "judge_failed",
+        }
+        scores = parse_judge_response(raw_response) if raw_response is not None else _judge_fail
+
     judge_time_s = round(time.monotonic() - t0, 1)
-    _judge_fail: dict = {
-        "transfer": 1,
-        "precision": 1,
-        "actionability": 1,
-        "reasoning": "",
-        "judge_reasoning": "",
-        "error": "judge_failed",
-    }
-    scores = parse_judge_response(raw_response) if raw_response is not None else _judge_fail
     insert_eval_result(
         db,
         run_id=run_id,
@@ -1515,6 +2193,8 @@ def _judge_one_target(
         source_item_id=source_item_id,
         target_item_id=str(target["id"]),
         is_same_cluster=1 if is_same else 0,
+        target_cluster_id=str(target.get("cluster_id") or target.get("cluster_seed") or ""),
+        source_cluster_id=source_cluster_id,
         row_type="judge",
         principle=principle,
         judge_reasoning=scores.get("judge_reasoning"),
@@ -1523,7 +2203,29 @@ def _judge_one_target(
         score_action=scores["actionability"],
         generation_time_s=judge_time_s,
         error=scores.get("error"),
+        **extra_cols,
     )
+
+
+def _fetch_v2_scored_rows(db: Database, run_id: int) -> list[dict]:
+    """Fetch V2 scored rows with paired/Bayesian columns for tournament and fusion metrics."""
+    with db._lock:
+        conn = db._connect()
+        return [
+            dict(r)
+            for r in conn.execute(
+                """SELECT variant, is_same_cluster AS is_same_group,
+                          score_paired_winner, score_posterior AS posterior,
+                          score_embedding_sim, score_mechanism_match,
+                          mechanism_trigger, mechanism_target, mechanism_fix,
+                          principle
+                   FROM eval_results
+                   WHERE run_id = ?
+                     AND row_type = 'judge'
+                     AND error IS NULL""",
+                (run_id,),
+            ).fetchall()
+        ]
 
 
 def _fetch_scored_rows(db: Database, run_id: int) -> list[dict]:
@@ -1536,7 +2238,8 @@ def _fetch_scored_rows(db: Database, run_id: int) -> list[dict]:
                 """SELECT variant, is_same_cluster,
                           COALESCE(override_score_transfer, score_transfer) AS effective_score_transfer,
                           COALESCE(override_score_precision, score_precision) AS effective_score_precision,
-                          COALESCE(override_score_action, score_action) AS effective_score_action
+                          COALESCE(override_score_action, score_action) AS effective_score_action,
+                          source_cluster_id, target_cluster_id
                    FROM eval_results
                    WHERE run_id = ?
                      AND row_type = 'judge'
@@ -1619,6 +2322,7 @@ def run_eval_judge(
     data_source_token: str = _get_eval_setting(db, "eval.data_source_token", "")
     same_cluster_targets: int = int(_get_eval_setting(db, "eval.same_cluster_targets", 2))
     diff_cluster_targets: int = int(_get_eval_setting(db, "eval.diff_cluster_targets", 2))
+    judge_mode: str = run.get("judge_mode") or "rubric"
 
     update_eval_run(db, run_id, stage="fetch_targets")
 
@@ -1679,9 +2383,12 @@ def run_eval_judge(
             diff_count=diff_cluster_targets,
         )
 
-        for is_same, target_list in [(True, same_targets), (False, diff_targets)]:
-            for target in target_list:
-                judge_pairs.append([source_item_id, str(target["id"])])
+        if judge_mode in ("tournament", "bayesian"):
+            # Paired modes: zip same + diff targets into pairs
+            for i in range(min(len(same_targets), len(diff_targets))):
+                same_t = same_targets[i]
+                diff_t = diff_targets[i]
+                judge_pairs.append([source_item_id, str(same_t["id"])])
                 try:
                     _judge_one_target(
                         db=db,
@@ -1689,15 +2396,17 @@ def run_eval_judge(
                         variant=gen_result["variant"],
                         source_item_id=source_item_id,
                         principle=principle,
-                        target=target,
-                        is_same=is_same,
+                        target=same_t,
+                        is_same=True,
                         judge_model=judge_model,
                         judge_temperature=judge_temperature,
                         source_tag=source_tag,
                         http_base=http_base,
+                        source_cluster_id=source_cid,
+                        judge_mode=judge_mode,
+                        diff_target=diff_t,
                     )
                 except _ProxyDownError as exc:
-                    # Proxy is unreachable — service is restarting. Abort cleanly.
                     _log.warning("run_eval_judge: proxy down — aborting run_id=%d: %s", run_id, exc)
                     update_eval_run(
                         db,
@@ -1707,6 +2416,37 @@ def run_eval_judge(
                         completed_at=datetime.now(UTC).isoformat(),
                     )
                     return
+        else:
+            # Standard rubric/binary modes: judge each target independently
+            for is_same, target_list in [(True, same_targets), (False, diff_targets)]:
+                for target in target_list:
+                    judge_pairs.append([source_item_id, str(target["id"])])
+                    try:
+                        _judge_one_target(
+                            db=db,
+                            run_id=run_id,
+                            variant=gen_result["variant"],
+                            source_item_id=source_item_id,
+                            principle=principle,
+                            target=target,
+                            is_same=is_same,
+                            judge_model=judge_model,
+                            judge_temperature=judge_temperature,
+                            source_tag=source_tag,
+                            http_base=http_base,
+                            source_cluster_id=source_cid,
+                            judge_mode=judge_mode,
+                        )
+                    except _ProxyDownError as exc:
+                        _log.warning("run_eval_judge: proxy down — aborting run_id=%d: %s", run_id, exc)
+                        update_eval_run(
+                            db,
+                            run_id,
+                            status="failed",
+                            error="proxy_unavailable",
+                            completed_at=datetime.now(UTC).isoformat(),
+                        )
+                        return
 
     # Persist exact (source_item_id, target_item_id) pairs for reproducibility.
     # This overwrites the coarse source-only item_ids stored during generation.
@@ -1715,8 +2455,18 @@ def run_eval_judge(
         _log.info("run_eval_judge: persisted %d judge pairs for run_id=%d", len(judge_pairs), run_id)
 
     scored_rows = _fetch_scored_rows(db, run_id)
-    metrics = compute_metrics(scored_rows)
-    winner = max(metrics.keys(), key=lambda v: metrics[v]["f1"]) if metrics else None
+    if judge_mode in ("tournament", "bayesian"):
+        # V2 metrics: use paired/Bayesian metrics instead of F1
+        v2_rows = _fetch_v2_scored_rows(db, run_id)
+        metrics = compute_tournament_metrics(v2_rows) if judge_mode == "tournament" else {}
+        bayesian_m = compute_bayesian_metrics(v2_rows) if judge_mode == "bayesian" else {}
+        # Merge bayesian AUC into metrics for winner selection
+        for vid, bm in bayesian_m.items():
+            metrics.setdefault(vid, {}).update(bm)
+        winner = max(metrics.keys(), key=lambda v: metrics[v].get("auc", 0)) if metrics else None
+    else:
+        metrics = compute_metrics(scored_rows)
+        winner = max(metrics.keys(), key=lambda v: metrics[v]["f1"]) if metrics else None
     report_md = render_report(run_id, metrics, db)
 
     # Persist full metrics snapshot and completion timestamp for trend analysis

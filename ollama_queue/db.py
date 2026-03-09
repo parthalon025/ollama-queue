@@ -138,6 +138,19 @@ class Database:
         self._add_column_if_missing(conn, "eval_runs", "created_at", "TEXT")
         self._add_column_if_missing(conn, "eval_runs", "data_source_token", "TEXT")
         self._add_column_if_missing(conn, "eval_runs", "analysis_md", "TEXT")
+        self._add_column_if_missing(conn, "eval_prompt_templates", "is_contrastive", "INTEGER DEFAULT 0")
+        self._add_column_if_missing(conn, "eval_prompt_templates", "is_multi_stage", "INTEGER DEFAULT 0")
+        self._add_column_if_missing(conn, "eval_results", "target_cluster_id", "TEXT")
+        self._add_column_if_missing(conn, "eval_results", "source_cluster_id", "TEXT")
+        # Eval V2: Bayesian fusion columns
+        self._add_column_if_missing(conn, "eval_results", "score_paired_winner", "TEXT")  # 'same'/'diff'/'neither'
+        self._add_column_if_missing(conn, "eval_results", "score_mechanism_match", "INTEGER")  # 0/1/NULL
+        self._add_column_if_missing(conn, "eval_results", "score_embedding_sim", "REAL")
+        self._add_column_if_missing(conn, "eval_results", "score_posterior", "REAL")
+        self._add_column_if_missing(conn, "eval_results", "mechanism_trigger", "TEXT")
+        self._add_column_if_missing(conn, "eval_results", "mechanism_target", "TEXT")
+        self._add_column_if_missing(conn, "eval_results", "mechanism_fix", "TEXT")
+        self._add_column_if_missing(conn, "eval_runs", "judge_mode", "TEXT DEFAULT 'rubric'")
 
     def initialize(self) -> None:
         """Create all tables and seed defaults."""
@@ -283,14 +296,16 @@ class Database:
             );
 
             CREATE TABLE IF NOT EXISTS eval_prompt_templates (
-                id           TEXT PRIMARY KEY,
-                label        TEXT NOT NULL,
-                instruction  TEXT NOT NULL,
-                format_spec  TEXT,
-                examples     TEXT,
-                is_chunked   INTEGER DEFAULT 0,
-                is_system    INTEGER DEFAULT 1,
-                created_at   TEXT NOT NULL
+                id              TEXT PRIMARY KEY,
+                label           TEXT NOT NULL,
+                instruction     TEXT NOT NULL,
+                format_spec     TEXT,
+                examples        TEXT,
+                is_chunked      INTEGER DEFAULT 0,
+                is_contrastive  INTEGER DEFAULT 0,
+                is_multi_stage  INTEGER DEFAULT 0,
+                is_system       INTEGER DEFAULT 1,
+                created_at      TEXT NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS eval_variants (
@@ -351,6 +366,8 @@ class Database:
                 judge_reasoning          TEXT,
                 target_item_id           TEXT NOT NULL,
                 is_same_cluster          INTEGER NOT NULL,
+                target_cluster_id        TEXT,
+                source_cluster_id        TEXT,
                 row_type                 TEXT NOT NULL DEFAULT 'judge',
                 score_transfer           INTEGER,
                 score_precision          INTEGER,
@@ -476,13 +493,44 @@ class Database:
                 (tmpl_id, label, instruction, is_chunked, is_system, created_at),
             )
 
-        # 5 system variants A-E
+        # Contrastive template — shows same-cluster AND diff-cluster items to force specificity
+        conn.execute(
+            """INSERT OR IGNORE INTO eval_prompt_templates
+               (id, label, instruction, is_chunked, is_contrastive, is_system, created_at)
+               VALUES (?, ?, ?, 0, 1, 1, ?)""",
+            (
+                "contrastive",
+                "Compare and distinguish",
+                "You are extracting a principle that distinguishes one failure pattern from others. "
+                "You will see examples from the SAME failure cluster and from DIFFERENT clusters.",
+                created_at,
+            ),
+        )
+
+        # Contrastive + self-critique template
+        conn.execute(
+            """INSERT OR IGNORE INTO eval_prompt_templates
+               (id, label, instruction, is_chunked, is_contrastive, is_multi_stage, is_system, created_at)
+               VALUES (?, ?, ?, 0, 1, 1, 1, ?)""",
+            (
+                "contrastive-multistage",
+                "Compare, distinguish, then self-critique",
+                "You are extracting a principle that distinguishes one failure pattern from others. "
+                "You will see examples from the SAME failure cluster and from DIFFERENT clusters.",
+                created_at,
+            ),
+        )
+
+        # System variants A-H
         variants = [
             ("A", "Baseline", "fewshot", "deepseek-r1:8b", 0.7, 4096, 0, 1),
             ("B", "Causal reasoning", "zero-shot-causal", "deepseek-r1:8b", 0.6, 8192, 0, 1),
             ("C", "Grouped context", "chunked", "deepseek-r1:8b", 0.6, 8192, 0, 1),
             ("D", "Causal + large model", "zero-shot-causal", "qwen3:14b", 0.6, 8192, 1, 1),
             ("E", "Grouped + large model", "chunked", "qwen3:14b", 0.6, 8192, 1, 1),
+            ("F", "Contrastive", "contrastive", "deepseek-r1:8b", 0.6, 8192, 1, 1),
+            ("G", "Contrastive + large model", "contrastive", "qwen3:14b", 0.6, 8192, 1, 1),
+            ("H", "Contrastive + self-critique", "contrastive-multistage", "deepseek-r1:8b", 0.6, 8192, 1, 1),
         ]
         for var_id, label, tmpl_id, model, temperature, num_ctx, is_recommended, is_system in variants:
             conn.execute(

@@ -924,3 +924,200 @@ class TestPromoteEvalRunEndpoint:
         with patch("ollama_queue.eval_engine.httpx.post", side_effect=httpx.ConnectError("refused")):
             resp = client.post(f"/api/eval/runs/{run_id}/promote", json={})
         assert resp.status_code == 502
+
+
+# ---------------------------------------------------------------------------
+# Judge mode API tests (Task 18)
+# ---------------------------------------------------------------------------
+
+
+class TestJudgeModeAPI:
+    """Tests for judge_mode parameter in eval run API endpoints."""
+
+    def test_post_accepts_judge_mode(self, client_and_db):
+        """POST /api/eval/runs accepts judge_mode in body."""
+        client, db = client_and_db
+        _make_variant(db, "A")
+        with patch("ollama_queue.eval_engine.run_eval_session"):
+            resp = client.post(
+                "/api/eval/runs",
+                json={"variant_id": "A", "judge_mode": "bayesian"},
+            )
+        assert resp.status_code == 201
+        run_id = resp.json()["run_id"]
+
+        # Verify stored in DB
+        from ollama_queue.eval_engine import get_eval_run
+
+        run = get_eval_run(db, run_id)
+        assert run["judge_mode"] == "bayesian"
+
+    def test_post_default_judge_mode_is_bayesian(self, client_and_db):
+        """POST /api/eval/runs defaults to 'bayesian' when judge_mode not specified."""
+        client, db = client_and_db
+        _make_variant(db, "A")
+        with patch("ollama_queue.eval_engine.run_eval_session"):
+            resp = client.post(
+                "/api/eval/runs",
+                json={"variant_id": "A"},
+            )
+        assert resp.status_code == 201
+        run_id = resp.json()["run_id"]
+
+        from ollama_queue.eval_engine import get_eval_run
+
+        run = get_eval_run(db, run_id)
+        assert run["judge_mode"] == "bayesian"
+
+    def test_post_rejects_invalid_judge_mode(self, client_and_db):
+        """POST /api/eval/runs returns 400 for invalid judge_mode."""
+        client, db = client_and_db
+        _make_variant(db, "A")
+        resp = client.post(
+            "/api/eval/runs",
+            json={"variant_id": "A", "judge_mode": "invalid"},
+        )
+        assert resp.status_code == 400
+        assert "judge_mode" in resp.json()["detail"]
+
+    def test_get_detail_returns_judge_mode(self, client_and_db):
+        """GET /api/eval/runs/{id} returns judge_mode in response."""
+        client, db = client_and_db
+        run_id = create_eval_run(db, variant_id="A")
+        update_eval_run(db, run_id, judge_mode="tournament")
+        resp = client.get(f"/api/eval/runs/{run_id}")
+        assert resp.status_code == 200
+        assert resp.json()["judge_mode"] == "tournament"
+
+    def test_list_returns_judge_mode(self, client_and_db):
+        """GET /api/eval/runs includes judge_mode in list response."""
+        client, db = client_and_db
+        run_id = create_eval_run(db, variant_id="A")
+        update_eval_run(db, run_id, judge_mode="bayesian")
+        resp = client.get("/api/eval/runs")
+        assert resp.status_code == 200
+        runs = resp.json()
+        assert len(runs) >= 1
+        assert runs[0]["judge_mode"] == "bayesian"
+
+    def test_trends_includes_judge_mode(self, client_and_db):
+        """GET /api/eval/trends includes judge_mode in run data."""
+        client, db = client_and_db
+        run_id = create_eval_run(db, variant_id="A")
+        metrics = {"A": {"f1": 0.8, "recall": 0.9, "precision": 0.7, "actionability": 3.5, "sample_count": 10}}
+        update_eval_run(
+            db,
+            run_id,
+            status="complete",
+            metrics=json.dumps(metrics),
+            judge_mode="bayesian",
+        )
+        resp = client.get("/api/eval/trends")
+        assert resp.status_code == 200
+        data = resp.json()
+        variant_data = data["variants"].get("A")
+        assert variant_data is not None
+        assert variant_data["runs"][0]["judge_mode"] == "bayesian"
+
+    def test_all_valid_judge_modes_accepted(self, client_and_db):
+        """All four valid judge modes are accepted by POST."""
+        client, db = client_and_db
+        _make_variant(db, "A")
+        for mode in ("rubric", "binary", "tournament", "bayesian"):
+            with patch("ollama_queue.eval_engine.run_eval_session"):
+                resp = client.post(
+                    "/api/eval/runs",
+                    json={"variant_id": "A", "judge_mode": mode},
+                )
+            assert resp.status_code == 201, f"Mode {mode} was rejected"
+
+
+# ---------------------------------------------------------------------------
+# GET /api/eval/runs/{id}/confusion
+# ---------------------------------------------------------------------------
+
+
+class TestConfusionMatrixEndpoint:
+    def test_404_for_missing_run(self, client):
+        resp = client.get("/api/eval/runs/999/confusion")
+        assert resp.status_code == 404
+
+    def test_empty_when_no_cluster_data(self, client_and_db):
+        """Returns empty matrix when no results have source_cluster_id."""
+        client, db = client_and_db
+        run_id = _make_run(db, status="complete")
+        resp = client.get(f"/api/eval/runs/{run_id}/confusion")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["matrix"] == {}
+        assert data["flagged"] == []
+        assert data["clusters"] == []
+
+    def test_returns_matrix_with_cluster_data(self, client_and_db):
+        """Returns populated confusion matrix when results have cluster IDs."""
+        client, db = client_and_db
+        run_id = _make_run(db, status="complete")
+        # Same-cluster pair: source=A, target=A, high transfer
+        insert_eval_result(
+            db,
+            run_id=run_id,
+            variant="F",
+            source_item_id="1",
+            target_item_id="2",
+            is_same_cluster=1,
+            row_type="judge",
+            score_transfer=5,
+            score_precision=4,
+            score_action=4,
+            source_cluster_id="A",
+            target_cluster_id="A",
+        )
+        # Diff-cluster pair: source=A, target=B, low transfer
+        insert_eval_result(
+            db,
+            run_id=run_id,
+            variant="F",
+            source_item_id="1",
+            target_item_id="3",
+            is_same_cluster=0,
+            row_type="judge",
+            score_transfer=1,
+            score_precision=4,
+            score_action=3,
+            source_cluster_id="A",
+            target_cluster_id="B",
+        )
+        resp = client.get(f"/api/eval/runs/{run_id}/confusion")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "A" in data["matrix"]
+        assert data["matrix"]["A"]["A"]["avg_transfer"] == 5.0
+        assert data["matrix"]["A"]["B"]["avg_transfer"] == 1.0
+        assert data["flagged"] == []  # no cross-cluster avg >= 3.0
+        assert sorted(data["clusters"]) == ["A", "B"]
+
+    def test_flags_high_cross_cluster_transfer(self, client_and_db):
+        """Flags cross-cluster pairs with avg transfer >= 3.0."""
+        client, db = client_and_db
+        run_id = _make_run(db, status="complete")
+        # Diff-cluster pair with high transfer (principle bleed)
+        insert_eval_result(
+            db,
+            run_id=run_id,
+            variant="F",
+            source_item_id="1",
+            target_item_id="3",
+            is_same_cluster=0,
+            row_type="judge",
+            score_transfer=4,
+            score_precision=2,
+            score_action=2,
+            source_cluster_id="A",
+            target_cluster_id="B",
+        )
+        resp = client.get(f"/api/eval/runs/{run_id}/confusion")
+        data = resp.json()
+        assert len(data["flagged"]) == 1
+        assert data["flagged"][0]["source"] == "A"
+        assert data["flagged"][0]["target"] == "B"
+        assert data["flagged"][0]["avg_transfer"] == 4.0
