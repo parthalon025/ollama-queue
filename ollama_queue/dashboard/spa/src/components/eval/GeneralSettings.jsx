@@ -82,6 +82,78 @@ const IMPROVEMENT_DEFS = [
   },
 ];
 
+// What it shows: Bayesian-specific auto-promote thresholds (AUC + posterior separation).
+// Decision it drives: User sets the bar for how good a Bayesian run must be before auto-promoting.
+const BAYESIAN_PROMOTE_DEFS = [
+  {
+    key:      'eval.auc_threshold',
+    transKey: 'auc_threshold',
+    type:     'number',
+    min:      0.0,
+    max:      1.0,
+    step:     0.05,
+    parse:    parseFloat,
+    validate: v => v >= 0.0 && v <= 1.0 ? '' : 'Must be 0.0–1.0',
+    default:  0.85,
+  },
+  {
+    key:      'eval.min_posterior_separation',
+    transKey: 'min_posterior_separation',
+    type:     'number',
+    min:      0.0,
+    max:      1.0,
+    step:     0.05,
+    parse:    parseFloat,
+    validate: v => v >= 0.0 && v <= 1.0 ? '' : 'Must be 0.0–1.0',
+    default:  0.4,
+  },
+];
+
+// What it shows: Bayesian pipeline settings — default judge mode, prior probability, pairs per principle.
+// Decision it drives: User controls the Bayesian fusion model's behavior.
+const BAYESIAN_FIELD_DEFS = [
+  {
+    key:      'eval.prior_probability',
+    type:     'number',
+    min:      0.0,
+    max:      1.0,
+    step:     0.05,
+    parse:    parseFloat,
+    validate: v => v >= 0.0 && v <= 1.0 ? '' : 'Must be 0.0–1.0',
+    default:  0.25,
+    label:    'Prior Transfer Probability',
+    tooltip:  'Prior probability that a principle transfers to a new category. Lower = more conservative. Default 0.25 means we assume 25% of principles transfer.',
+  },
+  {
+    key:      'eval.pairs_per_principle',
+    type:     'number',
+    min:      1,
+    max:      20,
+    step:     1,
+    parse:    parseInt,
+    validate: v => v >= 1 && v <= 20 ? '' : 'Must be 1–20',
+    default:  4,
+    label:    'Comparison Pairs per Principle',
+    tooltip:  'How many comparison pairs to generate per principle. More pairs = slower but more reliable scoring.',
+  },
+];
+
+// Informational only — shows the log-likelihood ratios used by the Bayesian fusion model
+const SIGNAL_WEIGHTS = [
+  { name: 'Paired winner',         positive: '+2.5', negative: '-2.5' },
+  { name: 'Mechanism match',       positive: '+2.0', negative: '-1.5' },
+  { name: 'Embedding similarity',  positive: '+1.5', negative: '-1.0' },
+  { name: 'Scope overlap',         positive: '+1.0', negative: '-0.5' },
+];
+
+// Judge mode options for the default selector
+const JUDGE_MODE_OPTIONS = [
+  { value: 'bayesian', label: 'Bayesian Fusion (recommended)' },
+  { value: 'tournament', label: 'Paired Tournament' },
+  { value: 'binary', label: 'Binary YES/NO' },
+  { value: 'rubric', label: 'Rubric 1-5 (legacy)' },
+];
+
 export default function GeneralSettings() {
   // Read .value at top of body to subscribe to signal changes
   const settings = evalSettings.value;
@@ -98,6 +170,14 @@ export default function GeneralSettings() {
     IMPROVEMENT_DEFS.forEach(def => {
       init[def.key] = settings[def.key] != null ? def.parse(settings[def.key]) : def.default;
     });
+    BAYESIAN_PROMOTE_DEFS.forEach(def => {
+      init[def.key] = settings[def.key] != null ? def.parse(settings[def.key]) : def.default;
+    });
+    BAYESIAN_FIELD_DEFS.forEach(def => {
+      init[def.key] = settings[def.key] != null ? def.parse(settings[def.key]) : def.default;
+    });
+    // Judge mode is a string select, not a numeric field
+    init['eval.judge_mode'] = settings['eval.judge_mode'] ?? 'bayesian';
     return init;
   });
 
@@ -126,6 +206,14 @@ export default function GeneralSettings() {
       const msg = def.validate(values[def.key]);
       if (msg) { newErrors[def.key] = msg; anyError = true; }
     });
+    BAYESIAN_PROMOTE_DEFS.forEach(def => {
+      const msg = def.validate(values[def.key]);
+      if (msg) { newErrors[def.key] = msg; anyError = true; }
+    });
+    BAYESIAN_FIELD_DEFS.forEach(def => {
+      const msg = def.validate(values[def.key]);
+      if (msg) { newErrors[def.key] = msg; anyError = true; }
+    });
     setErrors(newErrors);
     if (anyError) return;
 
@@ -137,6 +225,9 @@ export default function GeneralSettings() {
       FIELD_DEFS.forEach(def => { payload[def.key] = values[def.key]; });
       TOGGLE_DEFS.forEach(def => { payload[def.key] = values[def.key]; });
       IMPROVEMENT_DEFS.forEach(def => { payload[def.key] = values[def.key]; });
+      BAYESIAN_PROMOTE_DEFS.forEach(def => { payload[def.key] = values[def.key]; });
+      BAYESIAN_FIELD_DEFS.forEach(def => { payload[def.key] = values[def.key]; });
+      payload['eval.judge_mode'] = values['eval.judge_mode'];
       payload['eval.analysis_model'] = analysisModel;
       await saveEvalSettings(payload);
       setSaveOk(true);
@@ -232,6 +323,106 @@ export default function GeneralSettings() {
             </label>
           );
         })}
+        {/* Bayesian-specific auto-promote thresholds */}
+        {BAYESIAN_PROMOTE_DEFS.map(def => {
+          const trans = T[def.transKey] || { label: def.transKey, tooltip: null };
+          return (
+            <label key={def.key} class="eval-settings-label">
+              <span>
+                {trans.label}
+                {trans.tooltip && (
+                  <span class="eval-tooltip-trigger" title={trans.tooltip} aria-label={trans.tooltip}> ?</span>
+                )}
+              </span>
+              <input
+                class="t-input eval-settings-input"
+                type={def.type}
+                min={def.min}
+                max={def.max}
+                step={def.step}
+                value={values[def.key]}
+                onInput={evt => handleChange(def.key, evt.currentTarget.value, def)}
+              />
+              {errors[def.key] && (
+                <span class="eval-settings-error" role="alert">{errors[def.key]}</span>
+              )}
+            </label>
+          );
+        })}
+      </div>
+
+      {/* Bayesian settings — controls the fusion model's default behavior */}
+      <div style={{ marginTop: '1rem', borderTop: '1px solid var(--border-subtle)', paddingTop: '0.75rem' }}>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', marginBottom: '0.5rem' }}>
+          Bayesian settings
+        </div>
+
+        {/* Default judge mode */}
+        <label class="eval-settings-label">
+          <span>
+            Default Scoring Strategy
+            <span class="eval-tooltip-trigger" title="Which scoring strategy to use by default when starting new eval runs." aria-label="Which scoring strategy to use by default when starting new eval runs."> ?</span>
+          </span>
+          <select
+            class="t-input eval-settings-input"
+            value={values['eval.judge_mode']}
+            onChange={evt => setValues(prev => ({ ...prev, 'eval.judge_mode': evt.currentTarget.value }))}
+          >
+            {JUDGE_MODE_OPTIONS.map(opt => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+        </label>
+
+        {/* Numeric Bayesian fields */}
+        {BAYESIAN_FIELD_DEFS.map(def => (
+          <label key={def.key} class="eval-settings-label">
+            <span>
+              {def.label}
+              {def.tooltip && (
+                <span class="eval-tooltip-trigger" title={def.tooltip} aria-label={def.tooltip}> ?</span>
+              )}
+            </span>
+            <input
+              class="t-input eval-settings-input"
+              type={def.type}
+              min={def.min}
+              max={def.max}
+              step={def.step}
+              value={values[def.key]}
+              onInput={evt => handleChange(def.key, evt.currentTarget.value, def)}
+            />
+            {errors[def.key] && (
+              <span class="eval-settings-error" role="alert">{errors[def.key]}</span>
+            )}
+          </label>
+        ))}
+
+        {/* Signal weights — read-only informational display */}
+        <div style={{ marginTop: '0.75rem' }}>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', marginBottom: '0.25rem' }}>
+            Signal weights (read-only)
+            <span class="eval-tooltip-trigger" title="Log-likelihood ratios used by the Bayesian fusion model. These are fixed — not editable." aria-label="Log-likelihood ratios used by the Bayesian fusion model. These are fixed — not editable."> ?</span>
+          </div>
+          <table style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-secondary)', borderCollapse: 'collapse', width: '100%' }}>
+            <thead>
+              <tr>
+                <th style={{ textAlign: 'left', padding: '2px 8px', color: 'var(--text-tertiary)' }}>Signal</th>
+                <th style={{ textAlign: 'center', padding: '2px 8px', color: 'var(--status-healthy)' }}>Match</th>
+                <th style={{ textAlign: 'center', padding: '2px 8px', color: 'var(--status-error)' }}>No match</th>
+              </tr>
+            </thead>
+            <tbody>
+              {SIGNAL_WEIGHTS.map(sw => (
+                <tr key={sw.name}>
+                  <td style={{ padding: '2px 8px' }}>{sw.name}</td>
+                  <td style={{ textAlign: 'center', padding: '2px 8px', color: 'var(--status-healthy)' }}>{sw.positive}</td>
+                  <td style={{ textAlign: 'center', padding: '2px 8px', color: 'var(--status-error)' }}>{sw.negative}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* Analysis model */}
