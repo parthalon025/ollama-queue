@@ -151,9 +151,11 @@ export default function VariantRow({ variant }) {
             </div>
           </div>
 
-          {/* Quality sparkline placeholder */}
+          {/* Best quality score from latest_f1 prop */}
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', marginBottom: '0.5rem' }}>
-            Quality over time: ▁▃▅▇█ (run history below)
+            {latest_f1 != null
+              ? `Best quality score: ${Math.round(latest_f1 * 100)}% — expand below to see full run history`
+              : 'No runs yet — include this config in a test run to see quality scores'}
           </div>
 
           {/* Action buttons */}
