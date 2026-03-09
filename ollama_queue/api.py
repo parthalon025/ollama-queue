@@ -983,11 +983,18 @@ def create_app(db: Database) -> FastAPI:
 
     @app.get("/api/eval/variants")
     def list_eval_variants():
-        """Returns all eval_variants rows with latest_f1 from the most recent complete run."""
-        conn = db._connect()
-        variants = [dict(r) for r in conn.execute("SELECT * FROM eval_variants ORDER BY created_at").fetchall()]
-        # Compute latest_f1 per variant from eval_runs.metrics (JSON column)
-        runs = conn.execute("SELECT metrics FROM eval_runs WHERE status = 'complete' ORDER BY id ASC").fetchall()
+        """Returns all eval_variants rows with latest quality score from the most recent complete run.
+
+        Uses AUC for bayesian/tournament runs, F1 for legacy runs. The key is always
+        ``latest_f1`` for backward compatibility with existing SPA consumers.
+        """
+        with db._lock:
+            conn = db._connect()
+            variants = [dict(r) for r in conn.execute("SELECT * FROM eval_variants ORDER BY created_at").fetchall()]
+            # Compute latest quality per variant from eval_runs.metrics (JSON column)
+            runs = conn.execute(
+                "SELECT metrics, judge_mode FROM eval_runs WHERE status = 'complete' ORDER BY id ASC"
+            ).fetchall()
         latest_f1: dict[str, float | None] = {}
         for run_row in runs:
             if not run_row["metrics"]:
@@ -996,9 +1003,14 @@ def create_app(db: Database) -> FastAPI:
                 metrics = json.loads(run_row["metrics"])
             except (ValueError, TypeError):
                 continue
+            is_bayesian = run_row["judge_mode"] in ("bayesian", "tournament")
             for var_id, var_metrics in metrics.items():
-                if isinstance(var_metrics, dict) and "f1" in var_metrics:
-                    latest_f1[var_id] = var_metrics["f1"]
+                if not isinstance(var_metrics, dict):
+                    continue
+                # Use AUC for bayesian/tournament runs, F1 for legacy
+                quality = var_metrics.get("auc") if is_bayesian else var_metrics.get("f1")
+                if quality is not None:
+                    latest_f1[var_id] = quality
         for v in variants:
             v["latest_f1"] = latest_f1.get(v["id"])
         return variants

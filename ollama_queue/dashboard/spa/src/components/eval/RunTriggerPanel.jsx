@@ -209,7 +209,7 @@ export default function RunTriggerPanel({ defaultCollapsed }) {
                     ) : null}
                     {variant.latest_f1 != null && (
                       <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', marginLeft: 'auto' }}>
-                        {EVAL_TRANSLATIONS.f1.label}: {Math.round(variant.latest_f1 * 100)}%
+                        Score: {Math.round(variant.latest_f1 * 100)}%
                       </span>
                     )}
                   </label>
@@ -231,7 +231,7 @@ export default function RunTriggerPanel({ defaultCollapsed }) {
                     </span>
                     {variant.latest_f1 != null && (
                       <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', marginLeft: 'auto' }}>
-                        {EVAL_TRANSLATIONS.f1.label}: {Math.round(variant.latest_f1 * 100)}%
+                        Score: {Math.round(variant.latest_f1 * 100)}%
                       </span>
                     )}
                   </label>

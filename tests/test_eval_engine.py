@@ -1424,6 +1424,77 @@ class TestCheckAutoPromoteBayesian:
             check_auto_promote(db, run_id, "http://localhost:7683")
         mock_promote.assert_not_called()
 
+    def test_bayesian_stability_window_checks_auc(self, tmp_path):
+        """Bayesian stability gate checks AUC (not F1) across historical runs."""
+        import json
+
+        from ollama_queue.db import Database
+
+        db = Database(str(tmp_path / "test.db"))
+        db.initialize()
+        db.set_setting("eval.auto_promote", True)
+        db.set_setting("eval.auc_threshold", 0.80)
+        db.set_setting("eval.min_posterior_separation", 0.3)
+        db.set_setting("eval.auto_promote_min_improvement", 0.05)
+        db.set_setting("eval.error_budget", 0.30)
+        db.set_setting("eval.stability_window", 2)  # need 2 passing runs
+
+        bayesian_metrics = json.dumps(
+            {"A": {"auc": 0.90, "separation": 0.50, "same_mean_posterior": 0.85, "diff_mean_posterior": 0.35}}
+        )
+        # Create two complete runs with same winner + passing AUC
+        for _ in range(2):
+            rid = create_eval_run(db, variant_id="A")
+            update_eval_run(
+                db,
+                rid,
+                status="complete",
+                winner_variant="A",
+                metrics=bayesian_metrics,
+                item_count=10,
+                error_budget=0.30,
+                judge_mode="bayesian",
+            )
+
+        with patch("ollama_queue.eval_engine.do_promote_eval_run") as mock_promote:
+            mock_promote.return_value = {"ok": True, "run_id": rid, "variant_id": "A", "label": "Config A"}
+            check_auto_promote(db, rid, "http://localhost:7683")
+        mock_promote.assert_called_once_with(db, rid)
+
+    def test_bayesian_stability_window_rejects_insufficient_runs(self, tmp_path):
+        """Bayesian stability gate rejects when not enough runs in window."""
+        import json
+
+        from ollama_queue.db import Database
+
+        db = Database(str(tmp_path / "test.db"))
+        db.initialize()
+        db.set_setting("eval.auto_promote", True)
+        db.set_setting("eval.auc_threshold", 0.80)
+        db.set_setting("eval.min_posterior_separation", 0.3)
+        db.set_setting("eval.auto_promote_min_improvement", 0.05)
+        db.set_setting("eval.error_budget", 0.30)
+        db.set_setting("eval.stability_window", 3)  # need 3 runs but only 1 exists
+
+        run_id = create_eval_run(db, variant_id="A")
+        metrics = json.dumps(
+            {"A": {"auc": 0.90, "separation": 0.50, "same_mean_posterior": 0.85, "diff_mean_posterior": 0.35}}
+        )
+        update_eval_run(
+            db,
+            run_id,
+            status="complete",
+            winner_variant="A",
+            metrics=metrics,
+            item_count=10,
+            error_budget=0.30,
+            judge_mode="bayesian",
+        )
+
+        with patch("ollama_queue.eval_engine.do_promote_eval_run") as mock_promote:
+            check_auto_promote(db, run_id, "http://localhost:7683")
+        mock_promote.assert_not_called()
+
     def test_legacy_still_uses_f1(self, tmp_path):
         """Legacy auto-promote (rubric/binary) still uses F1, not AUC."""
         from ollama_queue.db import Database
