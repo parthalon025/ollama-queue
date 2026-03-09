@@ -1030,3 +1030,94 @@ class TestJudgeModeAPI:
                     json={"variant_id": "A", "judge_mode": mode},
                 )
             assert resp.status_code == 201, f"Mode {mode} was rejected"
+
+
+# ---------------------------------------------------------------------------
+# GET /api/eval/runs/{id}/confusion
+# ---------------------------------------------------------------------------
+
+
+class TestConfusionMatrixEndpoint:
+    def test_404_for_missing_run(self, client):
+        resp = client.get("/api/eval/runs/999/confusion")
+        assert resp.status_code == 404
+
+    def test_empty_when_no_cluster_data(self, client_and_db):
+        """Returns empty matrix when no results have source_cluster_id."""
+        client, db = client_and_db
+        run_id = _make_run(db, status="complete")
+        resp = client.get(f"/api/eval/runs/{run_id}/confusion")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["matrix"] == {}
+        assert data["flagged"] == []
+        assert data["clusters"] == []
+
+    def test_returns_matrix_with_cluster_data(self, client_and_db):
+        """Returns populated confusion matrix when results have cluster IDs."""
+        client, db = client_and_db
+        run_id = _make_run(db, status="complete")
+        # Same-cluster pair: source=A, target=A, high transfer
+        insert_eval_result(
+            db,
+            run_id=run_id,
+            variant="F",
+            source_item_id="1",
+            target_item_id="2",
+            is_same_cluster=1,
+            row_type="judge",
+            score_transfer=5,
+            score_precision=4,
+            score_action=4,
+            source_cluster_id="A",
+            target_cluster_id="A",
+        )
+        # Diff-cluster pair: source=A, target=B, low transfer
+        insert_eval_result(
+            db,
+            run_id=run_id,
+            variant="F",
+            source_item_id="1",
+            target_item_id="3",
+            is_same_cluster=0,
+            row_type="judge",
+            score_transfer=1,
+            score_precision=4,
+            score_action=3,
+            source_cluster_id="A",
+            target_cluster_id="B",
+        )
+        resp = client.get(f"/api/eval/runs/{run_id}/confusion")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "A" in data["matrix"]
+        assert data["matrix"]["A"]["A"]["avg_transfer"] == 5.0
+        assert data["matrix"]["A"]["B"]["avg_transfer"] == 1.0
+        assert data["flagged"] == []  # no cross-cluster avg >= 3.0
+        assert sorted(data["clusters"]) == ["A", "B"]
+
+    def test_flags_high_cross_cluster_transfer(self, client_and_db):
+        """Flags cross-cluster pairs with avg transfer >= 3.0."""
+        client, db = client_and_db
+        run_id = _make_run(db, status="complete")
+        # Diff-cluster pair with high transfer (principle bleed)
+        insert_eval_result(
+            db,
+            run_id=run_id,
+            variant="F",
+            source_item_id="1",
+            target_item_id="3",
+            is_same_cluster=0,
+            row_type="judge",
+            score_transfer=4,
+            score_precision=2,
+            score_action=2,
+            source_cluster_id="A",
+            target_cluster_id="B",
+        )
+        resp = client.get(f"/api/eval/runs/{run_id}/confusion")
+        data = resp.json()
+        assert len(data["flagged"]) == 1
+        assert data["flagged"][0]["source"] == "A"
+        assert data["flagged"][0]["target"] == "B"
+        assert data["flagged"][0]["avg_transfer"] == 4.0

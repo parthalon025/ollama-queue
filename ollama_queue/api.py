@@ -1939,6 +1939,65 @@ def create_app(db: Database) -> FastAPI:
         _threading_analyze.Thread(target=_run_analysis, daemon=True).start()
         return {"ok": True, "run_id": run_id, "message": "Analysis started in background"}
 
+    @app.get("/api/eval/runs/{run_id}/confusion")
+    def get_eval_run_confusion(run_id: int):
+        """Returns cluster confusion matrix for a completed eval run.
+
+        # What it shows: Cross-cluster transfer score heatmap — which cluster pairs
+        #   have principle "bleed" where principles from one cluster falsely match another.
+        # Decision it drives: Identifies ambiguous cluster boundaries that need either
+        #   merging (if semantically similar) or more discriminative prompts.
+        """
+        from ollama_queue import eval_engine as _ee
+
+        run = _ee.get_eval_run(db, run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail=f"Eval run {run_id} not found")
+
+        with db._lock:
+            conn = db._connect()
+            rows = [
+                dict(r)
+                for r in conn.execute(
+                    """SELECT source_cluster_id, target_cluster_id,
+                              COALESCE(override_score_transfer, score_transfer) AS transfer,
+                              is_same_cluster
+                       FROM eval_results
+                       WHERE run_id = ? AND row_type = 'judge'
+                         AND score_transfer IS NOT NULL AND error IS NULL
+                         AND source_cluster_id IS NOT NULL
+                         AND target_cluster_id IS NOT NULL""",
+                    (run_id,),
+                ).fetchall()
+            ]
+
+        if not rows:
+            return {"matrix": {}, "flagged": [], "clusters": []}
+
+        # Build (source, target) → [transfer scores]
+        buckets: dict[str, dict[str, list[int]]] = {}
+        for r in rows:
+            src = r["source_cluster_id"]
+            tgt = r["target_cluster_id"]
+            buckets.setdefault(src, {}).setdefault(tgt, []).append(r["transfer"])
+
+        clusters = sorted({r["source_cluster_id"] for r in rows} | {r["target_cluster_id"] for r in rows})
+
+        matrix: dict[str, dict[str, dict]] = {}
+        flagged: list[dict] = []
+        for src in clusters:
+            matrix[src] = {}
+            for tgt in clusters:
+                scores = buckets.get(src, {}).get(tgt, [])
+                if scores:
+                    avg = round(sum(scores) / len(scores), 2)
+                    matrix[src][tgt] = {"avg_transfer": avg, "count": len(scores)}
+                    if src != tgt and avg >= 3.0:
+                        flagged.append({"source": src, "target": tgt, "avg_transfer": avg, "count": len(scores)})
+
+        flagged.sort(key=lambda x: -x["avg_transfer"])
+        return {"matrix": matrix, "flagged": flagged, "clusters": clusters}
+
     @app.get("/api/eval/runs/{run_id}/results")
     def get_eval_run_results(run_id: int, row_type: str | None = None):
         """Returns all eval_results rows for an eval run, with optional row_type filter.
