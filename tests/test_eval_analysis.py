@@ -169,6 +169,16 @@ class TestExtractFailureCases:
         assert fp["score_transfer"] == 5
         assert fp["principle"] == "always log errors"
 
+    def test_zero_score_treated_as_score_not_missing(self):
+        """score_transfer=0 should be treated as a real (negative) score, not as missing."""
+        rows = [
+            _make_row(is_same_cluster=1, score_transfer=0),
+        ]
+        failures = extract_failure_cases(rows)
+        assert len(failures) == 1
+        assert failures[0]["type"] == "fn"
+        assert failures[0]["score_transfer"] == 0
+
     def test_no_cluster_data_shows_low_scoring(self):
         """Returns low_confidence entries when is_same_cluster=None."""
         rows = [
