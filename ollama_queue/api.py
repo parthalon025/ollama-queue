@@ -1662,6 +1662,7 @@ def create_app(db: Database) -> FastAPI:
             "analysis_model",
             "auto_promote",
             "auto_promote_min_improvement",
+            "positive_threshold",
         }
 
         # Validation rules — validate ALL before writing any
@@ -1702,6 +1703,8 @@ def create_app(db: Database) -> FastAPI:
                 not isinstance(value, int | float) or not (0.0 <= float(value) <= 1.0)
             ):
                 validation_errors.append(f"auto_promote_min_improvement must be 0.0-1.0, got {value!r}")
+            elif bare_key == "positive_threshold" and (not isinstance(value, int) or not (1 <= value <= 5)):
+                validation_errors.append(f"positive_threshold must be an integer 1-5, got {value!r}")
 
         if validation_errors:
             raise HTTPException(status_code=422, detail=validation_errors)

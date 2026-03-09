@@ -78,6 +78,7 @@ EVAL_SETTINGS_DEFAULTS = {
     "eval.analysis_model": "",  # empty = fall back to judge model
     "eval.auto_promote": False,  # explicit opt-in only
     "eval.auto_promote_min_improvement": 0.05,  # min F1 delta over current production
+    "eval.positive_threshold": 3,  # score_transfer >= this counts as positive for F1 calc
 }
 
 
