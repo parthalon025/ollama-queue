@@ -1200,6 +1200,42 @@ def create_app(db: Database) -> FastAPI:
         row = _get_eval_variant(conn, new_id)
         return JSONResponse(content=row, status_code=201)
 
+    @app.get("/api/eval/variants/stability")
+    def get_variant_stability(data_source: str | None = None):
+        """Compute cross-run F1 stability per variant (live query).
+
+        # What it shows: Mean F1, standard deviation, and stable/unstable badge per variant
+        #   across the last 20 completed runs.
+        # Decision it drives: Identifies variants with inconsistent performance across runs,
+        #   signaling unreliable configs that may need more data or different prompts.
+        """
+        from ollama_queue.eval_analysis import compute_variant_stability
+
+        with db._lock:
+            conn = db._connect()
+            if data_source:
+                rows = conn.execute(
+                    "SELECT metrics FROM eval_runs WHERE status = 'complete' AND data_source_url = ? "
+                    "ORDER BY id DESC LIMIT 20",
+                    (data_source,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT metrics FROM eval_runs WHERE status = 'complete' " "ORDER BY id DESC LIMIT 20",
+                ).fetchall()
+
+        run_metrics = []
+        for row in rows:
+            try:
+                metrics = json.loads(row["metrics"]) if isinstance(row["metrics"], str) else (row["metrics"] or {})
+            except (json.JSONDecodeError, TypeError):
+                continue
+            for vid, vm in metrics.items():
+                if isinstance(vm, dict) and "f1" in vm:
+                    run_metrics.append({"variant": vid, "f1": vm["f1"]})
+
+        return compute_variant_stability(run_metrics)
+
     @app.get("/api/eval/variants/{variant_id}/history")
     def eval_variant_history(variant_id: str):
         """Returns F1/recall/precision history across completed eval_runs for one variant.

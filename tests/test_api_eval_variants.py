@@ -1,5 +1,7 @@
 """Tests for eval variant and template API endpoints."""
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -396,3 +398,32 @@ def test_list_variants_includes_description(client):
         assert (
             v["description"] and len(v["description"]) > 10
         ), f"Variant {v['id']} has empty description in API response"
+
+
+# --- Stability ---
+
+
+def test_variant_stability(client_and_db):
+    """GET /api/eval/variants/stability returns cross-run stdev per variant."""
+    client, db = client_and_db
+    with db._lock:
+        conn = db._connect()
+        for run_id, f1 in [(1, 0.70), (2, 0.72), (3, 0.71)]:
+            conn.execute(
+                "INSERT INTO eval_runs (id, data_source_url, variants, variant_id, status, metrics) "
+                "VALUES (?, 'http://localhost:7685', '[\"A\"]', 'A', 'complete', ?)",
+                (run_id, json.dumps({"A": {"f1": f1}})),
+            )
+        conn.commit()
+    resp = client.get("/api/eval/variants/stability")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "A" in data
+    assert data["A"]["n_runs"] == 3
+    assert data["A"]["stable"] is True
+
+
+def test_variant_stability_empty(client):
+    resp = client.get("/api/eval/variants/stability")
+    assert resp.status_code == 200
+    assert resp.json() == {}
