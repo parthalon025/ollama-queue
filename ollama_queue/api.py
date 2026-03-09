@@ -2097,12 +2097,19 @@ def create_app(db: Database) -> FastAPI:
         return {"matrix": matrix, "flagged": flagged, "clusters": clusters}
 
     @app.get("/api/eval/runs/{run_id}/results")
-    def get_eval_run_results(run_id: int, row_type: str | None = None):
-        """Returns all eval_results rows for an eval run, with optional row_type filter.
+    def get_eval_run_results(
+        run_id: int,
+        row_type: str | None = None,
+        classification: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ):
+        """Returns eval_results rows for an eval run with optional filters.
 
         # What it shows: Per-item judge scores for one run — source, target, scores, errors.
         # Decision it drives: Lets the user drill into which items scored well or poorly
         #   to identify weak spots in a variant's principle transfer.
+        #   classification param filters to tp/tn/fp/fn error classes.
         """
         from ollama_queue import eval_engine as _ee
 
@@ -2110,18 +2117,44 @@ def create_app(db: Database) -> FastAPI:
         if run is None:
             raise HTTPException(status_code=404, detail=f"Eval run {run_id} not found")
 
+        where_clauses = ["run_id = ?"]
+        params: list = [run_id]
+
+        if row_type:
+            where_clauses.append("row_type = ?")
+            params.append(row_type)
+
+        # Classification filter (tp/tn/fp/fn) — requires judge rows with scores
+        if classification in ("fp", "fn", "tp", "tn"):
+            threshold = 3
+            try:
+                with db._lock:
+                    conn2 = db._connect()
+                    t_row = conn2.execute("SELECT value FROM settings WHERE key = 'eval.positive_threshold'").fetchone()
+                    if t_row:
+                        threshold = int(json.loads(t_row["value"]))
+            except Exception:
+                _log.debug("get_eval_run_results: could not read positive_threshold, using default=%d", threshold)
+            score_col = "COALESCE(override_score_transfer, score_transfer)"
+            if classification == "fp":
+                where_clauses.append(f"(is_same_cluster = 0 OR is_same_cluster IS NULL) AND {score_col} >= ?")
+            elif classification == "fn":
+                where_clauses.append(f"is_same_cluster = 1 AND {score_col} < ?")
+            elif classification == "tp":
+                where_clauses.append(f"is_same_cluster = 1 AND {score_col} >= ?")
+            elif classification == "tn":
+                where_clauses.append(f"(is_same_cluster = 0 OR is_same_cluster IS NULL) AND {score_col} < ?")
+            params.append(threshold)
+
+        where_sql = " AND ".join(where_clauses)
+        params.extend([limit, offset])
+
         with db._lock:
             conn = db._connect()
-            if row_type:
-                rows = conn.execute(
-                    "SELECT * FROM eval_results WHERE run_id = ? AND row_type = ? ORDER BY id",
-                    (run_id, row_type),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT * FROM eval_results WHERE run_id = ? ORDER BY id",
-                    (run_id,),
-                ).fetchall()
+            rows = conn.execute(
+                f"SELECT * FROM eval_results WHERE {where_sql} ORDER BY id LIMIT ? OFFSET ?",
+                params,
+            ).fetchall()
         return [dict(r) for r in rows]
 
     @app.get("/api/eval/runs/{run_id}/progress")
