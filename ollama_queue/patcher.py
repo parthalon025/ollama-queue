@@ -138,7 +138,7 @@ def _patch_toml(path: pathlib.Path) -> None:
     path.write_text(tomlkit.dumps(data))
 
 
-def _reload_systemd() -> None:
+def _reload_systemd() -> bool:
     try:
         result = subprocess.run(
             ["systemctl", "--user", "daemon-reload"],
@@ -147,12 +147,15 @@ def _reload_systemd() -> None:
             timeout=10,
         )
         if result.returncode != 0:
-            _log.error("daemon-reload exited %d: %s", result.returncode, result.stderr.strip())
+            _log.warning("daemon-reload exited %d: %s", result.returncode, result.stderr.strip())
+            return False
+        return True
     except Exception:
-        _log.error("daemon-reload failed", exc_info=True)
+        _log.warning("daemon-reload failed", exc_info=True)
+        return False
 
 
-def _restart_service(name: str) -> None:
+def _restart_service(name: str) -> bool:
     try:
         result = subprocess.run(
             ["systemctl", "--user", "restart", name],
@@ -161,9 +164,12 @@ def _restart_service(name: str) -> None:
             timeout=30,
         )
         if result.returncode != 0:
-            _log.error("restart %s exited %d: %s", name, result.returncode, result.stderr.strip())
+            _log.warning("restart %s exited %d: %s", name, result.returncode, result.stderr.strip())
+            return False
+        return True
     except Exception:
-        _log.error("restart %s failed", name, exc_info=True)
+        _log.warning("restart %s failed", name, exc_info=True)
+        return False
 
 
 def check_health(consumer: dict, db, plat: str | None = None) -> dict:
@@ -204,6 +210,9 @@ def _port_has_process(port: str, name: str, plat: str) -> bool:
                 text=True,
                 timeout=5,
             )
+            if result.returncode != 0:
+                _log.warning("ss -tp exited %d: %s", result.returncode, result.stderr.strip())
+                return False
             return f":{port}" in result.stdout and name.split(".")[0] in result.stdout
         if plat == "macos":
             result = subprocess.run(
@@ -212,6 +221,9 @@ def _port_has_process(port: str, name: str, plat: str) -> bool:
                 text=True,
                 timeout=5,
             )
+            if result.returncode != 0:
+                _log.warning("lsof -i:%s exited %d: %s", port, result.returncode, result.stderr.strip())
+                return False
             return name.split(".")[0] in result.stdout
         return False
     except Exception:

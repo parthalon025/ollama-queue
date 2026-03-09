@@ -45,11 +45,11 @@ def disable_intercept(uid: int, queue_port: int = 7683) -> dict:
             timeout=10,
         )
         if result.returncode != 0:
-            _log.error("disable_intercept: iptables exited %d: %s", result.returncode, result.stderr.strip())
+            _log.warning("disable_intercept: iptables exited %d: %s", result.returncode, result.stderr.strip())
             return {"enabled": True, "error": result.stderr.strip()}
         return {"enabled": False}
     except (OSError, subprocess.TimeoutExpired) as e:
-        _log.error("disable_intercept failed: %s", e)
+        _log.warning("disable_intercept failed: %s", e)
         return {"enabled": True, "error": str(e)}
 
 
@@ -68,6 +68,9 @@ def _rule_present(uid: int, queue_port: int) -> bool:
             text=True,
             timeout=5,
         )
+        if result.returncode != 0:
+            _log.warning("iptables -L exited %d: %s", result.returncode, result.stderr.strip())
+            return False
         return str(queue_port) in result.stdout and str(uid) in result.stdout
     except Exception as e:
         _log.warning("_rule_present check failed: %s", e)

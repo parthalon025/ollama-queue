@@ -310,3 +310,23 @@ def test_check_includes_loaded_models_list():
     assert isinstance(snap["ollama_loaded_models"], list)
     # backward compat: ollama_model is still present
     assert "ollama_model" in snap
+
+
+def test_get_vram_pct_cached(monkeypatch):
+    """nvidia-smi subprocess called at most once per TTL window."""
+
+    from ollama_queue.health import HealthMonitor
+
+    call_count = 0
+
+    def fake_run(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        return type("R", (), {"returncode": 0, "stdout": "1024\n"})()
+
+    monkeypatch.setattr("ollama_queue.health.subprocess.run", fake_run)
+    h = HealthMonitor()
+    h.get_vram_pct()
+    h.get_vram_pct()
+    h.get_vram_pct()
+    assert call_count == 1, "nvidia-smi should be called once within TTL window"

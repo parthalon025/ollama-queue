@@ -135,3 +135,36 @@ class TestEstimateWithVariance:
         mean, cv_sq = estimator.estimate_with_variance("no-history-src", model="deepseek-r1:8b")
         assert mean == 1800.0  # MODEL_DEFAULTS entry for deepseek
         assert cv_sq == 1.5  # unknown variance → conservative default
+
+
+def test_queue_etas_accepts_om_parameter(db):
+    """queue_etas() reuses a passed OllamaModels instance instead of creating a new one."""
+    from unittest.mock import patch
+
+    from ollama_queue.estimator import DurationEstimator
+    from ollama_queue.models import OllamaModels
+
+    estimator = DurationEstimator(db)
+    jobs = [{"source": "test", "model": "qwen2.5:7b", "resource_profile": "ollama"}]
+
+    shared_om = OllamaModels()
+
+    with patch("ollama_queue.estimator.OllamaModels") as mock_cls:
+        # When om is passed, OllamaModels() constructor should NOT be called
+        estimator.queue_etas(jobs, om=shared_om)
+        mock_cls.assert_not_called()
+
+
+def test_queue_etas_creates_om_when_none(db):
+    """queue_etas() creates OllamaModels when om=None (default)."""
+    from unittest.mock import patch
+
+    from ollama_queue.estimator import DurationEstimator
+
+    estimator = DurationEstimator(db)
+    jobs = [{"source": "test", "model": "qwen2.5:7b", "resource_profile": "ollama"}]
+
+    with patch("ollama_queue.estimator.OllamaModels") as mock_cls:
+        mock_cls.return_value.classify.return_value = {"resource_profile": "ollama"}
+        estimator.queue_etas(jobs)  # om=None by default
+        mock_cls.assert_called_once()

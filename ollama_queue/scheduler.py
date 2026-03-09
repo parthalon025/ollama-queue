@@ -23,8 +23,30 @@ _log = logging.getLogger(__name__)
 class Scheduler:
     """Manages recurring job promotion and schedule rebalancing."""
 
+    _JOBS_CACHE_TTL = 10.0  # seconds before recurring-jobs list cache expires
+
     def __init__(self, db: Database):
         self.db = db
+        self._jobs_cache: tuple[float, list[dict]] | None = None
+
+    def _invalidate_jobs_cache(self) -> None:
+        """Drop the recurring-jobs list cache. Call whenever recurring jobs are mutated."""
+        self._jobs_cache = None
+
+    def _get_recurring_jobs(self) -> list[dict]:
+        """Return the recurring-jobs list, using a short TTL cache to avoid redundant DB reads.
+
+        The cache is invalidated by any method that adds, removes, or modifies a recurring job.
+        TTL acts as a safety net for external mutations (e.g. direct DB writes).
+        """
+        now = time.time()
+        if self._jobs_cache is not None:
+            cached_at, jobs = self._jobs_cache
+            if now - cached_at < self._JOBS_CACHE_TTL:
+                return jobs
+        jobs = self.db.list_recurring_jobs()
+        self._jobs_cache = (now, jobs)
+        return jobs
 
     def promote_due_jobs(
         self,
@@ -46,6 +68,7 @@ class Scheduler:
         # when multiple become due simultaneously.
         due.sort(key=lambda rj: self._aoi_sort_key(rj, now))
         new_ids = []
+        next_run_updates: dict[int, float] = {}  # rj_id → new next_run; batched at end
         for rj in due:
             # Entropy suspension: skip low-priority promotion during backlog
             if suspend_low_priority and int(rj.get("priority") or 5) >= 8:
@@ -78,7 +101,7 @@ class Scheduler:
                         )
                     interval = rj.get("interval_seconds") or 300  # fallback 5min
                     new_next_run = now + interval
-                self.db._set_recurring_next_run(rj["id"], new_next_run)
+                next_run_updates[rj["id"]] = new_next_run
                 continue
             job_id = self.db.submit_job(
                 command=rj["command"],
@@ -99,6 +122,9 @@ class Scheduler:
             )
             new_ids.append(job_id)
             _log.info("Promoted recurring job %r → job #%d", rj["name"], job_id)
+        # Flush all next_run updates in a single batch DB write
+        if next_run_updates:
+            self.db.batch_set_recurring_next_runs(next_run_updates)
         return new_ids
 
     def _aoi_sort_key(self, rj: dict, now: float) -> float:
@@ -130,6 +156,7 @@ class Scheduler:
 
     def update_next_run(self, recurring_job_id: int, completed_at: float, job_id: int | None = None) -> None:
         """Update next_run after job completion. Anchors to completed_at."""
+        self._invalidate_jobs_cache()
         self.db.update_recurring_next_run(recurring_job_id, completed_at, job_id)
         rj = self.db.get_recurring_job(recurring_job_id)
         if rj is None:
@@ -163,6 +190,7 @@ class Scheduler:
         """
         if now is None:
             now = time.time()
+        self._invalidate_jobs_cache()  # rebalance writes next_run for all interval jobs
         # NOTE: list_recurring_jobs() and the subsequent _set_recurring_next_run() calls each
         # acquire db._lock independently — there is a narrow TOCTOU window where a concurrent
         # add/delete could produce a stale rj_id reference. Rebalance is rare (called on startup
@@ -287,7 +315,7 @@ class Scheduler:
             now = time.time()
 
         scores: list[float] = [0.0] * self._SLOT_COUNT
-        for rj in self.db.list_recurring_jobs():
+        for rj in self._get_recurring_jobs():
             if not rj["enabled"]:
                 continue
             priority = rj.get("priority") or 5
