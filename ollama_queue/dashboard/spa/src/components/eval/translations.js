@@ -31,4 +31,11 @@ export const EVAL_TRANSLATIONS = {
   opportunistic:     { label: 'One at a time (gentlest)',       tooltip: 'Submit one job at a time, only when the queue is otherwise idle. Slowest but least disruptive.' },
   'fill-open-slots': { label: 'Fill available slots',          tooltip: 'Use all currently open queue slots until a time or job count limit is reached.' },
   scheduled:         { label: 'At a scheduled time',           tooltip: 'Start at a specific future time or on a repeating schedule.' },
+  judge_mode_selector: { label: 'Scoring Strategy',            tooltip: 'How the scorer evaluates generated principles. Bayesian Fusion uses multiple signal types for the most accurate results.' },
+  auc:                 { label: 'Discrimination Score',        tooltip: 'AUC: how well the system separates same-category from different-category principles. 1.0 = perfect, 0.5 = random guess.' },
+  same_mean_posterior: { label: 'Same-Category Score',         tooltip: 'Average posterior probability for principles in the same category. Higher is better — they should score high.' },
+  diff_mean_posterior: { label: 'Diff-Category Score',         tooltip: 'Average posterior probability for principles in different categories. Lower is better — they should score low.' },
+  separation:          { label: 'Score Gap',                   tooltip: 'Difference between same-category and diff-category average scores. Larger = better discrimination. Minimum recommended: 0.4.' },
+  auc_threshold:       { label: 'Minimum AUC to Promote (Bayesian)',     tooltip: 'A Bayesian/tournament configuration must reach at least this AUC before it can be promoted to production.' },
+  min_posterior_separation: { label: 'Minimum Score Gap (Bayesian)',      tooltip: 'The gap between same-category and different-category scores must be at least this large to auto-promote.' },
 };
