@@ -692,7 +692,11 @@ Every chart and data presentation in this feature is grounded in peer-reviewed r
 
 ### Specific Chart Specifications
 
-**Performance Curve (tok/min vs model size):**
+**1. Performance Curve — tok/min vs model size**
+
+What it shows: A scatter plot where each dot is a model you've run, positioned by its file size (horizontal) and how many tokens per minute it generates on your machine (vertical). A fitted curve connects them, and a shaded band shows how confident the system is in the curve. Bigger dots mean more data points — the system has seen that model run many times.
+
+What decision it drives: When a failed or deferred job needs rescheduling, you can see whether the system's estimate for that model is trustworthy. If the dot is large and sits right on the curve, the estimate is solid. If it's small and far from the curve, the system is guessing — you might want to manually review the scheduled slot. Also tells you at a glance which models are fast and which are slow on your hardware, so you know what to expect when submitting jobs.
 
 ```
 Encoding:
@@ -709,7 +713,11 @@ Reference line: none (no meaningful threshold for tok/min).
 Axes: tick labels at sensible intervals (auto-tick for log scale: 1, 2, 5, 10, 20, 50).
 ```
 
-**Performance Curve (warmup vs model size):**
+**2. Performance Curve — warmup vs model size**
+
+What it shows: Same scatter layout, but the vertical axis is how long it takes to load the model from disk into GPU memory before it can start generating. Small models load in 1-2 seconds; large models can take 30+ seconds. The fitted line shows the pattern on your hardware — which is a function of your disk speed (NVMe vs SATA) and VRAM capacity.
+
+What decision it drives: Tells you whether warmup time is a significant factor for a given model. If warmup is 2 seconds on a 30-second job, it barely matters. If warmup is 25 seconds on a 40-second job, over half the slot is just loading — the scheduler needs to account for that, and you can see that it does. Also helps you understand why certain jobs take longer than expected: it might not be the AI being slow, it's the model loading.
 
 ```
 Encoding:
@@ -723,7 +731,11 @@ Same X-axis, separate Y-axes. Vertically stacked, not side-by-side (Tufte: small
 multiples should share the comparison axis for easy scanning).
 ```
 
-**Load Heatmap (hour × day-of-week):**
+**3. Load Heatmap — hour × day-of-week**
+
+What it shows: A grid of colored cells — one for every hour of every day of the week. Dark cells mean the system was busy during that hour. Light cells mean it was idle. The pattern emerges over time: you'll see that Tuesday afternoons are busy (maybe several recurring jobs overlap), but Sunday 2 AM is always empty.
+
+What decision it drives: This is how the scheduler learns when your "quiet hours" are — not from configuration, but from observation. When a DLQ job needs rescheduling, the system picks a light-colored cell (historically quiet). You can also spot scheduling problems: if a cell is unexpectedly dark, maybe two recurring jobs overlap and should be spread out. The DLQ scheduled markers (small dots on cells) show you where the system plans to retry failed jobs, so you can see whether it's picking sensible times.
 
 ```
 Encoding:
@@ -738,7 +750,11 @@ Grid gap: --chart-cell-gap (Gestalt: proximity groups cells within day, gap sepa
 Colorblind: sequential L-only ramp is safe for all CVD types (no hue discrimination needed).
 ```
 
-**Load Map (48-slot bar chart):**
+**4. Load Map — 48-slot bar chart (next 24 hours)**
+
+What it shows: A bar for each 30-minute slot over the next 24 hours. Tall bars = busy slots (lots of scheduled work). Short bars = open slots. Red bars are pinned (hard-scheduled, can't be moved). A vertical "now" needle shows where you currently are in the timeline. Icons above bars mark where DLQ and deferred jobs have been scheduled. A translucent overlay shows how much GPU memory is committed in each slot.
+
+What decision it drives: This is the scheduling dashboard — it answers "when is there room to run more jobs?" at a glance. If all bars are tall, the queue is full and DLQ retries will have to wait. If there are clear valleys (low bars with no pinned jobs and plenty of VRAM), the system has good options for rescheduling. You can also manually submit jobs into low-load slots by clicking them. The DLQ/deferred icons let you verify the system's scheduling decisions against your own judgment.
 
 ```
 Encoding:
@@ -756,7 +772,11 @@ VRAM overlay: secondary bar (lighter opacity) showing committed VRAM as fraction
 Not a dual axis — normalized to same 0–1 scale as load score ratio.
 ```
 
-**Model Performance Table (sparklines):**
+**5. Model Performance Table with sparklines**
+
+What it shows: A table listing every AI model you've run, with columns for how many times it's run, its average speed (tokens per minute), average warmup time, average total duration, and when it last ran. Each row also has a tiny inline chart (sparkline) showing the trend of that model's tok/min over the last 20 runs — is it getting faster, slower, or staying consistent?
+
+What decision it drives: At a glance, you can see which models are well-understood (many runs, tight variance) and which are uncertain (few runs, wide ± range). The sparkline trend matters: a downward trend in tok/min might indicate GPU thermal throttling over time or model contention. An upward trend after a driver update confirms the upgrade helped. This table is also where you verify the estimator's data — if the numbers don't match your expectations, something is wrong with the metrics capture.
 
 ```
 Per Tufte sparkline rules:
@@ -767,6 +787,18 @@ Per Tufte sparkline rules:
   - Inline in the "Avg tok/min" column cell
   - Shows last 20 observations — trend direction and volatility at a glance
 ```
+
+**6. System Health Panel**
+
+What it shows: Real-time gauges for CPU load, available RAM, GPU utilization percentage, GPU temperature, GPU VRAM usage (used/total), and disk I/O busy percentage. Each metric has a status badge: green (healthy), yellow (warm), red (throttling/critical). Values fade in opacity as they age — if the last update was 30+ seconds ago, the numbers desaturate to signal staleness.
+
+What decision it drives: Tells you whether the system is healthy enough to run more jobs right now. If GPU temp is 87°C with a red "Throttling" badge, you know why jobs are being deferred — and you know not to submit more until it cools. If VRAM is 11/12 GB used, you understand why a 14B model can't start. This panel is the "why" behind every deferral and scheduling decision. It also serves as a quick health check when accessing the dashboard remotely from your phone.
+
+**7. Decision Reasoning Panel (expandable on DLQ/Deferred entries)**
+
+What it shows: A tree of scored factors explaining exactly why the system chose a specific time slot for a rescheduled or deferred job. Each factor shows its name, its value, and its contribution to the overall score. For skipped entries, it shows why no slot was chosen and when the next sweep will try again.
+
+What decision it drives: Eliminates "why did it do that?" — the most common frustration with autonomous systems. If the system scheduled a job for 2:30 AM and you think midnight would be better, you can see the reasoning: maybe midnight had a recurring job conflict and VRAM contention. If the reasoning is wrong (maybe that recurring job was deleted), you know the system is working with stale data and can trigger a manual resweep. Transparency builds trust in the autonomous scheduling.
 
 ### Data Freshness (Weiser)
 
