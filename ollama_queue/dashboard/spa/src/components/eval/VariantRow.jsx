@@ -23,6 +23,7 @@ export default function VariantRow({ variant }) {
   const [cloning, setCloning] = useState(false);
   const [cloneError, setCloneError] = useState(null);
   const [history, setHistory] = useState(null);
+  const [pendingDelete, setPendingDelete] = useState(false);
 
   const {
     id,
@@ -67,7 +68,6 @@ export default function VariantRow({ variant }) {
 
   async function handleDelete(evt) {
     evt.stopPropagation();
-    if (!confirm(`Delete variant "${label}"?`)) return;
     await deleteAct(
       'Deleting…',
       async () => {
@@ -198,15 +198,38 @@ export default function VariantRow({ variant }) {
               {level === 3 ? '▲ Hide run history' : '▼ Run history'}
             </button>
             {!is_system && (
-              <div>
-                <button
-                  class="t-btn t-btn-secondary"
-                  style={{ fontSize: 'var(--type-label)', padding: '3px 10px', color: 'var(--status-error)' }}
-                  disabled={deleteFb.phase === 'loading'}
-                  onClick={handleDelete}
-                >
-                  {deleteFb.phase === 'loading' ? 'Deleting…' : 'Delete'}
-                </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                {!pendingDelete ? (
+                  <button
+                    class="t-btn t-btn-secondary"
+                    style={{ fontSize: 'var(--type-label)', padding: '3px 10px', color: 'var(--status-error)' }}
+                    disabled={deleteFb.phase === 'loading'}
+                    onClick={evt => { evt.stopPropagation(); setPendingDelete(true); }}
+                  >
+                    Delete
+                  </button>
+                ) : (
+                  <>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--status-error)' }}>
+                      Delete "{label}"?
+                    </span>
+                    <button
+                      class="t-btn t-btn-secondary"
+                      style={{ fontSize: 'var(--type-label)', padding: '3px 8px', color: 'var(--status-error)', borderColor: 'var(--status-error)' }}
+                      disabled={deleteFb.phase === 'loading'}
+                      onClick={handleDelete}
+                    >
+                      {deleteFb.phase === 'loading' ? 'Deleting…' : 'Yes, delete'}
+                    </button>
+                    <button
+                      class="t-btn t-btn-secondary"
+                      style={{ fontSize: 'var(--type-label)', padding: '3px 8px' }}
+                      onClick={evt => { evt.stopPropagation(); setPendingDelete(false); }}
+                    >
+                      Cancel
+                    </button>
+                  </>
+                )}
                 {deleteFb.msg && <div class={`action-fb action-fb--${deleteFb.phase}`}>{deleteFb.msg}</div>}
               </div>
             )}
