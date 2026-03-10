@@ -213,7 +213,7 @@ def _port_has_process(port: str, name: str, plat: str) -> bool:
             if result.returncode != 0:
                 _log.warning("ss -tp exited %d: %s", result.returncode, result.stderr.strip())
                 return False
-            return f":{port}" in result.stdout and name.split(".")[0] in result.stdout
+            return any(f":{port}" in line and name.split(".")[0] in line for line in result.stdout.splitlines())
         if plat == "macos":
             result = subprocess.run(
                 ["lsof", f"-i:{port}"],
@@ -224,7 +224,7 @@ def _port_has_process(port: str, name: str, plat: str) -> bool:
             if result.returncode != 0:
                 _log.warning("lsof -i:%s exited %d: %s", port, result.returncode, result.stderr.strip())
                 return False
-            return name.split(".")[0] in result.stdout
+            return any(name.split(".")[0] in line for line in result.stdout.splitlines())
         return False
     except Exception:
         _log.warning("_port_has_process failed for port %s", port, exc_info=True)
