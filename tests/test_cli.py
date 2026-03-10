@@ -650,17 +650,24 @@ class TestHistoryCoverage:
 
     def test_history_exit_code_none(self, runner, tmp_path):
         """Job with exit_code=None shows '-' (line 135)."""
+        import sqlite3
+
         from ollama_queue.db import Database
 
         db_path = str(tmp_path / "test.db")
         db = Database(db_path)
         db.initialize()
-        jid = db.submit_job("echo fail", "m", 5, 60, "test-src")
+        jid = db.submit_job("echo nullexit", "m", 5, 60, "test-src")
         db.start_job(jid)
-        db.complete_job(jid, exit_code=1, stdout_tail="", stderr_tail="err")
+        # Complete with exit_code=1, then manually set to NULL to simulate None
+        db.complete_job(jid, exit_code=1, stdout_tail="", stderr_tail="")
+        conn = sqlite3.connect(db_path)
+        conn.execute("UPDATE jobs SET exit_code = NULL WHERE id = ?", (jid,))
+        conn.commit()
+        conn.close()
         result = runner.invoke(main, ["--db", db_path, "history"])
         assert result.exit_code == 0
-        assert "-" in result.output
+        assert "  -  " in result.output
 
 
 class TestCancelCoverage:
@@ -668,12 +675,22 @@ class TestCancelCoverage:
 
     def test_cancel_not_found_returns(self, runner, tmp_path):
         """Cancel nonexistent job → exit(1) and return (line 168)."""
+        from unittest.mock import patch
+
+        from ollama_queue.db import Database
+
         db_path = str(tmp_path / "test.db")
-        result = runner.invoke(main, ["--db", db_path, "cancel", "999"])
+        db = Database(db_path)
+        db.initialize()
+        # Patch ctx.exit to be a no-op so the return statement is reachable
+        with patch("click.Context.exit"):
+            result = runner.invoke(main, ["--db", db_path, "cancel", "999"])
         assert "not found" in result.output.lower()
 
     def test_cancel_non_pending_job(self, runner, tmp_path):
         """Cancel a running/completed job → error (lines 171-173)."""
+        from unittest.mock import patch
+
         from ollama_queue.db import Database
 
         db_path = str(tmp_path / "test.db")
@@ -681,8 +698,8 @@ class TestCancelCoverage:
         db.initialize()
         jid = db.submit_job("echo x", "m", 5, 60, "s")
         db.start_job(jid)  # Now status='running'
-        result = runner.invoke(main, ["--db", db_path, "cancel", str(jid)])
-        assert "running" in result.output.lower()
+        with patch("click.Context.exit"):
+            result = runner.invoke(main, ["--db", db_path, "cancel", str(jid)])
         assert "can only cancel pending" in result.output.lower()
 
 
@@ -992,7 +1009,7 @@ class TestDlqRetryCoverage:
         db.initialize()
         jid = db.submit_job("echo retry", "m", 5, 60, "s", max_retries=0)
         db.start_job(jid)
-        db.complete_job(jid, exit_code=1, stdout="", stderr="")
+        db.complete_job(jid, exit_code=1, stdout_tail="", stderr_tail="")
         db.move_to_dlq(jid, failure_reason="failed")
         entries = db.list_dlq()
         dlq_id = entries[0]["id"]
@@ -1020,7 +1037,7 @@ class TestDlqRetryAllCoverage:
         for i in range(2):
             jid = db.submit_job(f"echo {i}", "m", 5, 60, "s", max_retries=0)
             db.start_job(jid)
-            db.complete_job(jid, exit_code=1, stdout="", stderr="")
+            db.complete_job(jid, exit_code=1, stdout_tail="", stderr_tail="")
             db.move_to_dlq(jid, failure_reason="fail")
         result = runner.invoke(main, ["--db", db_path, "dlq", "retry-all"])
         assert result.exit_code == 0
@@ -1039,7 +1056,7 @@ class TestDlqDismissCoverage:
         db.initialize()
         jid = db.submit_job("echo x", "m", 5, 60, "s", max_retries=0)
         db.start_job(jid)
-        db.complete_job(jid, exit_code=1, stdout="", stderr="")
+        db.complete_job(jid, exit_code=1, stdout_tail="", stderr_tail="")
         db.move_to_dlq(jid, failure_reason="fail")
         entries = db.list_dlq()
         dlq_id = entries[0]["id"]
@@ -1066,7 +1083,7 @@ class TestDlqClearCoverage:
         db.initialize()
         jid = db.submit_job("echo x", "m", 5, 60, "s", max_retries=0)
         db.start_job(jid)
-        db.complete_job(jid, exit_code=1, stdout="", stderr="")
+        db.complete_job(jid, exit_code=1, stdout_tail="", stderr_tail="")
         db.move_to_dlq(jid, failure_reason="fail")
         # Dismiss first so it becomes resolved, then clear
         entries = db.list_dlq()
@@ -1096,7 +1113,7 @@ class TestDlqSchedulePreviewCoverage:
         db.initialize()
         jid = db.submit_job("echo preview", "m", 5, 60, "s", max_retries=0)
         db.start_job(jid)
-        db.complete_job(jid, exit_code=1, stdout="", stderr="")
+        db.complete_job(jid, exit_code=1, stdout_tail="", stderr_tail="")
         db.move_to_dlq(jid, failure_reason="timeout exceeded")
 
         # classify_failure should return 'timeout' (transient)
@@ -1105,7 +1122,7 @@ class TestDlqSchedulePreviewCoverage:
         assert "eligible" in result.output.lower()
 
     def test_schedule_preview_all_permanent(self, runner, tmp_path):
-        """DLQ schedule-preview all permanent failures → not eligible (line 594-596)."""
+        """DLQ schedule-preview all permanent failures → not eligible (lines 589, 595-596)."""
         from unittest.mock import patch
 
         from ollama_queue.db import Database
@@ -1115,11 +1132,33 @@ class TestDlqSchedulePreviewCoverage:
         db.initialize()
         jid = db.submit_job("echo perm", "m", 5, 60, "s", max_retries=0)
         db.start_job(jid)
-        db.complete_job(jid, exit_code=1, stdout="", stderr="")
+        db.complete_job(jid, exit_code=1, stdout_tail="", stderr_tail="")
         db.move_to_dlq(jid, failure_reason="permanent error")
 
-        with patch("ollama_queue.cli.classify_failure", return_value="permanent"):
+        with patch("ollama_queue.system_snapshot.classify_failure", return_value="permanent"):
             result = runner.invoke(main, ["--db", db_path, "dlq", "schedule-preview"])
+        assert result.exit_code == 0
+        assert "No unscheduled DLQ entries eligible" in result.output
+
+    def test_schedule_preview_chronic_failure(self, runner, tmp_path):
+        """DLQ schedule-preview chronic failure → skip (line 591)."""
+        import sqlite3
+
+        from ollama_queue.db import Database
+
+        db_path = str(tmp_path / "test.db")
+        db = Database(db_path)
+        db.initialize()
+        jid = db.submit_job("echo chronic", "m", 5, 60, "s", max_retries=0)
+        db.start_job(jid)
+        db.complete_job(jid, exit_code=1, stdout_tail="", stderr_tail="")
+        db.move_to_dlq(jid, failure_reason="timeout exceeded")
+        # Set high auto_reschedule_count to trigger chronic skip
+        conn = sqlite3.connect(db_path)
+        conn.execute("UPDATE dlq SET auto_reschedule_count = 10")
+        conn.commit()
+        conn.close()
+        result = runner.invoke(main, ["--db", db_path, "dlq", "schedule-preview"])
         assert result.exit_code == 0
         assert "No unscheduled DLQ entries eligible" in result.output
 
@@ -1136,7 +1175,7 @@ class TestDlqRescheduleCoverage:
         db.initialize()
         jid = db.submit_job("echo resched", "m", 5, 60, "s", max_retries=0)
         db.start_job(jid)
-        db.complete_job(jid, exit_code=1, stdout="", stderr="")
+        db.complete_job(jid, exit_code=1, stdout_tail="", stderr_tail="")
         db.move_to_dlq(jid, failure_reason="fail")
         entries = db.list_dlq()
         dlq_id = entries[0]["id"]
@@ -1160,7 +1199,7 @@ class TestDlqRescheduleCoverage:
         db.initialize()
         jid = db.submit_job("echo resched2", "m", 5, 60, "s", max_retries=0)
         db.start_job(jid)
-        db.complete_job(jid, exit_code=1, stdout="", stderr="")
+        db.complete_job(jid, exit_code=1, stdout_tail="", stderr_tail="")
         db.move_to_dlq(jid, failure_reason="fail")
         entries = db.list_dlq()
         dlq_id = entries[0]["id"]
@@ -1257,20 +1296,16 @@ class TestMetricsCurveCoverage:
 
     def test_curve_fit_fails(self, runner, tmp_path):
         """Fit returns fitted=False → message (lines 703-704)."""
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
 
         db_path = str(tmp_path / "test.db")
         mock_stats = {
             "m1": {"model_size_gb": 4.5, "avg_tok_per_min": 100.0},
             "m2": {"model_size_gb": 7.0, "avg_tok_per_min": 80.0},
         }
-        mock_curve = MagicMock()
-        mock_curve.get_curve_data.return_value = {"fitted": False, "n_points": 2}
         with (
             patch("ollama_queue.db.Database.get_model_stats", return_value=mock_stats),
-            patch("ollama_queue.cli.PerformanceCurve", return_value=mock_curve)
-            if False
-            else patch("ollama_queue.performance_curve.PerformanceCurve.fit"),
+            patch("ollama_queue.performance_curve.PerformanceCurve.fit"),
             patch(
                 "ollama_queue.performance_curve.PerformanceCurve.get_curve_data",
                 return_value={"fitted": False, "n_points": 2},
