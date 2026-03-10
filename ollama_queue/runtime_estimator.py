@@ -3,11 +3,13 @@
 Predicts how long a job will take based on model size, historical performance,
 and token throughput — all learned from this machine's actual behavior.
 
-Uses 4-tier hierarchy:
+Uses 3-tier hierarchy:
 1. Resource profile prior (weakest — generic bucket)
-2. Cross-model performance curve (interpolated from other models)
-3. Model-level tok/min history (direct observations)
-4. (Model, command) duration history (strongest — exact match)
+2. Model-level duration history (direct observations)
+3. (Model, command) duration history (strongest — exact match)
+
+Note: Cross-model PerformanceCurve is a separate module used externally
+by callers who want to interpolate from other models' performance.
 """
 
 import logging
@@ -59,13 +61,13 @@ class RuntimeEstimator:
         # Tier 1: resource profile prior
         prior = PROFILE_PRIORS.get(resource_profile, PROFILE_PRIORS["ollama"]).copy()
 
-        # Tier 2: cross-model curve — handled externally by PerformanceCurve
+        # (PerformanceCurve is used by callers externally, not within this estimator)
 
-        # Tier 3: model-level historical durations
+        # Tier 2: model-level historical durations
         durations = self.db.get_job_durations(model)
         n_obs = len(durations)
 
-        # Tier 4: (model, command) specific durations
+        # Tier 3: (model, command) specific durations
         if command:
             specific = self.db.get_job_durations(model, command)
             if len(specific) >= 3:

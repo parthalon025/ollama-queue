@@ -10,7 +10,6 @@ from ollama_queue.runtime_estimator import Estimate, RuntimeEstimator
 @pytest.fixture
 def mock_db():
     db = MagicMock()
-    db.get_tok_per_min.return_value = []
     db.get_job_durations.return_value = []
     db.get_load_durations.return_value = []
     db.get_model_stats.return_value = {}
@@ -27,9 +26,8 @@ def test_estimate_with_no_history(mock_db):
     assert result.confidence == "low"
 
 
-def test_estimate_with_tok_per_min_history(mock_db):
-    """With observed tok/min, estimate is informed."""
-    mock_db.get_tok_per_min.return_value = [80.0, 85.0, 78.0, 82.0, 84.0]
+def test_estimate_with_duration_history(mock_db):
+    """With observed durations, estimate is informed."""
     mock_db.get_job_durations.return_value = [30.0, 32.0, 28.0, 35.0, 31.0]
     est = RuntimeEstimator(mock_db)
     result = est.estimate("qwen3.5:9b", "generate", "ollama")
