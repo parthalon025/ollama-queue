@@ -1,6 +1,6 @@
 import { h } from 'preact';
 import { useState } from 'preact/hooks';
-import { API, fetchEvalVariants } from '../../store.js';
+import { API, fetchEvalVariants } from '../../stores';
 import { EVAL_TRANSLATIONS } from './translations.js';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
 // What it shows: A single eval variant config with 3-level progressive disclosure.

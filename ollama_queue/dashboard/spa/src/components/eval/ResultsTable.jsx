@@ -1,6 +1,6 @@
 import { h } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
-import { API } from '../../store.js';
+import { API } from '../../stores';
 import ResultRow from './ResultRow.jsx';
 // What it shows: Paginated list of scored pairs for a completed eval run,
 //   with filter tabs for error class drill-down (All/TP/TN/FP/FN).

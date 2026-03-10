@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from 'preact/hooks';
 // Decision it drives: User can discover installed models and select one without
 //   memorising exact model tags.
 
-import { models, fetchModels } from '../store.js';
+import { models, fetchModels } from '../stores';
 
 const OPENAI_MODELS = [
   { name: 'gpt-4o',        tier: 'flagship' },

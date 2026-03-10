@@ -1,6 +1,6 @@
 import { h } from 'preact';
 import { useCallback } from 'preact/hooks';
-import { settings, status, API } from '../store';
+import { settings, status, API } from '../stores';
 import SettingsForm from '../components/SettingsForm.jsx';
 import { useActionFeedback } from '../hooks/useActionFeedback.js';
 

@@ -8,7 +8,7 @@ import { useState, useEffect } from 'preact/hooks';
 import {
   evalSettings, evalRuns, evalSubTab,
   testDataSource, saveEvalSettings,
-} from '../../store.js';
+} from '../../stores';
 
 // A single step row — shows a checkbox, title, detail, and action button
 function Step({ number, complete, disabled, title, detail, actionLabel, onAction }) {

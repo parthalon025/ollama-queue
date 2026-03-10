@@ -11,7 +11,7 @@ import {
   fetchConsumers, scanConsumers,
   fetchInterceptStatus, interceptStatus,
   enableIntercept, disableIntercept,
-} from '../store.js';
+} from '../stores';
 import { ConsumerRow } from '../components/consumers/ConsumerRow.jsx';
 
 // What it shows: System-wide iptables intercept mode status + enable/disable toggle.

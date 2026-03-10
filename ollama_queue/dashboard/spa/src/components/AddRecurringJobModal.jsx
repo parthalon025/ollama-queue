@@ -1,6 +1,6 @@
 import { h } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { loadMap, addRecurringJob, fetchSchedule, fetchLoadMap } from '../store';
+import { loadMap, addRecurringJob, fetchSchedule, fetchLoadMap } from '../stores';
 
 const inputStyle = {
     fontFamily: 'var(--font-mono)', fontSize: 'var(--type-body)',

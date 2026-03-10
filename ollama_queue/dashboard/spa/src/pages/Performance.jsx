@@ -3,7 +3,7 @@ import { useEffect } from 'preact/hooks';
 import {
     modelPerformance, performanceCurve,
     fetchModelPerformance, fetchPerformanceCurve,
-} from '../store';
+} from '../stores';
 import { SystemHealth } from '../components/SystemHealth.jsx';
 import PerformanceCurveChart from '../components/PerformanceCurveChart.jsx';
 import LoadHeatmap from '../components/LoadHeatmap.jsx';

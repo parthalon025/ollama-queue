@@ -1,6 +1,6 @@
 import { h } from 'preact';
 import { useState } from 'preact/hooks';
-import { API, evalVariants } from '../../store.js';
+import { API, evalVariants } from '../../stores';
 
 // What it shows: Side-by-side comparison of two variant configs — model, temperature,
 //   context window, prompt template differences.

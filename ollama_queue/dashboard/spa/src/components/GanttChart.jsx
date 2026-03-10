@@ -1,6 +1,6 @@
 import { h, Fragment } from 'preact';
 import { useState } from 'preact/hooks';
-import { fetchJobRuns } from '../store';
+import { fetchJobRuns } from '../stores';
 
 // NOTE: all .map() callbacks use descriptive names (job, slot, laneIdx) — never 'h'
 // as that shadows the JSX factory esbuild injects.

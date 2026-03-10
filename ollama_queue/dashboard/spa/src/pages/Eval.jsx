@@ -2,7 +2,7 @@ import { h } from 'preact';
 // What it shows: The Eval page — sub-navigation and the active sub-view
 // Decision it drives: Entry point for all eval functionality (runs, variants, trends, settings)
 
-import { evalSubTab } from '../store.js';
+import { evalSubTab } from '../stores';
 import EvalRuns from '../views/EvalRuns.jsx';
 import EvalVariants from '../views/EvalVariants.jsx';
 import EvalTrends from '../views/EvalTrends.jsx';

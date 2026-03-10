@@ -19,7 +19,7 @@ class PlanErrorBoundary extends Component {
 import {
     currentTab, dlqCount, fetchModels, fetchSchedule,
     startPolling, stopPolling, stopEvalPoll, status,
-} from './store';
+} from './stores';
 import Sidebar from './components/Sidebar.jsx';
 import BottomNav from './components/BottomNav.jsx';
 import Now from './pages/Now.jsx';

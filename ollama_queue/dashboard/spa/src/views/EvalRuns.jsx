@@ -1,6 +1,6 @@
 import { h } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
-import { evalActiveRun, fetchEvalRuns, fetchEvalVariants, fetchEvalSettings, startEvalPoll } from '../store.js';
+import { evalActiveRun, fetchEvalRuns, fetchEvalVariants, fetchEvalSettings, startEvalPoll } from '../stores';
 import ActiveRunProgress from '../components/eval/ActiveRunProgress.jsx';
 import RunTriggerPanel from '../components/eval/RunTriggerPanel.jsx';
 import RunHistoryTable from '../components/eval/RunHistoryTable.jsx';

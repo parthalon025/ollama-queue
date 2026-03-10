@@ -1,6 +1,6 @@
 import { h } from 'preact';
 import { useState } from 'preact/hooks';
-import { heatmapData, dlqSchedulePreview } from '../store';
+import { heatmapData, dlqSchedulePreview } from '../stores';
 
 // What it shows: A 24-hour × 7-day grid where each cell's brightness represents how many
 //   jobs ran during that hour. DLQ-rescheduled jobs appear as dot markers on their target slot.

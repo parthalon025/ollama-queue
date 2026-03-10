@@ -5,7 +5,7 @@ import { useState, useRef, useEffect } from 'preact/hooks';
 // Decision it drives: User sets the judge model used for all eval runs unless
 //   overridden per-run. Getting this right matters for score reliability.
 
-import { evalSettings, saveEvalSettings } from '../../store.js';
+import { evalSettings, saveEvalSettings } from '../../stores';
 import { EVAL_TRANSLATIONS } from './translations.js';
 import ModelSelect from '../ModelSelect.jsx';
 

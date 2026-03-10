@@ -4,7 +4,7 @@ import {
     models, modelCatalog, API,
     fetchModels, fetchModelCatalog,
     startModelPull, cancelModelPull,
-} from '../store';
+} from '../stores';
 import { ModelBadge } from '../components/ModelBadge';
 
 function useDebounce(value, delay) {

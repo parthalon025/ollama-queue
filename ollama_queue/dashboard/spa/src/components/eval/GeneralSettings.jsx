@@ -6,7 +6,7 @@ import { useState, useRef, useEffect } from 'preact/hooks';
 //   per_cluster = more data per run, slower throughput. Higher f1_threshold =
 //   harder to promote a variant automatically.
 
-import { evalSettings, saveEvalSettings } from '../../store.js';
+import { evalSettings, saveEvalSettings } from '../../stores';
 import { EVAL_TRANSLATIONS } from './translations.js';
 import ModelSelect from '../ModelSelect.jsx';
 

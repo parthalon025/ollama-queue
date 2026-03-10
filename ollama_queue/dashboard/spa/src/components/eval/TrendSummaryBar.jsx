@@ -4,7 +4,7 @@ import { h } from 'preact';
 // Decision it drives: Quick answer to "is the system improving?" — lets users decide
 //   whether to investigate further or act immediately on a regression.
 
-import { evalTrends } from '../../store.js';
+import { evalTrends } from '../../stores';
 
 // Map API trend_direction values to plain-language labels and colours
 const TREND_META = {

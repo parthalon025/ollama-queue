@@ -7,7 +7,7 @@ import uPlot from 'uplot';
 // Decision it drives: User sees which variant is improving and at what rate,
 //   helping them decide which config to promote or investigate.
 
-import { evalTrends } from '../../store.js';
+import { evalTrends } from '../../stores';
 
 // Stable palette for variant lines — falls back to accent for any beyond 5
 const VARIANT_COLORS = [

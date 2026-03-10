@@ -6,7 +6,7 @@ import { useState } from 'preact/hooks';
 // Decision it drives: User connects, verifies, or changes the data source. All
 //   eval runs pull lesson data from this source.
 
-import { evalSettings, testDataSource, saveEvalSettings } from '../../store.js';
+import { evalSettings, testDataSource, saveEvalSettings } from '../../stores';
 
 export default function DataSourcePanel() {
   // Read .value at top of body to subscribe to signal changes

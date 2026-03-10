@@ -1,5 +1,5 @@
 import { h } from 'preact';
-import { evalRuns } from '../../store.js';
+import { evalRuns } from '../../stores';
 import RunRow from './RunRow.jsx';
 // What it shows: The full list of past and current eval runs, newest first.
 //   Each row shows status, winner config, quality score, date, and item count.

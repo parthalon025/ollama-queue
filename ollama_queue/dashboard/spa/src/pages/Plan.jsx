@@ -6,7 +6,7 @@ import {
     updateScheduleJob, fetchModels, batchToggleJobs, batchRunJobs,
     fetchJobRuns, deleteScheduleJob, fetchSuggestTime, enableJobByName,
     generateJobDescription,
-} from '../store';
+} from '../stores';
 import { useActionFeedback } from '../hooks/useActionFeedback.js';
 import { GanttChart, runStatus } from '../components/GanttChart';
 import { ModelBadge } from '../components/ModelBadge';

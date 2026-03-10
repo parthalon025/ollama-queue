@@ -3,7 +3,7 @@ import { useState, useRef, useEffect } from 'preact/hooks';
 import {
     status, queue, history, healthData, durationData, settings,
     dlqCount, connectionStatus, currentTab, refreshQueue,
-} from '../store';
+} from '../stores';
 import CurrentJob from '../components/CurrentJob.jsx';
 import QueueList from '../components/QueueList.jsx';
 import HeroCard from '../components/HeroCard.jsx';

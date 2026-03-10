@@ -8,7 +8,7 @@ import { useEffect } from 'preact/hooks';
 import {
   fetchEvalSettings, fetchEvalVariants, fetchEvalRuns,
   evalSettings,
-} from '../store.js';
+} from '../stores';
 import SetupChecklist   from '../components/eval/SetupChecklist.jsx';
 import DataSourcePanel  from '../components/eval/DataSourcePanel.jsx';
 import JudgeDefaultsForm from '../components/eval/JudgeDefaultsForm.jsx';
