@@ -100,3 +100,17 @@ def test_not_fitted():
     data = curve.get_curve_data()
     assert data["fitted"] is False
     assert data["tok_slope"] is None
+
+
+def test_zero_model_size_returns_none():
+    """model_size_gb <= 0 returns None instead of crashing."""
+    curve = PerformanceCurve()
+    curve.fit(
+        [
+            {"model_size_gb": 5.0, "avg_tok_per_min": 80.0},
+            {"model_size_gb": 10.0, "avg_tok_per_min": 45.0},
+        ]
+    )
+    assert curve.predict_tok_per_min(0) is None
+    assert curve.predict_tok_per_min(-1) is None
+    assert curve.predict_tok_per_min_ci(0) is None

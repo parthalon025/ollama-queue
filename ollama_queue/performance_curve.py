@@ -77,14 +77,14 @@ class PerformanceCurve:
 
     def predict_tok_per_min(self, model_size_gb: float) -> float | None:
         """Predict tok/min for a model size."""
-        if self._tok_slope is None:
+        if self._tok_slope is None or model_size_gb <= 0:
             return None
         log_rate = self._tok_slope * math.log(model_size_gb) + self._tok_intercept
         return math.exp(log_rate)
 
     def predict_tok_per_min_ci(self, model_size_gb: float, z: float = 1.28) -> tuple[float, float, float] | None:
         """Predict tok/min with confidence interval (default 90%)."""
-        if self._tok_slope is None:
+        if self._tok_slope is None or model_size_gb <= 0:
             return None
         log_rate = self._tok_slope * math.log(model_size_gb) + self._tok_intercept
         std = self._tok_residual_std or 0.3

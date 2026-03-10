@@ -1697,7 +1697,6 @@ class Database:
         """Return the job_metrics row as a dict, or None if not found."""
         with self._lock:
             conn = self._connect()
-            conn.row_factory = sqlite3.Row
             row = conn.execute("SELECT * FROM job_metrics WHERE job_id = ?", (job_id,)).fetchone()
             if row is None:
                 return None
