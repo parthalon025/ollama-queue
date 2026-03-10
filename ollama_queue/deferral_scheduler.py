@@ -38,22 +38,17 @@ class DeferralScheduler:
             self._sweep_lock.release()
 
     def _do_sweep(self) -> list[dict]:
-        """Process deferred jobs — resume if conditions cleared."""
-        deferred = self.db.list_deferred(unscheduled_only=True)
-        if not deferred:
-            return []
-
+        """Process deferred jobs — resume scheduled-past entries and find slots for unscheduled."""
         resumed = []
-        load_map = self.load_map_fn()
         now = time.time()
 
-        for entry in deferred:
-            job = self.db.get_job(entry["job_id"])
-            if not job or job["status"] != "deferred":
-                continue
-
-            # Check if a scheduled time has passed
+        # Phase 1: Resume entries whose scheduled time has passed
+        all_deferred = self.db.list_deferred()
+        for entry in all_deferred:
             if entry.get("scheduled_for") and entry["scheduled_for"] <= now:
+                job = self.db.get_job(entry["job_id"])
+                if not job or job["status"] != "deferred":
+                    continue
                 self.db.resume_deferred_job(entry["id"])
                 resumed.append({"deferral_id": entry["id"], "job_id": entry["job_id"]})
                 logger.info(
@@ -61,6 +56,17 @@ class DeferralScheduler:
                     entry["job_id"],
                     entry["id"],
                 )
+
+        # Phase 2: Find slots for unscheduled entries
+        unscheduled = self.db.list_deferred(unscheduled_only=True)
+        if not unscheduled:
+            return resumed
+
+        load_map = self.load_map_fn()
+
+        for entry in unscheduled:
+            job = self.db.get_job(entry["job_id"])
+            if not job or job["status"] != "deferred":
                 continue
 
             # Try to find a slot

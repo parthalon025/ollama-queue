@@ -1346,7 +1346,7 @@ def create_app(db: Database) -> FastAPI:
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    "SELECT metrics FROM eval_runs WHERE status = 'complete' " "ORDER BY id DESC LIMIT 20",
+                    "SELECT metrics FROM eval_runs WHERE status = 'complete' ORDER BY id DESC LIMIT 20",
                 ).fetchall()
 
         run_metrics = []
@@ -1587,7 +1587,7 @@ def create_app(db: Database) -> FastAPI:
             # background eval threads that hold db._lock while inserting results.
             _agreed_expr = "SUM(CASE WHEN COALESCE(override_score_transfer, score_transfer) > 1 THEN 1 ELSE 0 END)"
             agreement_rows = conn.execute(
-                f"SELECT variant, COUNT(*) as total, {_agreed_expr} as agreed" " FROM eval_results GROUP BY variant"
+                f"SELECT variant, COUNT(*) as total, {_agreed_expr} as agreed FROM eval_results GROUP BY variant"
             ).fetchall()
 
         # Build per-variant run list
@@ -1877,8 +1877,7 @@ def create_app(db: Database) -> FastAPI:
             raise HTTPException(status_code=400, detail="recurrence must be 'daily' or 'weekly'")
 
         command = (
-            f"ollama-queue eval-run --variants {','.join(variants)} "
-            f"--per-cluster {per_cluster} --run-mode {run_mode}"
+            f"ollama-queue eval-run --variants {','.join(variants)} --per-cluster {per_cluster} --run-mode {run_mode}"
         )
         import sqlite3 as _sqlite3
 

@@ -1258,7 +1258,7 @@ class Daemon:
             return "disable"
         else:
             _log.warning(
-                "check_command returned unknown exit code %d for recurring job id=%d — " "proceeding (fail-open)",
+                "check_command returned unknown exit code %d for recurring job id=%d — proceeding (fail-open)",
                 code,
                 rj_id,
             )

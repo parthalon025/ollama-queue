@@ -350,8 +350,7 @@ def _check_auto_promote_inner(db: Database, run_id: int) -> None:  # noqa: PLR09
         with db._lock:
             conn = db._connect()
             failed_count = conn.execute(
-                "SELECT COUNT(*) FROM eval_results "
-                "WHERE run_id = ? AND score_transfer IS NULL AND row_type = 'judge'",
+                "SELECT COUNT(*) FROM eval_results WHERE run_id = ? AND score_transfer IS NULL AND row_type = 'judge'",
                 (run_id,),
             ).fetchone()[0]
         error_budget_used = failed_count / item_count
@@ -864,8 +863,7 @@ def build_analysis_prompt(
         m = metrics[vid]
         mark = " (winner)" if vid == winner else ""
         lines.append(
-            f"| {vid}{mark} | {m['f1']:.2f} | {m['recall']:.2f}"
-            f" | {m['precision']:.2f} | {m['actionability']:.2f}/5 |"
+            f"| {vid}{mark} | {m['f1']:.2f} | {m['recall']:.2f} | {m['precision']:.2f} | {m['actionability']:.2f}/5 |"
         )
     lines.append("")
 
@@ -1368,8 +1366,8 @@ def render_report(run_id: int, metrics: dict[str, dict[str, float]], db: Databas
     # Summary table
     lines.append("## Summary\n")
     if is_v2:
-        lines.append("| Variant | AUC | Separation | Same Mean Posterior" " | Diff Mean Posterior | Pairs |")
-        lines.append("|---------|-----|------------|--------------------" "|--------------------|-------|")
+        lines.append("| Variant | AUC | Separation | Same Mean Posterior | Diff Mean Posterior | Pairs |")
+        lines.append("|---------|-----|------------|--------------------|--------------------|-------|")
         for vid in sorted(metrics.keys()):
             m = metrics[vid]
             lines.append(
@@ -1423,18 +1421,14 @@ def render_report(run_id: int, metrics: dict[str, dict[str, float]], db: Databas
     first_m = next(iter(metrics.values()), {})
     if not is_v2 and "per_cluster" in first_m:
         lines.append("\n## Per-Cluster Breakdown\n")
-        lines.append("| Cluster | Quality (F1) | Catches Right (Recall)" " | Avoids False (Precision) | Samples |")
+        lines.append("| Cluster | Quality (F1) | Catches Right (Recall) | Avoids False (Precision) | Samples |")
         lines.append("|---------|-------------|------------------------|--------------------------|---------|")
         # Use winner variant for the breakdown
         winner_pc = metrics.get(winner, {}).get("per_cluster", {})
         for cid in sorted(winner_pc.keys()):
             cm = winner_pc[cid]
             lines.append(
-                f"| {cid} "
-                f"| {cm['f1']:.2f} "
-                f"| {cm['recall']:.2f} "
-                f"| {cm['precision']:.2f} "
-                f"| {cm['sample_count']} |"
+                f"| {cid} | {cm['f1']:.2f} | {cm['recall']:.2f} | {cm['precision']:.2f} | {cm['sample_count']} |"
             )
 
     # Variant config details from DB

@@ -191,10 +191,8 @@ class Database:
                 "Same causal reasoning as B but with a 14B model. "
                 "Tests whether more model capacity improves principle quality."
             ),
-            "E": ("Chunked input with the 14B model — combines the focused context of C " "with the capacity of D."),
-            "F": (
-                "Asks the model to state when the principle does NOT apply. " "Sharper scope reduces false positives."
-            ),
+            "E": ("Chunked input with the 14B model — combines the focused context of C with the capacity of D."),
+            "F": ("Asks the model to state when the principle does NOT apply. Sharper scope reduces false positives."),
             "G": (
                 "Contrastive prompt with the 14B model. "
                 "Tests whether a bigger model follows scope constraints more precisely."

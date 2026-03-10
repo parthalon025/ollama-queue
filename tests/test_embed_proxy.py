@@ -282,7 +282,6 @@ def test_get_next_job_embed_affinity_via_command(db):
 
     next_job = db.get_next_job()
     assert next_job is not None
-    assert next_job["id"] == embed_id, (
-        f"Expected embed job (id={embed_id}) to win affinity over "
-        f"normal job (id={normal_id}), got id={next_job['id']}"
-    )
+    assert (
+        next_job["id"] == embed_id
+    ), f"Expected embed job (id={embed_id}) to win affinity over normal job (id={normal_id}), got id={next_job['id']}"

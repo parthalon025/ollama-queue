@@ -292,7 +292,7 @@ class TestParseJudgeResponseThinkStripped:
         assert result["transfer"] == 2
 
     def test_multiline_think_block(self):
-        raw = "<think>\nLine 1\nLine 2\nLine 3\n</think>\n" '{"transfer": 5, "precision": 5, "actionability": 5}'
+        raw = '<think>\nLine 1\nLine 2\nLine 3\n</think>\n{"transfer": 5, "precision": 5, "actionability": 5}'
         result = parse_judge_response(raw)
         assert result["transfer"] == 5
         assert "Line 1" in result["judge_reasoning"]

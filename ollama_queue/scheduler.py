@@ -326,6 +326,38 @@ class Scheduler:
                 self._score_interval_job(scores, rj, job_score, now)
         return scores
 
+    def load_map_extended(self, now: float | None = None) -> list[dict]:
+        """Build a 48-slot load map with VRAM estimates per slot.
+
+        Returns list of dicts with 'load' (priority-weighted score) and
+        'vram_gb' (estimated VRAM commitment based on model sizes of scheduled jobs).
+        Uses per-job VRAM scoring alongside the standard load_map() logic.
+        """
+        if now is None:
+            now = time.time()
+
+        scores = self.load_map(now=now)
+        vram: list[float] = [0.0] * self._SLOT_COUNT
+
+        for rj in self._get_recurring_jobs():
+            if not rj["enabled"]:
+                continue
+            model = rj.get("model", "")
+            model_vram = _estimate_model_vram(model)
+            if model_vram <= 0:
+                continue
+            # Build a temporary score array to find which slots this job fires in
+            tmp: list[float] = [0.0] * self._SLOT_COUNT
+            if rj.get("cron_expression"):
+                self._score_cron_job(tmp, rj, 1.0, now)
+            elif rj.get("interval_seconds"):
+                self._score_interval_job(tmp, rj, 1.0, now)
+            for i in range(self._SLOT_COUNT):
+                if tmp[i] > 0:
+                    vram[i] += model_vram
+
+        return [{"load": scores[i], "vram_gb": round(vram[i], 1)} for i in range(self._SLOT_COUNT)]
+
     def suggest_time(
         self,
         priority: int = 5,
@@ -353,3 +385,41 @@ class Scheduler:
             cron_expr = f"{minute} {hour} * * *"
             results.append((cron_expr, score))
         return results
+
+
+import re as _re
+
+_SIZE_PATTERN = _re.compile(r"(\d+(?:\.\d+)?)b", _re.IGNORECASE)
+
+# Rough mapping from parameter count (billions) to VRAM (GB) at Q4 quantization
+_PARAM_TO_VRAM = {
+    0.5: 0.5,
+    1: 1.0,
+    1.5: 1.2,
+    3: 2.0,
+    7: 4.5,
+    8: 5.0,
+    9: 5.5,
+    13: 8.0,
+    14: 8.5,
+    32: 20.0,
+    70: 40.0,
+}
+
+
+def _estimate_model_vram(model: str) -> float:
+    """Estimate VRAM usage in GB from a model name like 'qwen2.5:7b'.
+
+    Uses parameter count hints in the model name (e.g. '7b', '14b') and maps to
+    approximate VRAM at Q4 quantization. Returns 0 if no size hint found.
+    """
+    match = _SIZE_PATTERN.search(model)
+    if not match:
+        return 0.0
+    params = float(match.group(1))
+    # Find closest known size
+    best_key = min(_PARAM_TO_VRAM, key=lambda k: abs(k - params))
+    if abs(best_key - params) / max(params, 0.1) > 0.5:
+        # Too far from any known size — interpolate linearly
+        return params * 0.6  # ~0.6 GB per billion params at Q4
+    return _PARAM_TO_VRAM[best_key]

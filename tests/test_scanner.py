@@ -19,7 +19,7 @@ def test_detect_platform_windows():
 
 
 def test_live_scan_linux_parses_ss_output():
-    ss_output = "tcp   ESTAB  0  0  127.0.0.1:52340  127.0.0.1:11434  " 'users:(("aria",pid=1234,fd=7))\n'
+    ss_output = 'tcp   ESTAB  0  0  127.0.0.1:52340  127.0.0.1:11434  users:(("aria",pid=1234,fd=7))\n'
     with patch("ollama_queue.scanner.subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=0, stdout=ss_output, stderr="")
         results = live_scan("linux")

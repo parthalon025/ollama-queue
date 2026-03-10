@@ -95,7 +95,7 @@ class TestMultilineOutput:
 
     def test_mixed_output_with_ollama_at_end(self):
         """Non-JSON output followed by Ollama response."""
-        stdout = "Loading model...\n" "Ready.\n" '{"done":true,"eval_count":50,"eval_duration":1000000000}\n'
+        stdout = 'Loading model...\nReady.\n{"done":true,"eval_count":50,"eval_duration":1000000000}\n'
         result = parse_ollama_metrics(stdout)
         assert result is not None
         assert result["eval_count"] == 50

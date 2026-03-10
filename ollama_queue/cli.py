@@ -133,9 +133,7 @@ def history(ctx, show_all, source):
     click.echo("-" * 70)
     for job in jobs:
         exit_str = str(job.get("exit_code", "")) if job.get("exit_code") is not None else "-"
-        click.echo(
-            f"{job['id']:>5}  {job['status']:<10}  {(job['source'] or ''):<15}  " f"{exit_str:>4}  {job['command']}"
-        )
+        click.echo(f"{job['id']:>5}  {job['status']:<10}  {(job['source'] or ''):<15}  {exit_str:>4}  {job['command']}")
 
 
 @main.command()
@@ -569,3 +567,126 @@ def dlq_clear(ctx):
     db = ctx.obj["db"]
     n = db.clear_dlq()
     click.echo(f"Cleared {n} resolved DLQ entries.")
+
+
+@dlq.command("schedule-preview")
+@click.pass_context
+def dlq_schedule_preview(ctx):
+    """Preview what the next DLQ sweep would reschedule."""
+    db = ctx.obj["db"]
+    entries = db.list_dlq(unscheduled_only=True)
+    if not entries:
+        click.echo("No unscheduled DLQ entries.")
+        return
+    from ollama_queue.system_snapshot import classify_failure
+
+    for e in entries:
+        cat = classify_failure(e.get("failure_reason", ""), e.get("exit_code"))
+        click.echo(f"[{e['id']}] {e['command'][:40]} — {cat} ({e['failure_reason'][:40]})")
+    click.echo(f"\n{len(entries)} entries eligible for auto-reschedule.")
+
+
+@dlq.command("reschedule")
+@click.argument("dlq_id", type=int)
+@click.pass_context
+def dlq_reschedule(ctx, dlq_id):
+    """Manually reschedule a DLQ entry as a new job."""
+    import time
+
+    db = ctx.obj["db"]
+    entry = db.get_dlq_entry(dlq_id)
+    if not entry:
+        click.echo(f"DLQ entry {dlq_id} not found.", err=True)
+        return
+    new_job_id = db.submit_job(
+        command=entry["command"],
+        model=entry.get("model", ""),
+        priority=entry.get("priority", 5),
+        timeout=entry.get("timeout", 600),
+        source=entry.get("source", "dlq-manual-reschedule"),
+        tag=entry.get("tag"),
+        resource_profile=entry.get("resource_profile", "ollama"),
+    )
+    db.update_dlq_reschedule(
+        dlq_id,
+        rescheduled_job_id=new_job_id,
+        rescheduled_for=time.time(),
+        reschedule_reasoning="manual CLI reschedule",
+    )
+    click.echo(f"DLQ #{dlq_id} → new job #{new_job_id}")
+
+
+@main.command("defer")
+@click.argument("job_id", type=int)
+@click.option("--reason", default="manual", help="Deferral reason")
+@click.pass_context
+def defer_job(ctx, job_id, reason):
+    """Defer a pending or queued job."""
+    db = ctx.obj["db"]
+    job = db.get_job(job_id)
+    if not job:
+        click.echo(f"Job {job_id} not found.", err=True)
+        return
+    if job["status"] not in ("pending", "queued"):
+        click.echo(f"Cannot defer job in status '{job['status']}'.", err=True)
+        return
+    deferral_id = db.defer_job(job_id, reason=reason)
+    click.echo(f"Job #{job_id} deferred (deferral #{deferral_id}, reason: {reason})")
+
+
+@main.group()
+def metrics():
+    """View model performance metrics."""
+    pass
+
+
+@metrics.command("models")
+@click.pass_context
+def metrics_models(ctx):
+    """Show per-model performance stats."""
+    db = ctx.obj["db"]
+    stats = db.get_model_stats()
+    if not stats:
+        click.echo("No metrics data yet — run some jobs first.")
+        return
+    click.echo(f"{'Model':<30} {'Runs':>5} {'tok/min':>8} {'Warmup':>8} {'Size':>6}")
+    click.echo("-" * 62)
+    for model, data in sorted(stats.items()):
+        tok = f"{data['avg_tok_per_min']:.0f}" if data.get("avg_tok_per_min") else "—"
+        warmup = f"{data['avg_warmup_s']:.1f}s" if data.get("avg_warmup_s") else "—"
+        size = f"{data['model_size_gb']:.1f}GB" if data.get("model_size_gb") else "—"
+        click.echo(f"{model:<30} {data['run_count']:>5} {tok:>8} {warmup:>8} {size:>6}")
+
+
+@metrics.command("curve")
+@click.pass_context
+def metrics_curve(ctx):
+    """Show fitted performance curve parameters."""
+    from ollama_queue.performance_curve import PerformanceCurve
+
+    db = ctx.obj["db"]
+    stats = db.get_model_stats()
+    curve = PerformanceCurve()
+    points = [
+        {
+            "model_size_gb": s["model_size_gb"],
+            "avg_tok_per_min": s["avg_tok_per_min"],
+        }
+        for s in stats.values()
+        if s.get("model_size_gb") and s.get("avg_tok_per_min")
+    ]
+    if not points:
+        click.echo("Not enough data to fit a curve — need at least 2 models with size + throughput data.")
+        return
+    curve.fit(points)
+    data = curve.get_curve_data()
+    if not data["fitted"]:
+        click.echo("Could not fit curve — need more data points.")
+        return
+    click.echo(f"Performance curve fitted from {data['n_points']} models:")
+    click.echo(f"  tok/min slope:     {data['tok_slope']:.4f}")
+    click.echo(f"  tok/min intercept: {data['tok_intercept']:.4f}")
+    click.echo(f"  residual std:      {data['tok_residual_std']:.4f}")
+    if data.get("warmup_slope") is not None:
+        click.echo(f"  warmup slope:      {data['warmup_slope']:.4f}")
+        click.echo(f"  warmup intercept:  {data['warmup_intercept']:.4f}")

@@ -27,7 +27,10 @@ class TestSweepNoDeferred:
         sched, db, *_ = _make_scheduler(deferred=[])
         result = sched.sweep()
         assert result == []
-        db.list_deferred.assert_called_once_with(unscheduled_only=True)
+        # Phase 1 fetches all deferred, phase 2 fetches unscheduled only
+        assert db.list_deferred.call_count == 2
+        db.list_deferred.assert_any_call()
+        db.list_deferred.assert_any_call(unscheduled_only=True)
         db.resume_deferred_job.assert_not_called()
         db.update_deferral_schedule.assert_not_called()
 

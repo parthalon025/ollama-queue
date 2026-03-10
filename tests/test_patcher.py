@@ -9,7 +9,7 @@ from ollama_queue.patcher import patch_consumer, revert_consumer
 def systemd_unit(tmp_path):
     unit = tmp_path / "aria.service"
     unit.write_text(
-        "[Unit]\nDescription=ARIA\n\n" "[Service]\nExecStart=/usr/bin/aria\n\n" "[Install]\nWantedBy=default.target\n"
+        "[Unit]\nDescription=ARIA\n\n[Service]\nExecStart=/usr/bin/aria\n\n[Install]\nWantedBy=default.target\n"
     )
     return unit
 
