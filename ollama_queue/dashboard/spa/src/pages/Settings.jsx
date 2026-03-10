@@ -1,7 +1,7 @@
 import { h } from 'preact';
 import { useCallback } from 'preact/hooks';
 import { settings, status, API } from '../stores';
-import SettingsForm from '../components/SettingsForm.jsx';
+import SettingsForm from '../components/SettingsForm';
 import { useActionFeedback } from '../hooks/useActionFeedback.js';
 
 // What it shows: All queue configuration — health thresholds that trigger automatic pausing,

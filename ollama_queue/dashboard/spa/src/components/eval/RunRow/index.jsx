@@ -1,10 +1,13 @@
 import { h } from 'preact';
 import { useState, useRef, useEffect } from 'preact/hooks';
-import { EVAL_TRANSLATIONS } from './translations.js';
-import ResultsTable from './ResultsTable.jsx';
-import ConfusionMatrix from './ConfusionMatrix.jsx';
-import { API, evalActiveRun, evalSubTab, evalVariants, fetchEvalRuns, fetchEvalVariants, fetchRunAnalysis, startEvalPoll } from '../../stores';
-import { useActionFeedback } from '../../hooks/useActionFeedback.js';
+import { EVAL_TRANSLATIONS } from '../translations.js';
+import ResultsTable from '../ResultsTable.jsx';
+import ConfusionMatrix from '../ConfusionMatrix.jsx';
+import { API, evalActiveRun, evalSubTab, evalVariants, fetchEvalRuns, fetchEvalVariants, fetchRunAnalysis, startEvalPoll } from '../../../stores';
+import { useActionFeedback } from '../../../hooks/useActionFeedback.js';
+import StatusDot from './StatusDot.jsx';
+import { formatDate, fmtPct, simpleRenderMd } from './helpers.js';
+
 // What it shows: A single eval run row with 3-level progressive disclosure.
 //   L1: status dot, winner config, quality score, date, item count.
 //   L2: per-variant metric table, scorer info, Ollama analysis panel, action buttons.
@@ -12,54 +15,6 @@ import { useActionFeedback } from '../../hooks/useActionFeedback.js';
 // Decision it drives: User sees run history at a glance, drills into
 //   per-variant breakdown + AI-generated analysis, and can re-run, compare, or export.
 // NOTE: All .map() callbacks use descriptive parameter names — never 'h' (shadows JSX factory)
-
-function statusDot(status) {
-  const colors = {
-    complete: 'var(--status-healthy)',
-    failed: 'var(--status-error)',
-    cancelled: 'var(--status-waiting)',
-    generating: 'var(--accent)',
-    judging: 'var(--accent)',
-    pending: 'var(--text-tertiary)',
-  };
-  return (
-    <span style={{
-      display: 'inline-block',
-      width: '8px',
-      height: '8px',
-      borderRadius: '50%',
-      background: colors[status] ?? 'var(--text-tertiary)',
-      marginRight: '0.4rem',
-      flexShrink: 0,
-    }} />
-  );
-}
-
-function formatDate(iso) {
-  if (!iso) return '';
-  try {
-    const d = new Date(iso);
-    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-  } catch { return iso; }
-}
-
-function fmtPct(val) {
-  if (val == null) return '—';
-  return `${Math.round(val * 100)}%`;
-}
-
-// Converts AI-generated markdown prose to readable plain text.
-// Handles: ## headers → bold label, **x** → x, - bullet → • bullet.
-// No library needed — analysis_md is structured prose, not full markdown.
-function simpleRenderMd(text) {
-  if (!text) return '';
-  return text
-    .replace(/^#{1,3} (.+)$/gm, '[$1]')       // ## Header → [Header]
-    .replace(/\*\*(.+?)\*\*/g, '$1')            // **bold** → bold
-    .replace(/^- (.+)$/gm, '• $1')             // - item → • item
-    .replace(/\n{3,}/g, '\n\n')                // collapse 3+ blank lines
-    .trim();
-}
 
 export default function RunRow({ run }) {
   const [level, setLevel] = useState(1); // 1 | 2 | 3
@@ -92,7 +47,7 @@ export default function RunRow({ run }) {
     ? (evalVariants.value || []).find(v => v.id === winner_variant)
     : null;
   const winnerLabel = winnerVariantRow
-    ? `${winner_variant} — ${winnerVariantRow.label}`
+    ? `${winner_variant} \u2014 ${winnerVariantRow.label}`
     : winner_variant;
 
   // Bayesian/tournament runs use AUC as primary quality metric instead of F1
@@ -104,7 +59,7 @@ export default function RunRow({ run }) {
   async function handleAnalyze(evt) {
     evt.stopPropagation();
     await analyzeAct(
-      'Generating analysis…',
+      'Generating analysis\u2026',
       async () => {
         const res = await fetch(`${API}/eval/runs/${id}/analyze`, { method: 'POST' });
         let data = null;
@@ -115,14 +70,14 @@ export default function RunRow({ run }) {
         refreshTimer.current = setTimeout(() => fetchEvalRuns(), 8000);
         return data;
       },
-      () => `Analysis started for run #${id} — refresh in a moment`
+      () => `Analysis started for run #${id} \u2014 refresh in a moment`
     );
   }
 
   async function handleRepeat(evt) {
     evt.stopPropagation();
     await repeatAct(
-      'Repeating run…',
+      'Repeating run\u2026',
       async () => {
         const res = await fetch(`${API}/eval/runs/${id}/repeat`, { method: 'POST' });
         let data = null;
@@ -144,7 +99,7 @@ export default function RunRow({ run }) {
   async function handlePromote(evt) {
     evt.stopPropagation();
     await promoteAct(
-      'Promoting…',
+      'Promoting\u2026',
       async () => {
         const res = await fetch(`${API}/eval/runs/${id}/promote`, {
           method: 'POST',
@@ -210,7 +165,7 @@ export default function RunRow({ run }) {
         aria-expanded={level >= 2}
       >
         <div style={{ display: 'flex', alignItems: 'center', flex: 1, gap: '0.5rem', flexWrap: 'wrap' }}>
-          {statusDot(status)}
+          <StatusDot status={status} />
           <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-secondary)', textTransform: 'lowercase' }}>
             {EVAL_TRANSLATIONS[status]?.label ?? status}
           </span>
@@ -231,12 +186,12 @@ export default function RunRow({ run }) {
           )}
           {item_count != null && (
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)' }}>
-              · {item_count} items
+              {'\u00B7'} {item_count} items
             </span>
           )}
         </div>
         <span style={{ color: 'var(--text-tertiary)', fontSize: 'var(--type-label)', flexShrink: 0 }}>
-          {level >= 2 ? '▲' : '▼'}
+          {level >= 2 ? '\u25B2' : '\u25BC'}
         </span>
       </div>
 
@@ -289,13 +244,13 @@ export default function RunRow({ run }) {
                       return (
                         <tr key={vid} style={{ background: isWinner ? 'var(--accent-glow)' : 'transparent' }}>
                           <td style={{ padding: '4px 8px', fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: isWinner ? 'var(--accent)' : 'var(--text-primary)' }}>
-                            {isWinner && '★ '}Config {vid}
+                            {isWinner && '\u2605 '}Config {vid}
                           </td>
                           {metricKeys.map(metric => (
                             <td key={metric} style={{ padding: '4px 8px', textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-secondary)' }}>
                               {metric === 'f1' && analysis?.confidence_intervals?.[vid]
-                                ? `${fmtPct(vm[metric])} ±${Math.round((analysis.confidence_intervals[vid].high - analysis.confidence_intervals[vid].low) / 2 * 100)}`
-                                : (vm[metric] != null ? fmtPct(vm[metric]) : '—')}
+                                ? `${fmtPct(vm[metric])} \u00B1${Math.round((analysis.confidence_intervals[vid].high - analysis.confidence_intervals[vid].low) / 2 * 100)}`
+                                : (vm[metric] != null ? fmtPct(vm[metric]) : '\u2014')}
                             </td>
                           ))}
                         </tr>
@@ -360,7 +315,7 @@ export default function RunRow({ run }) {
           {/* Scorer info */}
           {judge_model && (
             <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', marginBottom: '0.5rem' }}>
-              Scorer: {judge_model} · {judgeCallCount} items
+              Scorer: {judge_model} {'\u00B7'} {judgeCallCount} items
             </div>
           )}
 
@@ -504,7 +459,7 @@ export default function RunRow({ run }) {
                   onClick={handlePromote}
                   title="Promote winning config to production"
                 >
-                  {promoteFb.phase === 'loading' ? 'Promoting…' : 'Use this config'}
+                  {promoteFb.phase === 'loading' ? 'Promoting\u2026' : 'Use this config'}
                 </button>
                 {promoteFb.msg && <div class={`action-fb action-fb--${promoteFb.phase}`}>{promoteFb.msg}</div>}
               </div>
@@ -518,7 +473,7 @@ export default function RunRow({ run }) {
                   onClick={handleAnalyze}
                   title={analysis_md ? 'Regenerate analysis' : 'Analyze this run with Ollama'}
                 >
-                  {analyzeFb.phase === 'loading' ? 'Analysing…' : (analysis_md ? '↺ Re-analyze' : '✦ Analyze')}
+                  {analyzeFb.phase === 'loading' ? 'Analysing\u2026' : (analysis_md ? '\u21BA Re-analyze' : '\u2726 Analyze')}
                 </button>
                 {analyzeFb.msg && <div class={`action-fb action-fb--${analyzeFb.phase}`}>{analyzeFb.msg}</div>}
               </div>
@@ -532,7 +487,7 @@ export default function RunRow({ run }) {
                   onClick={handleRepeat}
                   title="Re-run this eval with the same items and seed"
                 >
-                  {repeatFb.phase === 'loading' ? 'Repeating…' : '↺ Repeat'}
+                  {repeatFb.phase === 'loading' ? 'Repeating\u2026' : '\u21BA Repeat'}
                 </button>
                 {repeatFb.msg && <div class={`action-fb action-fb--${repeatFb.phase}`}>{repeatFb.msg}</div>}
               </div>
@@ -542,7 +497,7 @@ export default function RunRow({ run }) {
               style={{ fontSize: 'var(--type-label)', padding: '3px 10px', marginLeft: 'auto' }}
               onClick={() => toggleLevel(3)}
             >
-              {level === 3 ? '▲ Hide scored pairs' : `▼ Show scored pairs (${item_count ?? '?'})`}
+              {level === 3 ? '\u25B2 Hide scored pairs' : `\u25BC Show scored pairs (${item_count ?? '?'})`}
             </button>
           </div>
         </div>
