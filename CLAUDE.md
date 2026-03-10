@@ -16,7 +16,7 @@ ollama_queue/
   metrics_parser.py   # Ollama response metrics parser (tok/min, eval duration)
 
   api/                # FastAPI REST API (90+ endpoints, APIRouter per domain)
-    __init__.py       # create_app() — mounts all routers, CORS, static SPA
+    __init__.py       # register_routes() — sets module db ref, includes all APIRouters
     consumers.py      # Consumer management endpoints (scan, patch, revert, health)
     dlq.py            # DLQ list/retry/clear/schedule endpoints
     eval_runs.py      # Eval run CRUD, progress, results, analysis, promote
@@ -37,7 +37,7 @@ ollama_queue/
 
   db/                 # SQLite persistence (mixin pattern → single Database class)
     __init__.py       # Database class: assembles all mixins, holds _conn + _lock
-    schema.py         # SchemaMixin: CREATE TABLE, migrations, _connect(), initialize()
+    schema.py         # SchemaMixin: CREATE TABLE, migrations, seed data, initialize()
     jobs.py           # JobsMixin: CRUD for jobs table (submit, claim, complete, cancel, retry)
     schedule.py       # ScheduleMixin: recurring_jobs CRUD, promote_due, next_run, load_map
     dlq.py            # DLQMixin: dlq table CRUD, move_to_dlq, retry, reschedule tracking
@@ -46,8 +46,8 @@ ollama_queue/
     eval.py           # EvalMixin: eval_runs, eval_results, eval_variants tables
 
   eval/               # Eval pipeline — prompt evaluation with A/B variants + LLM judge
-    __init__.py       # Re-exports: EvalEngine, compute_run_analysis
-    engine.py         # EvalEngine: session orchestration, scheduling modes, seed/reproducibility
+    __init__.py       # Re-exports public names from engine, judge, metrics, promote, analysis
+    engine.py         # Session orchestration, run CRUD, scheduling modes, seed/reproducibility
     generate.py       # run_eval_generate: variant-based generation with cooperative cancellation
     judge.py          # run_eval_judge: LLM-based scoring with agreement tracking
     promote.py        # do_promote_eval_run, check_auto_promote (3-gate auto-promote logic)

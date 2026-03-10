@@ -1,7 +1,10 @@
 """Eval pipeline business logic — generate, judge, analyze, promote.
 
-Re-exports all public names so that ``from ollama_queue.eval import X`` works
-for the most commonly used symbols.
+Re-exports commonly used names so that ``from ollama_queue.eval import X``
+works for the primary API surface. For internal helpers (prompt builders,
+signal computers, tournament/Bayesian metrics), import from the specific
+submodule: ``engine``, ``generate``, ``judge``, ``metrics``, ``promote``,
+or ``analysis``.
 """
 
 from ollama_queue.eval.analysis import (

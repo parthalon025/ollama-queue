@@ -14,7 +14,6 @@ a single Database class API.
 import logging
 import sqlite3
 import threading
-import time  # noqa: F401 — tests patch "ollama_queue.db.time"
 
 from ollama_queue.db.dlq import DLQMixin
 from ollama_queue.db.eval import EvalMixin

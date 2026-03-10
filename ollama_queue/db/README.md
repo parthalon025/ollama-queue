@@ -9,7 +9,7 @@ through this layer -- nothing else touches disk directly.
 ## Architecture
 
 Uses the **mixin pattern** to split a large class across domain files while
-presenting a single `Database` API. All mixins access `self._conn` and `self._lock`:
+presenting a single `Database` API. All mixins access `self._connect()` and `self._lock`:
 
 ```python
 class Database(SchemaMixin, JobsMixin, ScheduleMixin, SettingsMixin,

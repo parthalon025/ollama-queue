@@ -23,7 +23,7 @@
       "cd ~/Documents/projects/ollama-queue && .venv/bin/python -c 'from ollama_queue.api import api_router'",
       "cd ~/Documents/projects/ollama-queue && .venv/bin/python -m pytest --timeout=120 -x -q 2>&1 | tail -1 | grep -q passed"
     ],
-    "passes": false,
+    "passes": true,
     "blocked_by": []
   },
   {
@@ -44,7 +44,7 @@
       "cd ~/Documents/projects/ollama-queue && .venv/bin/python -c 'from ollama_queue.eval.analysis import compute_run_analysis'",
       "cd ~/Documents/projects/ollama-queue && .venv/bin/python -m pytest --timeout=120 -x -q 2>&1 | tail -1 | grep -q passed"
     ],
-    "passes": false,
+    "passes": true,
     "blocked_by": [1]
   },
   {
@@ -66,7 +66,7 @@
       "cd ~/Documents/projects/ollama-queue && .venv/bin/python -c 'from ollama_queue.db import Database; assert len(Database.__mro__) >= 8'",
       "cd ~/Documents/projects/ollama-queue && .venv/bin/python -m pytest --timeout=120 -x -q 2>&1 | tail -1 | grep -q passed"
     ],
-    "passes": false,
+    "passes": true,
     "blocked_by": [1, 2]
   },
   {
@@ -82,7 +82,7 @@
       "cd ~/Documents/projects/ollama-queue && .venv/bin/python -c 'from ollama_queue.daemon import loop'",
       "cd ~/Documents/projects/ollama-queue && .venv/bin/python -m pytest --timeout=120 -x -q 2>&1 | tail -1 | grep -q passed"
     ],
-    "passes": false,
+    "passes": true,
     "blocked_by": [1, 2, 3]
   },
   {
@@ -124,7 +124,7 @@
       "cd ~/Documents/projects/ollama-queue && .venv/bin/python -c 'from ollama_queue.config import patch_consumer'",
       "cd ~/Documents/projects/ollama-queue && .venv/bin/python -m pytest --timeout=120 -x -q 2>&1 | tail -1 | grep -q passed"
     ],
-    "passes": false,
+    "passes": true,
     "blocked_by": [1, 2, 3, 4]
   },
   {
@@ -138,7 +138,7 @@
       "cd ~/Documents/projects/ollama-queue && ! grep -n 'from ollama_queue.health import' ollama_queue/cli.py",
       "cd ~/Documents/projects/ollama-queue && .venv/bin/python -m pytest tests/test_cli.py --timeout=120 -x -q 2>&1 | tail -1 | grep -q passed"
     ],
-    "passes": false,
+    "passes": true,
     "blocked_by": [5]
   },
   {
@@ -157,7 +157,7 @@
       "cd ~/Documents/projects/ollama-queue && ! grep -rn 'from ollama_queue.scanner import' tests/",
       "cd ~/Documents/projects/ollama-queue && .venv/bin/python -m pytest --timeout=120 -x -q 2>&1 | tail -1 | grep -q passed"
     ],
-    "passes": false,
+    "passes": true,
     "blocked_by": [6]
   },
   {
@@ -176,7 +176,7 @@
       "cd ~/Documents/projects/ollama-queue/ollama_queue/dashboard/spa && ! test -f src/store.js",
       "cd ~/Documents/projects/ollama-queue/ollama_queue/dashboard/spa && npm run build 2>&1 | tail -3 | grep -qv 'error'"
     ],
-    "passes": false,
+    "passes": true,
     "blocked_by": []
   },
   {
@@ -192,7 +192,7 @@
       "cd ~/Documents/projects/ollama-queue/ollama_queue/dashboard/spa && ! test -f src/pages/Plan.jsx",
       "cd ~/Documents/projects/ollama-queue/ollama_queue/dashboard/spa && npm run build 2>&1 | tail -3 | grep -qv 'error'"
     ],
-    "passes": false,
+    "passes": true,
     "blocked_by": [8]
   },
   {
@@ -214,7 +214,7 @@
       "cd ~/Documents/projects/ollama-queue/ollama_queue/dashboard/spa && ! test -f src/components/eval/GeneralSettings.jsx",
       "cd ~/Documents/projects/ollama-queue/ollama_queue/dashboard/spa && npm run build 2>&1 | tail -3 | grep -qv 'error'"
     ],
-    "passes": false,
+    "passes": true,
     "blocked_by": [8]
   },
   {
@@ -230,7 +230,7 @@
       "cd ~/Documents/projects/ollama-queue && ! grep -rn 'from ollama_queue.scanner import' ollama_queue/ --include='*.py' | grep -v config/",
       "cd ~/Documents/projects/ollama-queue && .venv/bin/python -m pytest --timeout=120 -x -q 2>&1 | tail -1 | grep -q passed"
     ],
-    "passes": false,
+    "passes": true,
     "blocked_by": [7]
   },
   {
@@ -248,7 +248,7 @@
       "cd ~/Documents/projects/ollama-queue && grep -q 'config/' CLAUDE.md",
       "cd ~/Documents/projects/ollama-queue && ! grep -q 'api.py.*#.*FastAPI REST API' CLAUDE.md"
     ],
-    "passes": false,
+    "passes": true,
     "blocked_by": [11]
   },
   {
@@ -264,7 +264,7 @@
       "cd ~/Documents/projects/ollama-queue && ! find ollama_queue/ -name '*.py' -not -path '*/__pycache__/*' -exec sh -c 'test $(wc -l < \"$1\") -gt 900' _ {} \\; -print | grep -q .",
       "cd ~/Documents/projects/ollama-queue && test $(find ollama_queue/ -maxdepth 1 -name '*.py' -not -name '__init__.py' -not -name 'cli.py' -not -name 'dlq.py' -not -name 'intelligence.py' -not -name 'metrics_parser.py' -not -name 'app.py' | wc -l) -eq 0"
     ],
-    "passes": false,
+    "passes": true,
     "blocked_by": [11, 12, 9, 10]
   }
 ]

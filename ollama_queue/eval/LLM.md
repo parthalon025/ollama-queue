@@ -15,7 +15,7 @@ engine.py:run_eval_session()
   5. engine.py:compute_run_analysis()     -- calls analysis.py pure functions, stores analysis_json
 ```
 
-All DB helpers live in `engine.py`: `get_eval_run()`, `create_eval_run()`, `update_eval_run()`, `insert_eval_result()`, `compute_metrics()`, `render_report()`. Phase modules import from `engine.py`.
+All DB helpers live in `engine.py`: `get_eval_run()`, `create_eval_run()`, `update_eval_run()`, `insert_eval_result()`. Metric computation lives in `metrics.py`: `compute_metrics()`, `render_report()`. Phase modules import from `engine.py`.
 
 ## Cooperative Cancellation
 

@@ -21,16 +21,18 @@ engine.py (orchestrator)
 ```
 
 `engine.py` contains all DB helper functions (`get_eval_run`, `create_eval_run`,
-`update_eval_run`, `insert_eval_result`, `compute_metrics`, `render_report`,
-`compute_run_analysis`) and the `run_eval_session()` orchestrator. The phase modules
-import from `engine.py` for shared infrastructure.
+`update_eval_run`, `insert_eval_result`, `compute_run_analysis`) and the
+`run_eval_session()` orchestrator. `metrics.py` holds pure metric computation
+(`compute_metrics`, `render_report`). The phase modules import from `engine.py`
+for shared infrastructure.
 
 ## Modules
 
 | File | Key Exports | Role |
 |------|-------------|------|
 | `__init__.py` | All public names | Re-exports for `from ollama_queue.eval import X` |
-| `engine.py` | `run_eval_session`, `create_eval_run`, `get_eval_run`, `update_eval_run`, `insert_eval_result`, `compute_metrics`, `compute_run_analysis` | Session orchestrator + all DB helpers |
+| `engine.py` | `run_eval_session`, `create_eval_run`, `get_eval_run`, `update_eval_run`, `insert_eval_result`, `compute_run_analysis` | Session orchestrator + all DB helpers |
+| `metrics.py` | `compute_metrics`, `render_report`, `compute_tournament_metrics`, `compute_bayesian_metrics` | Pure metric computation: F1/precision/recall, tournament/Bayesian aggregates, report rendering |
 | `generate.py` | `run_eval_generate`, `build_generation_prompt` | Prompt construction and generation loop |
 | `judge.py` | `run_eval_judge`, `build_judge_prompt`, `parse_judge_response`, `build_analysis_prompt` | LLM scoring with 4 judge modes (rubric, binary, tournament, bayesian) |
 | `promote.py` | `do_promote_eval_run`, `check_auto_promote`, `generate_eval_analysis` | Winner resolution, 3-gate auto-promote, Ollama-powered analysis |
