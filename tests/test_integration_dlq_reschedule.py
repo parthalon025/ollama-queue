@@ -90,7 +90,7 @@ class TestDLQAutoRescheduleIntegration:
         assert new_job is not None
         assert new_job["status"] == "pending"
         assert new_job["model"] == "qwen2.5:7b"
-        assert new_job["source"] == "integration-test"
+        assert new_job["source"] == "dlq-reschedule:integration-test"
 
     def test_chronic_failure_skipped(self, db, estimator):
         """Jobs that fail too many times are marked chronic and skipped."""

@@ -121,7 +121,7 @@ class DLQScheduler:
                 model=entry.get("model", ""),
                 priority=entry.get("priority", 0),
                 timeout=entry.get("timeout", 600),
-                source=entry.get("source", "dlq-reschedule"),
+                source=f"dlq-reschedule:{entry.get('source', 'unknown')}",
                 tag=entry.get("tag"),
                 resource_profile=entry.get("resource_profile", "ollama"),
             )
