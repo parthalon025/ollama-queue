@@ -250,6 +250,20 @@ def test_yield_when_model_is_truly_interactive():
     assert decision["should_yield"] is True
 
 
+def test_get_loaded_model_success():
+    """get_loaded_model() returns first model name from ollama ps. Covers lines 116-117."""
+    from unittest.mock import MagicMock, patch
+
+    mock = MagicMock()
+    mock.returncode = 0
+    mock.stdout = (
+        "NAME    ID    SIZE    PROCESSOR    UNTIL\nllama3.2:3b    abc123    3.2 GB    100% GPU    4 minutes from now\n"
+    )
+    with patch("subprocess.run", return_value=mock):
+        result = HealthMonitor().get_ollama_active_model()
+    assert result == "llama3.2:3b"
+
+
 # --- T4: get_loaded_models() multi-model support ---
 
 
@@ -330,3 +344,186 @@ def test_get_vram_pct_cached(monkeypatch):
     h.get_vram_pct()
     h.get_vram_pct()
     assert call_count == 1, "nvidia-smi should be called once within TTL window"
+
+
+# ── Coverage gap tests ────────────────────────────────────────────────────
+
+
+from unittest.mock import MagicMock, mock_open, patch
+
+
+def test_get_ram_pct_zero_total():
+    """Line 34: MemTotal=0 returns 0.0."""
+    m = HealthMonitor()
+    with patch.object(HealthMonitor, "_parse_meminfo", return_value={"MemTotal": 0, "MemAvailable": 0}):
+        assert m.get_ram_pct() == 0.0
+
+
+def test_get_swap_pct_zero_total():
+    """Line 44: SwapTotal=0 returns 0.0."""
+    m = HealthMonitor()
+    with patch.object(HealthMonitor, "_parse_meminfo", return_value={"SwapTotal": 0, "SwapFree": 0}):
+        assert m.get_swap_pct() == 0.0
+
+
+def test_get_load_avg_exception():
+    """Lines 53-54: /proc/loadavg unreadable returns 0.0."""
+    m = HealthMonitor()
+    with patch("builtins.open", side_effect=OSError("no file")):
+        assert m.get_load_avg() == 0.0
+
+
+def test_fetch_vram_pct_nonzero_returncode():
+    """Line 85: nvidia-smi non-zero returncode returns None."""
+    m = HealthMonitor()
+    mock_result = MagicMock(returncode=1, stdout="", stderr="error")
+    with patch("ollama_queue.health.subprocess.run", return_value=mock_result):
+        assert m._fetch_vram_pct() is None
+
+
+def test_fetch_vram_pct_zero_total():
+    """Line 92: nvidia-smi reports 0 total VRAM returns 0.0."""
+    m = HealthMonitor()
+    mock_result = MagicMock(returncode=0, stdout="0, 0\n")
+    with patch("ollama_queue.health.subprocess.run", return_value=mock_result):
+        assert m._fetch_vram_pct() == 0.0
+
+
+def test_get_ollama_active_model_nonzero_returncode():
+    """Line 110: ollama ps non-zero returncode returns None."""
+    m = HealthMonitor()
+    mock_result = MagicMock(returncode=1, stdout="", stderr="err")
+    with patch("ollama_queue.health.subprocess.run", return_value=mock_result):
+        assert m.get_ollama_active_model() is None
+
+
+def test_get_ollama_active_model_header_only():
+    """Line 114: ollama ps with only header (< 2 lines) returns None."""
+    m = HealthMonitor()
+    mock_result = MagicMock(returncode=0, stdout="NAME  ID  SIZE  PROCESSOR  UNTIL\n")
+    with patch("ollama_queue.health.subprocess.run", return_value=mock_result):
+        assert m.get_ollama_active_model() is None
+
+
+def test_get_ollama_active_model_exception():
+    """Lines 118-119: ollama ps subprocess raises returns None."""
+    m = HealthMonitor()
+    with patch("ollama_queue.health.subprocess.run", side_effect=OSError("not found")):
+        assert m.get_ollama_active_model() is None
+
+
+def test_evaluate_swap_pause():
+    """Lines 181, 184: swap exceeds pause threshold triggers pause."""
+    m = HealthMonitor()
+    settings = {
+        "ram_pause_pct": 85,
+        "ram_resume_pct": 75,
+        "swap_pause_pct": 50,
+        "swap_resume_pct": 40,
+        "load_pause_multiplier": 2.0,
+        "load_resume_multiplier": 1.5,
+        "yield_to_interactive": False,
+    }
+    snap = {
+        "ram_pct": 50.0,
+        "swap_pct": 60.0,
+        "load_avg": 1.0,
+        "cpu_count": 4,
+        "vram_pct": 50.0,
+        "ollama_model": None,
+    }
+    decision = m.evaluate(snap, settings, currently_paused=False)
+    assert decision["should_pause"] is True
+    assert "Swap" in decision["reason"]
+
+
+def test_evaluate_load_pause():
+    """Line 184: load exceeds pause threshold triggers pause."""
+    m = HealthMonitor()
+    settings = {
+        "ram_pause_pct": 85,
+        "ram_resume_pct": 75,
+        "swap_pause_pct": 50,
+        "swap_resume_pct": 40,
+        "load_pause_multiplier": 2.0,
+        "load_resume_multiplier": 1.5,
+        "yield_to_interactive": False,
+    }
+    snap = {
+        "ram_pct": 50.0,
+        "swap_pct": 10.0,
+        "load_avg": 10.0,
+        "cpu_count": 4,
+        "vram_pct": 50.0,
+        "ollama_model": None,
+    }
+    decision = m.evaluate(snap, settings, currently_paused=False)
+    assert decision["should_pause"] is True
+    assert "Load" in decision["reason"]
+
+
+def test_evaluate_swap_still_high_when_paused():
+    """Line 195: swap still above resume threshold keeps paused."""
+    m = HealthMonitor()
+    settings = {
+        "ram_pause_pct": 85,
+        "ram_resume_pct": 75,
+        "swap_pause_pct": 50,
+        "swap_resume_pct": 40,
+        "load_pause_multiplier": 2.0,
+        "load_resume_multiplier": 1.5,
+        "yield_to_interactive": False,
+    }
+    snap = {
+        "ram_pct": 50.0,
+        "swap_pct": 45.0,
+        "load_avg": 1.0,
+        "cpu_count": 4,
+        "vram_pct": 50.0,
+        "ollama_model": None,
+    }
+    decision = m.evaluate(snap, settings, currently_paused=True)
+    assert decision["should_pause"] is True
+    assert "Swap" in decision["reason"]
+
+
+def test_evaluate_load_still_high_when_paused():
+    """Line 198: load still above resume threshold keeps paused."""
+    m = HealthMonitor()
+    settings = {
+        "ram_pause_pct": 85,
+        "ram_resume_pct": 75,
+        "swap_pause_pct": 50,
+        "swap_resume_pct": 40,
+        "load_pause_multiplier": 2.0,
+        "load_resume_multiplier": 1.5,
+        "yield_to_interactive": False,
+    }
+    snap = {
+        "ram_pct": 50.0,
+        "swap_pct": 10.0,
+        "load_avg": 8.0,
+        "cpu_count": 4,
+        "vram_pct": 50.0,
+        "ollama_model": None,
+    }
+    decision = m.evaluate(snap, settings, currently_paused=True)
+    assert decision["should_pause"] is True
+    assert "Load" in decision["reason"]
+
+
+def test_parse_meminfo_oserror():
+    """Lines 239-240: OSError reading /proc/meminfo returns empty dict."""
+    with patch("builtins.open", side_effect=OSError("permission denied")):
+        result = HealthMonitor._parse_meminfo()
+    assert result == {}
+
+
+def test_parse_meminfo_valueerror():
+    """Lines 237-238: non-integer value in meminfo is silently skipped."""
+    fake_meminfo = "MemTotal:       notanumber kB\nMemFree:        8000 kB\n"
+    with patch("builtins.open", mock_open(read_data=fake_meminfo)):
+        result = HealthMonitor._parse_meminfo()
+    # MemTotal should be skipped (ValueError), MemFree should be parsed
+    assert "MemTotal" not in result
+    assert result["MemFree"] == 8000

@@ -180,3 +180,52 @@ class TestClassifyUnknownFailure:
 
     def test_classify_none_like_reason(self):
         assert classify_failure("", exit_code=1) == "unknown"
+
+
+# ── Coverage gap tests: SystemSnapshot.capture() exception branches ───────
+
+
+class TestSnapshotCaptureExceptionBranches:
+    """Lines 53-54, 57-58, 61-62, 67-68: each health monitor method raising."""
+
+    def test_capture_ram_pct_exception(self):
+        """Lines 53-54: get_ram_pct raises → ram_used_pct stays 0.0."""
+        hm = MagicMock()
+        hm.get_ram_pct.side_effect = RuntimeError("boom")
+        hm.get_swap_pct.return_value = 5.0
+        hm.get_load_avg.return_value = 1.0
+        hm.get_vram_pct.return_value = 50.0
+        snap = SystemSnapshot.capture(health_monitor=hm)
+        assert snap.ram_used_pct == 0.0
+        assert snap.swap_used_pct == 5.0
+
+    def test_capture_swap_pct_exception(self):
+        """Lines 57-58: get_swap_pct raises → swap_used_pct stays 0.0."""
+        hm = MagicMock()
+        hm.get_ram_pct.return_value = 50.0
+        hm.get_swap_pct.side_effect = RuntimeError("boom")
+        hm.get_load_avg.return_value = 1.0
+        hm.get_vram_pct.return_value = 50.0
+        snap = SystemSnapshot.capture(health_monitor=hm)
+        assert snap.ram_used_pct == 50.0
+        assert snap.swap_used_pct == 0.0
+
+    def test_capture_load_avg_exception(self):
+        """Lines 61-62: get_load_avg raises → load_avg_1m stays 0.0."""
+        hm = MagicMock()
+        hm.get_ram_pct.return_value = 50.0
+        hm.get_swap_pct.return_value = 5.0
+        hm.get_load_avg.side_effect = RuntimeError("boom")
+        hm.get_vram_pct.return_value = 50.0
+        snap = SystemSnapshot.capture(health_monitor=hm)
+        assert snap.load_avg_1m == 0.0
+
+    def test_capture_vram_pct_exception(self):
+        """Lines 67-68: get_vram_pct raises → vram_used_pct stays 0.0."""
+        hm = MagicMock()
+        hm.get_ram_pct.return_value = 50.0
+        hm.get_swap_pct.return_value = 5.0
+        hm.get_load_avg.return_value = 1.0
+        hm.get_vram_pct.side_effect = RuntimeError("boom")
+        snap = SystemSnapshot.capture(health_monitor=hm)
+        assert snap.vram_used_pct == 0.0

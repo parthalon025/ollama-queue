@@ -1171,3 +1171,263 @@ class TestGetPendingJobsSentinelFilter:
         assert pending[0]["command"] == "high"
         assert pending[1]["command"] == "mid"
         assert pending[2]["command"] == "low"
+
+
+# ────────────────────────────────────────────────────────────────────
+# Coverage gap tests — lines 129, 558-559, 929-936, 1002, 1167,
+# 1170, 1183, 1342-1343, 1390-1403, 1428, 1558, 1637, 1660, 1664,
+# 1736, 1816-1822, 1847, 1933
+# ────────────────────────────────────────────────────────────────────
+
+
+class TestAddColumnIfMissingReraises:
+    """Line 129: _add_column_if_missing re-raises non-duplicate OperationalErrors."""
+
+    def test_non_duplicate_column_error_reraises(self, db):
+        import sqlite3
+
+        with db._lock:
+            conn = db._connect()
+        with pytest.raises(sqlite3.OperationalError, match="no such table"):
+            db._add_column_if_missing(conn, "nonexistent_table", "col", "TEXT")
+
+
+class TestSeedEvalDefaultsWithExplicitConn:
+    """Lines 558-559: seed_eval_defaults() with an explicit conn argument."""
+
+    def test_seed_eval_defaults_with_conn(self, db):
+        with db._lock:
+            conn = db._connect()
+        # Call with explicit connection — exercises the else branch
+        db.seed_eval_defaults(conn=conn)
+        rows = conn.execute("SELECT * FROM eval_prompt_templates").fetchall()
+        assert len(rows) >= 3  # at least the 3 original system templates
+
+
+class TestSetJobPriority:
+    """Lines 929-936: set_job_priority method."""
+
+    def test_set_priority_on_pending_job(self, db):
+        job_id = db.submit_job("cmd", "m", priority=5, timeout=60, source="s")
+        assert db.set_job_priority(job_id, 2) is True
+        job = db.get_job(job_id)
+        assert job["priority"] == 2
+
+    def test_set_priority_on_running_job_returns_false(self, db):
+        job_id = db.submit_job("cmd", "m", priority=5, timeout=60, source="s")
+        db.start_job(job_id)
+        assert db.set_job_priority(job_id, 1) is False
+
+    def test_set_priority_nonexistent_job(self, db):
+        assert db.set_job_priority(99999, 1) is False
+
+
+class TestGetSettingStringBool:
+    """Line 1002: get_setting converts string 'true'/'false' to Python bool."""
+
+    def test_string_true_returns_bool(self, db):
+        # Manually insert a JSON string "true" (not a JSON boolean)
+        with db._lock:
+            conn = db._connect()
+            conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, ?)",
+                ("test_bool", '"true"', time.time()),
+            )
+            conn.commit()
+        result = db.get_setting("test_bool")
+        assert result is True
+
+    def test_string_false_returns_bool(self, db):
+        with db._lock:
+            conn = db._connect()
+            conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, ?)",
+                ("test_bool", '"false"', time.time()),
+            )
+            conn.commit()
+        result = db.get_setting("test_bool")
+        assert result is False
+
+
+class TestUpdateDaemonStateEdgeCases:
+    """Lines 1167, 1170: update_daemon_state early return and unknown field error."""
+
+    def test_empty_kwargs_is_noop(self, db):
+        db.update_daemon_state(state="running")
+        # Calling with no kwargs should be a no-op (early return)
+        db.update_daemon_state()
+        state = db.get_daemon_state()
+        assert state["state"] == "running"
+
+    def test_unknown_field_raises_value_error(self, db):
+        with pytest.raises(ValueError, match="Unknown daemon_state fields"):
+            db.update_daemon_state(nonexistent_field="boom")
+
+
+class TestGetDaemonStateEmptyRow:
+    """Line 1183: get_daemon_state returns default dict when row is None."""
+
+    def test_returns_default_when_no_row(self, tmp_path):
+        from ollama_queue.db import Database
+
+        db = Database(str(tmp_path / "bare.db"))
+        # Initialize just enough to have a connection but no daemon_state row
+        with db._lock:
+            conn = db._connect()
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS daemon_state (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    state TEXT NOT NULL DEFAULT 'idle',
+                    current_job_id INTEGER,
+                    paused_since REAL,
+                    paused_reason TEXT
+                );
+            """)
+            conn.commit()
+        # No INSERT into daemon_state — row is None
+        result = db.get_daemon_state()
+        assert result == {"state": "idle", "current_job_id": None, "paused_since": None, "paused_reason": None}
+
+
+class TestUpdateRecurringNextRunNotFound:
+    """Lines 1342-1343: update_recurring_next_run when recurring job is deleted."""
+
+    def test_missing_recurring_job_logs_and_returns(self, db):
+        with patch("ollama_queue.db._log") as mock_log:
+            db.update_recurring_next_run(99999, completed_at=time.time())
+            mock_log.error.assert_called_once()
+            assert "not found" in mock_log.error.call_args[0][0]
+
+
+class TestDeleteRecurringJob:
+    """Lines 1390-1403: delete_recurring_job method."""
+
+    def test_delete_existing_recurring_job(self, db):
+        rj_id = db.add_recurring_job("test-rj", "echo hi", interval_seconds=3600)
+        # Submit a job linked to this recurring job
+        job_id = db.submit_job("echo hi", "m", 5, 60, "src", recurring_job_id=rj_id)
+        result = db.delete_recurring_job("test-rj")
+        assert result is True
+        # Recurring job should be gone
+        assert db.get_recurring_job(rj_id) is None
+        # Job's recurring_job_id should be cleared
+        job = db.get_job(job_id)
+        assert job["recurring_job_id"] is None
+
+    def test_delete_nonexistent_recurring_job(self, db):
+        result = db.delete_recurring_job("does-not-exist")
+        assert result is False
+
+
+class TestUpdateRecurringJobNoAllowedFields:
+    """Line 1428: update_recurring_job returns False when no allowed fields given."""
+
+    def test_returns_false_for_disallowed_fields(self, db):
+        rj_id = db.add_recurring_job("rj", "echo", interval_seconds=3600)
+        result = db.update_recurring_job(rj_id, totally_fake_field="nope")
+        assert result is False
+
+
+class TestMoveToDlqNotFound:
+    """Line 1558: move_to_dlq returns None when job doesn't exist."""
+
+    def test_move_nonexistent_job_to_dlq(self, db):
+        result = db.move_to_dlq(99999, failure_reason="gone")
+        assert result is None
+
+
+class TestListDlqIncludeResolved:
+    """Line 1637: list_dlq with include_resolved=True."""
+
+    def test_include_resolved_returns_all(self, db):
+        job_id = db.submit_job("cmd", "m", 5, 60, "src")
+        db.start_job(job_id)
+        db.complete_job(job_id, exit_code=1, stdout_tail="", stderr_tail="")
+        dlq_id = db.move_to_dlq(job_id, failure_reason="failed")
+        db.dismiss_dlq_entry(dlq_id)
+        # Default (include_resolved=False) should be empty
+        assert db.list_dlq(include_resolved=False) == []
+        # include_resolved=True should return the dismissed entry
+        entries = db.list_dlq(include_resolved=True)
+        assert len(entries) == 1
+        assert entries[0]["resolution"] == "dismissed"
+
+
+class TestRetryDlqEntryEdgeCases:
+    """Lines 1660, 1664: retry_dlq_entry not found and already resolved."""
+
+    def test_retry_nonexistent_entry(self, db):
+        result = db.retry_dlq_entry(99999)
+        assert result is None
+
+    def test_retry_already_resolved_entry(self, db):
+        job_id = db.submit_job("cmd", "m", 5, 60, "src")
+        db.start_job(job_id)
+        db.complete_job(job_id, exit_code=1, stdout_tail="", stderr_tail="")
+        dlq_id = db.move_to_dlq(job_id, failure_reason="failed")
+        db.dismiss_dlq_entry(dlq_id)
+        # Entry is now resolved — retry should return None
+        result = db.retry_dlq_entry(dlq_id)
+        assert result is None
+
+
+class TestGetJobMetricsNotFound:
+    """Line 1736: get_job_metrics returns None when not found."""
+
+    def test_no_metrics_returns_none(self, db):
+        result = db.get_job_metrics(99999)
+        assert result is None
+
+
+class TestHasPullingModel:
+    """Lines 1816-1822: has_pulling_model method."""
+
+    def test_no_pulling_model(self, db):
+        assert db.has_pulling_model("llama2:7b") is False
+
+    def test_with_pulling_model(self, db):
+        with db._lock:
+            conn = db._connect()
+            conn.execute(
+                "INSERT INTO model_pulls (model, status, started_at) VALUES (?, ?, ?)",
+                ("llama2:7b", "pulling", time.time()),
+            )
+            conn.commit()
+        assert db.has_pulling_model("llama2:7b") is True
+
+    def test_completed_pull_not_detected(self, db):
+        with db._lock:
+            conn = db._connect()
+            conn.execute(
+                "INSERT INTO model_pulls (model, status, started_at) VALUES (?, ?, ?)",
+                ("llama2:7b", "completed", time.time()),
+            )
+            conn.commit()
+        assert db.has_pulling_model("llama2:7b") is False
+
+
+class TestUpsertConsumerKeyFieldsOnly:
+    """Line 1847: upsert_consumer returns existing id when only key fields provided."""
+
+    def test_upsert_with_only_key_fields(self, db):
+        first_id = db.upsert_consumer(
+            {
+                "name": "test-svc",
+                "platform": "systemd",
+                "type": "timer",
+                "source_label": "test",
+                "status": "discovered",
+                "detected_at": int(time.time()),
+            }
+        )
+        # Upsert with only key fields — nothing to update
+        second_id = db.upsert_consumer({"name": "test-svc", "platform": "systemd"})
+        assert second_id == first_id
+
+
+class TestResumeDeferredJobNotFound:
+    """Line 1933: resume_deferred_job returns early when deferral not found."""
+
+    def test_resume_nonexistent_deferral(self, db):
+        # Should not raise — just returns silently
+        db.resume_deferred_job(99999)

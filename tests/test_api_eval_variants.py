@@ -473,3 +473,376 @@ def test_variant_diff_identical(client_and_db):
 def test_variant_diff_not_found(client):
     resp = client.get("/api/eval/variants/NOPE/diff/ALSO_NOPE")
     assert resp.status_code == 404
+
+
+# --- Coverage gap tests: variant/template/trends edge cases ---
+
+
+def test_list_variants_latest_f1_from_completed_runs(client_and_db):
+    """latest_f1 computed from eval_runs.metrics JSON. Covers lines 1128-1141."""
+    client, db = client_and_db
+    with db._lock:
+        conn = db._connect()
+        conn.execute(
+            "INSERT INTO eval_runs (id, data_source_url, variants, variant_id, status, metrics) "
+            "VALUES (1, 'http://localhost', '[\"A\"]', 'A', 'complete', ?)",
+            (json.dumps({"A": {"f1": 0.85, "precision": 0.9, "recall": 0.8}}),),
+        )
+        conn.commit()
+    resp = client.get("/api/eval/variants")
+    assert resp.status_code == 200
+    variants = resp.json()
+    a_var = next(v for v in variants if v["id"] == "A")
+    assert a_var["latest_f1"] == 0.85
+
+
+def test_list_variants_skips_bad_metrics_json(client_and_db):
+    """Runs with invalid metrics JSON are skipped. Covers lines 1132-1133."""
+    client, db = client_and_db
+    with db._lock:
+        conn = db._connect()
+        conn.execute(
+            "INSERT INTO eval_runs (id, data_source_url, variants, variant_id, status, metrics) "
+            "VALUES (1, 'http://localhost', '[\"A\"]', 'A', 'complete', 'not-valid-json')"
+        )
+        conn.commit()
+    resp = client.get("/api/eval/variants")
+    assert resp.status_code == 200
+    variants = resp.json()
+    a_var = next(v for v in variants if v["id"] == "A")
+    assert a_var["latest_f1"] is None
+
+
+def test_list_variants_skips_non_dict_metrics(client_and_db):
+    """Non-dict variant metrics in the JSON are skipped. Covers lines 1136-1137."""
+    client, db = client_and_db
+    with db._lock:
+        conn = db._connect()
+        conn.execute(
+            "INSERT INTO eval_runs (id, data_source_url, variants, variant_id, status, metrics) "
+            "VALUES (1, 'http://localhost', '[\"A\"]', 'A', 'complete', ?)",
+            (json.dumps({"A": "not-a-dict", "B": {"f1": 0.7}}),),
+        )
+        conn.commit()
+    resp = client.get("/api/eval/variants")
+    assert resp.status_code == 200
+    variants = resp.json()
+    a_var = next(v for v in variants if v["id"] == "A")
+    assert a_var["latest_f1"] is None
+    b_var = next(v for v in variants if v["id"] == "B")
+    assert b_var["latest_f1"] == 0.7
+
+
+def test_list_variants_auc_for_bayesian_runs(client_and_db):
+    """AUC used for bayesian judge mode runs. Covers lines 1134, 1139-1140."""
+    client, db = client_and_db
+    with db._lock:
+        conn = db._connect()
+        conn.execute(
+            "INSERT INTO eval_runs (id, data_source_url, variants, variant_id, status, metrics, judge_mode) "
+            "VALUES (1, 'http://localhost', '[\"A\"]', 'A', 'complete', ?, 'bayesian')",
+            (json.dumps({"A": {"auc": 0.92, "f1": 0.5}}),),
+        )
+        conn.commit()
+    resp = client.get("/api/eval/variants")
+    assert resp.status_code == 200
+    variants = resp.json()
+    a_var = next(v for v in variants if v["id"] == "A")
+    # Should use auc (0.92), not f1 (0.5)
+    assert a_var["latest_f1"] == 0.92
+
+
+def test_import_variants_with_templates(client):
+    """Import with templates creates them first. Covers lines 1207-1222."""
+    import uuid
+
+    tmpl_id = f"custom-{str(uuid.uuid4())[:6]}"
+    var_id = f"v-{str(uuid.uuid4())[:6]}"
+    resp = client.post(
+        "/api/eval/variants/import",
+        json={
+            "templates": [
+                {
+                    "id": tmpl_id,
+                    "label": "Custom Template",
+                    "instruction": "Do the thing",
+                    "format_spec": "JSON",
+                    "examples": None,
+                    "is_chunked": 0,
+                }
+            ],
+            "variants": [
+                {
+                    "id": var_id,
+                    "label": "Imported with template",
+                    "prompt_template_id": tmpl_id,
+                    "model": "test",
+                }
+            ],
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["templates_imported"] == 1
+    assert data["variants_imported"] == 1
+
+
+def test_generate_variants_empty_models_returns_400(client):
+    """Generate with empty models list returns 400. Covers line 1258."""
+    resp = client.post("/api/eval/variants/generate", json={"models": []})
+    assert resp.status_code == 400
+
+
+def test_variant_stability_with_data_source_filter(client_and_db):
+    """Stability with data_source filter. Covers line 1346."""
+    client, db = client_and_db
+    with db._lock:
+        conn = db._connect()
+        for run_id, f1, ds in [(1, 0.70, "http://a"), (2, 0.72, "http://a"), (3, 0.71, "http://b")]:
+            conn.execute(
+                "INSERT INTO eval_runs (id, data_source_url, variants, variant_id, status, metrics) "
+                "VALUES (?, ?, '[\"A\"]', 'A', 'complete', ?)",
+                (run_id, ds, json.dumps({"A": {"f1": f1}})),
+            )
+        conn.commit()
+    resp = client.get("/api/eval/variants/stability?data_source=http://a")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "A" in data
+    assert data["A"]["n_runs"] == 2
+
+
+def test_variant_stability_bad_metrics_json(client_and_db):
+    """Stability skips rows with bad metrics JSON. Covers lines 1360-1361."""
+    client, db = client_and_db
+    with db._lock:
+        conn = db._connect()
+        conn.execute(
+            "INSERT INTO eval_runs (id, data_source_url, variants, variant_id, status, metrics) "
+            "VALUES (1, 'http://localhost', '[\"A\"]', 'A', 'complete', 'bad-json')"
+        )
+        conn.commit()
+    resp = client.get("/api/eval/variants/stability")
+    assert resp.status_code == 200
+    assert resp.json() == {}
+
+
+def test_variant_history_with_completed_runs(client_and_db):
+    """Variant history returns metrics from completed runs. Covers lines 1407-1416."""
+    client, db = client_and_db
+    with db._lock:
+        conn = db._connect()
+        for run_id, f1 in [(1, 0.7), (2, 0.8)]:
+            conn.execute(
+                "INSERT INTO eval_runs (id, data_source_url, variants, variant_id, status, metrics, started_at) "
+                "VALUES (?, 'http://localhost', '[\"A\"]', 'A', 'complete', ?, '2026-03-01')",
+                (run_id, json.dumps({"A": {"f1": f1, "precision": 0.9, "recall": f1 - 0.1}})),
+            )
+        conn.commit()
+    resp = client.get("/api/eval/variants/A/history")
+    assert resp.status_code == 200
+    history = resp.json()
+    assert len(history) == 2
+    assert history[0]["f1"] == 0.7
+    assert history[1]["f1"] == 0.8
+
+
+def test_variant_history_skips_bad_metrics(client_and_db):
+    """Variant history skips runs with bad metrics. Covers lines 1411-1412."""
+    client, db = client_and_db
+    with db._lock:
+        conn = db._connect()
+        conn.execute(
+            "INSERT INTO eval_runs (id, data_source_url, variants, variant_id, status, metrics) "
+            "VALUES (1, 'http://localhost', '[\"A\"]', 'A', 'complete', 'bad')"
+        )
+        conn.commit()
+    resp = client.get("/api/eval/variants/A/history")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_update_variant_no_updatable_fields(client):
+    """Update with no updatable fields returns current variant unchanged. Covers line 1479."""
+    create_resp = client.post(
+        "/api/eval/variants",
+        json={
+            "label": "Test",
+            "prompt_template_id": "zero-shot-causal",
+            "model": "test",
+        },
+    )
+    var_id = create_resp.json()["id"]
+    resp = client.put(f"/api/eval/variants/{var_id}", json={"unrelated_field": "value"})
+    assert resp.status_code == 200
+    assert resp.json()["label"] == "Test"
+
+
+def test_update_variant_validates_template(client):
+    """Update with bad prompt_template_id returns 404. Covers line 1482."""
+    create_resp = client.post(
+        "/api/eval/variants",
+        json={
+            "label": "Test",
+            "prompt_template_id": "zero-shot-causal",
+            "model": "test",
+        },
+    )
+    var_id = create_resp.json()["id"]
+    resp = client.put(
+        f"/api/eval/variants/{var_id}",
+        json={"prompt_template_id": "nonexistent-template"},
+    )
+    assert resp.status_code == 404
+
+
+def test_update_template_no_updatable_fields(client):
+    """Update template with no updatable fields returns current template. Covers line 1533."""
+    clone_resp = client.post("/api/eval/templates/fewshot/clone", json={})
+    tmpl_id = clone_resp.json()["id"]
+    resp = client.put(f"/api/eval/templates/{tmpl_id}", json={"unrelated": "value"})
+    assert resp.status_code == 200
+    assert resp.json()["id"] == tmpl_id
+
+
+def test_trends_with_completed_runs(client_and_db):
+    """Trends computes direction and stability from run metrics. Covers lines 1605-1671."""
+    client, db = client_and_db
+    with db._lock:
+        conn = db._connect()
+        # Insert 5 runs with improving F1 to trigger "improving" direction
+        for run_id in range(1, 6):
+            f1 = 0.5 + run_id * 0.05
+            conn.execute(
+                "INSERT INTO eval_runs (id, data_source_url, variants, variant_id, status, metrics, "
+                "started_at, item_count, item_ids, judge_mode) "
+                "VALUES (?, 'http://localhost', '[\"A\"]', 'A', 'complete', ?, "
+                "'2026-03-01', 10, '[1,2,3]', 'binary')",
+                (run_id, json.dumps({"A": {"f1": f1, "precision": 0.9, "recall": f1}})),
+            )
+        conn.commit()
+    resp = client.get("/api/eval/trends")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "A" in data["variants"]
+    variant_data = data["variants"]["A"]
+    assert variant_data["trend_direction"] == "improving"
+    assert variant_data["stability"] is not None
+
+
+def test_trends_bad_metrics_json_skipped(client_and_db):
+    """Trends skips runs with invalid metrics JSON. Covers lines 1608-1609."""
+    client, db = client_and_db
+    with db._lock:
+        conn = db._connect()
+        conn.execute(
+            "INSERT INTO eval_runs (id, data_source_url, variants, variant_id, status, metrics, "
+            "started_at, item_count, item_ids, judge_mode) "
+            "VALUES (1, 'http://localhost', '[\"A\"]', 'A', 'complete', 'not-json', "
+            "'2026-03-01', 10, '', 'binary')"
+        )
+        conn.commit()
+    resp = client.get("/api/eval/trends")
+    assert resp.status_code == 200
+    assert resp.json()["variants"] == {}
+
+
+def test_trends_non_dict_variant_metrics_skipped(client_and_db):
+    """Trends skips non-dict variant metrics. Covers lines 1613-1614."""
+    client, db = client_and_db
+    with db._lock:
+        conn = db._connect()
+        conn.execute(
+            "INSERT INTO eval_runs (id, data_source_url, variants, variant_id, status, metrics, "
+            "started_at, item_count, item_ids, judge_mode) "
+            "VALUES (1, 'http://localhost', '[\"A\"]', 'A', 'complete', ?, "
+            "'2026-03-01', 10, '', 'binary')",
+            (json.dumps({"A": "string-not-dict"}),),
+        )
+        conn.commit()
+    resp = client.get("/api/eval/trends")
+    assert resp.status_code == 200
+    assert resp.json()["variants"] == {}
+
+
+def test_trends_agreement_rate(client_and_db):
+    """Trends computes judge_agreement_rate from eval_results. Covers lines 1635-1637."""
+    client, db = client_and_db
+    with db._lock:
+        conn = db._connect()
+        conn.execute(
+            "INSERT INTO eval_runs (id, data_source_url, variants, variant_id, status, metrics, "
+            "started_at, item_count, item_ids, judge_mode) "
+            "VALUES (1, 'http://localhost', '[\"A\"]', 'A', 'complete', ?, "
+            "'2026-03-01', 10, '', 'binary')",
+            (json.dumps({"A": {"f1": 0.8}}),),
+        )
+        # 3 of 4 results have score_transfer > 1 (agreed)
+        for i, score in enumerate([3, 4, 5, 1], start=1):
+            conn.execute(
+                "INSERT INTO eval_results (run_id, variant, source_item_id, target_item_id, "
+                "is_same_cluster, score_transfer, row_type) "
+                "VALUES (1, 'A', ?, ?, 1, ?, 'judge')",
+                (str(i), str(i + 10), score),
+            )
+        conn.commit()
+    resp = client.get("/api/eval/trends")
+    assert resp.status_code == 200
+    variant_data = resp.json()["variants"]["A"]
+    assert variant_data["judge_agreement_rate"] == 0.75
+
+
+def test_trends_regressing_direction(client_and_db):
+    """Trends with declining F1 shows 'regressing'. Covers lines 1670-1671."""
+    client, db = client_and_db
+    with db._lock:
+        conn = db._connect()
+        for run_id in range(1, 6):
+            f1 = 0.9 - run_id * 0.05
+            conn.execute(
+                "INSERT INTO eval_runs (id, data_source_url, variants, variant_id, status, metrics, "
+                "started_at, item_count, item_ids, judge_mode) "
+                "VALUES (?, 'http://localhost', '[\"A\"]', 'A', 'complete', ?, "
+                "'2026-03-01', 10, '', 'binary')",
+                (run_id, json.dumps({"A": {"f1": f1}})),
+            )
+        conn.commit()
+    resp = client.get("/api/eval/trends")
+    assert resp.status_code == 200
+    assert resp.json()["variants"]["A"]["trend_direction"] == "regressing"
+
+
+def test_trends_item_sets_differ(client_and_db):
+    """Trends detects when item_ids vary across runs. Covers line 1682."""
+    client, db = client_and_db
+    with db._lock:
+        conn = db._connect()
+        for run_id, item_ids in [(1, "[1,2,3]"), (2, "[4,5,6]")]:
+            conn.execute(
+                "INSERT INTO eval_runs (id, data_source_url, variants, variant_id, status, metrics, "
+                "started_at, item_count, item_ids, judge_mode) "
+                "VALUES (?, 'http://localhost', '[\"A\"]', 'A', 'complete', ?, "
+                "'2026-03-01', 3, ?, 'binary')",
+                (run_id, json.dumps({"A": {"f1": 0.8}}), item_ids),
+            )
+        conn.commit()
+    resp = client.get("/api/eval/trends")
+    assert resp.status_code == 200
+    assert resp.json()["item_sets_differ"] is True
+
+
+def test_trends_empty_metrics_skipped(client_and_db):
+    """Trends skips runs with null metrics. Covers line 1604-1605."""
+    client, db = client_and_db
+    with db._lock:
+        conn = db._connect()
+        conn.execute(
+            "INSERT INTO eval_runs (id, data_source_url, variants, variant_id, status, metrics, "
+            "started_at, item_count, item_ids, judge_mode) "
+            "VALUES (1, 'http://localhost', '[\"A\"]', 'A', 'complete', NULL, "
+            "'2026-03-01', 10, '', 'binary')"
+        )
+        conn.commit()
+    resp = client.get("/api/eval/trends")
+    assert resp.status_code == 200
+    assert resp.json()["variants"] == {}

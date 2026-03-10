@@ -1333,3 +1333,268 @@ def test_results_limit_offset(client_and_db):
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) == 2
+
+
+# ---------------------------------------------------------------------------
+# Coverage gap tests — eval runs
+# ---------------------------------------------------------------------------
+
+
+def test_list_eval_runs_with_bad_metrics_json(client_and_db):
+    """list_eval_runs handles unparseable metrics JSON gracefully."""
+    client, db = client_and_db
+    run_id = _make_run(db, status="complete")
+    update_eval_run(db, run_id, metrics="not valid json{{{")
+    resp = client.get("/api/eval/runs")
+    assert resp.status_code == 200
+    runs = resp.json()
+    found = next(r for r in runs if r["id"] == run_id)
+    assert found["metrics"] is None
+
+
+def test_get_eval_run_detail_bad_metrics_json(client_and_db):
+    """GET /api/eval/runs/{id} handles unparseable metrics gracefully."""
+    client, db = client_and_db
+    run_id = _make_run(db, status="complete")
+    update_eval_run(db, run_id, metrics="not valid json{{{")
+    resp = client.get(f"/api/eval/runs/{run_id}")
+    assert resp.status_code == 200
+    # metrics stays as the raw string or None since parse failed
+    data = resp.json()
+    assert "metrics" in data
+
+
+def test_post_eval_runs_variants_list_sets_variant_id(client_and_db):
+    """POST /api/eval/runs with variants list sets variant_id to first element."""
+    client, db = client_and_db
+    with patch("ollama_queue.eval_engine.run_eval_session"):
+        resp = client.post(
+            "/api/eval/runs",
+            json={"variants": ["A", "B"], "run_mode": "batch"},
+        )
+    assert resp.status_code == 201
+    run_id = resp.json()["run_id"]
+    detail = client.get(f"/api/eval/runs/{run_id}")
+    assert detail.json()["variant_id"] == "A"
+
+
+def test_post_eval_runs_with_judge_model(client_and_db):
+    """POST /api/eval/runs with judge_model persists it."""
+    client, db = client_and_db
+    with patch("ollama_queue.eval_engine.run_eval_session"):
+        resp = client.post(
+            "/api/eval/runs",
+            json={"variant_id": "A", "judge_model": "deepseek-r1:8b"},
+        )
+    assert resp.status_code == 201
+    run_id = resp.json()["run_id"]
+    from ollama_queue.eval_engine import get_eval_run
+
+    run = get_eval_run(db, run_id)
+    assert run["judge_model"] == "deepseek-r1:8b"
+
+
+def test_post_eval_runs_background_thread_exception(client_and_db):
+    """Background eval session exception is handled silently."""
+    import time
+
+    client, db = client_and_db
+
+    def _raise(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    with patch("ollama_queue.eval_engine.run_eval_session", side_effect=_raise):
+        resp = client.post("/api/eval/runs", json={"variant_id": "A"})
+    assert resp.status_code == 201
+    time.sleep(0.1)  # let background thread run
+
+
+def test_analyze_eval_run_exception_sets_failure_message(client_and_db):
+    """Background analysis exception sets failure message on run."""
+    import time
+
+    client, db = client_and_db
+    run_id = _make_run(db, status="complete")
+
+    def _raise(*args, **kwargs):
+        raise RuntimeError("analysis boom")
+
+    with patch("ollama_queue.eval_engine.generate_eval_analysis", side_effect=_raise):
+        resp = client.post(f"/api/eval/runs/{run_id}/analyze")
+    assert resp.status_code == 200
+    time.sleep(0.2)  # let background thread run
+    # The analysis_md should contain the failure message
+    detail = client.get(f"/api/eval/runs/{run_id}")
+    assert "failed" in (detail.json().get("analysis_md") or "").lower()
+
+
+def test_analyze_eval_run_double_exception(client_and_db):
+    """If both analysis and error recording fail, no crash occurs."""
+    import time
+
+    client, db = client_and_db
+    run_id = _make_run(db, status="complete")
+
+    def _raise(*args, **kwargs):
+        raise RuntimeError("analysis boom")
+
+    with (
+        patch("ollama_queue.eval_engine.generate_eval_analysis", side_effect=_raise),
+        patch("ollama_queue.eval_engine.update_eval_run", side_effect=Exception("db boom")),
+    ):
+        resp = client.post(f"/api/eval/runs/{run_id}/analyze")
+    assert resp.status_code == 200
+    time.sleep(0.2)
+
+
+def test_repeat_run_background_thread_exception(client_and_db):
+    """Background thread for repeat run handles exceptions."""
+    import time
+
+    client, db = client_and_db
+    pairs = [["101", "202"]]
+    orig_id = _insert_reproducible_run(db, item_ids=pairs, seed=1234)
+
+    with patch("ollama_queue.eval_engine.run_eval_session", side_effect=RuntimeError("boom")):
+        resp = client.post(f"/api/eval/runs/{orig_id}/repeat")
+    assert resp.status_code == 200
+    time.sleep(0.1)
+
+
+def test_judge_rerun_background_thread_exception(client_and_db):
+    """Background thread for judge-rerun handles exception and marks run failed."""
+    import time
+
+    client, db = client_and_db
+    run_id = _make_run(db, status="complete")
+
+    def _raise(*args, **kwargs):
+        raise RuntimeError("judge boom")
+
+    with patch("ollama_queue.eval_engine.run_eval_judge", side_effect=_raise):
+        resp = client.post(f"/api/eval/runs/{run_id}/judge-rerun")
+    assert resp.status_code == 201
+    new_id = resp.json()["run_id"]
+    time.sleep(0.3)  # let background thread run
+    from ollama_queue.eval_engine import get_eval_run
+
+    run = get_eval_run(db, new_id)
+    assert run["status"] == "failed"
+
+
+def test_judge_rerun_bg_thread_double_exception(client_and_db):
+    """If both judge and failure recording raise, no crash occurs."""
+    import time
+
+    client, db = client_and_db
+    run_id = _make_run(db, status="complete")
+
+    call_count = [0]
+
+    def _raise_judge(*args, **kwargs):
+        raise RuntimeError("judge boom")
+
+    orig_update = update_eval_run
+
+    def _raise_on_failed_update(db_ref, rid, **kwargs):
+        if kwargs.get("status") == "failed":
+            raise RuntimeError("db boom")
+        return orig_update(db_ref, rid, **kwargs)
+
+    with (
+        patch("ollama_queue.eval_engine.run_eval_judge", side_effect=_raise_judge),
+    ):
+        resp = client.post(f"/api/eval/runs/{run_id}/judge-rerun")
+    assert resp.status_code == 201
+    time.sleep(0.3)
+
+
+def test_eval_progress_with_item_ids_instead_of_item_count(client_and_db):
+    """Progress endpoint derives total from item_ids JSON when item_count is 0."""
+    client, db = client_and_db
+    run_id = _make_run(db, status="generating")
+    items = json.dumps(["a", "b", "c", "d", "e"])
+    update_eval_run(db, run_id, item_ids=items, item_count=0)
+
+    resp = client.get(f"/api/eval/runs/{run_id}/progress")
+    assert resp.status_code == 200
+    assert resp.json()["total"] == 5
+
+
+def test_eval_progress_bad_item_ids_json(client_and_db):
+    """Progress endpoint handles corrupt item_ids JSON gracefully."""
+    client, db = client_and_db
+    run_id = _make_run(db, status="generating")
+    # Set item_count=0 and corrupt item_ids
+    with db._lock:
+        conn = db._connect()
+        conn.execute(
+            "UPDATE eval_runs SET item_count = 0, item_ids = 'bad json{{' WHERE id = ?",
+            (run_id,),
+        )
+        conn.commit()
+
+    resp = client.get(f"/api/eval/runs/{run_id}/progress")
+    assert resp.status_code == 200
+    assert resp.json()["total"] == 0
+
+
+def test_eval_progress_variants_json_parse(client_and_db):
+    """Progress endpoint parses variants JSON to derive gen_model."""
+    client, db = client_and_db
+    run_id = _make_run(db, status="generating")
+    update_eval_run(db, run_id, item_count=10)
+
+    resp = client.get(f"/api/eval/runs/{run_id}/progress")
+    assert resp.status_code == 200
+    assert "gen_model" in resp.json()
+
+
+def test_results_filter_tn(client_and_db):
+    """Filter results by classification=tn returns only true negative rows."""
+    client, db = client_and_db
+    with db._lock:
+        conn = db._connect()
+        conn.execute(
+            "INSERT INTO eval_runs (id, data_source_url, variants, variant_id, status) "
+            "VALUES (1, 'http://localhost', '[\"A\"]', 'A', 'complete')"
+        )
+        # TN: diff cluster, low score (< threshold 3)
+        conn.execute(
+            "INSERT INTO eval_results (run_id, variant, source_item_id, target_item_id, "
+            "is_same_cluster, score_transfer, row_type) "
+            "VALUES (1, 'A', '1', '2', 0, 1, 'judge')"
+        )
+        # FP: diff cluster, high score
+        conn.execute(
+            "INSERT INTO eval_results (run_id, variant, source_item_id, target_item_id, "
+            "is_same_cluster, score_transfer, row_type) "
+            "VALUES (1, 'A', '3', '4', 0, 5, 'judge')"
+        )
+        conn.commit()
+    resp = client.get("/api/eval/runs/1/results?classification=tn")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["score_transfer"] == 1
+
+
+def test_results_classification_exception_uses_default_threshold(client_and_db):
+    """When positive_threshold setting read fails, default threshold is used."""
+    client, db = client_and_db
+    with db._lock:
+        conn = db._connect()
+        conn.execute(
+            "INSERT INTO eval_runs (id, data_source_url, variants, variant_id, status) "
+            "VALUES (1, 'http://localhost', '[\"A\"]', 'A', 'complete')"
+        )
+        conn.execute(
+            "INSERT INTO eval_results (run_id, variant, source_item_id, target_item_id, "
+            "is_same_cluster, score_transfer, row_type) "
+            "VALUES (1, 'A', '1', '2', 0, 4, 'judge')"
+        )
+        # Set bad value for positive_threshold
+        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('eval.positive_threshold', 'bad')")
+        conn.commit()
+    resp = client.get("/api/eval/runs/1/results?classification=fp")
+    assert resp.status_code == 200

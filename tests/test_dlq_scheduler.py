@@ -229,6 +229,16 @@ class TestPeriodicSweepNoEntries:
         db.submit_job.assert_not_called()
         db.update_dlq_reschedule.assert_not_called()
 
+    def test_periodic_sweep_with_entries(self):
+        """periodic_sweep triggers _sweep when unscheduled entries exist (line 46)."""
+        entry = _make_entry()
+        sched, db, _, _ = _make_scheduler(entries=[entry], submit_return=88)
+        db.list_dlq.return_value = [entry]
+
+        sched.periodic_sweep()
+
+        db.submit_job.assert_called_once()
+
 
 class TestSweepNoSlotAvailable:
     def test_sweep_no_slot_skips(self):
@@ -239,6 +249,22 @@ class TestSweepNoSlotAvailable:
         load_map_fn.return_value = []
 
         result = sched._sweep([entry])
+
+        assert result == []
+        db.submit_job.assert_not_called()
+
+
+class TestSweepDisabledSetting:
+    def test_auto_reschedule_disabled_returns_empty(self):
+        """When dlq.auto_reschedule is falsy, _do_sweep returns [] immediately (line 60)."""
+        entry = _make_entry()
+        sched, db, _, _ = _make_scheduler(entries=[entry])
+        db.get_setting.side_effect = lambda key: {
+            "dlq.auto_reschedule": False,
+            "dlq.chronic_failure_threshold": None,
+        }.get(key)
+
+        result = sched._do_sweep([entry])
 
         assert result == []
         db.submit_job.assert_not_called()

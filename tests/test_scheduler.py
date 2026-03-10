@@ -477,3 +477,144 @@ class TestRecurringJobsCache:
         # next_run should be advanced beyond now (now + interval)
         assert rj1_updated["next_run"] > now
         assert rj2_updated["next_run"] > now
+
+
+# ── Coverage gap tests ────────────────────────────────────────────────────
+
+
+class TestPromoteDueJobsCoverageGaps:
+    def test_promote_uses_current_time_when_now_is_none(self, db, scheduler):
+        """Line 65: now defaults to time.time() when not provided."""
+        before = time.time()
+        db.add_recurring_job("job1", "echo hi", 3600, next_run=before - 10)
+        new_ids = scheduler.promote_due_jobs()  # now=None
+        assert len(new_ids) == 1
+
+    def test_suspend_low_priority_skips_priority_8_plus(self, db, scheduler):
+        """Lines 78-83: suspend_low_priority=True skips priority >= 8."""
+        now = time.time()
+        db.add_recurring_job("low-p", "echo low", 3600, priority=8, next_run=now - 1)
+        db.add_recurring_job("high-p", "echo high", 3600, priority=3, next_run=now - 1)
+        new_ids = scheduler.promote_due_jobs(now, suspend_low_priority=True)
+        # Only priority 3 job is promoted; priority 8 is skipped
+        assert len(new_ids) == 1
+        job = db.get_job(new_ids[0])
+        assert job["command"] == "echo high"
+
+    def test_duplicate_coalesce_no_interval_no_cron_warning(self, db, scheduler):
+        """Line 101: recurring job with neither interval nor cron logs warning and uses 300s fallback."""
+        now = time.time()
+        rj_id = db.add_recurring_job("job1", "echo hi", interval_seconds=3600, next_run=now - 1)
+        # Promote to create a pending job
+        scheduler.promote_due_jobs(now)
+        # Remove interval_seconds and cron_expression from the DB to trigger the fallback
+        conn = db._connect()
+        conn.execute("UPDATE recurring_jobs SET interval_seconds = NULL, cron_expression = NULL WHERE id = ?", (rj_id,))
+        conn.commit()
+        # Now the job is already pending, so duplicating will hit the fallback branch
+        scheduler._invalidate_jobs_cache()
+        new_ids = scheduler.promote_due_jobs(now)
+        assert len(new_ids) == 0  # still pending, skipped
+        # next_run should be advanced by the 300s fallback
+        rj = db.get_recurring_job(rj_id)
+        assert abs(rj["next_run"] - (now + 300)) < 1.0
+
+
+class TestUpdateNextRunCoverageGaps:
+    def test_update_next_run_deleted_recurring_job(self, db, scheduler):
+        """Lines 162-163: update_next_run on a deleted recurring job logs warning and returns."""
+        rj_id = db.add_recurring_job("temp", "echo hi", 3600)
+        db.delete_recurring_job_by_id(rj_id)
+        # Should not raise — just logs warning
+        scheduler.update_next_run(rj_id, time.time(), job_id=1)
+
+
+class TestScoreCronJobCoverageGaps:
+    def test_cron_job_no_fire_times_falls_back_to_next_run(self, db, scheduler):
+        """Lines 274-276: cron job with no fires in 24h window uses next_run as fallback."""
+        import datetime
+
+        # Use a cron expression that fires yearly — no fires in the 24h window
+        rj_id = db.add_recurring_job(
+            "yearly",
+            "echo hi",
+            cron_expression="0 0 1 1 *",
+            next_run=datetime.datetime(2025, 1, 1, 6, 0, 0).timestamp(),
+        )
+        # Force load_map to exercise _score_cron_job with this job
+        now = datetime.datetime(2025, 6, 15, 12, 0, 0).timestamp()
+        lm = scheduler.load_map(now)
+        # The fallback fires at next_run's slot (06:00 = slot 12). Score = 11 - 5 = 6
+        assert lm[12] == 6
+
+
+class TestLoadMapExtendedCoverageGaps:
+    def test_load_map_extended_skips_disabled_jobs(self, db, scheduler):
+        """Line 351: disabled jobs are skipped in load_map_extended VRAM loop."""
+        db.add_recurring_job("enabled", "echo hi", 3600, priority=5, model="qwen2.5:7b")
+        db.add_recurring_job("disabled", "echo bye", 3600, priority=5, model="qwen2.5:7b")
+        db.set_recurring_job_enabled("disabled", False)
+        result = scheduler.load_map_extended()
+        # Disabled job should not appear in any slot's recurring_ids
+        all_rj_ids = set()
+        for slot in result:
+            all_rj_ids.update(slot["recurring_ids"])
+        disabled_rj = db.get_recurring_job_by_name("disabled")
+        assert disabled_rj["id"] not in all_rj_ids
+
+    def test_load_map_extended_scores_cron_and_interval_vram(self, db, scheduler):
+        """Lines 356-366: load_map_extended scores both cron and interval jobs with VRAM."""
+        import datetime
+
+        # Cron job with a model name containing size hint
+        db.add_recurring_job(
+            "cron-vram",
+            "echo hi",
+            cron_expression="0 6 * * *",
+            model="qwen2.5:7b",
+            next_run=datetime.datetime(2025, 1, 1, 6, 0, 0).timestamp(),
+        )
+        # Interval job with a model name containing size hint
+        db.add_recurring_job("interval-vram", "echo bye", 3600, model="llama3:14b")
+        result = scheduler.load_map_extended()
+        # At least one slot should have nonzero vram_committed_gb
+        assert any(s["vram_committed_gb"] > 0 for s in result)
+
+
+class TestEstimateModelVramCoverageGaps:
+    def test_interpolation_fallback_for_unusual_size(self):
+        """Line 442: model size far from any known key uses linear interpolation."""
+        from ollama_queue.scheduler import _estimate_model_vram
+
+        # 200b is far from any key in _PARAM_TO_VRAM (max is 70); |70-200|/200 = 0.65 > 0.5
+        result = _estimate_model_vram("custom-model:200b")
+        assert result == pytest.approx(200 * 0.6, abs=0.1)
+
+    def test_no_size_hint_returns_default(self):
+        """Line 436: model name with no size hint returns 4.0 default."""
+        from ollama_queue.scheduler import _estimate_model_vram
+
+        result = _estimate_model_vram("my-custom-model:latest")
+        assert result == 4.0
+
+
+class TestRebalanceCoverageGaps:
+    def test_rebalance_defaults_now_when_none(self, db, scheduler):
+        """Line 191: rebalance uses time.time() when now is None."""
+        db.add_recurring_job("job1", "echo hi", 3600, next_run=time.time())
+        changes = scheduler.rebalance()  # now=None
+        assert isinstance(changes, list)
+        assert len(changes) == 1
+
+    def test_rebalance_empty_when_no_enabled_jobs(self, db, scheduler):
+        """Line 199: rebalance returns [] when no enabled recurring jobs exist."""
+        db.add_recurring_job("disabled", "echo hi", 3600)
+        db.set_recurring_job_enabled("disabled", False)
+        changes = scheduler.rebalance(time.time())
+        assert changes == []
+
+    def test_rebalance_empty_when_only_cron_jobs(self, db, scheduler):
+        """Line 204: rebalance returns [] when only cron jobs exist (no interval jobs)."""
+        db.add_recurring_job("cron1", "echo hi", cron_expression="0 6 * * *", next_run=time.time() + 100)
+        changes = scheduler.rebalance(time.time())
+        assert changes == []

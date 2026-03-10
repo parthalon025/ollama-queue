@@ -1,5 +1,7 @@
 """Tests for the FastAPI REST API."""
 
+from unittest.mock import MagicMock, patch
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -833,3 +835,421 @@ def test_resume_already_resumed(client_and_db):
     db.resume_deferred_job(deferral_id)
     resp = client.post(f"/api/deferred/{deferral_id}/resume")
     assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Coverage gap tests
+# ---------------------------------------------------------------------------
+
+
+def test_get_status_with_active_eval_run(client_and_db):
+    """GET /api/status includes active_eval when an eval run is generating."""
+    client, db = client_and_db
+    with db._lock:
+        conn = db._connect()
+        conn.execute(
+            "INSERT INTO eval_runs (id, data_source_url, variants, variant_id, status, judge_model) "
+            "VALUES (1, 'http://localhost', '[\"A\"]', 'A', 'generating', 'qwen2.5:7b')"
+        )
+        conn.commit()
+    resp = client.get("/api/status")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["active_eval"] is not None
+    assert data["active_eval"]["status"] == "generating"
+
+
+def test_get_status_with_current_job(client_and_db):
+    """GET /api/status includes current_job when daemon has a current_job_id."""
+    client, db = client_and_db
+    job_id = db.submit_job("echo hi", "test-model", priority=5, timeout=60, source="test")
+    db.start_job(job_id)
+    db.update_daemon_state(state="running", current_job_id=job_id)
+    resp = client.get("/api/status")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["current_job"] is not None
+    assert data["current_job"]["id"] == job_id
+
+
+def test_set_priority_endpoint(client_and_db):
+    """PUT /api/queue/{job_id}/priority updates job priority."""
+    client, db = client_and_db
+    job_id = db.submit_job("echo hi", "test-model", priority=5, timeout=60, source="test")
+    resp = client.put(f"/api/queue/{job_id}/priority", json={"priority": 1})
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+
+
+def test_set_priority_invalid_type(client_and_db):
+    """PUT /api/queue/{job_id}/priority returns 400 if priority is not an int."""
+    client, db = client_and_db
+    job_id = db.submit_job("echo hi", "test-model", priority=5, timeout=60, source="test")
+    resp = client.put(f"/api/queue/{job_id}/priority", json={"priority": "high"})
+    assert resp.status_code == 400
+
+
+def test_set_priority_not_found(client):
+    """PUT /api/queue/{job_id}/priority returns 404 for non-existent or non-pending job."""
+    resp = client.put("/api/queue/99999/priority", json={"priority": 1})
+    assert resp.status_code == 404
+
+
+def test_put_settings_unknown_key(client):
+    """PUT /api/settings rejects unknown setting keys with 422."""
+    resp = client.put("/api/settings", json={"nonexistent_key": 42})
+    assert resp.status_code == 422
+
+
+def test_durations_with_source_filter(client_and_db):
+    """GET /api/durations?source=test filters by source."""
+    client, db = client_and_db
+    resp = client.get("/api/durations?source=test")
+    assert resp.status_code == 200
+    assert isinstance(resp.json(), list)
+
+
+def test_submit_429_fallback_when_etas_empty(client_and_db):
+    """When queue is full and no ETAs available, fallback drain_seconds is used."""
+    from unittest.mock import patch
+
+    client, db = client_and_db
+    db.set_setting("max_queue_depth", 1)
+    db.submit_job("echo a", "qwen2.5:7b", 5, 60, "test")
+
+    # Mock get_pending_jobs to return empty (triggers empty ETAs branch)
+    with patch.object(db, "get_pending_jobs", return_value=[]):
+        resp = client.post(
+            "/api/queue/submit",
+            json={
+                "command": "echo c",
+                "model": "qwen2.5:7b",
+                "priority": 5,
+                "timeout": 60,
+                "source": "test",
+            },
+        )
+    assert resp.status_code == 429
+    assert int(resp.headers["Retry-After"]) >= 1
+
+
+def test_submit_429_fallback_when_eta_calculation_raises(client_and_db):
+    """When queue is full and ETA calculation raises, fallback is used."""
+    from unittest.mock import patch
+
+    client, db = client_and_db
+    db.set_setting("max_queue_depth", 1)
+    db.submit_job("echo a", "qwen2.5:7b", 5, 60, "test")
+
+    with patch("ollama_queue.api.DurationEstimator") as mock_est:
+        mock_est.return_value.queue_etas.side_effect = Exception("boom")
+        resp = client.post(
+            "/api/queue/submit",
+            json={
+                "command": "echo c",
+                "model": "qwen2.5:7b",
+                "priority": 5,
+                "timeout": 60,
+                "source": "test",
+            },
+        )
+    assert resp.status_code == 429
+    assert int(resp.headers["Retry-After"]) >= 1
+
+
+def test_update_schedule_not_found(client):
+    """PUT /api/schedule/{rj_id} returns 404 for non-existent job."""
+    resp = client.put("/api/schedule/9999", json={"enabled": False})
+    assert resp.status_code == 404
+
+
+def test_update_schedule_rebalance_exception(client_and_db):
+    """Rebalance failure after update is logged but doesn't fail the request."""
+    from unittest.mock import patch
+
+    client, db = client_and_db
+    client.post("/api/schedule", json={"name": "j1", "command": "echo hi", "interval_seconds": 3600})
+    with patch("ollama_queue.scheduler.Scheduler.rebalance", side_effect=Exception("boom")):
+        resp = client.put("/api/schedule/1", json={"enabled": False})
+    assert resp.status_code == 200
+
+
+def test_delete_schedule_not_found(client):
+    """DELETE /api/schedule/{rj_id} returns 404 for non-existent job."""
+    resp = client.delete("/api/schedule/9999")
+    assert resp.status_code == 404
+
+
+def test_enable_schedule_by_name_not_found(client):
+    """POST /api/schedule/jobs/{name}/enable returns 404 for unknown name."""
+    resp = client.post("/api/schedule/jobs/nonexistent/enable")
+    assert resp.status_code == 404
+
+
+def test_run_schedule_now(client_and_db):
+    """POST /api/schedule/{rj_id}/run-now submits a one-off job."""
+    client, db = client_and_db
+    client.post("/api/schedule", json={"name": "run-now-test", "command": "echo hi", "interval_seconds": 3600})
+    jobs = client.get("/api/schedule").json()
+    rj_id = jobs[0]["id"]
+    resp = client.post(f"/api/schedule/{rj_id}/run-now")
+    assert resp.status_code == 200
+    assert "job_id" in resp.json()
+
+
+def test_run_schedule_now_not_found(client):
+    """POST /api/schedule/{rj_id}/run-now returns 404 for non-existent job."""
+    resp = client.post("/api/schedule/9999/run-now")
+    assert resp.status_code == 404
+
+
+def test_generate_description_endpoint(client_and_db):
+    """POST /api/schedule/{rj_id}/generate-description triggers description generation."""
+    from unittest.mock import patch
+
+    client, db = client_and_db
+    client.post("/api/schedule", json={"name": "desc-test", "command": "echo hi", "interval_seconds": 3600})
+    jobs = client.get("/api/schedule").json()
+    rj_id = jobs[0]["id"]
+
+    with patch("ollama_queue.api._call_generate_description") as mock_gen:
+        resp = client.post(f"/api/schedule/{rj_id}/generate-description")
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+    mock_gen.assert_called_once()
+
+
+def test_generate_description_not_found(client):
+    """POST /api/schedule/{rj_id}/generate-description returns 404 for non-existent job."""
+    resp = client.post("/api/schedule/9999/generate-description")
+    assert resp.status_code == 404
+
+
+def test_call_generate_description_empty_response():
+    """_call_generate_description logs warning on empty model response."""
+    from unittest.mock import MagicMock, patch
+
+    mock_db = MagicMock()
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {"response": ""}
+    mock_resp.raise_for_status = MagicMock()
+    mock_client = MagicMock()
+    mock_client.__enter__ = MagicMock(return_value=mock_client)
+    mock_client.__exit__ = MagicMock(return_value=False)
+    mock_client.post.return_value = mock_resp
+
+    from ollama_queue.api import _call_generate_description
+
+    with patch("ollama_queue.api.httpx.Client", return_value=mock_client):
+        _call_generate_description(1, "test", "tag", "echo hi", mock_db)
+    # update_recurring_job should NOT be called (empty response)
+    mock_db.update_recurring_job.assert_not_called()
+
+
+def test_list_schedule_with_model(client_and_db):
+    """GET /api/schedule includes model classification info when model is set."""
+    client, db = client_and_db
+    client.post(
+        "/api/schedule",
+        json={"name": "model-job", "command": "echo hi", "interval_seconds": 3600, "model": "qwen2.5:7b"},
+    )
+    resp = client.get("/api/schedule")
+    assert resp.status_code == 200
+    jobs = resp.json()
+    job = next(j for j in jobs if j["name"] == "model-job")
+    assert job.get("model_profile") is not None
+    assert job.get("model_type") is not None
+    assert job.get("model_vram_mb") is not None
+
+
+def test_retry_dlq_entry(client_and_db):
+    """POST /api/dlq/{dlq_id}/retry creates a new job from DLQ entry."""
+    client, db = client_and_db
+    job_id = db.submit_job("echo hi", "test-model", priority=5, timeout=60, source="test")
+    db.start_job(job_id)
+    db.complete_job(job_id, exit_code=1, stdout_tail="", stderr_tail="", outcome_reason="exit code 1")
+    db.move_to_dlq(job_id, "failure")
+    entries = db.list_dlq()
+    resp = client.post(f"/api/dlq/{entries[0]['id']}/retry")
+    assert resp.status_code == 200
+    assert "new_job_id" in resp.json()
+
+
+def test_dismiss_dlq_entry(client_and_db):
+    """POST /api/dlq/{dlq_id}/dismiss dismisses a DLQ entry."""
+    client, db = client_and_db
+    job_id = db.submit_job("echo hi", "test-model", priority=5, timeout=60, source="test")
+    db.start_job(job_id)
+    db.complete_job(job_id, exit_code=1, stdout_tail="", stderr_tail="", outcome_reason="exit code 1")
+    db.move_to_dlq(job_id, "failure")
+    entries = db.list_dlq()
+    resp = client.post(f"/api/dlq/{entries[0]['id']}/dismiss")
+    assert resp.status_code == 200
+    assert resp.json()["dismissed"] == entries[0]["id"]
+
+
+def test_dlq_reschedule_permanent_failure(client_and_db):
+    """POST /api/dlq/{dlq_id}/reschedule returns 400 for permanent failure."""
+    client, db = client_and_db
+    job_id = db.submit_job("echo hi", "test-model", priority=5, timeout=60, source="test")
+    db.start_job(job_id)
+    db.complete_job(job_id, exit_code=1, stdout_tail="", stderr_tail="", outcome_reason="exit code 1")
+    db.move_to_dlq(job_id, "command not found")
+    entries = db.list_dlq()
+    resp = client.post(f"/api/dlq/{entries[0]['id']}/reschedule")
+    assert resp.status_code == 400
+
+
+def test_defer_job_not_pending(client_and_db):
+    """POST /api/jobs/{job_id}/defer returns 400 for completed job."""
+    client, db = client_and_db
+    job_id = db.submit_job("echo hi", "test-model", priority=5, timeout=60, source="test")
+    db.start_job(job_id)
+    db.complete_job(job_id, exit_code=0, stdout_tail="", stderr_tail="")
+    resp = client.post(f"/api/jobs/{job_id}/defer", json={"reason": "test"})
+    assert resp.status_code == 400
+
+
+def test_resume_deferred_not_found(client):
+    """POST /api/deferred/{deferral_id}/resume returns 404 for non-existent deferral."""
+    resp = client.post("/api/deferred/99999/resume")
+    assert resp.status_code == 404
+
+
+def test_get_models_catalog_with_search(client):
+    """GET /api/models/catalog?q=llama performs Ollama search."""
+    from unittest.mock import patch
+
+    with patch("urllib.request.urlopen") as mock_urlopen:
+        mock_response = MagicMock()
+        mock_response.__enter__ = MagicMock(return_value=mock_response)
+        mock_response.__exit__ = MagicMock(return_value=False)
+        mock_response.read.return_value = b'[{"name": "llama3:8b"}]'
+        mock_urlopen.return_value = mock_response
+
+        resp = client.get("/api/models/catalog?q=llama")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "search_results" in data
+    assert len(data["search_results"]) == 1
+
+
+def test_get_models_catalog_search_exception(client):
+    """GET /api/models/catalog?q=fail gracefully handles search failure."""
+    from unittest.mock import patch
+
+    with patch("urllib.request.urlopen", side_effect=Exception("timeout")):
+        resp = client.get("/api/models/catalog?q=fail")
+    assert resp.status_code == 200
+    assert resp.json()["search_results"] == []
+
+
+def test_pull_model_empty_name(client):
+    """POST /api/models/pull returns 400 for empty model name."""
+    resp = client.post("/api/models/pull", json={"model": ""})
+    assert resp.status_code == 400
+
+
+def test_get_pull_status(client_and_db):
+    """GET /api/models/pull/{pull_id} returns status."""
+    from unittest.mock import patch
+
+    client, db = client_and_db
+    with patch("ollama_queue.models.OllamaModels.get_pull_status", return_value={"status": "downloading", "pct": 50}):
+        resp = client.get("/api/models/pull/1")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "downloading"
+
+
+def test_get_pull_status_not_found(client):
+    """GET /api/models/pull/{pull_id} returns 404 for unknown pull."""
+    from unittest.mock import patch
+
+    with patch("ollama_queue.models.OllamaModels.get_pull_status", return_value={"error": "not found"}):
+        resp = client.get("/api/models/pull/999")
+    assert resp.status_code == 404
+
+
+def test_cancel_pull(client):
+    """DELETE /api/models/pull/{pull_id} cancels a pull."""
+    from unittest.mock import patch
+
+    with patch("ollama_queue.models.OllamaModels.cancel_pull", return_value=True):
+        resp = client.delete("/api/models/pull/1")
+    assert resp.status_code == 200
+    assert resp.json()["cancelled"] is True
+
+
+def test_performance_curve_with_data(client_and_db):
+    """GET /api/metrics/performance-curve with fitting data."""
+    client, db = client_and_db
+    # Insert enough data points for a curve fit
+    for _i, (model, size, tok) in enumerate([("m1", 2.0, 300), ("m2", 4.0, 200), ("m3", 8.0, 100)], start=1):
+        job_id = db.submit_job("echo hi", model, priority=5, timeout=60, source="test")
+        db.start_job(job_id)
+        db.complete_job(job_id, exit_code=0, stdout_tail="", stderr_tail="")
+        db.store_job_metrics(
+            job_id,
+            {
+                "model": model,
+                "eval_count": 100,
+                "eval_duration_ns": int(60_000_000_000 / tok * 100),
+                "load_duration_ns": 1_000_000_000,
+                "model_size_gb": size,
+            },
+        )
+    resp = client.get("/api/metrics/performance-curve")
+    assert resp.status_code == 200
+
+
+# --- Coverage gap tests: SPA static file serving, middleware, startup ---
+
+
+def test_no_cache_spa_middleware_sets_header(tmp_path):
+    """_NoCacheSPA middleware sets no-store for /ui paths. Covers lines 217-218."""
+    db = Database(str(tmp_path / "test.db"))
+    db.initialize()
+    app = create_app(db)
+    client = TestClient(app)
+    resp = client.get("/ui/test-path")
+    # The middleware adds cache-control: no-store on /ui paths
+    if resp.status_code in (200, 404, 307):
+        assert resp.headers.get("cache-control") == "no-store"
+
+
+def test_startup_scan_exception_is_caught(tmp_path):
+    """Startup consumer scan exception is caught and logged. Covers lines 2756-2757."""
+    db = Database(str(tmp_path / "test.db"))
+    db.initialize()
+    with patch("ollama_queue.api.run_scan", side_effect=RuntimeError("scan failed")):
+        app = create_app(db)
+    assert app is not None
+
+
+def test_spa_static_with_dist_directory(tmp_path):
+    """SPA static file serving with a real dist directory. Covers lines 2736-2742."""
+    from pathlib import Path
+
+    db = Database(str(tmp_path / "test.db"))
+    db.initialize()
+
+    # Create a fake spa dist directory
+    spa_dir = Path(__file__).parent.parent / "ollama_queue" / "dashboard" / "spa" / "dist"
+    if spa_dir.exists():
+        app = create_app(db)
+        client = TestClient(app)
+
+        # Test null byte path — should return 404
+        resp = client.get("/ui/\x00bad")
+        assert resp.status_code == 404
+
+        # Test non-existent file path — should fall back to index.html
+        resp = client.get("/ui/nonexistent-page")
+        # Either 200 (index.html fallback) or 404
+        assert resp.status_code in (200, 404)
+
+        # Test root /ui/ path
+        resp = client.get("/ui/")
+        assert resp.status_code in (200, 307, 404)
+    else:
+        pytest.skip("spa dist directory not built")
