@@ -74,6 +74,9 @@ class RuntimeEstimator:
 
         # Bayesian update
         if durations:
+            bad = [d for d in durations if d <= 0]
+            if bad:
+                logger.warning("Clamping %d non-positive durations for model=%r: %s", len(bad), model, bad[:5])
             log_durations = [math.log(max(d, 0.1)) for d in durations]
             n = len(log_durations)
             sample_mean = sum(log_durations) / n
@@ -98,7 +101,7 @@ class RuntimeEstimator:
         # Warmup estimate
         warmup_mean = 0.0
         warmup_upper = 0.0
-        if loaded_models is None or model not in (loaded_models or []):
+        if loaded_models is None or model not in loaded_models:
             warmup_mean, warmup_upper = self._estimate_warmup(model)
 
         confidence = self._confidence_level(n_obs)
@@ -120,6 +123,9 @@ class RuntimeEstimator:
         prior = WARMUP_PRIOR.copy()
 
         if warmups:
+            bad = [w for w in warmups if w <= 0]
+            if bad:
+                logger.warning("Clamping %d non-positive warmup values for model=%r", len(bad), model)
             log_warmups = [math.log(max(w, 0.01)) for w in warmups]
             n = len(log_warmups)
             sample_mean = sum(log_warmups) / n
