@@ -803,6 +803,172 @@ class TestPullMonitor:
         OllamaModels._list_local_cache = None
 
 
+class TestPullMonitorDbErrors:
+    """Pull _monitor DB error branches (lines 349-352, 368-369)."""
+
+    def test_monitor_progress_db_error_continues(self, tmp_path):
+        """DB error during progress update is logged but doesn't kill monitor (lines 349-350)."""
+        import threading
+
+        from ollama_queue.db import Database
+        from ollama_queue.models import OllamaModels
+
+        db = Database(str(tmp_path / "q.db"))
+        db.initialize()
+        om = OllamaModels()
+
+        mock_proc = MagicMock()
+        mock_proc.pid = 12345
+        mock_proc.stdout = iter(["downloading 50%\n"])
+        mock_proc.wait.return_value = None
+        mock_proc.returncode = 0
+
+        threads_started = []
+        original_thread = threading.Thread
+
+        def capture_thread(*args, **kwargs):
+            t = original_thread(*args, **kwargs)
+            threads_started.append(t)
+            return t
+
+        OllamaModels._list_local_cache = None
+
+        # Make _connect return a connection that fails on execute for progress updates
+        original_connect = db._connect
+        call_count = [0]
+
+        def connect_that_fails_once():
+            call_count[0] += 1
+            conn = original_connect()
+            # Calls 1-2 are from pull() itself (INSERT + UPDATE pid).
+            # Call 3 is the progress update inside the monitor — make it fail.
+            if call_count[0] == 3:
+                mock_conn = MagicMock()
+                mock_conn.execute.side_effect = Exception("simulated progress DB error")
+                return mock_conn
+            return conn
+
+        db._connect = connect_that_fails_once
+
+        with patch("subprocess.Popen", return_value=mock_proc), patch("threading.Thread", side_effect=capture_thread):
+            pull_id = om.pull("llama3.2:3b", db)
+
+        for t in threads_started:
+            t.join(timeout=5)
+
+        # Restore
+        db._connect = original_connect
+
+        # Despite progress DB error, the monitor should complete and write final status
+        with db._lock:
+            row = db._connect().execute("SELECT * FROM model_pulls WHERE id = ?", (pull_id,)).fetchone()
+        assert row["status"] == "completed"
+        OllamaModels._list_local_cache = None
+
+    def test_monitor_final_status_db_error(self, tmp_path):
+        """DB error during final status update is caught (lines 368-369)."""
+        import threading
+
+        from ollama_queue.db import Database
+        from ollama_queue.models import OllamaModels
+
+        db = Database(str(tmp_path / "q.db"))
+        db.initialize()
+        om = OllamaModels()
+
+        # Use an event to synchronize: we rename the table AFTER stdout is consumed
+        # but BEFORE the final status update
+        rename_event = threading.Event()
+
+        mock_proc = MagicMock()
+        mock_proc.pid = 12345
+
+        # No progress lines — goes straight to wait/final update
+        def stdout_iter():
+            return iter([])
+
+        mock_proc.stdout = stdout_iter()
+
+        def fake_wait():
+            rename_event.set()
+            # Give the main thread time to rename the table
+            import time
+
+            time.sleep(0.2)
+
+        mock_proc.wait = fake_wait
+        mock_proc.returncode = 0
+
+        threads_started = []
+        original_thread = threading.Thread
+
+        def capture_thread(*args, **kwargs):
+            t = original_thread(*args, **kwargs)
+            threads_started.append(t)
+            return t
+
+        OllamaModels._list_local_cache = None
+        with patch("subprocess.Popen", return_value=mock_proc), patch("threading.Thread", side_effect=capture_thread):
+            pull_id = om.pull("llama3.2:3b", db)
+
+        # Wait for monitor to reach wait(), then rename table to break final update
+        rename_event.wait(timeout=5)
+        with db._lock:
+            conn = db._connect()
+            conn.execute("ALTER TABLE model_pulls RENAME TO model_pulls_bak")
+            conn.commit()
+
+        for t in threads_started:
+            t.join(timeout=5)
+
+        # Restore table
+        with db._lock:
+            conn = db._connect()
+            conn.execute("ALTER TABLE model_pulls_bak RENAME TO model_pulls")
+            conn.commit()
+
+        # The monitor should not have raised — it logs the exception
+        OllamaModels._list_local_cache = None
+
+    def test_monitor_progress_value_error(self, tmp_path):
+        """Non-numeric percentage in stdout — ValueError caught (lines 351-352)."""
+        import threading
+
+        from ollama_queue.db import Database
+        from ollama_queue.models import OllamaModels
+
+        db = Database(str(tmp_path / "q.db"))
+        db.initialize()
+        om = OllamaModels()
+
+        mock_proc = MagicMock()
+        mock_proc.pid = 12345
+        # "abc%" has a % but float("abc") raises ValueError
+        mock_proc.stdout = iter(["downloading abc%\n"])
+        mock_proc.wait.return_value = None
+        mock_proc.returncode = 0
+
+        threads_started = []
+        original_thread = threading.Thread
+
+        def capture_thread(*args, **kwargs):
+            t = original_thread(*args, **kwargs)
+            threads_started.append(t)
+            return t
+
+        OllamaModels._list_local_cache = None
+        with patch("subprocess.Popen", return_value=mock_proc), patch("threading.Thread", side_effect=capture_thread):
+            pull_id = om.pull("llama3.2:3b", db)
+
+        for t in threads_started:
+            t.join(timeout=5)
+
+        with db._lock:
+            row = db._connect().execute("SELECT * FROM model_pulls WHERE id = ?", (pull_id,)).fetchone()
+        assert row["status"] == "completed"
+        OllamaModels._list_local_cache = None
+
+
 class TestGetPullStatusNotFound:
     """get_pull_status not-found branch (line 382)."""
 
