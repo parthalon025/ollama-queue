@@ -106,3 +106,14 @@ class TestMultilineOutput:
         result = parse_ollama_metrics(stdout)
         assert result is not None
         assert result["eval_count"] == 50
+
+    def test_malformed_line_mid_stream_still_finds_done(self):
+        """A malformed JSON line mid-stream should not prevent finding the done response."""
+        output = (
+            '{"model":"qwen2.5:7b","response":"hello"}\n'
+            "{CORRUPTED LINE\n"
+            '{"model":"qwen2.5:7b","done":true,"total_duration":1000000000,"eval_count":50,"eval_duration":500000000}\n'
+        )
+        result = parse_ollama_metrics(output)
+        assert result is not None
+        assert result["eval_count"] == 50
