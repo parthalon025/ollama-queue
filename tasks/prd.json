@@ -1,0 +1,270 @@
+[
+  {
+    "id": 1,
+    "title": "Create api/ subpackage from api.py",
+    "description": "Split the 2,826-line api.py into 13 domain-specific route files under ollama_queue/api/. Each file defines an APIRouter with routes for its domain. The api/__init__.py assembles all routers. Create app.py at the package root for FastAPI app creation. Remove the old api.py after all routes are migrated. Preserve all endpoint paths and behavior exactly.",
+    "acceptance_criteria": [
+      "cd ~/Documents/projects/ollama-queue && test -d ollama_queue/api",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/api/__init__.py",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/api/jobs.py",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/api/proxy.py",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/api/schedule.py",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/api/consumers.py",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/api/models.py",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/api/health.py",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/api/settings.py",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/api/dlq.py",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/api/eval_runs.py",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/api/eval_variants.py",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/api/eval_settings.py",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/api/eval_trends.py",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/app.py",
+      "cd ~/Documents/projects/ollama-queue && ! test -f ollama_queue/api.py",
+      "cd ~/Documents/projects/ollama-queue && .venv/bin/python -c 'from ollama_queue.api import api_router'",
+      "cd ~/Documents/projects/ollama-queue && .venv/bin/python -m pytest --timeout=120 -x -q 2>&1 | tail -1 | grep -q passed"
+    ],
+    "passes": false,
+    "blocked_by": []
+  },
+  {
+    "id": 2,
+    "title": "Create eval/ subpackage from eval_engine.py",
+    "description": "Split the 2,620-line eval_engine.py into 5 phase-based modules under ollama_queue/eval/. engine.py handles run lifecycle orchestration, generate.py handles generation phase, judge.py handles judging + agreement scoring, promote.py handles auto-promote gate logic. Move existing eval_analysis.py into eval/analysis.py unchanged. Remove old eval_engine.py and eval_analysis.py after migration.",
+    "acceptance_criteria": [
+      "cd ~/Documents/projects/ollama-queue && test -d ollama_queue/eval",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/eval/__init__.py",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/eval/engine.py",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/eval/generate.py",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/eval/judge.py",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/eval/analysis.py",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/eval/promote.py",
+      "cd ~/Documents/projects/ollama-queue && ! test -f ollama_queue/eval_engine.py",
+      "cd ~/Documents/projects/ollama-queue && ! test -f ollama_queue/eval_analysis.py",
+      "cd ~/Documents/projects/ollama-queue && .venv/bin/python -c 'from ollama_queue.eval.engine import run_eval_session'",
+      "cd ~/Documents/projects/ollama-queue && .venv/bin/python -c 'from ollama_queue.eval.analysis import compute_run_analysis'",
+      "cd ~/Documents/projects/ollama-queue && .venv/bin/python -m pytest --timeout=120 -x -q 2>&1 | tail -1 | grep -q passed"
+    ],
+    "passes": false,
+    "blocked_by": [1]
+  },
+  {
+    "id": 3,
+    "title": "Create db/ subpackage from db.py using mixin pattern",
+    "description": "Split the 1,940-line db.py into 7 domain mixin files under ollama_queue/db/. The __init__.py defines the Database class that inherits from all mixins and contains __init__, _connect, close. schema.py contains table DDL and _ensure_schema. Each domain mixin (jobs, schedule, settings, health, dlq, eval) contains CRUD methods that use self._conn and self._lock. Remove old db.py after migration.",
+    "acceptance_criteria": [
+      "cd ~/Documents/projects/ollama-queue && test -d ollama_queue/db",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/db/__init__.py",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/db/schema.py",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/db/jobs.py",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/db/schedule.py",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/db/settings.py",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/db/health.py",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/db/dlq.py",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/db/eval.py",
+      "cd ~/Documents/projects/ollama-queue && ! test -f ollama_queue/db.py",
+      "cd ~/Documents/projects/ollama-queue && .venv/bin/python -c 'from ollama_queue.db import Database; print(Database.__mro__)'",
+      "cd ~/Documents/projects/ollama-queue && .venv/bin/python -c 'from ollama_queue.db import Database; assert len(Database.__mro__) >= 8'",
+      "cd ~/Documents/projects/ollama-queue && .venv/bin/python -m pytest --timeout=120 -x -q 2>&1 | tail -1 | grep -q passed"
+    ],
+    "passes": false,
+    "blocked_by": [1, 2]
+  },
+  {
+    "id": 4,
+    "title": "Create daemon/ subpackage from daemon.py",
+    "description": "Split the 1,347-line daemon.py into 2 modules under ollama_queue/daemon/. loop.py contains the main polling loop (poll_once, serve, health checks, scheduler calls). executor.py contains subprocess management (_run_job, stdout capture, metrics collection, stall monitoring). The __init__.py re-exports the main entry points. Remove old daemon.py.",
+    "acceptance_criteria": [
+      "cd ~/Documents/projects/ollama-queue && test -d ollama_queue/daemon",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/daemon/__init__.py",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/daemon/loop.py",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/daemon/executor.py",
+      "cd ~/Documents/projects/ollama-queue && ! test -f ollama_queue/daemon.py",
+      "cd ~/Documents/projects/ollama-queue && .venv/bin/python -c 'from ollama_queue.daemon import loop'",
+      "cd ~/Documents/projects/ollama-queue && .venv/bin/python -m pytest --timeout=120 -x -q 2>&1 | tail -1 | grep -q passed"
+    ],
+    "passes": false,
+    "blocked_by": [1, 2, 3]
+  },
+  {
+    "id": 5,
+    "title": "Move small modules to domain subpackages",
+    "description": "Reorganize the 16 small flat modules into 4 domain subpackages: scheduling/ (scheduler.py, slot_scoring.py, deferral_scheduler.py→deferral.py, dlq_scheduler.py), sensing/ (health.py, stall.py, burst.py, system_snapshot.py), models/ (models.py→client.py, estimator.py, runtime_estimator.py, performance_curve.py), config/ (patcher.py, scanner.py, intercept.py). Each subpackage has an __init__.py with re-exports. Keep dlq.py, intelligence.py, metrics_parser.py flat. Remove old flat files.",
+    "acceptance_criteria": [
+      "cd ~/Documents/projects/ollama-queue && test -d ollama_queue/scheduling",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/scheduling/scheduler.py",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/scheduling/slot_scoring.py",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/scheduling/deferral.py",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/scheduling/dlq_scheduler.py",
+      "cd ~/Documents/projects/ollama-queue && test -d ollama_queue/sensing",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/sensing/health.py",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/sensing/stall.py",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/sensing/burst.py",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/sensing/system_snapshot.py",
+      "cd ~/Documents/projects/ollama-queue && test -d ollama_queue/models",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/models/client.py",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/models/estimator.py",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/models/runtime_estimator.py",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/models/performance_curve.py",
+      "cd ~/Documents/projects/ollama-queue && test -d ollama_queue/config",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/config/patcher.py",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/config/scanner.py",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/config/intercept.py",
+      "cd ~/Documents/projects/ollama-queue && ! test -f ollama_queue/scheduler.py",
+      "cd ~/Documents/projects/ollama-queue && ! test -f ollama_queue/health.py",
+      "cd ~/Documents/projects/ollama-queue && ! test -f ollama_queue/stall.py",
+      "cd ~/Documents/projects/ollama-queue && ! test -f ollama_queue/burst.py",
+      "cd ~/Documents/projects/ollama-queue && ! test -f ollama_queue/patcher.py",
+      "cd ~/Documents/projects/ollama-queue && ! test -f ollama_queue/scanner.py",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/dlq.py",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/intelligence.py",
+      "cd ~/Documents/projects/ollama-queue && test -f ollama_queue/metrics_parser.py",
+      "cd ~/Documents/projects/ollama-queue && .venv/bin/python -c 'from ollama_queue.scheduling import RecurringJobScheduler'",
+      "cd ~/Documents/projects/ollama-queue && .venv/bin/python -c 'from ollama_queue.sensing import HealthMonitor'",
+      "cd ~/Documents/projects/ollama-queue && .venv/bin/python -c 'from ollama_queue.models import OllamaModels'",
+      "cd ~/Documents/projects/ollama-queue && .venv/bin/python -c 'from ollama_queue.config import patch_consumer'",
+      "cd ~/Documents/projects/ollama-queue && .venv/bin/python -m pytest --timeout=120 -x -q 2>&1 | tail -1 | grep -q passed"
+    ],
+    "passes": false,
+    "blocked_by": [1, 2, 3, 4]
+  },
+  {
+    "id": 6,
+    "title": "Update cli.py imports for new module paths",
+    "description": "Update all import statements in cli.py to use the new subpackage paths. Verify CLI commands still work.",
+    "acceptance_criteria": [
+      "cd ~/Documents/projects/ollama-queue && .venv/bin/python -c 'from ollama_queue.cli import main'",
+      "cd ~/Documents/projects/ollama-queue && .venv/bin/python -m py_compile ollama_queue/cli.py",
+      "cd ~/Documents/projects/ollama-queue && ! grep -n 'from ollama_queue.scheduler import' ollama_queue/cli.py",
+      "cd ~/Documents/projects/ollama-queue && ! grep -n 'from ollama_queue.health import' ollama_queue/cli.py",
+      "cd ~/Documents/projects/ollama-queue && .venv/bin/python -m pytest tests/test_cli.py --timeout=120 -x -q 2>&1 | tail -1 | grep -q passed"
+    ],
+    "passes": false,
+    "blocked_by": [5]
+  },
+  {
+    "id": 7,
+    "title": "Update all test imports and mock paths for new module paths",
+    "description": "Update import statements and unittest.mock.patch target strings across all 40 test files to use the new subpackage paths. Critical: patch paths must match the new module locations (e.g., 'ollama_queue.api.jobs.db' not 'ollama_queue.api.db'). Run full suite to verify.",
+    "acceptance_criteria": [
+      "cd ~/Documents/projects/ollama-queue && ! grep -rn 'from ollama_queue.eval_engine import' tests/",
+      "cd ~/Documents/projects/ollama-queue && ! grep -rn 'from ollama_queue.eval_analysis import' tests/",
+      "cd ~/Documents/projects/ollama-queue && ! grep -rn \"mock.patch.*'ollama_queue.api\\.\" tests/ | grep -v 'ollama_queue.api\\.'",
+      "cd ~/Documents/projects/ollama-queue && ! grep -rn 'from ollama_queue.scheduler import' tests/",
+      "cd ~/Documents/projects/ollama-queue && ! grep -rn 'from ollama_queue.health import' tests/",
+      "cd ~/Documents/projects/ollama-queue && ! grep -rn 'from ollama_queue.stall import' tests/",
+      "cd ~/Documents/projects/ollama-queue && ! grep -rn 'from ollama_queue.burst import' tests/",
+      "cd ~/Documents/projects/ollama-queue && ! grep -rn 'from ollama_queue.patcher import' tests/",
+      "cd ~/Documents/projects/ollama-queue && ! grep -rn 'from ollama_queue.scanner import' tests/",
+      "cd ~/Documents/projects/ollama-queue && .venv/bin/python -m pytest --timeout=120 -x -q 2>&1 | tail -1 | grep -q passed"
+    ],
+    "passes": false,
+    "blocked_by": [6]
+  },
+  {
+    "id": 8,
+    "title": "Split store.js into domain stores",
+    "description": "Split the 816-line store.js into 6 domain-specific store files under src/stores/: queue.js, eval.js, schedule.js, models.js, settings.js, health.js. Create stores/index.js that re-exports everything for backward compatibility. Update component imports from '../store' to '../stores'. Remove old store.js.",
+    "acceptance_criteria": [
+      "cd ~/Documents/projects/ollama-queue/ollama_queue/dashboard/spa && test -d src/stores",
+      "cd ~/Documents/projects/ollama-queue/ollama_queue/dashboard/spa && test -f src/stores/index.js",
+      "cd ~/Documents/projects/ollama-queue/ollama_queue/dashboard/spa && test -f src/stores/queue.js",
+      "cd ~/Documents/projects/ollama-queue/ollama_queue/dashboard/spa && test -f src/stores/eval.js",
+      "cd ~/Documents/projects/ollama-queue/ollama_queue/dashboard/spa && test -f src/stores/schedule.js",
+      "cd ~/Documents/projects/ollama-queue/ollama_queue/dashboard/spa && test -f src/stores/models.js",
+      "cd ~/Documents/projects/ollama-queue/ollama_queue/dashboard/spa && test -f src/stores/settings.js",
+      "cd ~/Documents/projects/ollama-queue/ollama_queue/dashboard/spa && test -f src/stores/health.js",
+      "cd ~/Documents/projects/ollama-queue/ollama_queue/dashboard/spa && ! test -f src/store.js",
+      "cd ~/Documents/projects/ollama-queue/ollama_queue/dashboard/spa && npm run build 2>&1 | tail -3 | grep -qv 'error'"
+    ],
+    "passes": false,
+    "blocked_by": []
+  },
+  {
+    "id": 9,
+    "title": "Split Plan.jsx into section components",
+    "description": "Split the 1,318-line Plan.jsx into a Plan/ directory with index.jsx (page shell + tab routing), GanttSection.jsx (Gantt chart + controls), LoadMapSection.jsx (load map visualization), RecurringJobsSection.jsx (recurring jobs table + actions). Update app.jsx router import.",
+    "acceptance_criteria": [
+      "cd ~/Documents/projects/ollama-queue/ollama_queue/dashboard/spa && test -d src/pages/Plan",
+      "cd ~/Documents/projects/ollama-queue/ollama_queue/dashboard/spa && test -f src/pages/Plan/index.jsx",
+      "cd ~/Documents/projects/ollama-queue/ollama_queue/dashboard/spa && test -f src/pages/Plan/GanttSection.jsx",
+      "cd ~/Documents/projects/ollama-queue/ollama_queue/dashboard/spa && test -f src/pages/Plan/LoadMapSection.jsx",
+      "cd ~/Documents/projects/ollama-queue/ollama_queue/dashboard/spa && test -f src/pages/Plan/RecurringJobsSection.jsx",
+      "cd ~/Documents/projects/ollama-queue/ollama_queue/dashboard/spa && ! test -f src/pages/Plan.jsx",
+      "cd ~/Documents/projects/ollama-queue/ollama_queue/dashboard/spa && npm run build 2>&1 | tail -3 | grep -qv 'error'"
+    ],
+    "passes": false,
+    "blocked_by": [8]
+  },
+  {
+    "id": 10,
+    "title": "Split oversized JS components into directories",
+    "description": "Split 4 oversized components into directory components with index.jsx entry points: SettingsForm/ (index.jsx + QueueSettings.jsx + DaemonSettings.jsx + AdvancedSettings.jsx), AddRecurringJobModal/ (index.jsx + CronBuilder.jsx), eval/RunRow/ (index.jsx + RunDetails.jsx), eval/GeneralSettings/ (index.jsx + ThresholdConfig.jsx). Remove old single-file versions.",
+    "acceptance_criteria": [
+      "cd ~/Documents/projects/ollama-queue/ollama_queue/dashboard/spa && test -d src/components/SettingsForm",
+      "cd ~/Documents/projects/ollama-queue/ollama_queue/dashboard/spa && test -f src/components/SettingsForm/index.jsx",
+      "cd ~/Documents/projects/ollama-queue/ollama_queue/dashboard/spa && ! test -f src/components/SettingsForm.jsx",
+      "cd ~/Documents/projects/ollama-queue/ollama_queue/dashboard/spa && test -d src/components/AddRecurringJobModal",
+      "cd ~/Documents/projects/ollama-queue/ollama_queue/dashboard/spa && test -f src/components/AddRecurringJobModal/index.jsx",
+      "cd ~/Documents/projects/ollama-queue/ollama_queue/dashboard/spa && ! test -f src/components/AddRecurringJobModal.jsx",
+      "cd ~/Documents/projects/ollama-queue/ollama_queue/dashboard/spa && test -d src/components/eval/RunRow",
+      "cd ~/Documents/projects/ollama-queue/ollama_queue/dashboard/spa && test -f src/components/eval/RunRow/index.jsx",
+      "cd ~/Documents/projects/ollama-queue/ollama_queue/dashboard/spa && ! test -f src/components/eval/RunRow.jsx",
+      "cd ~/Documents/projects/ollama-queue/ollama_queue/dashboard/spa && test -d src/components/eval/GeneralSettings",
+      "cd ~/Documents/projects/ollama-queue/ollama_queue/dashboard/spa && test -f src/components/eval/GeneralSettings/index.jsx",
+      "cd ~/Documents/projects/ollama-queue/ollama_queue/dashboard/spa && ! test -f src/components/eval/GeneralSettings.jsx",
+      "cd ~/Documents/projects/ollama-queue/ollama_queue/dashboard/spa && npm run build 2>&1 | tail -3 | grep -qv 'error'"
+    ],
+    "passes": false,
+    "blocked_by": [8]
+  },
+  {
+    "id": 11,
+    "title": "Remove backward-compatibility re-exports and verify clean imports",
+    "description": "Remove any temporary re-exports from ollama_queue/__init__.py added during migration. Verify no old flat-file import paths remain in source or tests. Clean up any stale references.",
+    "acceptance_criteria": [
+      "cd ~/Documents/projects/ollama-queue && ! grep -rn 'from ollama_queue.scheduler import' ollama_queue/ --include='*.py' | grep -v scheduling/",
+      "cd ~/Documents/projects/ollama-queue && ! grep -rn 'from ollama_queue.health import' ollama_queue/ --include='*.py' | grep -v sensing/",
+      "cd ~/Documents/projects/ollama-queue && ! grep -rn 'from ollama_queue.stall import' ollama_queue/ --include='*.py' | grep -v sensing/",
+      "cd ~/Documents/projects/ollama-queue && ! grep -rn 'from ollama_queue.burst import' ollama_queue/ --include='*.py' | grep -v sensing/",
+      "cd ~/Documents/projects/ollama-queue && ! grep -rn 'from ollama_queue.patcher import' ollama_queue/ --include='*.py' | grep -v config/",
+      "cd ~/Documents/projects/ollama-queue && ! grep -rn 'from ollama_queue.scanner import' ollama_queue/ --include='*.py' | grep -v config/",
+      "cd ~/Documents/projects/ollama-queue && .venv/bin/python -m pytest --timeout=120 -x -q 2>&1 | tail -1 | grep -q passed"
+    ],
+    "passes": false,
+    "blocked_by": [7]
+  },
+  {
+    "id": 12,
+    "title": "Update CLAUDE.md, ruff.toml, and project documentation",
+    "description": "Update the Structure section in CLAUDE.md to reflect the new domain subpackage layout. Update ruff.toml per-file-ignores for renamed paths (e.g. daemon.py→daemon/loop.py for S603/S607). Update any gotchas that reference old file paths.",
+    "acceptance_criteria": [
+      "cd ~/Documents/projects/ollama-queue && grep -q 'api/' CLAUDE.md",
+      "cd ~/Documents/projects/ollama-queue && grep -q 'db/' CLAUDE.md",
+      "cd ~/Documents/projects/ollama-queue && grep -q 'eval/' CLAUDE.md",
+      "cd ~/Documents/projects/ollama-queue && grep -q 'daemon/' CLAUDE.md",
+      "cd ~/Documents/projects/ollama-queue && grep -q 'scheduling/' CLAUDE.md",
+      "cd ~/Documents/projects/ollama-queue && grep -q 'sensing/' CLAUDE.md",
+      "cd ~/Documents/projects/ollama-queue && grep -q 'models/' CLAUDE.md",
+      "cd ~/Documents/projects/ollama-queue && grep -q 'config/' CLAUDE.md",
+      "cd ~/Documents/projects/ollama-queue && ! grep -q 'api.py.*#.*FastAPI REST API' CLAUDE.md"
+    ],
+    "passes": false,
+    "blocked_by": [11]
+  },
+  {
+    "id": 13,
+    "title": "Full quality gate — tests + coverage + lint + SPA build",
+    "description": "Run the complete quality gate: all 1,587 tests pass, 100% line coverage maintained, ruff lint clean, ruff format clean, SPA builds without errors. No Python source files over 900 lines (excluding tests). No old flat module files remain at package root (except cli.py, dlq.py, intelligence.py, metrics_parser.py).",
+    "acceptance_criteria": [
+      "cd ~/Documents/projects/ollama-queue && .venv/bin/python -m pytest --timeout=120 -x -q 2>&1 | tail -1 | grep -q passed",
+      "cd ~/Documents/projects/ollama-queue && .venv/bin/python -m pytest --cov=ollama_queue --cov-fail-under=99 --timeout=120 -q 2>&1 | tail -3 | grep -qE '(100%|TOTAL)'",
+      "cd ~/Documents/projects/ollama-queue && .venv/bin/python -m ruff check ollama_queue/",
+      "cd ~/Documents/projects/ollama-queue && .venv/bin/python -m ruff format --check ollama_queue/",
+      "cd ~/Documents/projects/ollama-queue/ollama_queue/dashboard/spa && npm run build 2>&1 | tail -3 | grep -qv 'error'",
+      "cd ~/Documents/projects/ollama-queue && ! find ollama_queue/ -name '*.py' -not -path '*/__pycache__/*' -exec sh -c 'test $(wc -l < \"$1\") -gt 900' _ {} \\; -print | grep -q .",
+      "cd ~/Documents/projects/ollama-queue && test $(find ollama_queue/ -maxdepth 1 -name '*.py' -not -name '__init__.py' -not -name 'cli.py' -not -name 'dlq.py' -not -name 'intelligence.py' -not -name 'metrics_parser.py' -not -name 'app.py' | wc -l) -eq 0"
+    ],
+    "passes": false,
+    "blocked_by": [11, 12, 9, 10]
+  }
+]
