@@ -9,13 +9,21 @@ Ollama job queue scheduler with priority, health monitoring, and web dashboard. 
 ```
 ollama_queue/
   __init__.py
-  cli.py              # Click CLI: submit, status, queue, history, pause, resume, cancel, serve, schedule, dlq, settings
+  cli.py              # Click CLI: submit, status, queue, history, pause, resume, cancel, serve, schedule, dlq, defer, metrics, settings
   db.py               # SQLite schema and CRUD (synchronous sqlite3, threading.RLock)
   daemon.py           # Polling loop: health check → scheduler → dequeue → subprocess → DLQ routing
   health.py           # System metrics: RAM/VRAM/load/swap/ollama-ps with hysteresis
   estimator.py        # Duration prediction: rolling avg + model-based defaults
-  scheduler.py        # Recurring job promotion: promote_due_jobs, update_next_run, rebalance
+  runtime_estimator.py # Bayesian log-normal runtime estimation (4-tier hierarchy: job → model → family → global)
+  performance_curve.py # Log-linear cross-model performance regression (tok/min vs param count)
+  scheduler.py        # Recurring job promotion: promote_due_jobs, update_next_run, rebalance, load_map_extended
   dlq.py              # DLQManager: handle_failure routes to retry (backoff) or DLQ
+  dlq_scheduler.py    # DLQ auto-reschedule: failure classification, slot fitting, chronic skip
+  deferral_scheduler.py # Proactive job deferral: two-phase sweep (resume past-scheduled + find slots)
+  intelligence.py     # LoadPatterns: hourly/daily load profiles from health log history
+  system_snapshot.py  # SystemSnapshot: 10-factor slot scoring with VRAM hard gates
+  metrics_parser.py   # Ollama response metrics parser (tok/min, eval duration)
+  slot_scoring.py     # find_fitting_slot: score-ranked slot selection for DLQ/deferral scheduling
   scanner.py          # 4-phase consumer detection: live (ss/lsof/netstat), static (config files), stream (streaming_confirmed flag), deadlock (queue-recursive call guard)
   patcher.py          # Config rewriter (systemd/env/yaml/toml) + health checker + backup/revert; patch_consumer(), revert_consumer(), check_health()
   intercept.py        # iptables REDIRECT intercept mode (Linux only); enable_intercept(), disable_intercept(), get_intercept_status()
@@ -35,6 +43,7 @@ tests/
   test_api_eval_runs.py    # 78 tests
   test_daemon.py           # 65 tests
   test_api.py              # 58 tests (incl. proxy priority, batch schedule, suggest endpoint)
+  test_system_snapshot.py  # 39 tests (10-factor scoring, VRAM gates, snapshot)
   test_scheduler.py        # 36 tests
   test_api_eval_variants.py # 36 tests
   test_cli.py              # 27 tests
@@ -43,12 +52,20 @@ tests/
   test_stall.py            # 24 tests
   test_health.py           # 19 tests
   test_models.py           # 18 tests
+  test_slot_scoring.py     # 17 tests (find_fitting_slot, score ranking)
   test_scanner.py          # 17 tests
+  test_metrics_parser.py   # 13 tests (Ollama response parsing)
   test_estimator.py        # 12 tests
   test_embed_proxy.py      # 12 tests
+  test_integration_dlq_reschedule.py # 11 tests (DLQ + deferral + CLI end-to-end)
+  test_dlq_scheduler.py    # 11 tests (DLQ auto-reschedule sweep)
   test_consumers_api.py    # 11 tests (API endpoints)
   test_proxy.py            # 10 tests
+  test_performance_curve.py # 9 tests (log-linear regression)
+  test_intelligence.py     # 8 tests (LoadPatterns hourly/daily profiles)
+  test_runtime_estimator.py # 8 tests (Bayesian log-normal estimation)
   test_dlq.py              # 8 tests
+  test_deferral_scheduler.py # 7 tests (two-phase sweep)
   test_burst.py            # 7 tests
   test_patcher.py          # 7 tests
   test_intercept.py        # 5 tests
@@ -62,7 +79,7 @@ tests/
 cd ~/Documents/projects/ollama-queue
 source .venv/bin/activate
 
-# Run tests (748 total)
+# Run tests (917 total)
 pytest
 
 # Start the server (daemon + API + dashboard)
@@ -85,6 +102,15 @@ ollama-queue schedule remove daily-aria
 ollama-queue dlq list
 ollama-queue dlq retry <id>
 ollama-queue dlq clear
+ollama-queue dlq schedule-preview    # Show unscheduled DLQ entries with failure classification
+ollama-queue dlq reschedule <id>     # Manually reschedule a DLQ entry as a new job
+
+# Deferral
+ollama-queue defer <job_id> --reason manual   # Defer a pending/queued job
+
+# Metrics
+ollama-queue metrics models          # Per-model stats (runs, tok/min, warmup, size)
+ollama-queue metrics curve           # Fitted cross-model performance curve parameters
 ```
 
 ## Deployment
@@ -113,9 +139,9 @@ npm run build        # Production
 npm run dev          # Watch mode
 ```
 
-Sidebar nav (desktop) + bottom tab bar (mobile). 6 views: **Now** (2-column command center: running job, queue, resource gauges, KPI cards, alert strip) + **Plan** (24h Gantt timeline with "now" needle, 48-bucket load-map density strip, ρ traffic intensity badge, "Suggest slot" button highlighting top-3 low-load windows; tag-grouped recurring jobs with collapsible sections, bulk actions, expandable detail panels) + **History** (DLQ entries, duration trends, activity heatmap, job list) + **Models** (model table) + **Settings** (thresholds, defaults, retention, daemon controls) + **Consumers** (scan button, consumer cards with status badges and include/ignore/revert actions, intercept toggle with status banner).
+Sidebar nav (desktop) + bottom tab bar (mobile). 7 views: **Now** (2-column command center: running job, queue, resource gauges, KPI cards, alert strip) + **Plan** (24h Gantt timeline with "now" needle, 48-bucket load-map density strip with DLQ/deferral slot markers, ρ traffic intensity badge, "Suggest slot" button highlighting top-3 low-load windows; tag-grouped recurring jobs with collapsible sections, bulk actions, expandable detail panels) + **History** (DLQ entries with reschedule status badges/reasoning, deferred jobs panel, duration trends, activity heatmap, job list) + **Models** (model table) + **Perf** (model performance table, cross-model performance curve chart, 24h×7d load heatmap, system health gauges) + **Settings** (thresholds, defaults, retention, DLQ auto-reschedule, proactive deferral, daemon controls) + **Consumers** (scan button, consumer cards with status badges and include/ignore/revert actions, intercept toggle with status banner).
 
-Route IDs: `now` | `plan` | `history` | `models` | `settings` | `eval` | `consumers`. Sidebar: 200px desktop, 64px icon-only (768–1023px), hidden on mobile. CSS classes: `layout-root`, `layout-sidebar`, `layout-main`, `now-grid`, `history-top-grid`, `mobile-bottom-nav`.
+Route IDs: `now` | `plan` | `history` | `models` | `settings` | `eval` | `consumers` | `performance`. Sidebar: 200px desktop, 64px icon-only (768–1023px), hidden on mobile. CSS classes: `layout-root`, `layout-sidebar`, `layout-main`, `now-grid`, `history-top-grid`, `mobile-bottom-nav`.
 
 **Eval tab** (4 sub-views): Runs (run list + active progress + repeat + judge-rerun + per-run analysis panel with `simpleRenderMd()` + Analyze/Re-analyze button; winner label shows variant label + model name; L2 shows bootstrap CI inline in metrics + per-item breakdown panel sorted worst-first + Compute/Re-analyze button for `analysis_json`; L3 ResultsTable has TP/TN/FP/FN filter tabs with classification from `eval.positive_threshold`), Variants (prompt variant CRUD + stability table with cross-run F1 stdev/stable badge from `/api/eval/variants/stability` + ConfigDiffPanel for side-by-side comparison via `/api/eval/variants/{a}/diff/{b}`; `latest_f1` score shown inline; two-click inline delete replaces `confirm()` dialog; `description` field shown per row), Trends (F1 line chart + trend summary), Settings (judge defaults + data source + scheduling mode + setup checklist [2 gates: data source connected + first run exists] + `eval.analysis_model` — empty string means use judge model; judge mode inline description; "1–20" range hint on Lessons per Group; variant descriptions shown in checkbox list; alert()-based tooltips replaced with inline reveal). `eval_variants` rows have a `description TEXT` column; `GET /api/eval/variants` includes `description` in response; live DB migration backfills pre-existing rows via `UPDATE WHERE description IS NULL`. Eval state: `evalActiveRun`, `evalSubTab`, `fetchEvalRuns` in `store.js`. Key invariants: `repeat` starts a background thread (not just a DB row); `judge-rerun` copies gen_results from source run before judging; cancel sets `completed_at`; all fetch calls check `res.ok`; `generate_eval_analysis()` runs automatically after each eval run completes and stores markdown to `eval_runs.analysis_md`; `compute_run_analysis()` stores structured `analysis_json` (per-item breakdown, failure cases, bootstrap CI) per run. `eval_analysis.py` is the pure analysis module (no DB/HTTP) — 5 public functions. Graceful no-cluster degradation: returns `{"status": "no_cluster_data"}` for projects without cluster labels.
 
@@ -204,6 +230,11 @@ This applies to: component files, store transformations in `store.js`, computed 
 - **`HealthMonitor` now has `__init__`** — if subclassing or constructing directly in tests, call `super().__init__()` to initialise `_vram_cache`. Missing this raises `AttributeError` on the first `get_vram_pct()` call.
 - **`_reload_systemd()` and `_restart_service()` return `bool`** — callers that previously ignored the return value should check it and log or raise on `False`. Silent failures from these calls were masking systemd and service restart errors.
 - **`get_pending_jobs()` defaults to `exclude_sentinel=True`** — pass `exclude_sentinel=False` at any call site that intentionally needs proxy sentinel jobs (command LIKE `'proxy:%'`) included in the result. The default is safe for all normal dequeue paths.
+- **`deferral_scheduler._do_sweep()` is two-phase** — Phase 1 fetches ALL deferred entries and resumes any whose `scheduled_for` has passed. Phase 2 fetches unscheduled-only entries and finds fitting slots. The original single-call design (`list_deferred(unscheduled_only=True)`) filtered out entries WITH `scheduled_for`, making scheduled resumptions impossible. Tests must assert `list_deferred` is called twice: once with no args (phase 1), once with `unscheduled_only=True` (phase 2).
+- **`_estimate_model_vram(model)` regex extracts param count from model name** — parses patterns like `7b`, `14b`, `0.5b` from the model string. The `_PARAM_TO_VRAM` lookup table maps common sizes to Q4-quantized VRAM estimates (e.g. `7b` → 4.5GB). Models without a recognizable size pattern default to 4.0GB. This is a heuristic — actual VRAM depends on quantization level and context size.
+- **`job_metrics` table** — stores per-job Ollama response metrics (tokens/sec, eval duration, model). Populated by `metrics_parser.py` which extracts metrics from job stdout if it contains Ollama JSON. The `model_performance` API endpoint aggregates these into per-model stats.
+- **`deferrals` table** — tracks job deferral lifecycle. Jobs move `pending → deferred` via `db.defer_job()` and back to `pending` via `db.resume_deferred_job()`. The `scheduled_for` column is set by `update_deferral_schedule()` when the deferral scheduler finds a fitting slot.
+- **DLQ auto-reschedule columns** — `auto_reschedule_count`, `rescheduled_job_id`, `reschedule_reasoning`, `last_reschedule_at` on the `dlq` table. `set_setting("dlq.auto_reschedule", True)` enables automatic sweep. `dlq.chronic_failure_threshold` (default 3) prevents infinite reschedule loops.
 
 ## Design Doc
 
