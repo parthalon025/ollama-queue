@@ -324,7 +324,7 @@ systemd timers / apps / proxy clients
 | **Scheduling** | croniter, custom 48-slot load map |
 | **Dashboard** | Preact 10, @preact/signals, Tailwind v4, uPlot |
 | **CLI** | Click |
-| **Tests** | pytest, pytest-xdist (1,587 tests, 100% line coverage) |
+| **Tests** | pytest, pytest-xdist (1,588 tests, 100% line coverage) |
 
 ---
 
@@ -381,7 +381,7 @@ Dev/test: `pip install -r requirements-dev.txt`
 
 ```bash
 source .venv/bin/activate
-pytest  # 1,587 tests, 100% line coverage, parallel by default
+pytest  # 1,588 tests, 100% line coverage, parallel by default
 ```
 
 ---
