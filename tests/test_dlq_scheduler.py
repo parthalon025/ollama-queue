@@ -61,7 +61,10 @@ def _make_scheduler(entries=None, submit_return=100):
     db = MagicMock()
     db.list_dlq.return_value = entries or []
     db.submit_job.return_value = submit_return
-    db.get_setting.return_value = None  # use defaults
+    db.get_setting.side_effect = lambda key: {
+        "dlq.auto_reschedule": True,
+        "dlq.chronic_failure_threshold": None,  # falls back to default of 5
+    }.get(key)
 
     estimator = MagicMock()
     estimator.estimate.return_value = _make_estimate()
@@ -121,7 +124,10 @@ class TestSweepSkipsChronicFailures:
         """Custom chronic threshold from settings is respected."""
         entry = _make_entry(auto_reschedule_count=3)
         sched, db, _, _ = _make_scheduler(entries=[entry])
-        db.get_setting.return_value = 3  # lower threshold
+        db.get_setting.side_effect = lambda key: {
+            "dlq.auto_reschedule": True,
+            "dlq.chronic_failure_threshold": 3,
+        }.get(key)
 
         result = sched._sweep([entry])
 

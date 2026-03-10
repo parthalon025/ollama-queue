@@ -1592,14 +1592,17 @@ class Database:
         """Mark a DLQ entry as auto-rescheduled."""
         with self._lock:
             conn = self._connect()
+            now = time.time()
             conn.execute(
                 """UPDATE dlq SET auto_rescheduled_at = ?,
                    rescheduled_job_id = ?,
                    rescheduled_for = ?,
                    reschedule_reasoning = ?,
-                   auto_reschedule_count = COALESCE(auto_reschedule_count, 0) + 1
+                   auto_reschedule_count = COALESCE(auto_reschedule_count, 0) + 1,
+                   resolution = 'rescheduled',
+                   resolved_at = ?
                    WHERE id = ?""",
-                (time.time(), rescheduled_job_id, rescheduled_for, reschedule_reasoning, dlq_id),
+                (now, rescheduled_job_id, rescheduled_for, reschedule_reasoning, now, dlq_id),
             )
             conn.commit()
 

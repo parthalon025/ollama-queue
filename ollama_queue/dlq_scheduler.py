@@ -55,6 +55,9 @@ class DLQScheduler:
 
     def _do_sweep(self, entries: list[dict]) -> list[dict]:
         """Process DLQ entries by priority, find slots, create new jobs."""
+        if not self.db.get_setting("dlq.auto_reschedule"):
+            return []
+
         rescheduled = []
         # Sort by priority descending (higher priority = try first)
         sorted_entries = sorted(entries, key=lambda e: e.get("priority", 0), reverse=True)

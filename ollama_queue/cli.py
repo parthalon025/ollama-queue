@@ -580,10 +580,23 @@ def dlq_schedule_preview(ctx):
         return
     from ollama_queue.system_snapshot import classify_failure
 
+    chronic_threshold = db.get_setting("dlq.chronic_failure_threshold") or 5
+    eligible = []
     for e in entries:
         cat = classify_failure(e.get("failure_reason", ""), e.get("exit_code"))
+        if cat == "permanent":
+            continue
+        if (e.get("auto_reschedule_count") or 0) >= chronic_threshold:
+            continue
+        eligible.append((e, cat))
+
+    if not eligible:
+        click.echo("No unscheduled DLQ entries eligible for auto-reschedule.")
+        return
+
+    for e, cat in eligible:
         click.echo(f"[{e['id']}] {e['command'][:40]} — {cat} ({e['failure_reason'][:40]})")
-    click.echo(f"\n{len(entries)} entries eligible for auto-reschedule.")
+    click.echo(f"\n{len(eligible)} entries eligible for auto-reschedule.")
 
 
 @dlq.command("reschedule")
@@ -597,6 +610,12 @@ def dlq_reschedule(ctx, dlq_id):
     entry = db.get_dlq_entry(dlq_id)
     if not entry:
         click.echo(f"DLQ entry {dlq_id} not found.", err=True)
+        return
+    if entry.get("rescheduled_job_id"):
+        click.echo(
+            f"DLQ #{dlq_id} already rescheduled as job #{entry['rescheduled_job_id']}.",
+            err=True,
+        )
         return
     new_job_id = db.submit_job(
         command=entry["command"],

@@ -67,12 +67,12 @@ class TestDLQAutoRescheduleIntegration:
 
         scheduler.periodic_sweep()
 
-        # 5. Verify DLQ entry now has reschedule info
-        dlq_entries = db.list_dlq()
-        entry = dlq_entries[0]
+        # 5. Verify DLQ entry now has reschedule info (include_resolved since resolution='rescheduled')
+        entry = db.get_dlq_entry(dlq_id)
         assert entry["auto_reschedule_count"] >= 1
         assert entry["rescheduled_job_id"] is not None
         assert entry["reschedule_reasoning"] is not None
+        assert entry["resolution"] == "rescheduled"
 
         # 6. Verify the new job exists and is pending
         new_job = db.get_job(entry["rescheduled_job_id"])
