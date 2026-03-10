@@ -1579,13 +1579,33 @@ class Database:
             row = conn.execute("SELECT * FROM dlq WHERE id = ?", (dlq_id,)).fetchone()
             return dict(row) if row else None
 
-    def list_dlq(self, include_resolved: bool = False) -> list[dict]:
+    def update_dlq_reschedule(
+        self, dlq_id: int, rescheduled_job_id: int, rescheduled_for: float, reschedule_reasoning: str | None = None
+    ) -> None:
+        """Mark a DLQ entry as auto-rescheduled."""
+        with self._lock:
+            conn = self._connect()
+            conn.execute(
+                """UPDATE dlq SET auto_rescheduled_at = ?,
+                   rescheduled_job_id = ?,
+                   rescheduled_for = ?,
+                   reschedule_reasoning = ?,
+                   auto_reschedule_count = COALESCE(auto_reschedule_count, 0) + 1
+                   WHERE id = ?""",
+                (time.time(), rescheduled_job_id, rescheduled_for, reschedule_reasoning, dlq_id),
+            )
+            conn.commit()
+
+    def list_dlq(self, include_resolved: bool = False, unscheduled_only: bool = False) -> list[dict]:
         with self._lock:
             conn = self._connect()
             if include_resolved:
                 rows = conn.execute("SELECT * FROM dlq ORDER BY moved_at DESC").fetchall()
             else:
-                rows = conn.execute("SELECT * FROM dlq WHERE resolution IS NULL ORDER BY moved_at DESC").fetchall()
+                where = "WHERE resolution IS NULL"
+                if unscheduled_only:
+                    where += " AND auto_rescheduled_at IS NULL"
+                rows = conn.execute(f"SELECT * FROM dlq {where} ORDER BY moved_at DESC").fetchall()
             return [dict(r) for r in rows]
 
     def dismiss_dlq_entry(self, dlq_id: int) -> bool:

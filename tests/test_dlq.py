@@ -133,3 +133,58 @@ class TestDLQRouting:
         assert job["retry_count"] == 2, f"Expected retry_count=2, got {job['retry_count']}"
         assert job["last_retry_delay"] is not None
         assert job["retry_after"] is not None
+
+
+def test_dlq_auto_reschedule_columns(db):
+    """DLQ entries have auto-reschedule tracking columns."""
+    job_id = db.submit_job("echo fail", "test-model", 5, 60, "test")
+    db.start_job(job_id)
+    db.complete_job(job_id, 1, "out", "err")
+    dlq_id = db.move_to_dlq(job_id, "exit code 1")
+    entry = db.get_dlq_entry(dlq_id)
+    assert entry["auto_reschedule_count"] == 0
+    assert entry["auto_rescheduled_at"] is None
+    assert entry["rescheduled_job_id"] is None
+    assert entry["rescheduled_for"] is None
+    assert entry["reschedule_reasoning"] is None
+
+
+def test_update_dlq_reschedule(db):
+    """Update DLQ entry with reschedule info."""
+    job_id = db.submit_job("echo fail", "test-model", 5, 60, "test")
+    db.start_job(job_id)
+    db.complete_job(job_id, 1, "out", "err")
+    dlq_id = db.move_to_dlq(job_id, "exit code 1")
+
+    import json
+
+    now = time.time()
+    reasoning = json.dumps({"score": 7.2, "reasons": ["load headroom: 8.0"]})
+    db.update_dlq_reschedule(dlq_id, rescheduled_job_id=999, rescheduled_for=now + 3600, reschedule_reasoning=reasoning)
+
+    entry = db.get_dlq_entry(dlq_id)
+    assert entry["auto_rescheduled_at"] is not None
+    assert entry["rescheduled_job_id"] == 999
+    assert entry["rescheduled_for"] > now
+    assert "load headroom" in entry["reschedule_reasoning"]
+
+
+def test_list_dlq_unscheduled_only(db):
+    """list_dlq with unscheduled_only=True excludes already-rescheduled entries."""
+    j1 = db.submit_job("cmd1", "m", 5, 60, "test")
+    db.start_job(j1)
+    db.complete_job(j1, 1, "out", "err")
+    dlq1 = db.move_to_dlq(j1, "fail1")
+
+    j2 = db.submit_job("cmd2", "m", 5, 60, "test")
+    db.start_job(j2)
+    db.complete_job(j2, 1, "out", "err")
+    dlq2 = db.move_to_dlq(j2, "fail2")
+
+    # Reschedule one
+    db.update_dlq_reschedule(dlq1, rescheduled_job_id=100, rescheduled_for=9999999999.0)
+
+    # Unscheduled only should return just the second
+    unscheduled = db.list_dlq(unscheduled_only=True)
+    assert len(unscheduled) == 1
+    assert unscheduled[0]["id"] == dlq2
