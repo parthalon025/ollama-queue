@@ -1,6 +1,5 @@
 import { h } from 'preact';
 import { useState } from 'preact/hooks';
-import { signal } from '@preact/signals';
 import { API, evalTemplates, fetchEvalVariants } from '../../store.js';
 import { EVAL_TRANSLATIONS } from './translations.js';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
@@ -19,6 +18,9 @@ export default function VariantToolbar() {
 
   const [showNewForm, setShowNewForm] = useState(false);
   const [genPreview, setGenPreview] = useState(null);
+  const [previewError, setPreviewError] = useState(null);
+  const [exportError, setExportError] = useState(null);
+  const [importError, setImportError] = useState(null);
   const [newVariant, setNewVariant] = useState({
     label: '',
     model: '',
@@ -59,11 +61,13 @@ export default function VariantToolbar() {
   }
 
   async function handleGeneratePreview() {
+    setPreviewError(null);
     try {
       const res = await fetch(`${API}/eval/variants/generate/preview`);
-      if (res.ok) setGenPreview(await res.json());
+      if (!res.ok) { setPreviewError(`Preview failed: HTTP ${res.status}`); return; }
+      setGenPreview(await res.json());
     } catch (e) {
-      console.error('Generate preview failed:', e);
+      setPreviewError(`Preview failed: ${e.message}`);
     }
   }
 
@@ -83,15 +87,20 @@ export default function VariantToolbar() {
   }
 
   async function handleExport() {
-    const res = await fetch(`${API}/eval/variants/export`);
-    if (!res.ok) return;
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'eval-variants.json';
-    a.click();
-    URL.revokeObjectURL(url);
+    setExportError(null);
+    try {
+      const res = await fetch(`${API}/eval/variants/export`);
+      if (!res.ok) { setExportError(`Export failed: HTTP ${res.status}`); return; }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'eval-variants.json';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setExportError(`Export failed: ${e.message}`);
+    }
   }
 
   function handleImportChange(e) {
@@ -99,6 +108,7 @@ export default function VariantToolbar() {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = async ev => {
+      setImportError(null);
       try {
         const data = JSON.parse(ev.target.result);
         const res = await fetch(`${API}/eval/variants/import`, {
@@ -106,9 +116,10 @@ export default function VariantToolbar() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data),
         });
-        if (res.ok) await fetchEvalVariants();
+        if (!res.ok) { setImportError(`Import failed: HTTP ${res.status}`); return; }
+        await fetchEvalVariants();
       } catch (importErr) {
-        console.error('Import failed:', importErr);
+        setImportError(`Import failed: ${importErr.message}`);
       }
     };
     reader.readAsText(file);
@@ -145,6 +156,11 @@ export default function VariantToolbar() {
           <input type="file" accept=".json" style={{ display: 'none' }} onChange={handleImportChange} />
         </label>
       </div>
+      {(previewError || exportError || importError) && (
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--status-error)', marginTop: '0.4rem' }}>
+          {previewError || exportError || importError}
+        </div>
+      )}
 
       {/* Generate preview modal */}
       {genPreview && (

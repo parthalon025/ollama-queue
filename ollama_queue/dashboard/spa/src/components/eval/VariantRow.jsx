@@ -23,6 +23,7 @@ export default function VariantRow({ variant }) {
   const [cloning, setCloning] = useState(false);
   const [cloneError, setCloneError] = useState(null);
   const [history, setHistory] = useState(null);
+  const [historyError, setHistoryError] = useState(null);
   const [pendingDelete, setPendingDelete] = useState(false);
 
   const {
@@ -44,11 +45,13 @@ export default function VariantRow({ variant }) {
   }
 
   async function loadHistory() {
+    setHistoryError(null);
     try {
       const res = await fetch(`${API}/eval/variants/${encodeURIComponent(id)}/history`);
-      if (res.ok) setHistory(await res.json());
+      if (!res.ok) { setHistoryError(`Failed to load history (HTTP ${res.status})`); return; }
+      setHistory(await res.json());
     } catch (e) {
-      console.error('loadHistory failed:', e);
+      setHistoryError(`Failed to load history: ${e.message}`);
     }
   }
 
@@ -160,22 +163,10 @@ export default function VariantRow({ variant }) {
 
           {/* Action buttons */}
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-            {is_system ? (
-              <button
-                class="t-btn t-btn-secondary"
-                style={{ fontSize: 'var(--type-label)', padding: '3px 10px', opacity: 0.5, cursor: 'not-allowed' }}
-                disabled
-                title="System configs can't be edited directly. Clone to customize."
-              >
-                Edit (clone to customize)
-              </button>
-            ) : (
-              <button
-                class="t-btn t-btn-secondary"
-                style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }}
-              >
-                Edit
-              </button>
+            {is_system && (
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)' }}>
+                System config — clone to customize
+              </span>
             )}
             <button
               class="t-btn t-btn-secondary"
@@ -243,8 +234,11 @@ export default function VariantRow({ variant }) {
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
             Run history for Config {id}
           </div>
-          {!history && (
+          {!history && !historyError && (
             <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)' }}>Loading…</div>
+          )}
+          {historyError && (
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--status-error)' }}>{historyError}</div>
           )}
           {history && history.length === 0 && (
             <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)' }}>No runs for this config yet.</div>

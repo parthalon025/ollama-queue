@@ -18,6 +18,7 @@ export default function TemplateRow({ template }) {
   const [level, setLevel] = useState(1); // 1 | 2 | 3
   const [cloning, setCloning] = useState(false);
   const [cloneError, setCloneError] = useState(null);
+  const [pendingDelete, setPendingDelete] = useState(false);
 
   const { id, label, instruction, is_system } = template;
 
@@ -44,7 +45,6 @@ export default function TemplateRow({ template }) {
 
   async function handleDelete(evt) {
     evt.stopPropagation();
-    if (!confirm(`Delete template "${label}"?`)) return;
     await deleteAct(
       'Deleting…',
       async () => {
@@ -52,6 +52,7 @@ export default function TemplateRow({ template }) {
         if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
         await fetchEvalTemplates();
         await fetchEvalVariants(); // variants may reference this template
+        setPendingDelete(false);
       },
       `Template deleted`
     );
@@ -134,15 +135,38 @@ export default function TemplateRow({ template }) {
               </button>
             )}
             {!is_system && (
-              <div>
-                <button
-                  class="t-btn t-btn-secondary"
-                  style={{ fontSize: 'var(--type-label)', padding: '3px 10px', color: 'var(--status-error)' }}
-                  disabled={deleteFb.phase === 'loading'}
-                  onClick={handleDelete}
-                >
-                  {deleteFb.phase === 'loading' ? 'Deleting…' : 'Delete'}
-                </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                {!pendingDelete ? (
+                  <button
+                    class="t-btn t-btn-secondary"
+                    style={{ fontSize: 'var(--type-label)', padding: '3px 10px', color: 'var(--status-error)' }}
+                    disabled={deleteFb.phase === 'loading'}
+                    onClick={evt => { evt.stopPropagation(); setPendingDelete(true); }}
+                  >
+                    Delete
+                  </button>
+                ) : (
+                  <>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--status-error)' }}>
+                      Delete "{label}"?
+                    </span>
+                    <button
+                      class="t-btn t-btn-secondary"
+                      style={{ fontSize: 'var(--type-label)', padding: '3px 8px', color: 'var(--status-error)', borderColor: 'var(--status-error)' }}
+                      disabled={deleteFb.phase === 'loading'}
+                      onClick={handleDelete}
+                    >
+                      {deleteFb.phase === 'loading' ? 'Deleting…' : 'Yes, delete'}
+                    </button>
+                    <button
+                      class="t-btn t-btn-secondary"
+                      style={{ fontSize: 'var(--type-label)', padding: '3px 8px' }}
+                      onClick={evt => { evt.stopPropagation(); setPendingDelete(false); }}
+                    >
+                      Cancel
+                    </button>
+                  </>
+                )}
                 {deleteFb.msg && <div class={`action-fb action-fb--${deleteFb.phase}`}>{deleteFb.msg}</div>}
               </div>
             )}

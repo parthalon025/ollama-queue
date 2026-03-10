@@ -215,6 +215,7 @@ export async function fetchEvalTrends() {
 // Decision it drives: returns {ok, item_count, cluster_count, response_ms} for setup checklist + status display
 export async function testDataSource() {
   const res = await fetch(`${API}/eval/datasource/test`);
+  if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
   return res.json();
 }
 
@@ -301,16 +302,22 @@ let _backoffMs = 5000;
 // history) refreshes every 60s (every 12 status polls) to reduce API load.
 // Backs off exponentially on repeated failures and sets connectionStatus='disconnected'
 // after 3 consecutive failures so the banner appears.
+let _visibilityHandler = null;
+
 export function startPolling() {
     fetchAll();
     pollTimer = setTimeout(fetchStatus, POLL_INTERVAL);
-    document.addEventListener('visibilitychange', () => {
-        if (!document.hidden) fetchAll();
-    });
+    if (_visibilityHandler) document.removeEventListener('visibilitychange', _visibilityHandler);
+    _visibilityHandler = () => { if (!document.hidden) fetchAll(); };
+    document.addEventListener('visibilitychange', _visibilityHandler);
 }
 
 export function stopPolling() {
     if (pollTimer) clearTimeout(pollTimer);
+    if (_visibilityHandler) {
+        document.removeEventListener('visibilitychange', _visibilityHandler);
+        _visibilityHandler = null;
+    }
 }
 
 async function fetchStatus() {
