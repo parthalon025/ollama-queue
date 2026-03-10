@@ -140,3 +140,43 @@ class TestSweepRespectsDisabledSetting:
         result = sched.sweep()
         assert result == []
         db.list_deferred.assert_not_called()
+
+
+class TestSweepPassesVramEstimate:
+    def test_sweep_passes_vram_estimate(self):
+        """find_fitting_slot should receive a non-zero VRAM estimate for known models."""
+        db = MagicMock()
+        db.get_setting.return_value = True
+        db.list_deferred.side_effect = [
+            [],  # Phase 1
+            [{"id": 1, "job_id": 100, "scheduled_for": None}],  # Phase 2
+        ]
+        db.get_job.return_value = {
+            "id": 100,
+            "status": "deferred",
+            "model": "qwen2.5:14b",
+            "command": "echo test",
+            "resource_profile": "ollama",
+        }
+        est = MagicMock()
+        est_result = MagicMock()
+        est_result.total_upper = 300.0
+        est_result.total_mean = 200.0
+        est.estimate.return_value = est_result
+        load_map = [
+            {
+                "load": 0.0,
+                "vram_committed_gb": 0.0,
+                "is_pinned": False,
+                "recurring_ids": [],
+                "timestamp": time.time() + i * 1800,
+            }
+            for i in range(48)
+        ]
+        sched = DeferralScheduler(db, est, lambda: load_map)
+        with patch("ollama_queue.deferral_scheduler.find_fitting_slot") as mock_ffs:
+            mock_ffs.return_value = {"slot_index": 5, "score": 10.0, "scheduled_time": time.time() + 9000}
+            sched.sweep()
+            mock_ffs.assert_called_once()
+            _, kwargs = mock_ffs.call_args
+            assert kwargs["job_vram_needed_gb"] > 0
