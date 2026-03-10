@@ -10,6 +10,7 @@ import logging
 import threading
 import time
 
+from ollama_queue.scheduler import _estimate_model_vram
 from ollama_queue.slot_scoring import find_fitting_slot
 from ollama_queue.system_snapshot import classify_failure
 
@@ -98,14 +99,16 @@ class DLQScheduler:
             )
 
             # Find fitting slot
+            model = entry.get("model", "")
+            job_vram = _estimate_model_vram(model)
             estimated_slots = max(1, int(est.total_upper / 1800) + 1)  # 30-min slots
             slot = find_fitting_slot(
                 load_map,
-                job_vram_needed_gb=0,  # TODO: derive from model size
+                job_vram_needed_gb=job_vram,
                 total_vram_gb=24.0,  # TODO: get from health monitor
                 estimated_slots=estimated_slots,
                 failure_category=failure_cat,
-                job_model=entry.get("model"),
+                job_model=model,
             )
 
             if slot is None:

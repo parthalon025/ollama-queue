@@ -231,3 +231,19 @@ class TestSweepNoSlotAvailable:
 
         assert result == []
         db.submit_job.assert_not_called()
+
+
+class TestSweepPassesVramEstimate:
+    def test_sweep_passes_vram_estimate(self):
+        """Verify find_fitting_slot receives real VRAM estimate, not 0."""
+        entry = _make_entry(model="qwen2.5:14b")
+        sched, db, estimator, load_map_fn = _make_scheduler(entries=[entry], submit_return=50)
+
+        with patch("ollama_queue.dlq_scheduler.find_fitting_slot") as mock_ffs:
+            mock_ffs.return_value = {"slot_index": 2, "score": 10.0, "scheduled_time": time.time() + 3600}
+            sched._do_sweep([entry])
+            mock_ffs.assert_called_once()
+            call_kwargs = mock_ffs.call_args
+            # 14b model → ~8.5 GB VRAM — must be > 0
+            vram = call_kwargs.kwargs.get("job_vram_needed_gb", call_kwargs[1].get("job_vram_needed_gb", 0))
+            assert vram > 0, f"Expected positive VRAM estimate, got {vram}"
