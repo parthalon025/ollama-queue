@@ -1,11 +1,14 @@
 import { h } from 'preact';
+import { dlqSchedulePreview, deferredJobs } from '../store';
 
 /**
  * What it shows: A 48-bar histogram of the next 24 hours split into 30-min slots.
  *   Each bar's opacity represents how many recurring jobs are scheduled to fire in that
- *   window — dark = congested, light = open. Hover a bar for the exact count and time.
+ *   window — dark = congested, light = open. DLQ-rescheduled and deferred jobs are shown
+ *   as colored dot markers above their target slot. Hover a bar for slot details.
  * Decision it drives: When is the queue lightest? This is the same data the backend uses
  *   when you click "Suggest slot" — the top-3 lowest-load windows become candidate cron times.
+ *   Markers show where auto-rescheduled and deferred jobs are landing.
  *
  * Opacity encoding (Treisman preattentive): dark = busy, light = free.
  *
@@ -17,6 +20,30 @@ export default function LoadMapStrip({ data }) {
 
     const slots = data.slots;
     const maxLoad = Math.max(...slots, 1);
+
+    // Build marker sets: which slot indices have DLQ-rescheduled or deferred jobs
+    const dlqSlotMarkers = new Set();
+    const deferredSlotMarkers = new Set();
+
+    const preview = dlqSchedulePreview.value;
+    if (preview && preview.entries) {
+        for (const entry of preview.entries) {
+            if (entry.rescheduled_for) {
+                const slotIdx = timestampToSlotIdx(entry.rescheduled_for);
+                if (slotIdx >= 0 && slotIdx < 48) dlqSlotMarkers.add(slotIdx);
+            }
+        }
+    }
+
+    const deferred = deferredJobs.value;
+    if (deferred && deferred.length > 0) {
+        for (const entry of deferred) {
+            if (entry.scheduled_for) {
+                const slotIdx = timestampToSlotIdx(entry.scheduled_for);
+                if (slotIdx >= 0 && slotIdx < 48) deferredSlotMarkers.add(slotIdx);
+            }
+        }
+    }
 
     function slotOpacity(count) {
         return 0.12 + (count / maxLoad) * 0.88;
@@ -48,12 +75,28 @@ export default function LoadMapStrip({ data }) {
                 </span>
             </div>
 
+            {/* Marker row — DLQ and deferred job indicators above bars */}
+            {(dlqSlotMarkers.size > 0 || deferredSlotMarkers.size > 0) && (
+                <div style={{ display: 'flex', gap: '1px', height: '8px', marginBottom: '2px' }}>
+                    {slots.map((_, idx) => {
+                        const hasDLQ = dlqSlotMarkers.has(idx);
+                        const hasDeferred = deferredSlotMarkers.has(idx);
+                        return (
+                            <div key={idx} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '1px' }}>
+                                {hasDLQ && <div style={{ width: 4, height: 4, borderRadius: '50%', background: 'var(--status-warn)' }} title="DLQ rescheduled" />}
+                                {hasDeferred && <div style={{ width: 4, height: 4, borderRadius: '50%', background: 'var(--accent)' }} title="Deferred" />}
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+
             {/* Bars */}
             <div style={{ display: 'flex', gap: '1px', height: '24px', alignItems: 'flex-end' }}>
                 {slots.map((count, idx) => (
                     <div
                         key={idx}
-                        title={`${slotLabel(idx)} — ${count} job${count !== 1 ? 's' : ''} scheduled in this 30-minute window${count === 0 ? ' (quiet time)' : ''}`}
+                        title={`${slotLabel(idx)} — ${count} job${count !== 1 ? 's' : ''} scheduled${dlqSlotMarkers.has(idx) ? ' + DLQ rescheduled' : ''}${deferredSlotMarkers.has(idx) ? ' + deferred' : ''}${count === 0 && !dlqSlotMarkers.has(idx) && !deferredSlotMarkers.has(idx) ? ' (quiet time)' : ''}`}
                         style={{
                             flex: 1,
                             height: '100%',
@@ -75,4 +118,9 @@ export default function LoadMapStrip({ data }) {
             </div>
         </div>
     );
+}
+
+function timestampToSlotIdx(ts) {
+    const dt = new Date(ts * 1000);
+    return dt.getHours() * 2 + (dt.getMinutes() >= 30 ? 1 : 0);
 }

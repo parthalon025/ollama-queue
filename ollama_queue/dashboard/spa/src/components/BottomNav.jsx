@@ -9,6 +9,7 @@ const NAV_ITEMS = [
     { id: 'settings', icon: '⚙', label: 'Settings', tooltip: 'Configure queue thresholds and defaults' },
     { id: 'eval',      icon: '⊡', label: 'Eval',      tooltip: 'Test and compare AI model configurations' },
     { id: 'consumers', icon: '⇄', label: 'Consumers', tooltip: 'Detected Ollama consumers and routing' },
+    { id: 'performance', icon: '⊘', label: 'Perf', tooltip: 'Model performance stats and system health' },
 ];
 
 export default function BottomNav({ active, onNavigate, dlqCount }) {

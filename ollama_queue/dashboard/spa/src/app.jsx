@@ -29,6 +29,7 @@ import ModelsTab from './pages/ModelsTab.jsx';
 import Settings from './pages/Settings.jsx';
 import Eval from './pages/Eval.jsx';
 import Consumers from './pages/Consumers.jsx';
+import Performance from './pages/Performance.jsx';
 
 // What it shows: A thin persistent strip at the top of the content area whenever an eval
 //   session is running — shows eval run #, model name, and current phase.
@@ -99,6 +100,7 @@ export function App() {
             case 'settings': return <Settings />;
             case 'eval':      return <Eval />;
             case 'consumers': return <Consumers />;
+            case 'performance': return <Performance />;
             default:          return <Now />;
         }
     }

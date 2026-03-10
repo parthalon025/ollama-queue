@@ -2,7 +2,7 @@ import { h } from 'preact';
 import { useState, useRef, useCallback } from 'preact/hooks';
 
 /**
- * What it shows: All queue configuration in twelve sections. Each field saves on blur —
+ * What it shows: All queue configuration in fourteen sections. Each field saves on blur —
  *   no Save button needed; changes take effect on the next poll cycle (~5s).
  *
  * Sections:
@@ -18,6 +18,8 @@ import { useState, useRef, useCallback } from 'preact/hooks';
  *  10. Interrupt for Urgent Jobs — let high-priority jobs cut the line
  *  11. Anomaly Detection — spot unusual spikes in queue activity
  *  12. Daemon Controls — manually pause or resume the queue
+ *  13. DLQ Auto-Reschedule — automatically retry failed jobs in quiet slots
+ *  14. Proactive Deferral — pause jobs when resources are tight
  *
  * @param {{ settings: object, daemonState: string, onSave: (key: string, value: any) => Promise<boolean>, onPause: () => void, onResume: () => void, pauseFb: object, resumeFb: object }} props
  */
@@ -441,6 +443,81 @@ export default function SettingsForm({ settings, daemonState, onSave, onPause, o
             sublabel="entropy_suspend_low_priority · hold low-priority work when an anomaly is detected"
             settingKey="entropy_suspend_low_priority"
             settings={settings} flashKey={flashKey} onSave={onSave} flash={flash}
+          />
+        </div>
+      </div>
+
+      {/* 13. DLQ Auto-Reschedule */}
+      {/* What it shows: Whether the system automatically retries dead-letter jobs in quieter
+       *   time slots, how often the sweep runs, and how many failures before giving up.
+       * Decision it drives: Turn off auto-reschedule if you want full manual control of failed
+       *   jobs. Raise the chronic threshold if flaky jobs need more chances. */}
+      <div class="t-frame" data-label="DLQ Auto-Reschedule — automatically retry failed jobs in quiet slots">
+        <p style="font-size: var(--type-label); color: var(--text-tertiary); margin: 0 0 0.75rem;">
+          When a job lands in the Dead Letter Queue, the system can automatically find a low-load
+          time slot and reschedule it. Jobs that fail repeatedly are marked "chronic" and left alone.
+        </p>
+        <div class="flex flex-col gap-3">
+          <ToggleRow
+            label="Enable Auto-Reschedule"
+            sublabel="dlq.auto_reschedule · automatically retry DLQ entries in optimal time slots"
+            settingKey="dlq.auto_reschedule"
+            settings={settings} flashKey={flashKey} onSave={onSave} flash={flash}
+          />
+          <NumberRow
+            label="Sweep Interval"
+            sublabel="dlq.sweep_fallback_minutes · how often the system checks for reschedulable DLQ entries"
+            settingKey="dlq.sweep_fallback_minutes"
+            min={5} max={240} unit="min"
+            settings={settings} flashKey={flashKey} onBlur={handleBlur}
+          />
+          <NumberRow
+            label="Chronic Failure Threshold"
+            sublabel="dlq.chronic_failure_threshold · after this many reschedule attempts, stop trying"
+            settingKey="dlq.chronic_failure_threshold"
+            min={1} max={20}
+            settings={settings} flashKey={flashKey} onBlur={handleBlur}
+          />
+        </div>
+      </div>
+
+      {/* 14. Proactive Deferral */}
+      {/* What it shows: Whether the system proactively defers jobs when resources are tight,
+       *   GPU thermal thresholds, and burst priority cutoff.
+       * Decision it drives: Turn off deferral if you always want jobs to queue normally.
+       *   Lower thermal threshold if GPU overheating is a concern. */}
+      <div class="t-frame" data-label="Proactive Deferral — pause jobs when resources are tight">
+        <p style="font-size: var(--type-label); color: var(--text-tertiary); margin: 0 0 0.75rem;">
+          Instead of letting low-priority jobs fail, the system can defer them until resources free
+          up — like waiting for GPU temperature to drop or memory to clear.
+        </p>
+        <div class="flex flex-col gap-3">
+          <ToggleRow
+            label="Enable Deferral"
+            sublabel="defer.enabled · proactively defer jobs when system resources are constrained"
+            settingKey="defer.enabled"
+            settings={settings} flashKey={flashKey} onSave={onSave} flash={flash}
+          />
+          <NumberRow
+            label="Burst Priority Threshold"
+            sublabel="defer.burst_priority_threshold · during burst regime, defer jobs above this priority number (lower = more important)"
+            settingKey="defer.burst_priority_threshold"
+            min={1} max={10}
+            settings={settings} flashKey={flashKey} onBlur={handleBlur}
+          />
+          <NumberRow
+            label="GPU Thermal Limit"
+            sublabel="defer.thermal_threshold_c · defer jobs when GPU temperature exceeds this"
+            settingKey="defer.thermal_threshold_c"
+            min={60} max={100} unit="°C"
+            settings={settings} flashKey={flashKey} onBlur={handleBlur}
+          />
+          <NumberRow
+            label="Resource Wait Timeout"
+            sublabel="defer.resource_wait_timeout_s · how long to wait for resources before deferring"
+            settingKey="defer.resource_wait_timeout_s"
+            min={10} max={600} unit="sec"
+            settings={settings} flashKey={flashKey} onBlur={handleBlur}
           />
         </div>
       </div>
