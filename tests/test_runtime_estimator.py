@@ -97,3 +97,13 @@ def test_estimate_dataclass_fields():
     assert e.total_upper == 0.0
     assert e.confidence == "low"
     assert e.n_observations == 0
+
+
+def test_estimate_clamps_negative_durations(mock_db):
+    """Non-positive durations should be clamped, not crash."""
+    mock_db.get_job_durations.return_value = [0.0, -1.0, 30.0, 60.0]
+    mock_db.get_load_durations.return_value = []
+    est = RuntimeEstimator(mock_db)
+    result = est.estimate("test-model", "echo test", "ollama")
+    assert result.total_mean > 0
+    assert result.confidence in ("low", "medium", "high")
