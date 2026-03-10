@@ -263,7 +263,7 @@ def create_eval_variant(body: dict = Body(...)):
             ),
         )
         conn.commit()
-    row = _get_eval_variant(conn, new_id)
+        row = _get_eval_variant(conn, new_id)
     return JSONResponse(content=row, status_code=201)
 
 
@@ -276,7 +276,7 @@ def get_variant_stability(data_source: str | None = None):
     # Decision it drives: Identifies variants with inconsistent performance across runs,
     #   signaling unreliable configs that may need more data or different prompts.
     """
-    from ollama_queue.eval_analysis import compute_variant_stability
+    from ollama_queue.eval.analysis import compute_variant_stability
 
     db = _api.db
     with db._lock:
@@ -313,7 +313,7 @@ def get_variant_diff(variant_a: str, variant_b: str):
     # Decision it drives: Helps the user understand what changed between variants
     #   to interpret why one performs better than another.
     """
-    from ollama_queue.eval_analysis import describe_config_diff
+    from ollama_queue.eval.analysis import describe_config_diff
 
     db = _api.db
     with db._lock:
@@ -403,7 +403,7 @@ def clone_eval_variant(variant_id: str, body: dict = Body(default={})):
             ),
         )
         conn.commit()
-    row = _get_eval_variant(conn, new_id)
+        row = _get_eval_variant(conn, new_id)
     return JSONResponse(content=row, status_code=201)
 
 
@@ -431,7 +431,8 @@ def update_eval_variant(variant_id: str, body: dict = Body(...)):
         values = [*list(updates.values()), variant_id]
         conn.execute(f"UPDATE eval_variants SET {set_clause} WHERE id = ?", values)
         conn.commit()
-    return _get_eval_variant(conn, variant_id)
+        row = _get_eval_variant(conn, variant_id)
+    return row
 
 
 @router.delete("/api/eval/variants/{variant_id}")
@@ -489,7 +490,8 @@ def update_eval_template(template_id: str, body: dict = Body(...)):
         values = [*list(updates.values()), template_id]
         conn.execute(f"UPDATE eval_prompt_templates SET {set_clause} WHERE id = ?", values)
         conn.commit()
-    return _get_eval_template(conn, template_id)
+        row = _get_eval_template(conn, template_id)
+    return row
 
 
 @router.post("/api/eval/templates/{template_id}/clone")
@@ -525,5 +527,5 @@ def clone_eval_template(template_id: str, body: dict = Body(default={})):
             ),
         )
         conn.commit()
-    row = _get_eval_template(conn, new_id)
+        row = _get_eval_template(conn, new_id)
     return JSONResponse(content=row, status_code=201)

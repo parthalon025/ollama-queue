@@ -720,7 +720,7 @@ def test_trends_stability_statistics_error(client_and_db):
             {
                 "id": i + 1,
                 "metrics": json.dumps({"A": {"f1": f1}}),
-                "started_at": f"2026-01-0{i+1}T00:00:00",
+                "started_at": f"2026-01-0{i + 1}T00:00:00",
             }
         )
     _seed_trend_runs(db, runs)
@@ -744,7 +744,7 @@ def test_trends_stability_with_enough_runs(client_and_db):
             {
                 "id": i + 1,
                 "metrics": json.dumps({"A": {"f1": f1}}),
-                "started_at": f"2026-01-0{i+1}T00:00:00",
+                "started_at": f"2026-01-0{i + 1}T00:00:00",
             }
         )
     _seed_trend_runs(db, runs)
@@ -793,7 +793,7 @@ def test_trends_improving_direction(client_and_db):
             {
                 "id": i + 1,
                 "metrics": json.dumps({"A": {"f1": f1}}),
-                "started_at": f"2026-01-0{i+1}T00:00:00",
+                "started_at": f"2026-01-0{i + 1}T00:00:00",
             }
         )
     _seed_trend_runs(db, runs)
@@ -815,7 +815,7 @@ def test_trends_regressing_direction(client_and_db):
             {
                 "id": i + 1,
                 "metrics": json.dumps({"A": {"f1": f1}}),
-                "started_at": f"2026-01-0{i+1}T00:00:00",
+                "started_at": f"2026-01-0{i + 1}T00:00:00",
             }
         )
     _seed_trend_runs(db, runs)
@@ -837,7 +837,7 @@ def test_trends_stable_direction(client_and_db):
             {
                 "id": i + 1,
                 "metrics": json.dumps({"A": {"f1": f1}}),
-                "started_at": f"2026-01-0{i+1}T00:00:00",
+                "started_at": f"2026-01-0{i + 1}T00:00:00",
             }
         )
     _seed_trend_runs(db, runs)
@@ -886,7 +886,7 @@ def test_trends_uses_auc_for_bayesian(client_and_db):
             {
                 "id": i + 1,
                 "metrics": json.dumps({"A": {"auc": auc, "f1": 0.1}}),
-                "started_at": f"2026-01-0{i+1}T00:00:00",
+                "started_at": f"2026-01-0{i + 1}T00:00:00",
                 "judge_mode": "bayesian",
             }
         )

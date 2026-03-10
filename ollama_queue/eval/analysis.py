@@ -1,7 +1,7 @@
 """Pure analysis functions for eval pipeline.
 
 No DB, no HTTP, no side effects. Takes lists of dicts, returns lists of dicts.
-Used by eval_engine.py to compute structured analysis stored per-run,
+Used by eval.engine to compute structured analysis stored per-run,
 and by API endpoints for live cross-run queries.
 """
 

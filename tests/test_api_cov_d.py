@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 
 from ollama_queue.app import create_app
 from ollama_queue.db import Database
-from ollama_queue.eval_engine import create_eval_run, update_eval_run
+from ollama_queue.eval.engine import create_eval_run, update_eval_run
 
 
 @pytest.fixture
@@ -294,9 +294,9 @@ def test_trigger_eval_run_variants_list(client_and_db):
     client, _db = client_and_db
 
     with (
-        patch("ollama_queue.eval_engine.create_eval_run", return_value=1) as mock_create,
-        patch("ollama_queue.eval_engine.update_eval_run"),
-        patch("ollama_queue.eval_engine.run_eval_session"),
+        patch("ollama_queue.api.eval_runs.create_eval_run", return_value=1) as mock_create,
+        patch("ollama_queue.api.eval_runs.update_eval_run"),
+        patch("ollama_queue.api.eval_runs.run_eval_session"),
     ):
         resp = client.post(
             "/api/eval/runs",
@@ -324,9 +324,9 @@ def test_trigger_eval_run_sets_judge_model(client_and_db):
     client, _db = client_and_db
 
     with (
-        patch("ollama_queue.eval_engine.create_eval_run", return_value=1),
-        patch("ollama_queue.eval_engine.update_eval_run") as mock_update,
-        patch("ollama_queue.eval_engine.run_eval_session"),
+        patch("ollama_queue.api.eval_runs.create_eval_run", return_value=1),
+        patch("ollama_queue.api.eval_runs.update_eval_run") as mock_update,
+        patch("ollama_queue.api.eval_runs.run_eval_session"),
     ):
         resp = client.post(
             "/api/eval/runs",
@@ -357,9 +357,9 @@ def test_trigger_eval_run_background_exception_is_logged(client_and_db):
         raise RuntimeError("session crashed")
 
     with (
-        patch("ollama_queue.eval_engine.create_eval_run", return_value=1),
-        patch("ollama_queue.eval_engine.update_eval_run"),
-        patch("ollama_queue.eval_engine.run_eval_session", side_effect=_raise),
+        patch("ollama_queue.api.eval_runs.create_eval_run", return_value=1),
+        patch("ollama_queue.api.eval_runs.update_eval_run"),
+        patch("ollama_queue.api.eval_runs.run_eval_session", side_effect=_raise),
         patch("threading.Thread") as mock_thread,
     ):
         mock_thread_instance = MagicMock()
@@ -415,8 +415,8 @@ def test_analyze_eval_run_background_error(client_and_db):
         raise RuntimeError("analysis boom")
 
     with (
-        patch("ollama_queue.eval_engine.generate_eval_analysis", side_effect=_raise_analysis),
-        patch("ollama_queue.eval_engine.update_eval_run") as mock_update,
+        patch("ollama_queue.api.eval_runs.generate_eval_analysis", side_effect=_raise_analysis),
+        patch("ollama_queue.api.eval_runs.update_eval_run") as mock_update,
         patch("threading.Thread") as mock_thread,
     ):
         mock_thread_instance = MagicMock()
@@ -438,8 +438,8 @@ def test_analyze_eval_run_background_double_error(client_and_db):
     run_id = _make_run(db, variant_id="A", status="complete")
 
     with (
-        patch("ollama_queue.eval_engine.generate_eval_analysis", side_effect=RuntimeError("boom1")),
-        patch("ollama_queue.eval_engine.update_eval_run", side_effect=RuntimeError("boom2")),
+        patch("ollama_queue.api.eval_runs.generate_eval_analysis", side_effect=RuntimeError("boom1")),
+        patch("ollama_queue.api.eval_runs.update_eval_run", side_effect=RuntimeError("boom2")),
         patch("threading.Thread") as mock_thread,
     ):
         mock_thread_instance = MagicMock()
@@ -578,7 +578,7 @@ def test_repeat_eval_run_background_error(client_and_db):
         conn.commit()
 
     with (
-        patch("ollama_queue.eval_engine.run_eval_session", side_effect=RuntimeError("repeat boom")),
+        patch("ollama_queue.api.eval_runs.run_eval_session", side_effect=RuntimeError("repeat boom")),
         patch("threading.Thread") as mock_thread,
     ):
         mock_thread_instance = MagicMock()
@@ -605,8 +605,8 @@ def test_judge_rerun_background_error_marks_failed(client_and_db):
     exc = RuntimeError("judge crashed")
 
     with (
-        patch("ollama_queue.eval_engine.run_eval_judge", side_effect=exc),
-        patch("ollama_queue.eval_engine.update_eval_run") as mock_update,
+        patch("ollama_queue.api.eval_runs.run_eval_judge", side_effect=exc),
+        patch("ollama_queue.api.eval_runs.update_eval_run") as mock_update,
         patch("threading.Thread") as mock_thread,
     ):
         mock_thread_instance = MagicMock()
@@ -635,8 +635,8 @@ def test_judge_rerun_background_double_error(client_and_db):
             raise RuntimeError("update also failed")
 
     with (
-        patch("ollama_queue.eval_engine.run_eval_judge", side_effect=RuntimeError("judge crash")),
-        patch("ollama_queue.eval_engine.update_eval_run", side_effect=_mock_update),
+        patch("ollama_queue.api.eval_runs.run_eval_judge", side_effect=RuntimeError("judge crash")),
+        patch("ollama_queue.api.eval_runs.update_eval_run", side_effect=_mock_update),
         patch("threading.Thread") as mock_thread,
     ):
         mock_thread_instance = MagicMock()

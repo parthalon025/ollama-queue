@@ -178,21 +178,23 @@ def cancel(ctx, job_id):
 
 @main.command()
 @click.option("--port", default=7683, type=int, help="Port for FastAPI server")
+@click.option("--debug", is_flag=True, default=False, help="Enable DEBUG logging for all ollama_queue modules")
 @click.pass_context
-def serve(ctx, port):
+def serve(ctx, port, debug):
     """Start the daemon and FastAPI server."""
     import threading
 
     import uvicorn
 
-    # Scope INFO to our package only — root stays at WARNING so third-party
-    # libraries (uvicorn internals, urllib3, etc.) don't flood the journal.
+    # Scope INFO (or DEBUG with --debug) to our package only — root stays at
+    # WARNING so third-party libraries don't flood the journal.
     # Lesson #246: set package logger level, not root logger level.
+    _level = logging.DEBUG if debug else logging.INFO
     _handler = logging.StreamHandler()
     _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
     logging.getLogger().addHandler(_handler)
     logging.getLogger().setLevel(logging.WARNING)
-    logging.getLogger("ollama_queue").setLevel(logging.INFO)
+    logging.getLogger("ollama_queue").setLevel(_level)
 
     from ollama_queue.app import create_app
     from ollama_queue.daemon import Daemon

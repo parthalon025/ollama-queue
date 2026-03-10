@@ -10,6 +10,15 @@ from fastapi import APIRouter, Body, HTTPException
 from fastapi.responses import JSONResponse
 
 import ollama_queue.api as _api
+from ollama_queue.eval.engine import (
+    compute_run_analysis,
+    create_eval_run,
+    get_eval_run,
+    run_eval_session,
+    update_eval_run,
+)
+from ollama_queue.eval.judge import run_eval_judge
+from ollama_queue.eval.promote import do_promote_eval_run, generate_eval_analysis
 
 _log = logging.getLogger(__name__)
 
@@ -86,7 +95,6 @@ def trigger_eval_run(body: dict = Body(...)):
     #   without touching the CLI.
     """
     db = _api.db
-    from ollama_queue import eval_engine as _ee
 
     # Accept either variants (list, from SPA) or variant_id (single, legacy/API)
     variants_list = body.get("variants")
@@ -123,7 +131,7 @@ def trigger_eval_run(body: dict = Body(...)):
     max_time_s = int(max_time_s_raw) if max_time_s_raw is not None else None
 
     # Create the run row
-    run_id = _ee.create_eval_run(
+    run_id = create_eval_run(
         db,
         variant_id=variant_id,
         run_mode=run_mode,
@@ -139,7 +147,7 @@ def trigger_eval_run(body: dict = Body(...)):
     # Persist judge_model from request body so run_eval_judge uses it instead of the setting default
     judge_model = body.get("judge_model")
     if judge_model and isinstance(judge_model, str):
-        _ee.update_eval_run(db, run_id, judge_model=judge_model)
+        update_eval_run(db, run_id, judge_model=judge_model)
 
     # Persist judge_mode from request body (default: "bayesian")
     judge_mode = body.get("judge_mode", "bayesian")
@@ -149,7 +157,7 @@ def trigger_eval_run(body: dict = Body(...)):
             status_code=400,
             detail=f"judge_mode must be one of: {', '.join(valid_judge_modes)}",
         )
-    _ee.update_eval_run(db, run_id, judge_mode=judge_mode)
+    update_eval_run(db, run_id, judge_mode=judge_mode)
 
     # Run the session in a background thread — NOT as a queued job.
     # Running as a queued job would deadlock: the daemon sets current_job_id while
@@ -161,7 +169,7 @@ def trigger_eval_run(body: dict = Body(...)):
 
     def _run_session_in_background() -> None:
         try:
-            _ee.run_eval_session(_captured_run_id, db)
+            run_eval_session(_captured_run_id, db)
         except Exception:
             _log.exception("run_eval_session failed for run_id=%d", _captured_run_id)
 
@@ -179,9 +187,8 @@ def get_eval_run_detail(run_id: int):
     #   whether to promote, judge-rerun, or investigate failures.
     """
     db = _api.db
-    from ollama_queue import eval_engine as _ee
 
-    run = _ee.get_eval_run(db, run_id)
+    run = get_eval_run(db, run_id)
     if run is None:
         raise HTTPException(status_code=404, detail=f"Eval run {run_id} not found")
 
@@ -206,9 +213,8 @@ def cancel_eval_run(run_id: int):
     #   without waiting for it to time out.
     """
     db = _api.db
-    from ollama_queue import eval_engine as _ee
 
-    run = _ee.get_eval_run(db, run_id)
+    run = get_eval_run(db, run_id)
     if run is None:
         raise HTTPException(status_code=404, detail=f"Eval run {run_id} not found")
 
@@ -222,7 +228,7 @@ def cancel_eval_run(run_id: int):
     from datetime import UTC
     from datetime import datetime as _cdt
 
-    _ee.update_eval_run(db, run_id, status="cancelled", completed_at=_cdt.now(UTC).isoformat())
+    update_eval_run(db, run_id, status="cancelled", completed_at=_cdt.now(UTC).isoformat())
     return {"ok": True, "run_id": run_id}
 
 
@@ -237,9 +243,7 @@ def analyze_eval_run(run_id: int):
     db = _api.db
     import threading as _threading_analyze
 
-    from ollama_queue import eval_engine as _ee
-
-    run = _ee.get_eval_run(db, run_id)
+    run = get_eval_run(db, run_id)
     if run is None:
         raise HTTPException(status_code=404, detail=f"Eval run {run_id} not found")
     if run.get("status") != "complete":
@@ -247,11 +251,11 @@ def analyze_eval_run(run_id: int):
 
     def _run_analysis() -> None:
         try:
-            _ee.generate_eval_analysis(db, run_id)
+            generate_eval_analysis(db, run_id)
         except Exception:
             _log.exception("generate_eval_analysis failed for run_id=%d", run_id)
             try:
-                _ee.update_eval_run(db, run_id, analysis_md="[Analysis failed — see server logs]")
+                update_eval_run(db, run_id, analysis_md="[Analysis failed — see server logs]")
             except Exception:
                 _log.exception("could not record analysis failure for run_id=%d", run_id)
 
@@ -287,14 +291,13 @@ def reanalyze_eval_run(run_id: int):
     #   or when analysis wasn't computed during the original run.
     """
     db = _api.db
-    from ollama_queue import eval_engine as _ee
 
-    run = _ee.get_eval_run(db, run_id)
+    run = get_eval_run(db, run_id)
     if not run:
         raise HTTPException(404, f"Run {run_id} not found")
     if run["status"] != "complete":
         raise HTTPException(400, f"Run must be complete (current: {run['status']})")
-    _ee.compute_run_analysis(run_id, db)
+    compute_run_analysis(run_id, db)
     return {"ok": True}
 
 
@@ -308,9 +311,8 @@ def get_eval_run_confusion(run_id: int):
     #   merging (if semantically similar) or more discriminative prompts.
     """
     db = _api.db
-    from ollama_queue import eval_engine as _ee
 
-    run = _ee.get_eval_run(db, run_id)
+    run = get_eval_run(db, run_id)
     if run is None:
         raise HTTPException(status_code=404, detail=f"Eval run {run_id} not found")
 
@@ -375,9 +377,8 @@ def get_eval_run_results(
     #   classification param filters to tp/tn/fp/fn error classes.
     """
     db = _api.db
-    from ollama_queue import eval_engine as _ee
 
-    run = _ee.get_eval_run(db, run_id)
+    run = get_eval_run(db, run_id)
     if run is None:
         raise HTTPException(status_code=404, detail=f"Eval run {run_id} not found")
 
@@ -430,9 +431,8 @@ def get_eval_run_progress(run_id: int):
     # Decision it drives: Lets the user know if a run is progressing normally or stalled.
     """
     db = _api.db
-    from ollama_queue import eval_engine as _ee
 
-    run = _ee.get_eval_run(db, run_id)
+    run = get_eval_run(db, run_id)
     if run is None:
         raise HTTPException(status_code=404, detail=f"Eval run {run_id} not found")
 
@@ -593,9 +593,7 @@ def repeat_eval_run(run_id: int):
 
     def _run_repeat_in_background() -> None:
         try:
-            from ollama_queue import eval_engine as _ee_repeat
-
-            _ee_repeat.run_eval_session(_captured_new_id, db)
+            run_eval_session(_captured_new_id, db)
         except Exception:
             _log.exception("run_eval_session failed for repeat run_id=%d", _captured_new_id)
 
@@ -616,10 +614,9 @@ def promote_eval_run(run_id: int, body: dict = Body(default={})):
     automatically from the run's winner_variant in eval_variants.
     """
     db = _api.db
-    from ollama_queue import eval_engine as _ee
 
     try:
-        result = _ee.do_promote_eval_run(db, run_id)
+        result = do_promote_eval_run(db, run_id)
         return result
     except ValueError as exc:
         msg = str(exc)
@@ -641,9 +638,8 @@ def judge_rerun_eval_run(run_id: int, body: dict = Body(default={})):
     #   see whether scores change without re-running generation.
     """
     db = _api.db
-    from ollama_queue import eval_engine as _ee
 
-    run = _ee.get_eval_run(db, run_id)
+    run = get_eval_run(db, run_id)
     if run is None:
         raise HTTPException(status_code=404, detail=f"Eval run {run_id} not found")
 
@@ -654,7 +650,7 @@ def judge_rerun_eval_run(run_id: int, body: dict = Body(default={})):
         )
 
     # Create a new run copying item_ids and seed from the original, starting at judging
-    new_run_id = _ee.create_eval_run(
+    new_run_id = create_eval_run(
         db,
         variant_id=run.get("variant_id") or run.get("variants", ""),
         run_mode=run.get("run_mode") or "batch",
@@ -669,7 +665,7 @@ def judge_rerun_eval_run(run_id: int, body: dict = Body(default={})):
 
     # Propagate judge_mode from original run (or allow override from body)
     rerun_judge_mode = body.get("judge_mode") or run.get("judge_mode") or "rubric"
-    _ee.update_eval_run(db, new_run_id, judge_mode=rerun_judge_mode)
+    update_eval_run(db, new_run_id, judge_mode=rerun_judge_mode)
 
     # Copy gen_results from original run so run_eval_judge can find them.
     # Without this the new run has no eval_results rows and judge produces empty metrics.
@@ -692,7 +688,7 @@ def judge_rerun_eval_run(run_id: int, body: dict = Body(default={})):
         conn.commit()
 
     # Set status to 'judging' (override 'queued' set by create_eval_run)
-    _ee.update_eval_run(db, new_run_id, status="judging")
+    update_eval_run(db, new_run_id, status="judging")
 
     # Spawn background thread for the judge phase — same pattern as trigger_eval_run.
     # (The `ollama-queue eval-run` CLI subcommand does not exist; queue-job approach
@@ -703,17 +699,13 @@ def judge_rerun_eval_run(run_id: int, body: dict = Body(default={})):
 
     def _run_judge_in_background() -> None:
         try:
-            from ollama_queue import eval_engine as _ee_jr
-
-            _ee_jr.run_eval_judge(_captured_judge_id, db)
+            run_eval_judge(_captured_judge_id, db)
         except Exception as _exc:
             _log.exception("run_eval_judge failed for judge-rerun run_id=%d", _captured_judge_id)
             try:
                 import datetime as _dt_jr
 
-                from ollama_queue import eval_engine as _ee_jr2
-
-                _ee_jr2.update_eval_run(
+                update_eval_run(
                     db,
                     _captured_judge_id,
                     status="failed",

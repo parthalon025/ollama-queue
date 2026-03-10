@@ -16,13 +16,6 @@ if TYPE_CHECKING:
 # Each route module accesses this via ``import ollama_queue.api as _api; _api.db``.
 db: Database | None = None
 
-# Re-export create_app for backward compatibility (tests, cli, etc.)
-# Re-export _call_generate_description so tests can import it from ollama_queue.api
-from ollama_queue.api.schedule import (
-    _call_generate_description as _call_generate_description,
-)
-from ollama_queue.app import create_app as create_app
-
 
 def register_routes(app, db_instance: Database) -> None:
     """Set the module db reference and include all route routers."""

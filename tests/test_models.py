@@ -473,7 +473,7 @@ class TestGetLoaded:
         """Line with fewer than 3 parts — skipped (line 141)."""
         from ollama_queue.models import OllamaModels
 
-        ps_output = "NAME                ID            SIZE      PROCESSOR    UNTIL\n" "ab cd\n"
+        ps_output = "NAME                ID            SIZE      PROCESSOR    UNTIL\nab cd\n"
         mock = MagicMock()
         mock.returncode = 0
         mock.stdout = ps_output
@@ -500,7 +500,7 @@ class TestGetLoaded:
         """Line with exactly 3 parts — size_str uses 'B' suffix (line 143)."""
         from ollama_queue.models import OllamaModels
 
-        ps_output = "NAME  ID  SIZE\n" "model abc 1234\n"
+        ps_output = "NAME  ID  SIZE\nmodel abc 1234\n"
         mock = MagicMock()
         mock.returncode = 0
         mock.stdout = ps_output
