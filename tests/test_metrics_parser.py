@@ -64,7 +64,7 @@ class TestNonOllamaOutput:
 
 class TestMalformedInput:
     def test_truncated_json(self):
-        """Partial JSON that matches the regex but fails to parse."""
+        """Partial JSON that fails to parse."""
         stdout = '{"done":true,"eval_count":10'
         assert parse_ollama_metrics(stdout) is None
 
@@ -96,6 +96,13 @@ class TestMultilineOutput:
     def test_mixed_output_with_ollama_at_end(self):
         """Non-JSON output followed by Ollama response."""
         stdout = 'Loading model...\nReady.\n{"done":true,"eval_count":50,"eval_duration":1000000000}\n'
+        result = parse_ollama_metrics(stdout)
+        assert result is not None
+        assert result["eval_count"] == 50
+
+    def test_chat_format_nested_json(self):
+        """Ollama /api/chat wraps response in message object — regex would miss this."""
+        stdout = '{"model":"llama3","message":{"role":"assistant","content":"Hi"},"done":true,"eval_count":50,"eval_duration":1000000000,"total_duration":2000000000,"load_duration":500000000}\n'
         result = parse_ollama_metrics(stdout)
         assert result is not None
         assert result["eval_count"] == 50
