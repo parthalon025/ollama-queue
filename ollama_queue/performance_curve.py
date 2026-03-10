@@ -60,7 +60,7 @@ class PerformanceCurve:
             predicted = [self._tok_slope * x + self._tok_intercept for x in log_sizes]
             residuals = [a - p for a, p in zip(log_rates, predicted, strict=False)]
             self._tok_residual_std = (
-                math.sqrt(sum(r**2 for r in residuals) / (len(residuals) - 2)) if len(residuals) > 2 else 0.3
+                math.sqrt(sum(r**2 for r in residuals) / max(len(residuals) - 2, 1)) if len(residuals) >= 2 else 0.3
             )
             self.fitted = True
         elif len(valid_tok) == 1:
@@ -118,6 +118,6 @@ class PerformanceCurve:
             "warmup_slope": self._warmup_slope,
             "warmup_intercept": self._warmup_intercept,
             "n_points": len(self._points),
-            "points": self._points,
+            "points": list(self._points),
             "fitted": self.fitted,
         }
