@@ -585,7 +585,7 @@ def test_repeat_eval_run_background_error(client_and_db):
         mock_thread.return_value = mock_thread_instance
 
         resp = client.post(f"/api/eval/runs/{run_id}/repeat")
-        assert resp.status_code == 200
+        assert resp.status_code == 201
 
         target_fn = mock_thread.call_args.kwargs.get("target") or mock_thread.call_args[1].get("target")
         # Should not raise

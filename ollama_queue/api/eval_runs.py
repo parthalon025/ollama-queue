@@ -599,7 +599,7 @@ def repeat_eval_run(run_id: int):
 
     _threading.Thread(target=_run_repeat_in_background, daemon=True).start()
 
-    return {"run_id": new_run_id}
+    return JSONResponse(content={"run_id": new_run_id}, status_code=201)
 
 
 @router.post("/api/eval/runs/{run_id}/promote")

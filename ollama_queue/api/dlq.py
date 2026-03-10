@@ -31,13 +31,17 @@ def retry_all_dlq():
 def retry_dlq(dlq_id: int):
     db = _api.db
     new_id = db.retry_dlq_entry(dlq_id)
+    if new_id is None:
+        raise HTTPException(404, "DLQ entry not found or already resolved")
     return {"new_job_id": new_id}
 
 
 @router.post("/api/dlq/{dlq_id}/dismiss")
 def dismiss_dlq(dlq_id: int):
     db = _api.db
-    db.dismiss_dlq_entry(dlq_id)
+    changed = db.dismiss_dlq_entry(dlq_id)
+    if not changed:
+        raise HTTPException(404, "DLQ entry not found or already resolved")
     return {"dismissed": dlq_id}
 
 

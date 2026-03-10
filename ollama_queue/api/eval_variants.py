@@ -7,6 +7,7 @@ import logging
 
 from fastapi import APIRouter, Body, HTTPException
 from fastapi.responses import JSONResponse
+from starlette.responses import Response
 
 import ollama_queue.api as _api
 
@@ -450,7 +451,7 @@ def delete_eval_variant(variant_id: str):
             raise HTTPException(status_code=422, detail="Cannot modify system variant — clone it first.")
         conn.execute("DELETE FROM eval_variants WHERE id = ?", (variant_id,))
         conn.commit()
-    return JSONResponse(content=None, status_code=204)
+    return Response(status_code=204)
 
 
 # --- Eval: Templates ---

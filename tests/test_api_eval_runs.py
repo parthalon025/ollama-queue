@@ -566,7 +566,7 @@ def test_repeat_run_returns_new_run_id(client_and_db):
     orig_id = _insert_reproducible_run(db, item_ids=pairs, seed=1234)
 
     resp = client.post(f"/api/eval/runs/{orig_id}/repeat")
-    assert resp.status_code == 200
+    assert resp.status_code == 201
     data = resp.json()
     assert "run_id" in data
     new_id = data["run_id"]
@@ -581,7 +581,7 @@ def test_repeat_run_copies_seed_and_item_ids(client_and_db):
     orig_id = _insert_reproducible_run(db, item_ids=pairs, seed=555)
 
     resp = client.post(f"/api/eval/runs/{orig_id}/repeat")
-    assert resp.status_code == 200
+    assert resp.status_code == 201
     new_id = resp.json()["run_id"]
 
     with db._lock:
@@ -1459,7 +1459,7 @@ def test_repeat_run_background_thread_exception(client_and_db):
 
     with patch("ollama_queue.api.eval_runs.run_eval_session", side_effect=RuntimeError("boom")):
         resp = client.post(f"/api/eval/runs/{orig_id}/repeat")
-    assert resp.status_code == 200
+    assert resp.status_code == 201
     time.sleep(0.1)
 
 
