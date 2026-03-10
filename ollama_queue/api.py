@@ -9,6 +9,7 @@ import os
 import time
 from pathlib import Path
 from typing import cast
+from urllib.parse import urlparse
 
 _log = logging.getLogger(__name__)
 
@@ -608,7 +609,7 @@ def create_app(db: Database) -> FastAPI:
 
         try:
             # Use build_request + send(stream=True) so httpx doesn't buffer the body.
-            async_client = httpx.AsyncClient(timeout=httpx.Timeout(None))
+            async_client = httpx.AsyncClient(timeout=httpx.Timeout(None, connect=10.0))
             rp_req = async_client.build_request("POST", f"{OLLAMA_URL}/api/generate", json=body)
             rp_resp = await async_client.send(rp_req, stream=True)
         except Exception as e:
@@ -1161,20 +1162,21 @@ def create_app(db: Database) -> FastAPI:
         """
         import datetime as _dt
 
-        conn = db._connect()
-        variants = [dict(r) for r in conn.execute("SELECT * FROM eval_variants WHERE is_system = 0").fetchall()]
-        # Collect only the templates referenced by user variants
-        tmpl_ids = {v["prompt_template_id"] for v in variants}
-        templates = []
-        if tmpl_ids:
-            placeholders = ",".join("?" * len(tmpl_ids))
-            templates = [
-                dict(r)
-                for r in conn.execute(
-                    f"SELECT * FROM eval_prompt_templates WHERE id IN ({placeholders})",
-                    list(tmpl_ids),
-                ).fetchall()
-            ]
+        with db._lock:
+            conn = db._connect()
+            variants = [dict(r) for r in conn.execute("SELECT * FROM eval_variants WHERE is_system = 0").fetchall()]
+            # Collect only the templates referenced by user variants
+            tmpl_ids = {v["prompt_template_id"] for v in variants}
+            templates = []
+            if tmpl_ids:
+                placeholders = ",".join("?" * len(tmpl_ids))
+                templates = [
+                    dict(r)
+                    for r in conn.execute(
+                        f"SELECT * FROM eval_prompt_templates WHERE id IN ({placeholders})",
+                        list(tmpl_ids),
+                    ).fetchall()
+                ]
         return JSONResponse(
             content={
                 "variants": variants,
@@ -1194,11 +1196,11 @@ def create_app(db: Database) -> FastAPI:
 
         variants = body.get("variants", [])
         templates = body.get("templates", [])
-        conn = db._connect()
         now = _dt.datetime.now(_dt.UTC).isoformat()
         variants_imported = 0
         templates_imported = 0
         with db._lock:
+            conn = db._connect()
             for tmpl in templates:
                 cur = conn.execute(
                     """INSERT OR IGNORE INTO eval_prompt_templates
@@ -1252,12 +1254,12 @@ def create_app(db: Database) -> FastAPI:
         tmpl_id = body.get("template_id") or "zero-shot-causal"
         if not models_list:
             raise HTTPException(status_code=400, detail="models list is required")
-        conn = db._connect()
-        # Validate template exists
-        _get_eval_template(conn, tmpl_id)
         now = _dt.datetime.now(_dt.UTC).isoformat()
         created = []
         with db._lock:
+            conn = db._connect()
+            # Validate template exists
+            _get_eval_template(conn, tmpl_id)
             for model_name in models_list:
                 new_id = str(uuid.uuid4())[:8]
                 label = f"Auto: {model_name} ({tmpl_id})"
@@ -1299,11 +1301,11 @@ def create_app(db: Database) -> FastAPI:
         model = body.get("model")
         if not label or not tmpl_id or not model:
             raise HTTPException(status_code=400, detail="label, prompt_template_id, and model are required")
-        conn = db._connect()
-        _get_eval_template(conn, tmpl_id)
         now = _dt.datetime.now(_dt.UTC).isoformat()
         new_id = str(uuid.uuid4())[:8]
         with db._lock:
+            conn = db._connect()
+            _get_eval_template(conn, tmpl_id)
             conn.execute(
                 """INSERT INTO eval_variants
                    (id, label, prompt_template_id, model, temperature, num_ctx,
@@ -1392,11 +1394,12 @@ def create_app(db: Database) -> FastAPI:
         What it shows: Per-run quality scores for a single variant over time.
         Decision it drives: Lets the user see whether a variant is improving, stable, or regressing.
         """
-        conn = db._connect()
-        _get_eval_variant(conn, variant_id)
-        runs = conn.execute(
-            "SELECT id, started_at, metrics FROM eval_runs WHERE status = 'complete' ORDER BY id ASC"
-        ).fetchall()
+        with db._lock:
+            conn = db._connect()
+            _get_eval_variant(conn, variant_id)
+            runs = conn.execute(
+                "SELECT id, started_at, metrics FROM eval_runs WHERE status = 'complete' ORDER BY id ASC"
+            ).fetchall()
         history = []
         for run_row in runs:
             if not run_row["metrics"]:
@@ -1429,12 +1432,12 @@ def create_app(db: Database) -> FastAPI:
         import datetime as _dt
         import uuid
 
-        conn = db._connect()
-        original = _get_eval_variant(conn, variant_id)
         now = _dt.datetime.now(_dt.UTC).isoformat()
         new_id = str(uuid.uuid4())[:8]
-        label = body.get("label") or f"{original['label']} (copy)"
         with db._lock:
+            conn = db._connect()
+            original = _get_eval_variant(conn, variant_id)
+            label = body.get("label") or f"{original['label']} (copy)"
             conn.execute(
                 """INSERT INTO eval_variants
                    (id, label, prompt_template_id, model, temperature, num_ctx,
@@ -1815,11 +1818,12 @@ def create_app(db: Database) -> FastAPI:
             elif bare_key == "data_source_url":
                 if not isinstance(value, str) or not (value.startswith("http://") or value.startswith("https://")):
                     validation_errors.append("data_source_url must start with http:// or https://")
-                elif not any(
-                    value.startswith(f"http://{h}") or value.startswith(f"https://{h}")
-                    for h in ("127.0.0.1", "localhost")
-                ):
-                    validation_errors.append("data_source_url must target 127.0.0.1 or localhost only")
+                else:
+                    parsed_url = urlparse(value)
+                    if parsed_url.hostname not in ("127.0.0.1", "localhost"):
+                        validation_errors.append(
+                            "data_source_url must target 127.0.0.1 or localhost only (SSRF protection)"
+                        )
             elif bare_key == "stability_window" and not (isinstance(value, int) and (1 <= value <= 20)):
                 validation_errors.append(f"stability_window must be an integer 1-20, got {value!r}")
             elif bare_key == "auto_promote" and not isinstance(value, bool):
