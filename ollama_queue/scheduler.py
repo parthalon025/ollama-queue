@@ -64,9 +64,12 @@ class Scheduler:
         if now is None:
             now = time.time()
         due = self.db.get_due_recurring_jobs(now)
+        # Pre-fetch AoI parameters once — O(1) instead of O(N) DB reads during sort.
+        aoi_weight = float(self.db.get_setting("aoi_weight") or 0.3)
+        last_success_cache = {rj["id"]: self.db.get_last_successful_run_time(rj["id"]) for rj in due}
         # AoI sort: lower score = higher urgency. Ensures stale jobs promoted first
         # when multiple become due simultaneously.
-        due.sort(key=lambda rj: self._aoi_sort_key(rj, now))
+        due.sort(key=lambda rj: self._aoi_sort_key(rj, now, aoi_weight, last_success_cache.get(rj["id"])))
         new_ids = []
         next_run_updates: dict[int, float] = {}  # rj_id → new next_run; batched at end
         for rj in due:
@@ -127,7 +130,7 @@ class Scheduler:
             self.db.batch_set_recurring_next_runs(next_run_updates)
         return new_ids
 
-    def _aoi_sort_key(self, rj: dict, now: float) -> float:
+    def _aoi_sort_key(self, rj: dict, now: float, aoi_weight: float, last_success: float | None) -> float:
         """Compute AoI-weighted scheduling urgency score. Lower = higher priority.
 
         Score = priority_norm * (1 - aoi_weight) + (1 - staleness_norm) * aoi_weight
@@ -136,12 +139,8 @@ class Scheduler:
         staleness_norm: 0=fresh, 1=maximally stale (>=5 intervals), normalized to [0,1]
         aoi_weight=0.3 means exactly 30% of score from information staleness.
         """
-        aoi_weight = float(self.db.get_setting("aoi_weight") or 0.3)
-
         priority = max(1, min(10, int(rj.get("priority") or 5)))
         priority_norm = (priority - 1) / 9.0  # 0 = p1 (critical), 1 = p10 (background)
-
-        last_success = self.db.get_last_successful_run_time(rj["id"])
         if last_success is not None:
             interval = float(rj.get("interval_seconds") or 3600)
             # Note: cron jobs (interval_seconds=None) use 3600s fallback.
