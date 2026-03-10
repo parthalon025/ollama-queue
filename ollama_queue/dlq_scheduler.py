@@ -115,17 +115,6 @@ class DLQScheduler:
                 logger.debug("DLQ #%s: no fitting slot found", entry.get("id"))
                 continue
 
-            # Create new job
-            new_job_id = self.db.submit_job(
-                command=entry["command"],
-                model=entry.get("model", ""),
-                priority=entry.get("priority", 0),
-                timeout=entry.get("timeout", 600),
-                source=f"dlq-reschedule:{entry.get('source', 'unknown')}",
-                tag=entry.get("tag"),
-                resource_profile=entry.get("resource_profile", "ollama"),
-            )
-
             # Build reasoning
             reasoning = json.dumps(
                 {
@@ -143,7 +132,26 @@ class DLQScheduler:
                 }
             )
 
-            # Update DLQ entry
+            # Mark DLQ entry BEFORE submitting job (crash-safe ordering)
+            self.db.update_dlq_reschedule(
+                entry["id"],
+                rescheduled_job_id=None,
+                rescheduled_for=slot["scheduled_time"],
+                reschedule_reasoning=reasoning,
+            )
+
+            # Create new job
+            new_job_id = self.db.submit_job(
+                command=entry["command"],
+                model=entry.get("model", ""),
+                priority=entry.get("priority", 0),
+                timeout=entry.get("timeout", 600),
+                source=f"dlq-reschedule:{entry.get('source', 'unknown')}",
+                tag=entry.get("tag"),
+                resource_profile=entry.get("resource_profile", "ollama"),
+            )
+
+            # Backfill the actual job ID
             self.db.update_dlq_reschedule(
                 entry["id"],
                 rescheduled_job_id=new_job_id,
