@@ -32,6 +32,8 @@ class TestInitialize:
             "eval_results",
             "judge_attempts",
             "consumers",
+            "job_metrics",
+            "deferrals",
         }
         assert expected == set(tables)
 
