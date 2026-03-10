@@ -1229,6 +1229,80 @@ body {
 .action-fb--success { color: var(--status-ok, #4caf50); }
 .action-fb--error   { color: var(--status-error, #f44336); white-space: pre-wrap; }
 
+/* ── DLQ reschedule status badges ───────────────────────────────────────── */
+.dlq-status {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: var(--type-micro);
+  font-family: var(--font-mono);
+  font-weight: 600;
+  line-height: 1.4;
+}
+.dlq-status--awaiting   { background: var(--bg-surface, #1a1a1a); color: var(--text-tertiary, #666); }
+.dlq-status--scheduled  { background: color-mix(in srgb, var(--status-warn, #ff9800) 15%, transparent); color: var(--status-warn, #ff9800); }
+.dlq-status--rescheduled { background: color-mix(in srgb, var(--status-ok, #4caf50) 15%, transparent); color: var(--status-ok, #4caf50); }
+.dlq-status--chronic    { background: color-mix(in srgb, var(--status-error, #f44336) 15%, transparent); color: var(--status-error, #f44336); }
+
+/* ── Deferred jobs panel ────────────────────────────────────────────────── */
+.deferred-panel { margin-bottom: 0.75rem; }
+.deferred-panel__title { font-size: var(--type-body); margin-bottom: 0.5rem; }
+.deferred-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.3rem 0;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-wrap: wrap;
+}
+.deferred-row__model  { font-family: var(--font-mono); font-size: var(--type-body); flex: 1; min-width: 0; }
+.deferred-row__reason { font-size: var(--type-micro); padding: 1px 6px; border-radius: 3px; font-weight: 600; }
+.deferred-reason--resource { background: color-mix(in srgb, var(--status-warn, #ff9800) 15%, transparent); color: var(--status-warn); }
+.deferred-reason--thermal  { background: color-mix(in srgb, var(--status-error, #f44336) 15%, transparent); color: var(--status-error); }
+.deferred-reason--burst    { background: color-mix(in srgb, var(--accent, #7c4dff) 15%, transparent); color: var(--accent); }
+.deferred-reason--manual   { background: var(--bg-surface, #1a1a1a); color: var(--text-tertiary); }
+.deferred-reason--unknown  { background: var(--bg-surface, #1a1a1a); color: var(--text-tertiary); }
+.deferred-row__scheduled { font-size: var(--type-label); color: var(--text-secondary); }
+.deferred-row__resume {
+  font-size: var(--type-label);
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+/* ── System health gauges ───────────────────────────────────────────────── */
+.sys-health { margin-bottom: 0.75rem; }
+.sys-health__title { font-size: var(--type-body); margin-bottom: 0.5rem; }
+.sys-health__gauges { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+.sys-gauge { flex: 1; min-width: 80px; }
+.sys-gauge__bar {
+  height: 6px;
+  background: var(--bg-surface, #1a1a1a);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 2px;
+}
+.sys-gauge__fill {
+  height: 100%;
+  background: var(--accent, #7c4dff);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+.sys-gauge--warn .sys-gauge__fill { background: var(--status-error, #f44336); }
+.sys-gauge__label { font-size: var(--type-micro); color: var(--text-tertiary); margin-right: 4px; }
+.sys-gauge__value { font-size: var(--type-micro); color: var(--text-secondary); font-family: var(--font-mono); }
+
+/* ── Warmup badge ───────────────────────────────────────────────────────── */
+.warmup-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: var(--type-micro);
+  font-family: var(--font-mono);
+}
+.warmup-badge--warming    { background: color-mix(in srgb, var(--status-warn, #ff9800) 15%, transparent); color: var(--status-warn); }
+.warmup-badge--generating { background: color-mix(in srgb, var(--status-ok, #4caf50) 15%, transparent); color: var(--status-ok); }
+.warmup-badge--complete   { background: var(--bg-surface, #1a1a1a); color: var(--text-secondary); }
+
 /* ── Eval Pipeline Swimlane ───────────────────────────────────────────────── */
 .eval-swimlane-wrap { margin-bottom: 0.75rem; }
 .eval-swimlane {

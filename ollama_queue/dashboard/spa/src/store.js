@@ -24,6 +24,11 @@ export const modelCatalog = signal({ curated: [], search_results: [] });
 export const queueEtas = signal([]);
 export const connectionStatus = signal('ok'); // 'ok' | 'disconnected'
 export const loadMap = signal(null);  // /api/schedule/load-map response
+// DLQ auto-reschedule + deferral + performance signals
+export const deferredJobs = signal([]);       // /api/deferred response
+export const modelPerformance = signal({});   // /api/metrics/models response
+export const performanceCurve = signal(null); // /api/metrics/performance-curve response
+export const dlqSchedulePreview = signal({ entries: [], count: 0 }); // /api/dlq/schedule-preview
 
 // ── Eval pipeline signals ─────────────────────────────────────────────────────
 
@@ -345,6 +350,11 @@ async function _fetchNonRealtime() {
         if (heatResp.ok) heatmapData.value = await heatResp.json();
         if (histResp.ok) history.value = await histResp.json();
         if (lmResp.ok) loadMap.value = await lmResp.json();
+        // DLQ/deferral/performance non-realtime refresh
+        fetchDeferred();
+        fetchDLQSchedulePreview();
+        fetchModelPerformance();
+        fetchPerformanceCurve();
     } catch (e) {
         console.error('Non-realtime refresh failed:', e);
     }
@@ -501,6 +511,70 @@ export async function clearDLQ() {
     } catch (e) {
         console.error('clearDLQ failed:', e);
     }
+}
+
+// ── Deferred jobs & performance metrics ──────────────────────────────────────
+// Deferred jobs are polled alongside DLQ. Performance metrics are non-realtime.
+
+export async function fetchDeferred() {
+    try {
+        const resp = await fetch(`${API}/deferred`);
+        if (resp.ok) deferredJobs.value = await resp.json();
+    } catch (e) {
+        console.error('fetchDeferred failed:', e);
+    }
+}
+
+export async function fetchModelPerformance() {
+    try {
+        const resp = await fetch(`${API}/metrics/models`);
+        if (resp.ok) modelPerformance.value = await resp.json();
+    } catch (e) {
+        console.error('fetchModelPerformance failed:', e);
+    }
+}
+
+export async function fetchPerformanceCurve() {
+    try {
+        const resp = await fetch(`${API}/metrics/performance-curve`);
+        if (resp.ok) performanceCurve.value = await resp.json();
+    } catch (e) {
+        console.error('fetchPerformanceCurve failed:', e);
+    }
+}
+
+export async function fetchDLQSchedulePreview() {
+    try {
+        const resp = await fetch(`${API}/dlq/schedule-preview`);
+        if (resp.ok) dlqSchedulePreview.value = await resp.json();
+    } catch (e) {
+        console.error('fetchDLQSchedulePreview failed:', e);
+    }
+}
+
+export async function rescheduleDLQEntry(id) {
+    const resp = await fetch(`${API}/dlq/${id}/reschedule`, { method: 'POST' });
+    if (!resp.ok) throw new Error(`Reschedule failed: ${resp.status}`);
+    await fetchDLQ();
+    return resp.json();
+}
+
+export async function deferJob(jobId, reason = 'manual') {
+    const resp = await fetch(`${API}/jobs/${jobId}/defer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason }),
+    });
+    if (!resp.ok) throw new Error(`Defer failed: ${resp.status}`);
+    await fetchDeferred();
+    return resp.json();
+}
+
+export async function resumeDeferred(deferralId) {
+    const resp = await fetch(`${API}/deferred/${deferralId}/resume`, { method: 'POST' });
+    if (!resp.ok) throw new Error(`Resume failed: ${resp.status}`);
+    await fetchDeferred();
+    return resp.json();
 }
 
 // ── Model management ─────────────────────────────────────────────────────────

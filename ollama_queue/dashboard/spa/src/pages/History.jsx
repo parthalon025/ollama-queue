@@ -1,9 +1,9 @@
 import { h } from 'preact';
 import {
     dlqEntries, dlqCount, durationData, heatmapData, history,
-    fetchDLQ, API,
+    fetchDLQ, rescheduleDLQEntry, API,
 } from '../store';
-import { useEffect } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 import { useActionFeedback } from '../hooks/useActionFeedback.js';
 import ActivityHeatmap from '../components/ActivityHeatmap.jsx';
 import HistoryList from '../components/HistoryList.jsx';
@@ -167,76 +167,147 @@ export default function History() {
 
 // ── DLQ sub-component ──────────────────────────────────────────────────────
 
-// What it shows: A single DLQ entry — job source/id, failure reason, retry count — with
-//   per-row Retry and Dismiss controls and inline feedback for each action.
-// Decision it drives: User can retry a specific failed job (requeues it) or permanently
-//   dismiss it (removes from DLQ), with immediate visual confirmation of the outcome.
+// What it shows: A single DLQ entry — job source/id, failure reason, retry count,
+//   auto-reschedule status (awaiting/scheduled/rescheduled/chronic), and decision reasoning.
+// Decision it drives: User can retry, dismiss, or manually reschedule a failed job.
+//   The reschedule status tells the user whether the system has already handled it.
+//   Expanding the reasoning panel shows WHY the scheduler made its decision.
+
+function dlqRescheduleStatus(entry) {
+    const count = entry.auto_reschedule_count || 0;
+    if (count >= 5) return { label: 'Chronic', cls: 'dlq-status--chronic' };
+    if (entry.rescheduled_job_id) return { label: 'Rescheduled', cls: 'dlq-status--rescheduled' };
+    if (entry.rescheduled_for) {
+        const when = new Date(entry.rescheduled_for * 1000).toLocaleTimeString();
+        return { label: `Scheduled ${when}`, cls: 'dlq-status--scheduled' };
+    }
+    return { label: 'Awaiting', cls: 'dlq-status--awaiting' };
+}
+
 function DLQRow({ entry, onAction }) {
+    // All hooks before any conditional returns (Rules of Hooks)
     const [retryFb, retryAct] = useActionFeedback();
     const [dismissFb, dismissAct] = useActionFeedback();
+    const [rescheduleFb, rescheduleAct] = useActionFeedback();
+    const [expanded, setExpanded] = useState(false);
+
+    const reschedule = dlqRescheduleStatus(entry);
+    const hasReasoning = !!entry.reschedule_reasoning;
+    const alreadyRescheduled = !!entry.rescheduled_job_id;
 
     return (
         <div style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'flex-start',
             padding: '0.4rem 0',
             borderBottom: '1px solid var(--border-subtle)',
-            gap: '0.5rem',
-            flexWrap: 'wrap',
         }}>
-            <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0;">
-                <span style={{
-                    fontSize: 'var(--type-body)',
-                    color: 'var(--text-primary)',
-                    fontFamily: 'var(--font-mono)',
-                }}>
-                    {entry.source || '—'} #{entry.job_id}
-                </span>
-                <span style={{
+            <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-start',
+                gap: '0.5rem',
+                flexWrap: 'wrap',
+            }}>
+                <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1;">
+                    <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                        <span style={{
+                            fontSize: 'var(--type-body)',
+                            color: 'var(--text-primary)',
+                            fontFamily: 'var(--font-mono)',
+                        }}>
+                            {entry.source || '—'} #{entry.job_id}
+                        </span>
+                        <span class={`dlq-status ${reschedule.cls}`}>
+                            {reschedule.label}
+                        </span>
+                    </div>
+                    <span style={{
+                        fontSize: 'var(--type-label)',
+                        color: 'var(--text-tertiary)',
+                    }}>
+                        {entry.failure_reason || 'unknown reason'}
+                        {entry.retry_count > 0 && ` · ${entry.retry_count} retries`}
+                        {entry.auto_reschedule_count > 0 && ` · ${entry.auto_reschedule_count} reschedule${entry.auto_reschedule_count !== 1 ? 's' : ''}`}
+                    </span>
+                </div>
+                <div class="flex gap-2" style="flex-shrink: 0; align-items: flex-start;">
+                    {!alreadyRescheduled && (
+                        <div>
+                            <button
+                                class="t-btn t-btn-secondary"
+                                style="font-size: var(--type-label); padding: 2px 8px;"
+                                disabled={rescheduleFb.phase === 'loading'}
+                                onClick={() => rescheduleAct(
+                                    'Scheduling…',
+                                    () => rescheduleDLQEntry(entry.id),
+                                    `DLQ #${entry.id} rescheduled`,
+                                )}
+                            >
+                                {rescheduleFb.phase === 'loading' ? 'Scheduling…' : 'Reschedule'}
+                            </button>
+                            {rescheduleFb.msg && (
+                                <div class={`action-fb action-fb--${rescheduleFb.phase}`}>{rescheduleFb.msg}</div>
+                            )}
+                        </div>
+                    )}
+                    <div>
+                        <button
+                            class="t-btn t-btn-secondary"
+                            style="font-size: var(--type-label); padding: 2px 8px;"
+                            disabled={retryFb.phase === 'loading'}
+                            onClick={() => retryAct(
+                                'Retrying…',
+                                () => onAction('retry', entry.id),
+                                'Job re-queued for retry',
+                            )}
+                        >
+                            {retryFb.phase === 'loading' ? 'Retrying…' : 'Re-queue'}
+                        </button>
+                        {retryFb.msg && (
+                            <div class={`action-fb action-fb--${retryFb.phase}`}>{retryFb.msg}</div>
+                        )}
+                    </div>
+                    <div>
+                        <button
+                            class="t-btn t-btn-secondary"
+                            style="font-size: var(--type-label); padding: 2px 8px;"
+                            disabled={dismissFb.phase === 'loading'}
+                            onClick={() => dismissAct(
+                                'Dismissing…',
+                                () => onAction('dismiss', entry.id),
+                                'Deleted from failed queue',
+                            )}
+                        >
+                            {dismissFb.phase === 'loading' ? 'Dismissing…' : 'Delete'}
+                        </button>
+                        {dismissFb.msg && (
+                            <div class={`action-fb action-fb--${dismissFb.phase}`}>{dismissFb.msg}</div>
+                        )}
+                    </div>
+                    {hasReasoning && (
+                        <button
+                            class="t-btn t-btn-secondary"
+                            style="font-size: var(--type-label); padding: 2px 8px;"
+                            onClick={() => setExpanded(prev => !prev)}
+                        >
+                            {expanded ? 'Hide' : 'Why?'}
+                        </button>
+                    )}
+                </div>
+            </div>
+            {expanded && hasReasoning && (
+                <div style={{
+                    marginTop: '0.4rem',
+                    padding: '0.4rem 0.6rem',
+                    background: 'var(--bg-surface)',
+                    borderRadius: '4px',
                     fontSize: 'var(--type-label)',
-                    color: 'var(--text-tertiary)',
+                    color: 'var(--text-secondary)',
+                    fontFamily: 'var(--font-mono)',
+                    whiteSpace: 'pre-wrap',
                 }}>
-                    {entry.failure_reason || 'unknown reason'}
-                    {entry.retry_count > 0 && ` · ${entry.retry_count} retries`}
-                </span>
-            </div>
-            <div class="flex gap-2" style="flex-shrink: 0; align-items: flex-start;">
-                <div>
-                    <button
-                        class="t-btn t-btn-secondary"
-                        style="font-size: var(--type-label); padding: 2px 8px;"
-                        disabled={retryFb.phase === 'loading'}
-                        onClick={() => retryAct(
-                            'Retrying…',
-                            () => onAction('retry', entry.id),
-                            'Job re-queued for retry',
-                        )}
-                    >
-                        {retryFb.phase === 'loading' ? 'Retrying…' : 'Re-queue'}
-                    </button>
-                    {retryFb.msg && (
-                        <div class={`action-fb action-fb--${retryFb.phase}`}>{retryFb.msg}</div>
-                    )}
+                    {entry.reschedule_reasoning}
                 </div>
-                <div>
-                    <button
-                        class="t-btn t-btn-secondary"
-                        style="font-size: var(--type-label); padding: 2px 8px;"
-                        disabled={dismissFb.phase === 'loading'}
-                        onClick={() => dismissAct(
-                            'Dismissing…',
-                            () => onAction('dismiss', entry.id),
-                            'Deleted from failed queue',
-                        )}
-                    >
-                        {dismissFb.phase === 'loading' ? 'Dismissing…' : 'Delete'}
-                    </button>
-                    {dismissFb.msg && (
-                        <div class={`action-fb action-fb--${dismissFb.phase}`}>{dismissFb.msg}</div>
-                    )}
-                </div>
-            </div>
+            )}
         </div>
     );
 }
