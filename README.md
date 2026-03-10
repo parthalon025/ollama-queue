@@ -44,7 +44,7 @@ Running multiple services against a local Ollama instance creates a resource con
 | **Eval pipeline** | Run A/B–E prompt variant evaluations with an LLM judge (F1/recall/precision). Auto-promote the winning config when quality gates pass. Thompson Sampling routes production traffic to the recommended variant. |
 | **Intelligence layer** | Bayesian log-normal runtime estimation (4-tier hierarchy), log-linear cross-model performance curves, 10-factor slot scoring with VRAM hard gates, hourly/daily load pattern learning. |
 | **Web dashboard** | 8-view Preact SPA: Now, Plan, History, Models, Performance, Settings, Eval, Consumers. |
-| **REST API** | 80+ endpoints covering all features. |
+| **REST API** | 90+ endpoints covering all features. |
 
 ---
 
@@ -303,7 +303,7 @@ systemd timers / apps / proxy clients
         │
         ▼
 ┌─────────────────────────────────────────────┐
-│  FastAPI (70+ endpoints)                    │
+│  FastAPI (90+ endpoints)                    │
 │  /api/generate  /api/embed  (proxy)         │
 │  /api/queue     /api/history  /api/health   │
 │  /api/schedule  /api/dlq     /api/settings  │
@@ -324,7 +324,7 @@ systemd timers / apps / proxy clients
 | **Scheduling** | croniter, custom 48-slot load map |
 | **Dashboard** | Preact 10, @preact/signals, Tailwind v4, uPlot |
 | **CLI** | Click |
-| **Tests** | pytest, pytest-xdist (917 tests) |
+| **Tests** | pytest, pytest-xdist (927 tests) |
 
 ---
 
@@ -357,7 +357,7 @@ ollama_queue/
 scripts/
   migrate_timers.py              # Migrate systemd timers to recurring jobs
   migrate_dlq_max_retries.py     # Schema migration (idempotent)
-tests/                           # 917 tests (pytest-xdist parallel)
+tests/                           # 927 tests (pytest-xdist parallel)
 ```
 
 ---
@@ -387,7 +387,7 @@ Dev/test: `pip install -r requirements-dev.txt`
 
 ```bash
 source .venv/bin/activate
-pytest  # 917 tests, parallel by default
+pytest  # 927 tests, parallel by default
 ```
 
 ---
@@ -406,6 +406,8 @@ Implementation plans and design decisions are in [`docs/plans/`](docs/plans/):
 | [Promote & auto-promote](docs/plans/2026-03-07-promote-auto-promote-design.md) | Winner promotion + three-gate auto-promote logic |
 | [Consumer detection](docs/plans/2026-03-08-consumer-detection-design.md) | 4-phase scanner, config patcher, iptables intercept |
 | [DLQ auto-reschedule](docs/plans/2026-03-09-dlq-auto-reschedule-design.md) | Failure classification, slot scoring, proactive deferral, runtime estimation |
+| [Eval analysis panel](docs/plans/2026-03-09-eval-analysis-panel-design.md) | Per-item breakdown, bootstrap CI, stability, config diff |
+| [Eval UX improvements](docs/plans/2026-03-09-eval-ux-design.md) | Dead button removal, inline tooltips, variant descriptions |
 
 ---
 

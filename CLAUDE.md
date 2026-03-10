@@ -28,7 +28,7 @@ ollama_queue/
   patcher.py          # Config rewriter (systemd/env/yaml/toml) + health checker + backup/revert; patch_consumer(), revert_consumer(), check_health()
   intercept.py        # iptables REDIRECT intercept mode (Linux only); enable_intercept(), disable_intercept(), get_intercept_status()
   eval_analysis.py    # Pure analysis functions (no DB/HTTP): per-item breakdown, failure cases, bootstrap CI, stability, config diff
-  api.py              # FastAPI REST API (70+ endpoints including /api/generate + /api/embed proxy, eval pipeline, consumer management) + static SPA serving
+  api.py              # FastAPI REST API (90+ endpoints including /api/generate + /api/embed proxy, eval pipeline, consumer management) + static SPA serving
   dashboard/
     spa/              # Preact SPA (built separately, served as static)
       src/            # Source: JSX components, signals store, CSS tokens
@@ -39,12 +39,11 @@ scripts/
   migrate_dlq_max_retries.py   # Add max_retries column to existing dlq table (idempotent)
 tests/
   test_eval_engine.py      # 145 tests
-  test_db.py               # 107 tests
+  test_db.py               # 113 tests
   test_api_eval_runs.py    # 78 tests
-  test_daemon.py           # 65 tests
-  test_api.py              # 58 tests (incl. proxy priority, batch schedule, suggest endpoint)
-  test_system_snapshot.py  # 39 tests (10-factor scoring, VRAM gates, snapshot)
-  test_scheduler.py        # 36 tests
+  test_api.py              # 70 tests (incl. proxy priority, batch schedule, suggest endpoint)
+  test_daemon.py           # 66 tests
+  test_scheduler.py        # 37 tests
   test_api_eval_variants.py # 36 tests
   test_cli.py              # 27 tests
   test_api_eval_settings.py # 27 tests
@@ -54,21 +53,24 @@ tests/
   test_models.py           # 18 tests
   test_slot_scoring.py     # 17 tests (find_fitting_slot, score ranking)
   test_scanner.py          # 17 tests
-  test_metrics_parser.py   # 13 tests (Ollama response parsing)
-  test_estimator.py        # 12 tests
+  test_system_snapshot.py  # 15 tests (10-factor scoring, VRAM gates, snapshot)
+  test_metrics_parser.py   # 15 tests (Ollama response parsing)
+  test_estimator.py        # 14 tests
   test_embed_proxy.py      # 12 tests
+  test_dlq_scheduler.py    # 12 tests (DLQ auto-reschedule sweep)
+  test_performance_curve.py # 11 tests (log-linear regression)
   test_integration_dlq_reschedule.py # 11 tests (DLQ + deferral + CLI end-to-end)
-  test_dlq_scheduler.py    # 11 tests (DLQ auto-reschedule sweep)
+  test_dlq.py              # 11 tests
   test_consumers_api.py    # 11 tests (API endpoints)
   test_proxy.py            # 10 tests
-  test_performance_curve.py # 9 tests (log-linear regression)
-  test_intelligence.py     # 8 tests (LoadPatterns hourly/daily profiles)
-  test_runtime_estimator.py # 8 tests (Bayesian log-normal estimation)
-  test_dlq.py              # 8 tests
-  test_deferral_scheduler.py # 7 tests (two-phase sweep)
-  test_burst.py            # 7 tests
+  test_runtime_estimator.py # 9 tests (Bayesian log-normal estimation)
+  test_intelligence.py     # 9 tests (LoadPatterns hourly/daily profiles)
+  test_deferral_scheduler.py # 9 tests (two-phase sweep)
   test_patcher.py          # 7 tests
+  test_burst.py            # 7 tests
+  test_job_metrics.py      # 6 tests
   test_intercept.py        # 5 tests
+  test_deferral.py         # 5 tests
   test_consumers.py        # 4 tests (DB layer)
 ```
 
@@ -79,7 +81,7 @@ tests/
 cd ~/Documents/projects/ollama-queue
 source .venv/bin/activate
 
-# Run tests (917 total)
+# Run tests (927 total)
 pytest
 
 # Start the server (daemon + API + dashboard)
@@ -139,7 +141,7 @@ npm run build        # Production
 npm run dev          # Watch mode
 ```
 
-Sidebar nav (desktop) + bottom tab bar (mobile). 7 views: **Now** (2-column command center: running job, queue, resource gauges, KPI cards, alert strip) + **Plan** (24h Gantt timeline with "now" needle, 48-bucket load-map density strip with DLQ/deferral slot markers, ρ traffic intensity badge, "Suggest slot" button highlighting top-3 low-load windows; tag-grouped recurring jobs with collapsible sections, bulk actions, expandable detail panels) + **History** (DLQ entries with reschedule status badges/reasoning, deferred jobs panel, duration trends, activity heatmap, job list) + **Models** (model table) + **Perf** (model performance table, cross-model performance curve chart, 24h×7d load heatmap, system health gauges) + **Settings** (thresholds, defaults, retention, DLQ auto-reschedule, proactive deferral, daemon controls) + **Consumers** (scan button, consumer cards with status badges and include/ignore/revert actions, intercept toggle with status banner).
+Sidebar nav (desktop) + bottom tab bar (mobile). 8 views: **Now** (2-column command center: running job, queue, resource gauges, KPI cards, alert strip) + **Plan** (24h Gantt timeline with "now" needle, 48-bucket load-map density strip with DLQ/deferral slot markers, ρ traffic intensity badge, "Suggest slot" button highlighting top-3 low-load windows; tag-grouped recurring jobs with collapsible sections, bulk actions, expandable detail panels) + **History** (DLQ entries with reschedule status badges/reasoning, deferred jobs panel, duration trends, activity heatmap, job list) + **Models** (model table) + **Perf** (model performance table, cross-model performance curve chart, 24h×7d load heatmap, system health gauges) + **Settings** (thresholds, defaults, retention, DLQ auto-reschedule, proactive deferral, daemon controls) + **Consumers** (scan button, consumer cards with status badges and include/ignore/revert actions, intercept toggle with status banner).
 
 Route IDs: `now` | `plan` | `history` | `models` | `settings` | `eval` | `consumers` | `performance`. Sidebar: 200px desktop, 64px icon-only (768–1023px), hidden on mobile. CSS classes: `layout-root`, `layout-sidebar`, `layout-main`, `now-grid`, `history-top-grid`, `mobile-bottom-nav`.
 
@@ -162,7 +164,7 @@ This applies to: component files, store transformations in `store.js`, computed 
 
 ## Pipeline Verification
 
-**Horizontal:** All 40 API endpoints + static files (includes `/api/generate` and `/api/embed` proxies). **Vertical:** `ollama-queue submit` → DB row → daemon dequeue → subprocess → DB completed → API endpoints reflect → dashboard renders. Recurring: `schedule add` → `promote_due_jobs` → queue → run → `update_next_run`. DLQ: job fails max_retries → `move_to_dlq` → `dlq list` reflects. Full method: `projects/CLAUDE.md` § Pipeline Verification.
+**Horizontal:** All 90+ API endpoints + static files (includes `/api/generate` and `/api/embed` proxies). **Vertical:** `ollama-queue submit` → DB row → daemon dequeue → subprocess → DB completed → API endpoints reflect → dashboard renders. Recurring: `schedule add` → `promote_due_jobs` → queue → run → `update_next_run`. DLQ: job fails max_retries → `move_to_dlq` → `dlq list` reflects. Full method: `projects/CLAUDE.md` § Pipeline Verification.
 
 ## Gotchas
 
@@ -238,6 +240,10 @@ This applies to: component files, store transformations in `store.js`, computed 
 - **`mark_dlq_scheduling` is the crash-safety marker** — does NOT increment `auto_reschedule_count`. Only `update_dlq_reschedule` increments the count and sets resolution. The two-step pattern (mark → submit job → finalize) prevents double-counting if the process crashes between submit and finalize.
 - **`RuntimeEstimator` uses precision-weighted posterior** — `post_precision = prior_precision + sample_precision`, `post_std = sqrt(1/post_precision)`. The old pseudo-count formula (`(n0 * prior_var + n * sample_var) / (n0 + n)`) was inconsistent with the mean formula and over-estimated uncertainty when sample data was abundant.
 - **`performance_curve.fit()` must reset state at entry** — `_warmup_slope`, `_warmup_intercept`, `_eval_slope`, `_eval_intercept`, `_residual_std` must all be set to `None` at the top of `fit()`. Without this, stale parameters from a previous fit survive if the new fit has insufficient data, causing `predict_tok_per_min()` and `predict_warmup()` to return results based on obsolete data.
+- **`_set_job_retry` must clear `completed_at`** — the UPDATE sets `completed_at = NULL` alongside `status = 'pending'`. Without this, `prune_old_data()` considers the retried job eligible for pruning (it has a non-NULL `completed_at`) and may delete it before it re-runs.
+- **Daemon stdout capture has a 128KB sliding window** — `_MAX_STDOUT_BYTES = 128 * 1024`. The `_append_stdout` callback pops oldest chunks when total exceeds the cap. Without this, a chatty Ollama job (e.g. full response streaming) accumulates unbounded stdout in memory, which can exceed the service's `MemoryMax=512M` and trigger OOM kill.
+- **Falsy-zero antipattern in settings** — `db.get_setting()` returns strings or `None`. `x or default` treats `"0"` as truthy (correct) but `int(x) or default` treats `0` as falsy (wrong). Always use `int(x) if x is not None else default` for numeric settings that can legitimately be 0 (e.g. `error_budget=0` meaning zero tolerance, `poll_interval=0`).
+- **DLQ priority sort is ascending** — lower number = higher importance (1=critical, 10=background). `sorted(entries, key=lambda e: e.get("priority", 0))` is correct. The inverted sort (descending) processed background jobs before critical ones.
 
 ## Design Doc
 
