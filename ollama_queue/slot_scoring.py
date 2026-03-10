@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 _BASE_SCORE = 5.0
 _HOT_MODEL_BONUS = 3.0
 _RECURRING_CONFLICT_PENALTY = -5.0
@@ -125,5 +127,5 @@ def find_fitting_slot(
     return {
         "slot_index": best_start,
         "score": best_avg,
-        "scheduled_time": load_map[best_start].get("timestamp", 0.0),
+        "scheduled_time": load_map[best_start].get("timestamp") or (time.time() + best_start * 1800),
     }
