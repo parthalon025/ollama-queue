@@ -82,6 +82,7 @@ class TestSweepNoEntries:
         result = sched._sweep([])
         assert result == []
         db.submit_job.assert_not_called()
+        db.mark_dlq_scheduling.assert_not_called()
         db.update_dlq_reschedule.assert_not_called()
 
 
@@ -102,16 +103,18 @@ class TestSweepFindsSlotAndReschedules:
         call_kw = db.submit_job.call_args
         assert call_kw[1]["command"] == "echo hello" or call_kw[0][0] == "echo hello"
 
-        # Verify DLQ entry was updated (called twice: mark before submit, backfill after)
-        assert db.update_dlq_reschedule.call_count == 2
-        # First call marks entry with rescheduled_job_id=None
-        first_call = db.update_dlq_reschedule.call_args_list[0]
-        assert first_call[0][0] == 1  # dlq_id
-        assert first_call[1]["rescheduled_job_id"] is None
-        # Second call backfills with actual job id
-        second_call = db.update_dlq_reschedule.call_args_list[1]
-        assert second_call[0][0] == 1  # dlq_id
-        assert second_call[1]["rescheduled_job_id"] == 42
+        # Verify DLQ entry was marked then finalized
+        # First call: mark_dlq_scheduling (crash-safety marker, no count increment)
+        db.mark_dlq_scheduling.assert_called_once()
+        mark_call = db.mark_dlq_scheduling.call_args
+        assert mark_call[0][0] == 1  # dlq_id
+        assert "rescheduled_for" in mark_call[1]
+        assert "reschedule_reasoning" in mark_call[1]
+        # Second call: update_dlq_reschedule (finalize with job ID, increments count)
+        db.update_dlq_reschedule.assert_called_once()
+        finalize_call = db.update_dlq_reschedule.call_args
+        assert finalize_call[0][0] == 1  # dlq_id
+        assert finalize_call[1]["rescheduled_job_id"] == 42
 
 
 class TestSweepSkipsChronicFailures:
@@ -160,20 +163,19 @@ class TestSweepPriorityOrdering:
         high = _make_entry(id=2, priority=10)
         sched, db, _, _ = _make_scheduler(submit_return=99)
 
-        # Track order of submit_job calls via dlq_id in update_dlq_reschedule
-        # Each entry gets 2 calls (mark + backfill), so 4 total
-        update_calls = []
-        db.update_dlq_reschedule.side_effect = lambda *a, **kw: update_calls.append(a[0])
+        # Track order via mark_dlq_scheduling (pre-submit) and update_dlq_reschedule (post-submit)
+        mark_calls = []
+        finalize_calls = []
+        db.mark_dlq_scheduling.side_effect = lambda *a, **kw: mark_calls.append(a[0])
+        db.update_dlq_reschedule.side_effect = lambda *a, **kw: finalize_calls.append(a[0])
 
         result = sched._sweep([low, high])
 
         # Both should be rescheduled
         assert len(result) == 2
-        # High priority (id=2) should be processed first: mark(2), backfill(2), mark(1), backfill(1)
-        assert update_calls[0] == 2
-        assert update_calls[1] == 2
-        assert update_calls[2] == 1
-        assert update_calls[3] == 1
+        # High priority (id=2) should be processed first
+        assert mark_calls == [2, 1]
+        assert finalize_calls == [2, 1]
 
 
 class TestSweepLockPreventsConcurrent:
@@ -201,9 +203,10 @@ class TestOnJobCompletedTriggersSweep:
 
         sched.on_job_completed(job_id=1)
 
-        # Should have attempted to reschedule (2 update calls: mark + backfill)
+        # Should have attempted to reschedule (mark + finalize)
         db.submit_job.assert_called_once()
-        assert db.update_dlq_reschedule.call_count == 2
+        db.mark_dlq_scheduling.assert_called_once()
+        db.update_dlq_reschedule.assert_called_once()
 
     def test_on_job_completed_no_entries(self):
         """on_job_completed with no unscheduled entries does nothing."""
