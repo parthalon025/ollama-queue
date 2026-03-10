@@ -589,3 +589,32 @@ class TestEstimateModelVramCoverageGaps:
         # 200b is far from any key in _PARAM_TO_VRAM (max is 70); |70-200|/200 = 0.65 > 0.5
         result = _estimate_model_vram("custom-model:200b")
         assert result == pytest.approx(200 * 0.6, abs=0.1)
+
+    def test_no_size_hint_returns_default(self):
+        """Line 436: model name with no size hint returns 4.0 default."""
+        from ollama_queue.scheduler import _estimate_model_vram
+
+        result = _estimate_model_vram("my-custom-model:latest")
+        assert result == 4.0
+
+
+class TestRebalanceCoverageGaps:
+    def test_rebalance_defaults_now_when_none(self, db, scheduler):
+        """Line 191: rebalance uses time.time() when now is None."""
+        db.add_recurring_job("job1", "echo hi", 3600, next_run=time.time())
+        changes = scheduler.rebalance()  # now=None
+        assert isinstance(changes, list)
+        assert len(changes) == 1
+
+    def test_rebalance_empty_when_no_enabled_jobs(self, db, scheduler):
+        """Line 199: rebalance returns [] when no enabled recurring jobs exist."""
+        db.add_recurring_job("disabled", "echo hi", 3600)
+        db.set_recurring_job_enabled("disabled", False)
+        changes = scheduler.rebalance(time.time())
+        assert changes == []
+
+    def test_rebalance_empty_when_only_cron_jobs(self, db, scheduler):
+        """Line 204: rebalance returns [] when only cron jobs exist (no interval jobs)."""
+        db.add_recurring_job("cron1", "echo hi", cron_expression="0 6 * * *", next_run=time.time() + 100)
+        changes = scheduler.rebalance(time.time())
+        assert changes == []

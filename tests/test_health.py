@@ -335,7 +335,7 @@ def test_get_vram_pct_cached(monkeypatch):
 # ── Coverage gap tests ────────────────────────────────────────────────────
 
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, mock_open, patch
 
 
 def test_get_ram_pct_zero_total():
@@ -499,7 +499,17 @@ def test_evaluate_load_still_high_when_paused():
 
 
 def test_parse_meminfo_oserror():
-    """Lines 237-240: OSError reading /proc/meminfo returns empty dict."""
+    """Lines 239-240: OSError reading /proc/meminfo returns empty dict."""
     with patch("builtins.open", side_effect=OSError("permission denied")):
         result = HealthMonitor._parse_meminfo()
     assert result == {}
+
+
+def test_parse_meminfo_valueerror():
+    """Lines 237-238: non-integer value in meminfo is silently skipped."""
+    fake_meminfo = "MemTotal:       notanumber kB\nMemFree:        8000 kB\n"
+    with patch("builtins.open", mock_open(read_data=fake_meminfo)):
+        result = HealthMonitor._parse_meminfo()
+    # MemTotal should be skipped (ValueError), MemFree should be parsed
+    assert "MemTotal" not in result
+    assert result["MemFree"] == 8000

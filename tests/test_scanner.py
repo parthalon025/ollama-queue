@@ -283,3 +283,69 @@ def test_deadlock_check_exception(tmp_path):
     mock_db._connect.return_value.execute.side_effect = RuntimeError("db error")
     result = deadlock_check("test", "cmd", mock_db)
     assert result is False
+
+
+def test_live_scan_linux_skips_non_ollama_and_non_matching_lines():
+    """Lines 84, 87: lines without :11434 are skipped; lines without users: pattern are skipped."""
+    ss_output = (
+        "tcp   ESTAB  0  0  127.0.0.1:52340  127.0.0.1:5432   users:((...))  \n"  # no :11434
+        "tcp   ESTAB  0  0  127.0.0.1:52340  127.0.0.1:11434  no-match-here  \n"  # no users:
+        'tcp   ESTAB  0  0  127.0.0.1:52341  127.0.0.1:11434  users:(("real",pid=999,fd=3))\n'
+    )
+    with patch("ollama_queue.scanner.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout=ss_output, stderr="")
+        results = _live_scan_linux()
+    assert len(results) == 1
+    assert results[0]["name"] == "real"
+
+
+def test_stream_check_no_source_dir():
+    """Line 223: stream_check with source_dir=None returns suspect."""
+    result = stream_check(source_dir=None)
+    assert result["streaming_confirmed"] is False
+    assert result["streaming_suspect"] is True
+
+
+def test_deadlock_check_matches_command(tmp_path):
+    """Lines 251-252: deadlock_check matches by command substring."""
+    from ollama_queue.db import Database
+
+    db = Database(str(tmp_path / "test.db"))
+    db.initialize()
+    db.add_recurring_job(name="other-job", command="aria predict --full", interval_seconds=3600)
+    # Name does NOT match, but command[:50] is in cmdline
+    result = deadlock_check("unrelated-name", "aria predict --full --verbose", db)
+    assert result is True
+
+
+def test_run_scan_merges_live_consumer_not_in_static(tmp_path):
+    """Lines 270-273: live consumer not in static results gets its own entry."""
+    from ollama_queue.db import Database
+
+    db = Database(str(tmp_path / "test.db"))
+    db.initialize()
+
+    live_consumer = {
+        "name": "live-process",
+        "pid": 1234,
+        "type": "transient",
+        "last_live_seen": 1000000,
+    }
+    with (
+        patch("ollama_queue.scanner.live_scan", return_value=[live_consumer]),
+        patch("ollama_queue.scanner.static_scan", return_value=[]),
+    ):
+        results = run_scan(db, search_dirs=[str(tmp_path)])
+    assert len(results) == 1
+    assert results[0]["name"] == "live-process"
+    assert "detected_at" in results[0]
+
+
+def test_static_scan_default_search_dirs(tmp_path):
+    """Lines 157-158: static_scan with no search_dirs defaults to home."""
+    with patch("os.path.expanduser", return_value=str(tmp_path)):
+        # Create an env file in the fake home
+        env = tmp_path / ".env"
+        env.write_text("OLLAMA_HOST=localhost:11434\n")
+        results = static_scan()
+    assert len(results) == 1
