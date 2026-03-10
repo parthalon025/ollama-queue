@@ -73,3 +73,36 @@ class TestBurstDetector:
         for i in range(20):
             detector.record_submission(now + i * 10)
         assert detector.regime(now + 200) in valid
+
+    def test_non_positive_interval_discarded(self):
+        """Duplicate or reversed timestamps discard the interval (line 73)."""
+        detector = BurstDetector()
+        now = time.time()
+        detector.record_submission(now)
+        detector.record_submission(now)  # interval == 0 → discarded
+        detector.record_submission(now - 1)  # interval < 0 → discarded
+        # No valid intervals recorded, so EWMA stays None
+        assert detector._ewma is None
+        assert len(detector._baseline_samples) == 0
+
+    def test_baseline_zero_returns_unknown(self):
+        """When all baseline samples are 0, regime returns 'unknown' (line 103)."""
+        detector = BurstDetector()
+        # Manually inject 10 zero-value samples (can't happen via record_submission,
+        # but tests the defensive guard)
+        detector._baseline_samples.extend([0.0] * 10)
+        detector._ewma = 1.0
+        assert detector.regime(time.time()) == "unknown"
+
+    def test_fallback_subcritical(self):
+        """When ratio doesn't match any bracket, returns 'subcritical' (line 109).
+
+        This is a defensive fallback that shouldn't happen with the current _REGIMES
+        definition (subcritical covers 0.5 to inf), but we test the guard by making
+        ratio negative (ewma < 0 while baseline > 0).
+        """
+        detector = BurstDetector()
+        detector._baseline_samples.extend([1.0] * 10)
+        detector._ewma = -0.1  # negative ratio, no bracket matches
+        result = detector.regime(time.time())
+        assert result == "subcritical"

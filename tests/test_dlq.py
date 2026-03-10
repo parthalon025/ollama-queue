@@ -169,6 +169,13 @@ def test_update_dlq_reschedule(db):
     assert "load headroom" in entry["reschedule_reasoning"]
 
 
+def test_handle_failure_job_not_found(db):
+    """handle_failure returns 'dlq' immediately when job doesn't exist (lines 32-33)."""
+    dlq_mgr = DLQManager(db)
+    result = dlq_mgr.handle_failure(999999, "job vanished")
+    assert result == "dlq"
+
+
 def test_list_dlq_unscheduled_only(db):
     """list_dlq with unscheduled_only=True excludes already-rescheduled entries."""
     j1 = db.submit_job("cmd1", "m", 5, 60, "test")

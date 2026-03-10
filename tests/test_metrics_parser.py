@@ -117,3 +117,10 @@ class TestMultilineOutput:
         result = parse_ollama_metrics(output)
         assert result is not None
         assert result["eval_count"] == 50
+
+    def test_empty_lines_skipped(self):
+        """Empty and whitespace-only lines are skipped via continue (line 30)."""
+        stdout = '\n  \n\t\n{"done":true,"eval_count":10,"eval_duration":500000000}\n\n'
+        result = parse_ollama_metrics(stdout)
+        assert result is not None
+        assert result["eval_count"] == 10

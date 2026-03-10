@@ -142,6 +142,22 @@ class TestSweepRespectsDisabledSetting:
         db.list_deferred.assert_not_called()
 
 
+class TestSweepPhase1SkipsNonDeferred:
+    def test_phase1_skips_job_whose_status_changed(self):
+        """Phase 1: if job status changed from 'deferred' between listing and processing,
+        the continue on line 55 skips it."""
+        past_time = time.time() - 60
+        deferred = [{"id": 50, "job_id": 200, "scheduled_for": past_time}]
+        # Job exists but status changed to 'running' (no longer deferred)
+        jobs = {200: {"status": "running", "model": "m", "command": "c", "resource_profile": "ollama"}}
+
+        sched, db, *_ = _make_scheduler(deferred=deferred, jobs=jobs)
+        result = sched.sweep()
+
+        assert result == []
+        db.resume_deferred_job.assert_not_called()
+
+
 class TestSweepPassesVramEstimate:
     def test_sweep_passes_vram_estimate(self):
         """find_fitting_slot should receive a non-zero VRAM estimate for known models."""

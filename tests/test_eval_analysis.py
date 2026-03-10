@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from ollama_queue.eval_analysis import (
+    _is_positive,
     bootstrap_f1_ci,
     compute_per_item_breakdown,
     compute_variant_stability,
@@ -351,3 +352,56 @@ class TestDescribeConfigDiff:
         assert len(diffs) == 1
         assert "None" in diffs[0]
         assert "0.6" in diffs[0]
+
+    def test_temperature_to_none(self):
+        """Handles 0.7 -> None change — no direction annotation (lines 306-307)."""
+        diffs = describe_config_diff(
+            {"temperature": 0.7},
+            {"temperature": None},
+        )
+        assert len(diffs) == 1
+        assert "0.7" in diffs[0]
+        assert "None" in diffs[0]
+        # No direction when target is None
+        assert "creative" not in diffs[0]
+        assert "deterministic" not in diffs[0]
+
+    def test_temperature_non_numeric_no_crash(self):
+        """Non-numeric temperature values don't crash (lines 308-309)."""
+        diffs = describe_config_diff(
+            {"temperature": "warm"},
+            {"temperature": "cold"},
+        )
+        assert len(diffs) == 1
+        assert "warm" in diffs[0]
+        assert "cold" in diffs[0]
+
+    def test_prompt_template_change(self):
+        """Prompt template diff reported (line 322)."""
+        diffs = describe_config_diff(
+            {"prompt_template_id": "A"},
+            {"prompt_template_id": "B"},
+        )
+        assert len(diffs) == 1
+        assert "Prompt template" in diffs[0]
+        assert "A" in diffs[0]
+        assert "B" in diffs[0]
+
+
+# ---------------------------------------------------------------------------
+# Test _is_positive edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestIsPositiveEdgeCases:
+    def test_none_returns_false(self):
+        """_is_positive(None) returns False (line 35)."""
+        assert _is_positive(None) is False
+
+    def test_non_numeric_string_returns_false(self):
+        """_is_positive('abc') catches ValueError and returns False (lines 38-39)."""
+        assert _is_positive("abc") is False
+
+    def test_non_castable_type_returns_false(self):
+        """_is_positive with unconstable type returns False (lines 38-39)."""
+        assert _is_positive([1, 2, 3]) is False

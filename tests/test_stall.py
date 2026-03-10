@@ -215,3 +215,66 @@ def test_forget_clears_cpu_state(det):
 def test_forget_unknown_job_is_safe(det):
     """forget() on a job that was never tracked should not raise."""
     det.forget(999999)  # should not raise
+
+
+# ── Coverage gap tests ────────────────────────────────────────────────────
+
+
+def test_get_process_state_reads_proc_status(det, tmp_path):
+    """Lines 62-69: get_process_state parses /proc/{pid}/status for State line."""
+    status_content = "Name:\tpython3\nUmask:\t0022\nState:\tS (sleeping)\nTgid:\t1234\n"
+    with patch("builtins.open", mock_open(read_data=status_content)):
+        state = det.get_process_state(1234)
+    assert state == "S"
+
+
+def test_get_process_state_returns_question_on_oserror(det):
+    """Lines 67-69: OSError reading /proc/{pid}/status returns '?'."""
+    with patch("builtins.open", side_effect=OSError("no proc")):
+        state = det.get_process_state(99999)
+    assert state == "?"
+
+
+def test_read_cpu_ticks_parses_stat(det):
+    """Lines 79-87: _read_cpu_ticks parses utime+stime from /proc/{pid}/stat."""
+    # Field format: pid (comm) state ppid ... utime(14) stime(15) ...
+    # After ')' there are state + 10 fields before utime (fields[11]) and stime (fields[12])
+    stat_content = "1234 (python3) S 1233 1234 1234 0 -1 4194304 1000 0 0 0 500 200 0 0 20 0 1 0 123456 0 0"
+    with patch("builtins.open", mock_open(read_data=stat_content)):
+        ticks = det._read_cpu_ticks(1234)
+    assert ticks == 700  # 500 + 200
+
+
+def test_read_cpu_ticks_returns_none_on_oserror(det):
+    """Lines 86-87: OSError returns None."""
+    with patch("builtins.open", side_effect=OSError("no proc")):
+        ticks = det._read_cpu_ticks(99999)
+    assert ticks is None
+
+
+def test_get_cpu_pct_elapsed_zero(det):
+    """Line 101: elapsed <= 0 returns None."""
+    with patch.object(det, "_read_cpu_ticks", return_value=100):
+        det.get_cpu_pct(9999, 1, 5.0)  # first call
+    with patch.object(det, "_read_cpu_ticks", return_value=200):
+        result = det.get_cpu_pct(9999, 1, 5.0)  # same timestamp → elapsed=0
+    assert result is None
+
+
+def test_cpu_group_lr_neutral_range(det):
+    """Line 129: CPU 1-5% returns neutral 0.0."""
+    assert det._cpu_group_lr(3.0) == 0.0
+
+
+def test_silence_group_lr_30_to_120(det):
+    """Line 137: silence 30-120s returns neutral 0.0."""
+    assert det._silence_group_lr(60.0) == 0.0
+
+
+def test_silence_group_lr_120_to_300(det):
+    """Line 139: silence 120-300s returns moderate stall signal 1.79."""
+    lr = det._silence_group_lr(200.0)
+    assert lr == pytest.approx(1.79, abs=0.01)
+
+
+from unittest.mock import mock_open

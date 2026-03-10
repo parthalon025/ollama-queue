@@ -169,3 +169,117 @@ def test_run_scan_persists_to_db(tmp_path):
     consumers = db.list_consumers()
     assert len(consumers) == 1
     assert consumers[0]["status"] == "discovered"
+
+
+# ── Coverage gap tests ────────────────────────────────────────────────────
+
+import pathlib
+
+from ollama_queue.scanner import (
+    _check_config_file,
+    _live_scan_linux,
+    _live_scan_macos,
+    _live_scan_windows,
+)
+
+
+def test_live_scan_windows_dispatches():
+    """Line 65: live_scan('windows') dispatches to _live_scan_windows."""
+    with patch("ollama_queue.scanner._live_scan_windows", return_value=[]) as mock_win:
+        results = live_scan("windows")
+    mock_win.assert_called_once()
+    assert results == []
+
+
+def test_live_scan_linux_nonzero_returncode():
+    """Lines 79-80: ss non-zero returncode returns empty list."""
+    mock_result = MagicMock(returncode=1, stdout="", stderr="error")
+    with patch("ollama_queue.scanner.subprocess.run", return_value=mock_result):
+        results = _live_scan_linux()
+    assert results == []
+
+
+def test_live_scan_macos_nonzero_returncode():
+    """Lines 107-108: lsof non-zero returncode returns empty list."""
+    mock_result = MagicMock(returncode=1, stdout="", stderr="error")
+    with patch("ollama_queue.scanner.subprocess.run", return_value=mock_result):
+        results = _live_scan_macos()
+    assert results == []
+
+
+def test_live_scan_macos_short_line():
+    """Line 113: lsof line with < 2 parts is skipped."""
+    lsof_output = "HEADER\nshort\n"
+    mock_result = MagicMock(returncode=0, stdout=lsof_output, stderr="")
+    with patch("ollama_queue.scanner.subprocess.run", return_value=mock_result):
+        results = _live_scan_macos()
+    assert results == []
+
+
+def test_live_scan_windows_parses_netstat():
+    """Lines 126-149: _live_scan_windows parses netstat output."""
+    netstat_output = (
+        "  Proto  Local Address          Foreign Address        State           PID\n"
+        "  TCP    127.0.0.1:52000        127.0.0.1:11434        ESTABLISHED     4567\n"
+    )
+    mock_result = MagicMock(returncode=0, stdout=netstat_output, stderr="")
+    with patch("ollama_queue.scanner.subprocess.run", return_value=mock_result):
+        results = _live_scan_windows()
+    assert len(results) == 1
+    assert results[0]["name"] == "pid:4567"
+    assert results[0]["pid"] == 4567
+
+
+def test_live_scan_windows_nonzero_returncode():
+    """Lines 133-134: netstat non-zero returncode returns empty list."""
+    mock_result = MagicMock(returncode=1, stdout="", stderr="error")
+    with patch("ollama_queue.scanner.subprocess.run", return_value=mock_result):
+        results = _live_scan_windows()
+    assert results == []
+
+
+def test_check_config_file_oserror(tmp_path):
+    """Lines 190-191: unreadable config file returns None."""
+    path = tmp_path / "unreadable.yaml"
+    path.write_text("OLLAMA_HOST=localhost:11434")
+    # Patch read_text to raise
+    with patch.object(pathlib.Path, "read_text", side_effect=OSError("permission denied")):
+        result = _check_config_file(path)
+    assert result is None
+
+
+def test_check_config_file_yaml_type(tmp_path):
+    """Lines 205-206: yaml file detected as config_yaml type."""
+    yaml_file = tmp_path / "config.yaml"
+    yaml_file.write_text("ollama_host: localhost:11434\n")
+    result = _check_config_file(yaml_file)
+    assert result is not None
+    assert result["type"] == "config_yaml"
+
+
+def test_check_config_file_toml_type(tmp_path):
+    """Lines 205-206: toml file detected as config_toml type."""
+    toml_file = tmp_path / "config.toml"
+    toml_file.write_text('ollama_host = "localhost:11434"\n')
+    result = _check_config_file(toml_file)
+    assert result is not None
+    assert result["type"] == "config_toml"
+
+
+def test_stream_check_oserror(tmp_path):
+    """Lines 236-237: OSError reading source file is skipped gracefully."""
+    src = tmp_path / "broken.py"
+    src.write_text("stream=True")
+    with patch.object(pathlib.Path, "read_text", side_effect=OSError("unreadable")):
+        result = stream_check(str(tmp_path))
+    assert result["streaming_confirmed"] is False
+    assert result["streaming_suspect"] is False
+
+
+def test_deadlock_check_exception(tmp_path):
+    """Lines 252, 254-256: deadlock_check returns False on DB exception."""
+    mock_db = MagicMock()
+    # Make _connect().execute() raise to trigger the except branch
+    mock_db._connect.return_value.execute.side_effect = RuntimeError("db error")
+    result = deadlock_check("test", "cmd", mock_db)
+    assert result is False

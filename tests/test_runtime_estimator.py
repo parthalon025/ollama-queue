@@ -107,3 +107,13 @@ def test_estimate_clamps_negative_durations(mock_db):
     result = est.estimate("test-model", "echo test", "ollama")
     assert result.total_mean > 0
     assert result.confidence in ("low", "medium", "high")
+
+
+def test_warmup_clamps_non_positive_values(mock_db):
+    """Non-positive warmup durations trigger warning log and get clamped (line 133)."""
+    mock_db.get_job_durations.return_value = []
+    mock_db.get_load_durations.return_value = [0.0, -0.5, 2.0, 3.0]
+    est = RuntimeEstimator(mock_db)
+    result = est.estimate("test-model", None, "ollama", loaded_models=[])
+    assert result.warmup_mean > 0
+    assert result.warmup_upper > 0
