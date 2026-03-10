@@ -36,7 +36,7 @@ class _ProxyDownError(Exception):
 
 
 # ---------------------------------------------------------------------------
-# DB helper functions (standalone — do NOT modify db.py)
+# DB helper functions (standalone — access db._lock + db._connect() directly)
 # ---------------------------------------------------------------------------
 
 
@@ -66,7 +66,7 @@ def create_eval_run(
 ) -> int:
     """Insert a new eval_runs row with status='queued' and return the new id.
 
-    Uses db._lock + db._connect() directly — do NOT modify db.py for this helper.
+    Uses db._lock + db._connect() directly (bypasses db/ mixin methods).
     data_source_url defaults to the 'eval.data_source_url' setting when not provided.
 
     variants: if provided, overrides the variants column with a JSON array so
