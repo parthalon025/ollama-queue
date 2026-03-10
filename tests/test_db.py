@@ -1417,6 +1417,7 @@ class TestUpsertConsumerKeyFieldsOnly:
                 "type": "timer",
                 "source_label": "test",
                 "status": "discovered",
+                "detected_at": int(time.time()),
             }
         )
         # Upsert with only key fields — nothing to update
