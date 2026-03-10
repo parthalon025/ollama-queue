@@ -157,6 +157,12 @@ class Database:
         self._add_column_if_missing(conn, "eval_results", "source_item_title", "TEXT")
         self._add_column_if_missing(conn, "eval_results", "target_item_title", "TEXT")
         self._add_column_if_missing(conn, "eval_runs", "analysis_json", "TEXT")
+        # DLQ auto-reschedule columns
+        self._add_column_if_missing(conn, "dlq", "auto_reschedule_count", "INTEGER DEFAULT 0")
+        self._add_column_if_missing(conn, "dlq", "auto_rescheduled_at", "REAL")
+        self._add_column_if_missing(conn, "dlq", "rescheduled_job_id", "INTEGER")
+        self._add_column_if_missing(conn, "dlq", "rescheduled_for", "REAL")
+        self._add_column_if_missing(conn, "dlq", "reschedule_reasoning", "TEXT")
         # Backfill descriptions for system variants that existed before the column was added.
         # INSERT OR IGNORE skips rows that already exist, so existing rows need an explicit UPDATE.
         _system_descriptions = {
@@ -322,6 +328,25 @@ class Database:
             CREATE INDEX IF NOT EXISTS idx_jobs_recurring_job_id
                 ON jobs (recurring_job_id) WHERE recurring_job_id IS NOT NULL;
 
+            CREATE TABLE IF NOT EXISTS job_metrics (
+                job_id INTEGER PRIMARY KEY,
+                model TEXT NOT NULL,
+                command TEXT,
+                resource_profile TEXT,
+                load_duration_ns INTEGER,
+                prompt_eval_count INTEGER,
+                prompt_eval_duration_ns INTEGER,
+                eval_count INTEGER,
+                eval_duration_ns INTEGER,
+                total_duration_ns INTEGER,
+                model_size_gb REAL,
+                completed_at REAL,
+                FOREIGN KEY (job_id) REFERENCES jobs(id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_job_metrics_model
+                ON job_metrics(model);
+
             CREATE TABLE IF NOT EXISTS model_registry (
                 name              TEXT PRIMARY KEY,
                 size_bytes        INTEGER,
@@ -330,6 +355,22 @@ class Database:
                 type_tag          TEXT DEFAULT 'general',
                 last_seen         REAL
             );
+
+            -- Deferrals table — tracks proactively deferred jobs
+            CREATE TABLE IF NOT EXISTS deferrals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id INTEGER NOT NULL,
+                reason TEXT NOT NULL,
+                context TEXT,
+                deferred_at REAL NOT NULL,
+                estimated_ready_at REAL,
+                scheduled_for REAL,
+                scoring_snapshot TEXT,
+                resumed_at REAL,
+                FOREIGN KEY (job_id) REFERENCES jobs(id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_deferrals_job_id ON deferrals(job_id);
 
             CREATE TABLE IF NOT EXISTS model_pulls (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1601,6 +1642,121 @@ class Database:
             cur = conn.execute("DELETE FROM dlq WHERE resolution IS NOT NULL")
             conn.commit()
             return cur.rowcount
+
+    # ── job_metrics CRUD ─────────────────────────────────────────────
+
+    def store_job_metrics(self, job_id: int, metrics: dict) -> None:
+        """INSERT OR REPLACE a row in job_metrics from a dict of Ollama response fields."""
+        with self._lock:
+            conn = self._connect()
+            conn.execute(
+                """INSERT OR REPLACE INTO job_metrics
+                   (job_id, model, command, resource_profile,
+                    load_duration_ns, prompt_eval_count, prompt_eval_duration_ns,
+                    eval_count, eval_duration_ns, total_duration_ns,
+                    model_size_gb, completed_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    job_id,
+                    metrics.get("model", ""),
+                    metrics.get("command"),
+                    metrics.get("resource_profile"),
+                    metrics.get("load_duration_ns"),
+                    metrics.get("prompt_eval_count"),
+                    metrics.get("prompt_eval_duration_ns"),
+                    metrics.get("eval_count"),
+                    metrics.get("eval_duration_ns"),
+                    metrics.get("total_duration_ns"),
+                    metrics.get("model_size_gb"),
+                    metrics.get("completed_at", time.time()),
+                ),
+            )
+            conn.commit()
+
+    def get_job_metrics(self, job_id: int) -> dict | None:
+        """Return the job_metrics row as a dict, or None if not found."""
+        with self._lock:
+            conn = self._connect()
+            conn.row_factory = sqlite3.Row
+            row = conn.execute("SELECT * FROM job_metrics WHERE job_id = ?", (job_id,)).fetchone()
+            if row is None:
+                return None
+            return dict(row)
+
+    def get_tok_per_min(self, model: str) -> list[float]:
+        """Derive tok/min from eval_count and eval_duration_ns for recent jobs."""
+        with self._lock:
+            conn = self._connect()
+            rows = conn.execute(
+                """SELECT eval_count, eval_duration_ns FROM job_metrics
+                   WHERE model = ? AND eval_count IS NOT NULL
+                     AND eval_duration_ns IS NOT NULL AND eval_duration_ns > 0
+                   ORDER BY completed_at DESC LIMIT 50""",
+                (model,),
+            ).fetchall()
+            return [(r[0] / (r[1] / 1_000_000_000)) * 60 for r in rows]
+
+    def get_job_durations(self, model: str, command: str | None = None) -> list[float]:
+        """Wall-clock durations (seconds) from the jobs table (completed_at - started_at)."""
+        with self._lock:
+            conn = self._connect()
+            if command is not None:
+                rows = conn.execute(
+                    """SELECT completed_at - started_at FROM jobs
+                       WHERE model = ? AND command = ?
+                         AND completed_at IS NOT NULL AND started_at IS NOT NULL
+                       ORDER BY completed_at DESC LIMIT 50""",
+                    (model, command),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """SELECT completed_at - started_at FROM jobs
+                       WHERE model = ?
+                         AND completed_at IS NOT NULL AND started_at IS NOT NULL
+                       ORDER BY completed_at DESC LIMIT 50""",
+                    (model,),
+                ).fetchall()
+            return [r[0] for r in rows]
+
+    def get_load_durations(self, model: str) -> list[float]:
+        """Convert load_duration_ns to seconds for recent jobs."""
+        with self._lock:
+            conn = self._connect()
+            rows = conn.execute(
+                """SELECT load_duration_ns FROM job_metrics
+                   WHERE model = ? AND load_duration_ns IS NOT NULL
+                   ORDER BY completed_at DESC LIMIT 50""",
+                (model,),
+            ).fetchall()
+            return [r[0] / 1_000_000_000 for r in rows]
+
+    def get_model_stats(self) -> dict[str, dict]:
+        """Aggregate stats per model: run_count, avg_tok_per_min, avg_warmup_s, model_size_gb."""
+        with self._lock:
+            conn = self._connect()
+            rows = conn.execute(
+                """SELECT model,
+                          COUNT(*) as run_count,
+                          AVG(CASE WHEN eval_count IS NOT NULL AND eval_duration_ns IS NOT NULL
+                                    AND eval_duration_ns > 0
+                               THEN (CAST(eval_count AS REAL) / (eval_duration_ns / 1e9)) * 60
+                               ELSE NULL END) as avg_tok_per_min,
+                          AVG(CASE WHEN load_duration_ns IS NOT NULL
+                               THEN load_duration_ns / 1e9
+                               ELSE NULL END) as avg_warmup_s,
+                          MAX(model_size_gb) as model_size_gb
+                   FROM job_metrics
+                   GROUP BY model"""
+            ).fetchall()
+            result = {}
+            for r in rows:
+                result[r[0]] = {
+                    "run_count": r[1],
+                    "avg_tok_per_min": r[2],
+                    "avg_warmup_s": r[3],
+                    "model_size_gb": r[4],
+                }
+            return result
 
     def has_pulling_model(self, model_name: str) -> bool:
         """Return True if any pull for model_name is currently in 'pulling' status."""
