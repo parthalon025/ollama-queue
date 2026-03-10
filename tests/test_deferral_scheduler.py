@@ -128,3 +128,15 @@ class TestSweepPreservesJobId:
         db.resume_deferred_job.assert_called_once_with(50)
         # No new job creation method should be called
         db.submit_job.assert_not_called()
+
+
+class TestSweepRespectsDisabledSetting:
+    def test_sweep_respects_disabled_setting(self):
+        """When defer.enabled is false, sweep should return empty."""
+        db = MagicMock()
+        db.get_setting.return_value = False
+        est = MagicMock()
+        sched = DeferralScheduler(db, est, lambda: [])
+        result = sched.sweep()
+        assert result == []
+        db.list_deferred.assert_not_called()

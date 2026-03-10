@@ -40,6 +40,9 @@ class DeferralScheduler:
 
     def _do_sweep(self) -> list[dict]:
         """Process deferred jobs — resume scheduled-past entries and find slots for unscheduled."""
+        if not self.db.get_setting("defer.enabled"):
+            return []
+
         resumed = []
         now = time.time()
 
