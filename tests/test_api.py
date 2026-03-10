@@ -697,3 +697,139 @@ class TestAdmissionGate:
         assert data["error"] == "queue_full"
         assert data["pending"] == 1
         assert data["max_queue_depth"] == 1
+
+
+# --- DLQ Schedule Preview & Reschedule ---
+
+
+def test_dlq_schedule_preview_empty(client):
+    resp = client.get("/api/dlq/schedule-preview")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["entries"] == []
+    assert data["count"] == 0
+
+
+def test_dlq_schedule_preview_with_entries(client_and_db):
+    client, db = client_and_db
+    job_id = db.submit_job("echo hi", "test-model", priority=5, timeout=60, source="test")
+    db.start_job(job_id)
+    db.complete_job(job_id, exit_code=1, stdout_tail="", stderr_tail="", outcome_reason="exit code 1")
+    db.move_to_dlq(job_id, "connection refused")
+    resp = client.get("/api/dlq/schedule-preview")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["entries"]) == 1
+    assert data["entries"][0]["eligible"] is True
+    assert data["count"] == 1
+
+
+def test_dlq_manual_reschedule(client_and_db):
+    client, db = client_and_db
+    job_id = db.submit_job("echo hi", "test-model", priority=5, timeout=60, source="test")
+    db.start_job(job_id)
+    db.complete_job(job_id, exit_code=1, stdout_tail="", stderr_tail="", outcome_reason="exit code 1")
+    db.move_to_dlq(job_id, "connection refused")
+    dlq_entries = db.list_dlq()
+    assert len(dlq_entries) == 1
+    resp = client.post(f"/api/dlq/{dlq_entries[0]['id']}/reschedule")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "new_job_id" in data
+
+
+def test_dlq_reschedule_not_found(client):
+    resp = client.post("/api/dlq/99999/reschedule")
+    assert resp.status_code == 404
+
+
+# --- Metrics ---
+
+
+def test_model_metrics_empty(client):
+    resp = client.get("/api/metrics/models")
+    assert resp.status_code == 200
+    assert resp.json() == {}
+
+
+def test_performance_curve_empty(client):
+    resp = client.get("/api/metrics/performance-curve")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["fitted"] is False
+
+
+def test_model_metrics_with_data(client_and_db):
+    client, db = client_and_db
+    job_id = db.submit_job("echo hi", "qwen2.5:7b", priority=5, timeout=60, source="test")
+    db.start_job(job_id)
+    db.complete_job(job_id, exit_code=0, stdout_tail="", stderr_tail="")
+    db.store_job_metrics(
+        job_id,
+        {
+            "model": "qwen2.5:7b",
+            "eval_count": 100,
+            "eval_duration_ns": 2_000_000_000,
+            "load_duration_ns": 1_500_000_000,
+            "model_size_gb": 4.7,
+        },
+    )
+    resp = client.get("/api/metrics/models")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "qwen2.5:7b" in data
+    assert data["qwen2.5:7b"]["run_count"] == 1
+
+
+# --- Deferrals ---
+
+
+def test_list_deferred_empty(client):
+    resp = client.get("/api/deferred")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_defer_and_resume(client_and_db):
+    client, db = client_and_db
+    job_id = db.submit_job("echo hi", "test-model", priority=5, timeout=60, source="test")
+    resp = client.post(f"/api/jobs/{job_id}/defer", json={"reason": "test"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["job_id"] == job_id
+    deferral_id = data["deferral_id"]
+
+    # Verify listed
+    resp = client.get("/api/deferred")
+    assert len(resp.json()) == 1
+
+    # Resume
+    resp = client.post(f"/api/deferred/{deferral_id}/resume")
+    assert resp.status_code == 200
+    assert resp.json()["job_id"] == job_id
+
+    # Verify no longer listed
+    resp = client.get("/api/deferred")
+    assert len(resp.json()) == 0
+
+
+def test_defer_not_found(client):
+    resp = client.post("/api/jobs/99999/defer", json={"reason": "test"})
+    assert resp.status_code == 404
+
+
+def test_defer_running_job_fails(client_and_db):
+    client, db = client_and_db
+    job_id = db.submit_job("echo hi", "test-model", priority=5, timeout=60, source="test")
+    db.start_job(job_id)
+    resp = client.post(f"/api/jobs/{job_id}/defer", json={"reason": "test"})
+    assert resp.status_code == 400
+
+
+def test_resume_already_resumed(client_and_db):
+    client, db = client_and_db
+    job_id = db.submit_job("echo hi", "test-model", priority=5, timeout=60, source="test")
+    deferral_id = db.defer_job(job_id, "test")
+    db.resume_deferred_job(deferral_id)
+    resp = client.post(f"/api/deferred/{deferral_id}/resume")
+    assert resp.status_code == 400

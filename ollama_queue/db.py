@@ -60,6 +60,15 @@ DEFAULTS = {
     "entropy_alert_window": 30,  # PR4: polls for rolling entropy baseline
     "entropy_alert_sigma": 2.0,  # PR4: std deviations for anomaly detection
     "entropy_suspend_low_priority": True,  # PR4: suspend p8-10 promotion on critical_backlog
+    # DLQ auto-reschedule
+    "dlq.auto_reschedule": True,
+    "dlq.sweep_fallback_minutes": 30,
+    "dlq.chronic_failure_threshold": 5,
+    # Proactive deferral
+    "defer.enabled": True,
+    "defer.burst_priority_threshold": 3,
+    "defer.thermal_threshold_c": 85,
+    "defer.resource_wait_timeout_s": 120,
 }
 
 EVAL_SETTINGS_DEFAULTS = {

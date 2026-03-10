@@ -886,6 +886,131 @@ def create_app(db: Database) -> FastAPI:
         n = db.clear_dlq()
         return {"cleared": n}
 
+    @app.get("/api/dlq/schedule-preview")
+    def dlq_schedule_preview():
+        """Preview what the next DLQ auto-reschedule sweep would do."""
+        from ollama_queue.system_snapshot import classify_failure
+
+        unscheduled = db.list_dlq(unscheduled_only=True)
+        if not unscheduled:
+            return {"entries": [], "count": 0}
+
+        chronic_threshold = db.get_setting("dlq.chronic_failure_threshold") or 5
+        preview = []
+        for entry in unscheduled:
+            cat = classify_failure(entry.get("failure_reason", ""))
+            reschedule_count = entry.get("auto_reschedule_count") or 0
+            eligible = cat != "permanent" and reschedule_count < chronic_threshold
+            preview.append(
+                {
+                    "dlq_id": entry["id"],
+                    "model": entry.get("model"),
+                    "failure_category": cat,
+                    "reschedule_count": reschedule_count,
+                    "eligible": eligible,
+                    "skip_reason": (
+                        "permanent failure"
+                        if cat == "permanent"
+                        else f"chronic (count={reschedule_count})"
+                        if not eligible
+                        else None
+                    ),
+                }
+            )
+        return {"entries": preview, "count": sum(1 for p in preview if p["eligible"])}
+
+    @app.post("/api/dlq/{dlq_id}/reschedule")
+    def reschedule_dlq_entry(dlq_id: int):
+        """Manually trigger reschedule for a single DLQ entry."""
+        from ollama_queue.system_snapshot import classify_failure
+
+        entry = None
+        for e in db.list_dlq():
+            if e["id"] == dlq_id:
+                entry = e
+                break
+        if not entry:
+            raise HTTPException(404, "DLQ entry not found")
+
+        cat = classify_failure(entry.get("failure_reason", ""))
+        if cat == "permanent":
+            raise HTTPException(400, "Cannot reschedule permanent failure")
+
+        new_job_id = db.submit_job(
+            command=entry["command"],
+            model=entry.get("model", ""),
+            priority=entry.get("priority", 0),
+            timeout=entry.get("timeout", 600),
+            source=entry.get("source", "dlq-manual-reschedule"),
+            tag=entry.get("tag"),
+            resource_profile=entry.get("resource_profile", "ollama"),
+        )
+        db.update_dlq_reschedule(
+            dlq_id,
+            rescheduled_job_id=new_job_id,
+            rescheduled_for=time.time(),
+            reschedule_reasoning="manual reschedule",
+        )
+        return {"new_job_id": new_job_id, "failure_category": cat}
+
+    # --- Metrics ---
+
+    @app.get("/api/metrics/models")
+    def get_model_metrics():
+        """Per-model performance stats from stored job metrics."""
+        return db.get_model_stats()
+
+    @app.get("/api/metrics/performance-curve")
+    def get_performance_curve():
+        """Fitted cross-model performance curve."""
+        from ollama_queue.performance_curve import PerformanceCurve
+
+        stats = db.get_model_stats()
+        curve = PerformanceCurve()
+        points = [
+            {
+                "model_size_gb": s["model_size_gb"],
+                "avg_tok_per_min": s["avg_tok_per_min"],
+                "avg_warmup_s": s.get("avg_warmup_s"),
+            }
+            for s in stats.values()
+            if s.get("model_size_gb") and s.get("avg_tok_per_min")
+        ]
+        if points:
+            curve.fit(points)
+        return curve.get_curve_data()
+
+    # --- Deferrals ---
+
+    @app.get("/api/deferred")
+    def list_deferred_jobs():
+        """List deferred jobs with scheduled resume times."""
+        return db.list_deferred()
+
+    @app.post("/api/jobs/{job_id}/defer")
+    def defer_job(job_id: int, body: dict = Body(default={})):
+        """User-initiated deferral."""
+        reason = body.get("reason", "manual")
+        context = body.get("context", "")
+        job = db.get_job(job_id)
+        if not job:
+            raise HTTPException(404, "Job not found")
+        if job["status"] not in ("pending", "queued"):
+            raise HTTPException(400, f"Cannot defer job in status '{job['status']}'")
+        deferral_id = db.defer_job(job_id, reason=reason, context=context)
+        return {"deferral_id": deferral_id, "job_id": job_id}
+
+    @app.post("/api/deferred/{deferral_id}/resume")
+    def resume_deferred(deferral_id: int):
+        """Manually resume a deferred job."""
+        deferral = db.get_deferral(deferral_id)
+        if not deferral:
+            raise HTTPException(404, "Deferral not found")
+        if deferral.get("resumed_at"):
+            raise HTTPException(400, "Already resumed")
+        db.resume_deferred_job(deferral_id)
+        return {"resumed": deferral_id, "job_id": deferral["job_id"]}
+
     # --- Models ---
 
     @app.get("/api/models")
