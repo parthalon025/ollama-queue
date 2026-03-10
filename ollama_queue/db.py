@@ -1606,6 +1606,23 @@ class Database:
             )
             conn.commit()
 
+    def mark_dlq_scheduling(self, dlq_id: int, rescheduled_for: float, reschedule_reasoning: str | None = None) -> None:
+        """Mark a DLQ entry as being rescheduled (crash-safety marker).
+
+        Does NOT increment auto_reschedule_count or set resolution — those are
+        written by update_dlq_reschedule once the job is confirmed created.
+        """
+        with self._lock:
+            conn = self._connect()
+            conn.execute(
+                """UPDATE dlq SET auto_rescheduled_at = ?,
+                   rescheduled_for = ?,
+                   reschedule_reasoning = ?
+                   WHERE id = ?""",
+                (time.time(), rescheduled_for, reschedule_reasoning, dlq_id),
+            )
+            conn.commit()
+
     def list_dlq(self, include_resolved: bool = False, unscheduled_only: bool = False) -> list[dict]:
         with self._lock:
             conn = self._connect()

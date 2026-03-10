@@ -92,7 +92,10 @@ class RuntimeEstimator:
                 sample_var = sum((x - sample_mean) ** 2 for x in log_durations) / (n - 1)
             else:
                 sample_var = prior["log_std"] ** 2
-            post_std = math.sqrt((n0 * prior["log_std"] ** 2 + n * sample_var) / (n0 + n))
+            prior_precision = 1.0 / (prior["log_std"] ** 2)
+            sample_precision = n / sample_var if sample_var > 1e-10 else n / (prior["log_std"] ** 2)
+            post_precision = prior_precision + sample_precision
+            post_std = math.sqrt(1.0 / post_precision)
         else:
             post_mean = prior["log_mean"]
             post_std = prior["log_std"]
@@ -135,7 +138,10 @@ class RuntimeEstimator:
             post_mean = (n0 * prior["log_mean"] + n * sample_mean) / (n0 + n)
 
             sample_var = sum((x - sample_mean) ** 2 for x in log_warmups) / (n - 1) if n > 1 else prior["log_std"] ** 2
-            post_std = math.sqrt((n0 * prior["log_std"] ** 2 + n * sample_var) / (n0 + n))
+            prior_precision = 1.0 / (prior["log_std"] ** 2)
+            sample_precision = n / sample_var if sample_var > 1e-10 else n / (prior["log_std"] ** 2)
+            post_precision = prior_precision + sample_precision
+            post_std = math.sqrt(1.0 / post_precision)
         else:
             post_mean = prior["log_mean"]
             post_std = prior["log_std"]

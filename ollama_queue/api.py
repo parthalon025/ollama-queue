@@ -1466,20 +1466,20 @@ def create_app(db: Database) -> FastAPI:
         What it shows: N/A — write-only; updated row returned.
         Decision it drives: Lets the user tune parameters without creating a new variant.
         """
-        conn = db._connect()
-        variant = _get_eval_variant(conn, variant_id)
-        if variant["is_system"]:
-            raise HTTPException(status_code=422, detail="Cannot modify system variant — clone it first.")
-        updatable_fields = {"label", "prompt_template_id", "model", "temperature", "num_ctx", "is_recommended"}
-        updates = {k: v for k, v in body.items() if k in updatable_fields}
-        if not updates:
-            return dict(variant)
-        # Validate prompt_template_id if provided
-        if "prompt_template_id" in updates:
-            _get_eval_template(conn, updates["prompt_template_id"])
-        set_clause = ", ".join(f"{k} = ?" for k in updates)
-        values = [*list(updates.values()), variant_id]
         with db._lock:
+            conn = db._connect()
+            variant = _get_eval_variant(conn, variant_id)
+            if variant["is_system"]:
+                raise HTTPException(status_code=422, detail="Cannot modify system variant — clone it first.")
+            updatable_fields = {"label", "prompt_template_id", "model", "temperature", "num_ctx", "is_recommended"}
+            updates = {k: v for k, v in body.items() if k in updatable_fields}
+            if not updates:
+                return dict(variant)
+            # Validate prompt_template_id if provided
+            if "prompt_template_id" in updates:
+                _get_eval_template(conn, updates["prompt_template_id"])
+            set_clause = ", ".join(f"{k} = ?" for k in updates)
+            values = [*list(updates.values()), variant_id]
             conn.execute(f"UPDATE eval_variants SET {set_clause} WHERE id = ?", values)
             conn.commit()
         return _get_eval_variant(conn, variant_id)
@@ -1491,11 +1491,11 @@ def create_app(db: Database) -> FastAPI:
         What it shows: N/A — delete operation; variant disappears from GET /api/eval/variants.
         Decision it drives: Lets the user remove experiments they no longer need.
         """
-        conn = db._connect()
-        variant = _get_eval_variant(conn, variant_id)
-        if variant["is_system"]:
-            raise HTTPException(status_code=422, detail="Cannot modify system variant — clone it first.")
         with db._lock:
+            conn = db._connect()
+            variant = _get_eval_variant(conn, variant_id)
+            if variant["is_system"]:
+                raise HTTPException(status_code=422, detail="Cannot modify system variant — clone it first.")
             conn.execute("DELETE FROM eval_variants WHERE id = ?", (variant_id,))
             conn.commit()
         return JSONResponse(content=None, status_code=204)
@@ -1509,8 +1509,9 @@ def create_app(db: Database) -> FastAPI:
         What it shows: All available prompt templates (system + user).
         Decision it drives: Lets the user pick or clone a template when creating variants.
         """
-        conn = db._connect()
-        return [dict(r) for r in conn.execute("SELECT * FROM eval_prompt_templates ORDER BY created_at").fetchall()]
+        with db._lock:
+            conn = db._connect()
+            return [dict(r) for r in conn.execute("SELECT * FROM eval_prompt_templates ORDER BY created_at").fetchall()]
 
     @app.put("/api/eval/templates/{template_id}")
     def update_eval_template(template_id: str, body: dict = Body(...)):
@@ -1519,17 +1520,17 @@ def create_app(db: Database) -> FastAPI:
         What it shows: N/A — write-only; updated row returned.
         Decision it drives: Lets the user refine prompt instructions without losing the system originals.
         """
-        conn = db._connect()
-        template = _get_eval_template(conn, template_id)
-        if template["is_system"]:
-            raise HTTPException(status_code=422, detail="Cannot modify system template — clone it first.")
-        updatable_fields = {"label", "instruction", "format_spec", "examples", "is_chunked"}
-        updates = {k: v for k, v in body.items() if k in updatable_fields}
-        if not updates:
-            return dict(template)
-        set_clause = ", ".join(f"{k} = ?" for k in updates)
-        values = [*list(updates.values()), template_id]
         with db._lock:
+            conn = db._connect()
+            template = _get_eval_template(conn, template_id)
+            if template["is_system"]:
+                raise HTTPException(status_code=422, detail="Cannot modify system template — clone it first.")
+            updatable_fields = {"label", "instruction", "format_spec", "examples", "is_chunked"}
+            updates = {k: v for k, v in body.items() if k in updatable_fields}
+            if not updates:
+                return dict(template)
+            set_clause = ", ".join(f"{k} = ?" for k in updates)
+            values = [*list(updates.values()), template_id]
             conn.execute(f"UPDATE eval_prompt_templates SET {set_clause} WHERE id = ?", values)
             conn.commit()
         return _get_eval_template(conn, template_id)
@@ -1544,12 +1545,12 @@ def create_app(db: Database) -> FastAPI:
         import datetime as _dt
         import uuid
 
-        conn = db._connect()
-        original = _get_eval_template(conn, template_id)
         now = _dt.datetime.now(_dt.UTC).isoformat()
         new_id = str(uuid.uuid4())[:8]
-        label = body.get("label") or f"{original['label']} (copy)"
         with db._lock:
+            conn = db._connect()
+            original = _get_eval_template(conn, template_id)
+            label = body.get("label") or f"{original['label']} (copy)"
             conn.execute(
                 """INSERT INTO eval_prompt_templates
                    (id, label, instruction, format_spec, examples, is_chunked, is_system, created_at)
