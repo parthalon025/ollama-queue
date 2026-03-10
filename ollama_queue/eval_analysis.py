@@ -142,7 +142,7 @@ def extract_failure_cases(
         # No cluster data: return lowest-scoring pairs as low_confidence
         scored_with_values = [r for r in scored_rows if _get_score(r) is not None]
         scored_with_values.sort(
-            key=lambda r: int(_get_score(r) or 0),
+            key=lambda r: int(_get_score(r) if _get_score(r) is not None else 0),
         )
         results = []
         for r in scored_with_values:
