@@ -6,12 +6,19 @@ import {
     updateScheduleJob, fetchModels, batchToggleJobs, batchRunJobs,
     fetchJobRuns, deleteScheduleJob, fetchSuggestTime, enableJobByName,
     generateJobDescription,
-} from '../stores';
-import { useActionFeedback } from '../hooks/useActionFeedback.js';
-import { GanttChart, runStatus } from '../components/GanttChart';
-import { ModelBadge } from '../components/ModelBadge';
-import LoadMapStrip from '../components/LoadMapStrip.jsx';
-import AddRecurringJobModal from '../components/AddRecurringJobModal.jsx';
+} from '../../stores';
+import { useActionFeedback } from '../../hooks/useActionFeedback.js';
+import { GanttChart, runStatus } from '../../components/GanttChart';
+import { ModelBadge } from '../../components/ModelBadge';
+import LoadMapStrip from '../../components/LoadMapStrip.jsx';
+import AddRecurringJobModal from '../../components/AddRecurringJobModal.jsx';
+import ScheduleHistory from './ScheduleHistory.jsx';
+import {
+    formatCountdown, formatInterval, parseInterval, formatDuration,
+    computeRho, rhoStatus, priorityCategory, groupJobsByTag, groupNextDue,
+    CATEGORY_COLORS, COLUMN_DEFS, COL_COUNT, STATUS_COLORS,
+    labelStyle, inputStyle, isMobileScreen,
+} from './helpers.js';
 
 // What it shows: The scheduling view — the Gantt timeline of upcoming jobs, the 24h load-map
 //   density strip showing which half-hour slots are already busy, and the full list of
@@ -19,96 +26,6 @@ import AddRecurringJobModal from '../components/AddRecurringJobModal.jsx';
 // Decision it drives: When should I add a new recurring job so it doesn't pile on top of
 //   existing ones? Which recurring jobs are enabled or disabled? Is the schedule evenly
 //   spread across the day, or are all jobs firing at the same time?
-
-// Note: local vars named 'hrs'/'mins' to avoid shadowing the injected 'h' JSX factory.
-function formatCountdown(next_run) {
-    const diff = next_run - Date.now() / 1000;
-    if (diff < 0) return 'overdue';
-    const hrs = Math.floor(diff / 3600);
-    const mins = Math.floor((diff % 3600) / 60);
-    const secs = Math.floor(diff % 60);
-    if (hrs > 0) return `${hrs}h ${mins}m ${secs}s`;
-    if (mins > 0) return `${mins}m ${secs}s`;
-    return `${secs}s`;
-}
-
-function formatInterval(seconds) {
-    if (!seconds) return '\u2014';
-    if (seconds % 86400 === 0) return `${seconds / 86400}d`;
-    if (seconds % 3600 === 0) return `${seconds / 3600}h`;
-    if (seconds % 60 === 0) return `${seconds / 60}m`;
-    return `${seconds}s`;
-}
-
-// Parse shorthand like "4h", "30m", "1d", "7d", "90s", or plain seconds
-function parseInterval(str) {
-    if (!str) return null;
-    const trimmed = str.trim().toLowerCase();
-    const match = trimmed.match(/^(\d+(?:\.\d+)?)\s*(d|h|m|s)?$/);
-    if (!match) return null;
-    const val = parseFloat(match[1]);
-    if (val <= 0 || !isFinite(val)) return null;
-    const unit = match[2] || 's';
-    const multipliers = { d: 86400, h: 3600, m: 60, s: 1 };
-    return Math.round(val * multipliers[unit]);
-}
-
-function formatDuration(secs) {
-    if (secs === null || secs === undefined || secs < 0) return '--';
-    const s = Math.round(secs);
-    if (s < 60) return `${s}s`;
-    const mins = Math.floor(s / 60);
-    const rem = s % 60;
-    if (mins < 60) return `${mins}m ${rem}s`;
-    const hrs = Math.floor(mins / 60);
-    return `${hrs}h ${mins % 60}m`;
-}
-
-// Traffic intensity ρ = sum(estimated_duration) / 86400.
-// Research threshold: keep ρ < 0.80 (Kingman's formula diverges as ρ → 1).
-// Includes ALL jobs (enabled + disabled) — represents maximum scheduled load.
-// Heavy-model fallback: 1800s; others: 600s (10m default for LLM tasks).
-function computeRho(jobList) {
-    if (jobList.length === 0) return 0;
-    const totalSecs = jobList.reduce((sum, j) => {
-        const fallback = j.model_profile === 'heavy' ? 1800 : 600;
-        return sum + (j.estimated_duration || fallback);
-    }, 0);
-    return totalSecs / 86400;
-}
-
-function rhoStatus(rho) {
-    if (rho < 0.60) return { label: 'light load', color: 'var(--status-healthy)' };
-    if (rho < 0.80) return { label: 'moderate load', color: 'var(--status-warning)' };
-    return { label: 'very busy', color: 'var(--status-error)' };
-}
-
-// Priority design token colors (theme-aware)
-const CATEGORY_COLORS = {
-    critical:   'var(--status-error)',
-    high:       'var(--status-warning)',
-    normal:     'var(--accent)',
-    low:        'var(--text-tertiary)',
-    background: 'var(--text-tertiary)',
-};
-
-function priorityCategory(p) {
-    if (p <= 2) return 'critical';
-    if (p <= 4) return 'high';
-    if (p <= 6) return 'normal';
-    if (p <= 8) return 'low';
-    return 'background';
-}
-
-function relativeTimeLog(ts) {
-    if (!ts) return '\u2014';
-    const diff = Math.max(0, Math.floor(Date.now() / 1000 - ts));
-    if (diff < 60) return `${diff}s ago`;
-    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-    const dateObj = new Date(ts * 1000);
-    return `${dateObj.toLocaleDateString()} ${dateObj.toLocaleTimeString()}`;
-}
 
 function useDebounce(value, delay) {
     const [debounced, setDebounced] = useState(value);
@@ -118,79 +35,6 @@ function useDebounce(value, delay) {
     }, [value, delay]);
     return debounced;
 }
-
-// --- Grouping ---
-
-const TAG_ORDER = ['aria', 'telegram', 'lessons', 'notion', 'embeddings'];
-
-function groupJobsByTag(jobList) {
-    const groups = {};
-    for (const job of jobList) {
-        const tag = job.tag || 'other';
-        if (!groups[tag]) groups[tag] = [];
-        groups[tag].push(job);
-    }
-    const ordered = TAG_ORDER.filter(tag => groups[tag]).map(tag => ({ tag, jobs: groups[tag] }));
-    const extra = Object.keys(groups)
-        .filter(tag => !TAG_ORDER.includes(tag) && tag !== 'other')
-        .sort();
-    for (const tag of extra) ordered.push({ tag, jobs: groups[tag] });
-    if (groups['other']) ordered.push({ tag: 'other', jobs: groups['other'] });
-    return ordered;
-}
-
-function groupNextDue(groupJobs) {
-    let min = Infinity;
-    for (const rj of groupJobs) {
-        if (rj.enabled && rj.next_run < min) min = rj.next_run;
-    }
-    return min === Infinity ? null : min;
-}
-
-// --- Table layout ---
-
-const COLUMN_DEFS = [
-    { label: 'Name',      title: 'Job name — set when the recurring job was created' },
-    { label: 'Model',     title: 'Ollama model this job uses (overrides the system default)' },
-    { label: 'GPU Mem',   title: 'Memory profile: light · standard · heavy. Heavy needs ≥16GB VRAM and cannot overlap another heavy job' },
-    { label: 'Repeats',   title: 'How often this job runs — interval (e.g. 4h) or cron expression' },
-    { label: 'Priority',  title: '1=highest, 10=lowest. Lower number dequeues first when multiple jobs are waiting' },
-    { label: 'Due In',    title: 'Time until the next scheduled run' },
-    { label: 'Est. Time', title: 'Estimated run duration based on recent run history' },
-    { label: '\u2713',    title: 'Number of completed successful runs' },
-    { label: 'Limit',     title: 'Max retry attempts before the job is moved to the Dead Letter Queue (DLQ)' },
-    { label: '\u{1F4CC}', title: "Pinned slot — the rebalancer will not move this job's scheduled run time" },
-    { label: 'On',        title: 'Enable or disable this recurring job' },
-    { label: '',          title: undefined },
-];
-const COLUMNS = COLUMN_DEFS.map(d => d.label);
-const COL_COUNT = COLUMNS.length;
-
-const STATUS_COLORS = {
-    completed: 'var(--status-success)',
-    failed: 'var(--status-error)',
-    killed: 'var(--status-error)',
-    pending: 'var(--text-tertiary)',
-    running: 'var(--accent)',
-};
-
-// Shared styles for detail panel form
-const labelStyle = {
-    fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)',
-    color: 'var(--text-tertiary)', fontWeight: 600,
-    textTransform: 'uppercase', letterSpacing: '0.03em',
-    marginBottom: '0.2rem', display: 'block',
-};
-
-const inputStyle = {
-    fontFamily: 'var(--font-mono)', fontSize: 'var(--type-body)',
-    background: 'var(--bg-surface-raised)', color: 'var(--text-primary)',
-    border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius)',
-    padding: '0.3rem 0.5rem', width: '100%',
-};
-
-
-const isMobileScreen = () => typeof window !== 'undefined' && window.innerWidth <= 640;
 
 export default function Plan() {
     const [tick, setTick] = useState(0);
@@ -320,7 +164,7 @@ export default function Plan() {
             return;
         }
         await saveAct(
-            'Saving…',
+            'Saving\u2026',
             async () => {
                 await updateScheduleJob(editForm.id, updates);
                 setExpandedJobId(null);
@@ -335,7 +179,7 @@ export default function Plan() {
     async function handleGenerateDescription(rjId) {
         setGeneratingDescId(rjId);
         await generateAct(
-            'Generating description…',
+            'Generating description\u2026',
             async () => {
                 const result = await generateJobDescription(rjId);
                 if (result.description) {
@@ -352,7 +196,7 @@ export default function Plan() {
         const rj = jobs.find(j => j.id === rjId);
         if (!window.confirm(`Delete recurring job "${rj?.name}"? This cannot be undone.`)) return;
         await deleteAct(
-            'Deleting…',
+            'Deleting\u2026',
             async () => {
                 await deleteScheduleJob(rjId);
                 setExpandedJobId(null);
@@ -368,7 +212,7 @@ export default function Plan() {
             if (!ok) return;
         }
         await runNowAct(
-            `Triggering ${rj.name}…`,
+            `Triggering ${rj.name}\u2026`,
             async () => {
                 await runScheduleJobNow(rj.id);
             },
@@ -378,7 +222,7 @@ export default function Plan() {
 
     async function handlePinToggle(rj) {
         await pinAct(
-            rj.pinned ? 'Unpinning…' : 'Pinning…',
+            rj.pinned ? 'Unpinning\u2026' : 'Pinning\u2026',
             async () => {
                 await updateScheduleJob(rj.id, { pinned: !rj.pinned });
             },
@@ -389,7 +233,7 @@ export default function Plan() {
     async function handleBatchRun(tag) {
         setBatchRunningTags(prev => new Set([...prev, tag]));
         await batchRunAct(
-            `Running all ${tag} jobs…`,
+            `Running all ${tag} jobs\u2026`,
             async () => {
                 await batchRunJobs(tag);
             },
@@ -404,7 +248,7 @@ export default function Plan() {
 
     async function handleBatchToggle(tag, enabled) {
         await batchToggleAct(
-            enabled ? `Enabling ${tag}…` : `Disabling ${tag}…`,
+            enabled ? `Enabling ${tag}\u2026` : `Disabling ${tag}\u2026`,
             async () => {
                 await batchToggleJobs(tag, enabled);
                 await fetchSchedule();
@@ -415,7 +259,7 @@ export default function Plan() {
 
     async function handleRebalance() {
         await rebalanceAct(
-            'Rebalancing…',
+            'Rebalancing\u2026',
             async () => {
                 await triggerRebalance();
                 await fetchSchedule();
@@ -426,7 +270,7 @@ export default function Plan() {
 
     async function handleReenableJob(name) {
         await reenableAct(
-            `Re-enabling ${name}…`,
+            `Re-enabling ${name}\u2026`,
             async () => {
                 await enableJobByName(name);
                 await fetchSchedule();
@@ -677,7 +521,7 @@ export default function Plan() {
                                     opacity: reenableFb.phase === 'loading' ? 0.5 : 1,
                                 }}
                             >
-                                {reenableFb.phase === 'loading' ? '…' : 'Re-enable'}
+                                {reenableFb.phase === 'loading' ? '\u2026' : 'Re-enable'}
                             </button>
                             {reenableFb.msg && <div class={`action-fb action-fb--${reenableFb.phase}`}>{reenableFb.msg}</div>}
                         </div>
@@ -735,12 +579,12 @@ export default function Plan() {
                                     onClick={() => handleGenerateDescription(rj.id)}
                                     disabled={generatingDescId === rj.id}
                                 >
-                                    {generatingDescId === rj.id ? '…' : '↻'}
+                                    {generatingDescId === rj.id ? '\u2026' : '\u21BB'}
                                 </button>
                                 {generatingDescId === rj.id && (
                                     <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-micro)',
                                                    color: 'var(--text-tertiary)' }}>
-                                        generating…
+                                        generating\u2026
                                     </span>
                                 )}
                                 {generateFb.msg && !generatingDescId && (
@@ -752,8 +596,8 @@ export default function Plan() {
                                 value={editForm.description}
                                 onInput={ev => setEditForm(prev => ({ ...prev, description: ev.target.value }))}
                                 placeholder={generatingDescId === rj.id
-                                    ? 'Asking AI…'
-                                    : 'Click ↻ to auto-generate, or type a description here'}
+                                    ? 'Asking AI\u2026'
+                                    : 'Click \u21BB to auto-generate, or type a description here'}
                                 rows={3}
                                 style={{
                                     width: '100%', resize: 'vertical',
@@ -1091,7 +935,7 @@ export default function Plan() {
                                 }}
                                 title="Find the best time windows to add a new recurring job — highlights the quietest slots on the chart above"
                             >
-                                {suggestLoading ? '…' : suggestSlots === null ? 'Find best slot' : suggestSlots.length === 0 ? 'No open slots found' : 'Clear suggestions'}
+                                {suggestLoading ? '\u2026' : suggestSlots === null ? 'Find best slot' : suggestSlots.length === 0 ? 'No open slots found' : 'Clear suggestions'}
                             </button>
                         </div>
                     </div>
@@ -1101,7 +945,7 @@ export default function Plan() {
             {/* Load map density strip — 48-slot daily load visualization */}
             <LoadMapStrip data={loadMap.value} />
 
-            {/* Gantt timeline — tap/click bars for details; ⤢ expands to full screen on mobile */}
+            {/* Gantt timeline — tap/click bars for details; expands to full screen on mobile */}
             <div class="t-frame" data-label="Next 24 hours">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
                     <p style={{ margin: 0, fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', lineHeight: 1.5, flex: 1 }}>
@@ -1117,7 +961,7 @@ export default function Plan() {
                             color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)',
                             fontSize: 'var(--type-label)', padding: '2px 7px', marginLeft: '0.5rem', flexShrink: 0,
                         }}
-                    >⤢</button>
+                    >{'\u2922'}</button>
                 </div>
                 <GanttChart
                     jobs={jobs}
@@ -1142,7 +986,7 @@ export default function Plan() {
                         <button
                             onClick={() => setGanttExpanded(false)}
                             style={{ background: 'none', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius)', cursor: 'pointer', color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', fontSize: 'var(--type-body)', padding: '3px 10px' }}
-                        >✕ close</button>
+                        >{'\u2715'} close</button>
                     </div>
                     <GanttChart
                         jobs={jobs}
@@ -1197,7 +1041,7 @@ export default function Plan() {
                             marginBottom: '0.25rem',
                         }}>
                             <span style={{ color: 'var(--status-warning)', fontWeight: 700, whiteSpace: 'nowrap' }}>
-                                ⚠ {lateJobs.length} job{lateJobs.length > 1 ? 's' : ''} running behind schedule —
+                                {'\u26A0'} {lateJobs.length} job{lateJobs.length > 1 ? 's' : ''} running behind schedule {'\u2014'}
                             </span>
                             {lateJobs.map((rj, idx) => (
                                 <span key={rj.id}>
@@ -1261,58 +1105,7 @@ export default function Plan() {
                 </>
             )}
 
-            <section>
-                <h3 style={{ fontFamily: 'var(--font-mono)', fontWeight: 700,
-                             fontSize: 'var(--type-label)', color: 'var(--text-secondary)',
-                             textTransform: 'uppercase', letterSpacing: '0.05em',
-                             margin: '0 0 0.5rem' }}>
-                    Schedule Change History
-                </h3>
-                {events.length === 0 ? (
-                    <p style={{ color: 'var(--text-tertiary)', fontSize: 'var(--type-body)' }}>
-                        No schedule changes yet. Changes appear here after you rebalance or add jobs.
-                    </p>
-                ) : (
-                    <div class="t-frame" style={{ padding: 0, overflow: 'hidden' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse',
-                                        fontSize: 'var(--type-label)' }}>
-                            <thead>
-                                <tr style={{ borderBottom: '1px solid var(--border-subtle)',
-                                             background: 'var(--bg-surface-raised)' }}>
-                                    {['Time', 'Event', 'Details'].map(col => (
-                                        <th key={col} style={{
-                                            textAlign: 'left', padding: '0.4rem 0.75rem',
-                                            color: 'var(--text-secondary)', fontWeight: 600,
-                                        }}>{col}</th>
-                                    ))}
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {events.slice(0, 20).map(evItem => (
-                                    <tr key={evItem.id}
-                                        style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                                        <td style={{ padding: '0.4rem 0.75rem', color: 'var(--text-tertiary)',
-                                                     fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }}>
-                                            <span title={new Date(evItem.timestamp * 1000).toLocaleString()}>
-                                                {relativeTimeLog(evItem.timestamp)}
-                                            </span>
-                                        </td>
-                                        <td style={{ padding: '0.4rem 0.75rem' }}>
-                                            <code class="data-mono"
-                                                  style={{ color: 'var(--accent)', fontSize: 'var(--type-label)' }}>
-                                                {evItem.event_type}
-                                            </code>
-                                        </td>
-                                        <td style={{ padding: '0.4rem 0.75rem', color: 'var(--text-secondary)' }}>
-                                            {evItem.details || '\u2014'}
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                )}
-            </section>
+            <ScheduleHistory events={events} />
         </div>
     );
 }

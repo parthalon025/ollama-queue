@@ -23,7 +23,7 @@ import {
 import Sidebar from './components/Sidebar.jsx';
 import BottomNav from './components/BottomNav.jsx';
 import Now from './pages/Now.jsx';
-import Plan from './pages/Plan.jsx';
+import Plan from './pages/Plan';
 import History from './pages/History.jsx';
 import ModelsTab from './pages/ModelsTab.jsx';
 import Settings from './pages/Settings.jsx';
