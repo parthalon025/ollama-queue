@@ -86,7 +86,7 @@ class TestSweepFindsSlotAndReschedules:
     def test_sweep_finds_slot_and_reschedules(self):
         """Single entry with available slot: new job created, DLQ updated."""
         entry = _make_entry()
-        sched, db, estimator, load_map_fn = _make_scheduler(entries=[entry], submit_return=42)
+        sched, db, _estimator, _load_map_fn = _make_scheduler(entries=[entry], submit_return=42)
 
         result = sched._sweep([entry])
 
