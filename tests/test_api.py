@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from ollama_queue.api import create_app
+from ollama_queue.app import create_app
 from ollama_queue.db import Database
 from ollama_queue.scheduler import Scheduler
 
@@ -941,7 +941,7 @@ def test_submit_429_fallback_when_eta_calculation_raises(client_and_db):
     db.set_setting("max_queue_depth", 1)
     db.submit_job("echo a", "qwen2.5:7b", 5, 60, "test")
 
-    with patch("ollama_queue.api.DurationEstimator") as mock_est:
+    with patch("ollama_queue.api.jobs.DurationEstimator") as mock_est:
         mock_est.return_value.queue_etas.side_effect = Exception("boom")
         resp = client.post(
             "/api/queue/submit",
@@ -1012,7 +1012,7 @@ def test_generate_description_endpoint(client_and_db):
     jobs = client.get("/api/schedule").json()
     rj_id = jobs[0]["id"]
 
-    with patch("ollama_queue.api._call_generate_description") as mock_gen:
+    with patch("ollama_queue.api.schedule._call_generate_description") as mock_gen:
         resp = client.post(f"/api/schedule/{rj_id}/generate-description")
     assert resp.status_code == 200
     assert resp.json()["ok"] is True
@@ -1038,9 +1038,9 @@ def test_call_generate_description_empty_response():
     mock_client.__exit__ = MagicMock(return_value=False)
     mock_client.post.return_value = mock_resp
 
-    from ollama_queue.api import _call_generate_description
+    from ollama_queue.api.schedule import _call_generate_description
 
-    with patch("ollama_queue.api.httpx.Client", return_value=mock_client):
+    with patch("ollama_queue.api.schedule.httpx.Client", return_value=mock_client):
         _call_generate_description(1, "test", "tag", "echo hi", mock_db)
     # update_recurring_job should NOT be called (empty response)
     mock_db.update_recurring_job.assert_not_called()
@@ -1221,7 +1221,7 @@ def test_startup_scan_exception_is_caught(tmp_path):
     """Startup consumer scan exception is caught and logged. Covers lines 2756-2757."""
     db = Database(str(tmp_path / "test.db"))
     db.initialize()
-    with patch("ollama_queue.api.run_scan", side_effect=RuntimeError("scan failed")):
+    with patch("ollama_queue.app.run_scan", side_effect=RuntimeError("scan failed")):
         app = create_app(db)
     assert app is not None
 

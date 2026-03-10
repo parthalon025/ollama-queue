@@ -4,7 +4,7 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from ollama_queue.api import create_app
+from ollama_queue.app import create_app
 from ollama_queue.db import Database
 
 
@@ -51,7 +51,7 @@ def test_list_consumers_returns_rows(client, db):
 
 def test_scan_triggers_and_returns_consumers(client):
     with patch(
-        "ollama_queue.api.run_scan",
+        "ollama_queue.api.consumers.run_scan",
         return_value=[
             {
                 "name": "aria.service",
@@ -96,7 +96,7 @@ def test_include_streaming_confirmed_with_override_proceeds(client, db, tmp_path
     env.write_text("OLLAMA_HOST=localhost:11434\n")
     cid = _seed_consumer(db, streaming_confirmed=1, patch_path=str(env), type="env_file")
     with patch(
-        "ollama_queue.api.patch_consumer",
+        "ollama_queue.api.consumers.patch_consumer",
         return_value={"patch_applied": True, "status": "patched", "patch_type": "env_file"},
     ):
         resp = client.post(
@@ -121,7 +121,7 @@ def test_include_deferred_sets_pending_restart(client, db, tmp_path):
     env.write_text("OLLAMA_HOST=localhost:11434\n")
     cid = _seed_consumer(db, patch_path=str(env), type="env_file")
     with patch(
-        "ollama_queue.api.patch_consumer",
+        "ollama_queue.api.consumers.patch_consumer",
         return_value={"patch_applied": True, "status": "pending_restart", "patch_type": "env_file"},
     ):
         resp = client.post(f"/api/consumers/{cid}/include", json={"restart_policy": "deferred"})
@@ -141,7 +141,7 @@ def test_ignore_sets_status(client, db):
 
 def test_revert_calls_revert_and_resets_status(client, db):
     cid = _seed_consumer(db, status="patched", patch_applied=1)
-    with patch("ollama_queue.api.revert_consumer"):
+    with patch("ollama_queue.api.consumers.revert_consumer"):
         resp = client.post(f"/api/consumers/{cid}/revert")
     assert resp.status_code == 200
     assert db.get_consumer(cid)["status"] == "discovered"
@@ -150,7 +150,7 @@ def test_revert_calls_revert_and_resets_status(client, db):
 def test_health_endpoint_returns_status(client, db):
     cid = _seed_consumer(db, status="patched")
     with patch(
-        "ollama_queue.api.check_health",
+        "ollama_queue.api.consumers.check_health",
         return_value={
             "old_port_clear": True,
             "new_port_active": True,
@@ -190,7 +190,7 @@ def test_include_patch_exception_returns_500(client, db):
     """Patch failure returns 500. Covers lines 2641-2642."""
     cid = _seed_consumer(db, patch_path="/tmp/test.env", type="env_file")  # noqa: S108
     with patch(
-        "ollama_queue.api.patch_consumer",
+        "ollama_queue.api.consumers.patch_consumer",
         side_effect=RuntimeError("patch write error"),
     ):
         resp = client.post(
@@ -215,10 +215,10 @@ def test_include_patched_triggers_health_check(client, db, tmp_path):
 
     with (
         patch(
-            "ollama_queue.api.patch_consumer",
+            "ollama_queue.api.consumers.patch_consumer",
             return_value={"patch_applied": True, "status": "patched", "patch_type": "env_file"},
         ),
-        patch("ollama_queue.api.check_health", side_effect=mock_check_health),
+        patch("ollama_queue.api.consumers.check_health", side_effect=mock_check_health),
     ):
         resp = client.post(
             f"/api/consumers/{cid}/include",
@@ -240,10 +240,10 @@ def test_include_health_check_exception_is_logged(client, db, tmp_path):
 
     with (
         patch(
-            "ollama_queue.api.patch_consumer",
+            "ollama_queue.api.consumers.patch_consumer",
             return_value={"patch_applied": True, "status": "patched", "patch_type": "env_file"},
         ),
-        patch("ollama_queue.api.check_health", side_effect=RuntimeError("health check boom")),
+        patch("ollama_queue.api.consumers.check_health", side_effect=RuntimeError("health check boom")),
     ):
         resp = client.post(
             f"/api/consumers/{cid}/include",
@@ -272,7 +272,7 @@ def test_revert_consumer_exception_returns_500(client, db):
     """Revert failure returns 500. Covers lines 2680-2682."""
     cid = _seed_consumer(db, status="patched", patch_applied=1)
     with patch(
-        "ollama_queue.api.revert_consumer",
+        "ollama_queue.api.consumers.revert_consumer",
         side_effect=RuntimeError("file revert failed"),
     ):
         resp = client.post(f"/api/consumers/{cid}/revert")
@@ -315,7 +315,7 @@ def test_intercept_enable_success(client, db):
     with (
         patch.object(_plat_mod, "system", return_value="Linux"),
         patch(
-            "ollama_queue.api.enable_intercept",
+            "ollama_queue.api.consumers.enable_intercept",
             return_value={"enabled": True},
         ),
         patch("os.getuid", return_value=1000),
@@ -333,7 +333,7 @@ def test_intercept_enable_iptables_fail_returns_422(client, db):
     with (
         patch.object(_plat_mod, "system", return_value="Linux"),
         patch(
-            "ollama_queue.api.enable_intercept",
+            "ollama_queue.api.consumers.enable_intercept",
             return_value={"enabled": False, "error": "iptables not found"},
         ),
         patch("os.getuid", return_value=1000),
@@ -347,7 +347,7 @@ def test_intercept_disable_success(client, db):
     """Intercept disable succeeds. Covers lines 2717-2722."""
     db.set_setting("intercept_mode_uid", "1000")
     with patch(
-        "ollama_queue.api.disable_intercept",
+        "ollama_queue.api.consumers.disable_intercept",
         return_value={"enabled": False},
     ):
         resp = client.post("/api/consumers/intercept/disable")
@@ -359,7 +359,7 @@ def test_intercept_disable_error_returns_500(client, db):
     """Intercept disable with error returns 500. Covers lines 2719-2720."""
     db.set_setting("intercept_mode_uid", "1000")
     with patch(
-        "ollama_queue.api.disable_intercept",
+        "ollama_queue.api.consumers.disable_intercept",
         return_value={"enabled": True, "error": "iptables -D failed"},
     ):
         resp = client.post("/api/consumers/intercept/disable")
@@ -370,7 +370,7 @@ def test_intercept_status_endpoint(client, db):
     """Intercept status returns current state. Covers lines 2726-2727."""
     db.set_setting("intercept_mode_uid", "1000")
     with patch(
-        "ollama_queue.api.get_intercept_status",
+        "ollama_queue.api.consumers.get_intercept_status",
         return_value={"enabled": False, "rules": []},
     ):
         resp = client.get("/api/consumers/intercept/status")

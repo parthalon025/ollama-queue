@@ -17,7 +17,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from ollama_queue.api import create_app
+from ollama_queue.app import create_app
 from ollama_queue.db import Database
 from ollama_queue.eval_engine import create_eval_run, update_eval_run
 
@@ -684,7 +684,7 @@ def test_include_consumer_patch_exception(client_and_db):
     """POST /api/consumers/{id}/include returns 500 when patch_consumer fails."""
     client, db = client_and_db
     cid = _seed_consumer(db, patch_path="/home/fake/test.env")
-    with patch("ollama_queue.api.patch_consumer", side_effect=RuntimeError("patch failed")):
+    with patch("ollama_queue.api.consumers.patch_consumer", side_effect=RuntimeError("patch failed")):
         resp = client.post(f"/api/consumers/{cid}/include", json={"restart_policy": "deferred"})
     assert resp.status_code == 500
     assert "Patch failed" in resp.json()["detail"]
@@ -702,10 +702,10 @@ def test_include_consumer_health_check_exception(client_and_db):
 
     with (
         patch(
-            "ollama_queue.api.patch_consumer",
+            "ollama_queue.api.consumers.patch_consumer",
             return_value={"patch_applied": True, "status": "patched", "patch_type": "env_file"},
         ),
-        patch("ollama_queue.api.check_health", side_effect=RuntimeError("health boom")),
+        patch("ollama_queue.api.consumers.check_health", side_effect=RuntimeError("health boom")),
         patch("threading.Thread") as mock_thread,
     ):
         mock_thread_instance = MagicMock()
@@ -747,7 +747,7 @@ def test_revert_consumer_exception(client_and_db):
     """POST /api/consumers/{id}/revert returns 500 when revert fails."""
     client, db = client_and_db
     cid = _seed_consumer(db, status="patched", patch_applied=1)
-    with patch("ollama_queue.api.revert_consumer", side_effect=RuntimeError("revert boom")):
+    with patch("ollama_queue.api.consumers.revert_consumer", side_effect=RuntimeError("revert boom")):
         resp = client.post(f"/api/consumers/{cid}/revert")
     assert resp.status_code == 500
     assert "revert" in resp.json()["detail"].lower()
@@ -792,7 +792,9 @@ def test_intercept_enable_iptables_failure(client_and_db):
 
     with (
         patch("platform.system", return_value="Linux"),
-        patch("ollama_queue.api.enable_intercept", return_value={"enabled": False, "error": "iptables failed"}),
+        patch(
+            "ollama_queue.api.consumers.enable_intercept", return_value={"enabled": False, "error": "iptables failed"}
+        ),
     ):
         resp = client.post("/api/consumers/intercept/enable")
     assert resp.status_code == 422
@@ -806,7 +808,7 @@ def test_intercept_enable_success(client_and_db):
     with (
         patch("platform.system", return_value="Linux"),
         patch("os.getuid", return_value=1000),
-        patch("ollama_queue.api.enable_intercept", return_value={"enabled": True}),
+        patch("ollama_queue.api.consumers.enable_intercept", return_value={"enabled": True}),
     ):
         resp = client.post("/api/consumers/intercept/enable")
     assert resp.status_code == 200
@@ -821,7 +823,7 @@ def test_intercept_enable_success(client_and_db):
 def test_intercept_disable_success(client_and_db):
     """POST /api/consumers/intercept/disable succeeds."""
     client, _db = client_and_db
-    with patch("ollama_queue.api.disable_intercept", return_value={"enabled": False}):
+    with patch("ollama_queue.api.consumers.disable_intercept", return_value={"enabled": False}):
         resp = client.post("/api/consumers/intercept/disable")
     assert resp.status_code == 200
 
@@ -830,7 +832,7 @@ def test_intercept_disable_error(client_and_db):
     """POST /api/consumers/intercept/disable returns 500 on iptables error."""
     client, _db = client_and_db
     with patch(
-        "ollama_queue.api.disable_intercept",
+        "ollama_queue.api.consumers.disable_intercept",
         return_value={"enabled": True, "error": "iptables -D failed"},
     ):
         resp = client.post("/api/consumers/intercept/disable")
@@ -846,7 +848,7 @@ def test_intercept_status(client_and_db):
     """GET /api/consumers/intercept/status returns status."""
     client, _db = client_and_db
     with patch(
-        "ollama_queue.api.get_intercept_status",
+        "ollama_queue.api.consumers.get_intercept_status",
         return_value={"enabled": False, "rules": []},
     ):
         resp = client.get("/api/consumers/intercept/status")
@@ -865,10 +867,10 @@ def test_spa_static_serves_file(tmp_path):
     Creates a real dist directory so create_app registers the SPA routes,
     then tests file serving, index fallback, and the null-byte guard.
     """
-    import ollama_queue.api as api_mod
+    import ollama_queue.app as app_mod
 
-    # Create the dist directory at the path create_app expects
-    real_spa_dir = Path(api_mod.__file__).parent / "dashboard" / "spa" / "dist"
+    # Create the dist directory at the path create_app expects (app.py is in ollama_queue/)
+    real_spa_dir = Path(app_mod.__file__).parent / "dashboard" / "spa" / "dist"
     created = False
     if not real_spa_dir.exists():
         real_spa_dir.mkdir(parents=True, exist_ok=True)
@@ -917,9 +919,9 @@ def test_spa_static_null_byte_guard(tmp_path):
     """
     import asyncio
 
-    import ollama_queue.api as api_mod
+    import ollama_queue.app as app_mod
 
-    real_spa_dir = Path(api_mod.__file__).parent / "dashboard" / "spa" / "dist"
+    real_spa_dir = Path(app_mod.__file__).parent / "dashboard" / "spa" / "dist"
     created = False
     if not real_spa_dir.exists():
         real_spa_dir.mkdir(parents=True, exist_ok=True)
@@ -969,7 +971,7 @@ def test_startup_scan_exception_logged(tmp_path):
     db = Database(str(tmp_path / "test.db"))
     db.initialize()
 
-    with patch("ollama_queue.api.run_scan", side_effect=RuntimeError("scan failed")):
+    with patch("ollama_queue.app.run_scan", side_effect=RuntimeError("scan failed")):
         # App creation should not raise even when startup scan fails
         app = create_app(db)
         assert app is not None

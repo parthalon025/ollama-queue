@@ -194,7 +194,7 @@ def serve(ctx, port):
     logging.getLogger().setLevel(logging.WARNING)
     logging.getLogger("ollama_queue").setLevel(logging.INFO)
 
-    from ollama_queue.api import create_app
+    from ollama_queue.app import create_app
     from ollama_queue.daemon import Daemon
 
     db = ctx.obj["db"]

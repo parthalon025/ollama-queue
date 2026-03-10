@@ -11,7 +11,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from ollama_queue.api import create_app
+from ollama_queue.app import create_app
 from ollama_queue.db import Database
 
 
@@ -38,7 +38,7 @@ class TestCallGenerateDescription:
 
     def test_successful_description_generation(self, db):
         """Lines 198-201: raise_for_status, parse response, update DB."""
-        from ollama_queue.api import _call_generate_description
+        from ollama_queue.api.schedule import _call_generate_description
 
         # Create a recurring job to update
         rj_id = db.add_recurring_job(
@@ -58,7 +58,7 @@ class TestCallGenerateDescription:
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
 
-        with patch("ollama_queue.api.httpx.Client", return_value=mock_client):
+        with patch("ollama_queue.api.schedule.httpx.Client", return_value=mock_client):
             _call_generate_description(rj_id, "test-desc", "test", "echo hi", db)
 
         # Verify description was persisted
@@ -68,7 +68,7 @@ class TestCallGenerateDescription:
 
     def test_empty_description_logs_warning(self, db):
         """Lines 202-203: empty response triggers warning log, no DB update."""
-        from ollama_queue.api import _call_generate_description
+        from ollama_queue.api.schedule import _call_generate_description
 
         rj_id = db.add_recurring_job(
             name="empty-desc",
@@ -88,15 +88,15 @@ class TestCallGenerateDescription:
         mock_client.__exit__ = MagicMock(return_value=False)
 
         with (
-            patch("ollama_queue.api.httpx.Client", return_value=mock_client),
-            patch("ollama_queue.api._log") as mock_log,
+            patch("ollama_queue.api.schedule.httpx.Client", return_value=mock_client),
+            patch("ollama_queue.api.schedule._log") as mock_log,
         ):
             _call_generate_description(rj_id, "empty-desc", None, "echo hi", db)
             mock_log.warning.assert_called_once()
 
     def test_none_response_logs_warning(self, db):
         """Lines 202-203: None response also triggers the empty branch."""
-        from ollama_queue.api import _call_generate_description
+        from ollama_queue.api.schedule import _call_generate_description
 
         rj_id = db.add_recurring_job(
             name="none-desc",
@@ -116,8 +116,8 @@ class TestCallGenerateDescription:
         mock_client.__exit__ = MagicMock(return_value=False)
 
         with (
-            patch("ollama_queue.api.httpx.Client", return_value=mock_client),
-            patch("ollama_queue.api._log") as mock_log,
+            patch("ollama_queue.api.schedule.httpx.Client", return_value=mock_client),
+            patch("ollama_queue.api.schedule._log") as mock_log,
         ):
             _call_generate_description(rj_id, "none-desc", None, "echo hi", db)
             mock_log.warning.assert_called_once()
@@ -191,7 +191,7 @@ class TestSubmitJob429:
             db.submit_job(command=f"echo {i}", model="m", priority=5, timeout=60, source="test")
 
         # Mock DurationEstimator.queue_etas to return empty list
-        with patch("ollama_queue.api.DurationEstimator") as mock_est_cls:
+        with patch("ollama_queue.api.jobs.DurationEstimator") as mock_est_cls:
             mock_est = MagicMock()
             mock_est.queue_etas.return_value = []
             mock_est_cls.return_value = mock_est
@@ -211,7 +211,7 @@ class TestSubmitJob429:
         db.set_setting("max_queue_depth", 1)
         db.submit_job(command="echo 0", model="m", priority=5, timeout=60, source="test")
 
-        with patch("ollama_queue.api.DurationEstimator") as mock_est_cls:
+        with patch("ollama_queue.api.jobs.DurationEstimator") as mock_est_cls:
             mock_est_cls.side_effect = Exception("ETA calc boom")
 
             resp = client.post(
@@ -323,7 +323,7 @@ class TestIterNdjson:
         mock_resp.aiter_raw = fake_aiter_raw
         mock_resp.aclose = AsyncMock()
 
-        with patch("ollama_queue.api.httpx.AsyncClient") as mock_cls:
+        with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
             mock_client = AsyncMock()
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=False)
@@ -356,7 +356,7 @@ class TestIterNdjson:
         mock_resp.aiter_raw = fake_aiter_raw
         mock_resp.aclose = AsyncMock()
 
-        with patch("ollama_queue.api.httpx.AsyncClient") as mock_cls:
+        with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
             mock_client = AsyncMock()
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=False)
@@ -385,7 +385,7 @@ class TestIterNdjson:
         mock_resp.aiter_raw = fake_aiter_raw
         mock_resp.aclose = AsyncMock()
 
-        with patch("ollama_queue.api.httpx.AsyncClient") as mock_cls:
+        with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
             mock_client = AsyncMock()
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=False)
@@ -413,7 +413,7 @@ class TestIterNdjson:
         mock_resp.aiter_raw = failing_aiter_raw
         mock_resp.aclose = AsyncMock()
 
-        with patch("ollama_queue.api.httpx.AsyncClient") as mock_cls:
+        with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
             mock_client = AsyncMock()
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=False)
@@ -543,7 +543,7 @@ def test_release_proxy_claim_exception_logged(db, client):
     with (
         patch("httpx.AsyncClient", return_value=mock_client),
         patch.object(db, "release_proxy_claim", side_effect=Exception("release failed")),
-        patch("ollama_queue.api._log") as mock_log,
+        patch("ollama_queue.api.proxy._log") as mock_log,
     ):
         resp = client.post(
             "/api/generate",

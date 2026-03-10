@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from ollama_queue.api import create_app
+from ollama_queue.app import create_app
 from ollama_queue.db import Database
 from ollama_queue.eval_engine import create_eval_run, do_promote_eval_run, insert_eval_result, update_eval_run
 
