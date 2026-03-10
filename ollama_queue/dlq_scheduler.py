@@ -10,6 +10,7 @@ import logging
 import threading
 import time
 
+from ollama_queue.scheduler import _estimate_model_vram
 from ollama_queue.slot_scoring import find_fitting_slot
 from ollama_queue.system_snapshot import classify_failure
 
@@ -59,11 +60,12 @@ class DLQScheduler:
             return []
 
         rescheduled = []
-        # Sort by priority descending (higher priority = try first)
-        sorted_entries = sorted(entries, key=lambda e: e.get("priority", 0), reverse=True)
+        # Sort by priority ascending (lower number = higher importance: 1=critical, 10=background)
+        sorted_entries = sorted(entries, key=lambda e: e.get("priority", 0))
 
-        # Check chronic failure threshold
-        chronic_threshold = self.db.get_setting("dlq.chronic_failure_threshold") or 5
+        # Check chronic failure threshold (int cast guards against string-stored settings)
+        raw_threshold = self.db.get_setting("dlq.chronic_failure_threshold")
+        chronic_threshold = int(raw_threshold) if raw_threshold is not None else 3
 
         load_map = self.load_map_fn()
 
@@ -98,30 +100,21 @@ class DLQScheduler:
             )
 
             # Find fitting slot
+            model = entry.get("model", "")
+            job_vram = _estimate_model_vram(model)
             estimated_slots = max(1, int(est.total_upper / 1800) + 1)  # 30-min slots
             slot = find_fitting_slot(
                 load_map,
-                job_vram_needed_gb=0,  # TODO: derive from model size
+                job_vram_needed_gb=job_vram,
                 total_vram_gb=24.0,  # TODO: get from health monitor
                 estimated_slots=estimated_slots,
                 failure_category=failure_cat,
-                job_model=entry.get("model"),
+                job_model=model,
             )
 
             if slot is None:
                 logger.debug("DLQ #%s: no fitting slot found", entry.get("id"))
                 continue
-
-            # Create new job
-            new_job_id = self.db.submit_job(
-                command=entry["command"],
-                model=entry.get("model", ""),
-                priority=entry.get("priority", 0),
-                timeout=entry.get("timeout", 600),
-                source=entry.get("source", "dlq-reschedule"),
-                tag=entry.get("tag"),
-                resource_profile=entry.get("resource_profile", "ollama"),
-            )
 
             # Build reasoning
             reasoning = json.dumps(
@@ -140,7 +133,26 @@ class DLQScheduler:
                 }
             )
 
-            # Update DLQ entry
+            # Mark DLQ entry BEFORE submitting job (crash-safe ordering).
+            # mark_dlq_scheduling does NOT increment count or set resolution.
+            self.db.mark_dlq_scheduling(
+                entry["id"],
+                rescheduled_for=slot["scheduled_time"],
+                reschedule_reasoning=reasoning,
+            )
+
+            # Create new job
+            new_job_id = self.db.submit_job(
+                command=entry["command"],
+                model=entry.get("model", ""),
+                priority=entry.get("priority", 0),
+                timeout=entry.get("timeout", 600),
+                source=f"dlq-reschedule:{entry.get('source', 'unknown')}",
+                tag=entry.get("tag"),
+                resource_profile=entry.get("resource_profile", "ollama"),
+            )
+
+            # Backfill the actual job ID
             self.db.update_dlq_reschedule(
                 entry["id"],
                 rescheduled_job_id=new_job_id,

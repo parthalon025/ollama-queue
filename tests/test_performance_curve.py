@@ -102,6 +102,34 @@ def test_not_fitted():
     assert data["tok_slope"] is None
 
 
+def test_fit_ignores_negative_stats():
+    """Negative model_size_gb or avg_tok_per_min must not crash math.log."""
+    curve = PerformanceCurve()
+    curve.fit(
+        [
+            {"model_size_gb": -1.0, "avg_tok_per_min": 80.0},
+            {"model_size_gb": 5.0, "avg_tok_per_min": -5.0},
+            {"model_size_gb": 10.0, "avg_tok_per_min": 45.0},
+        ]
+    )
+    # Should fit from valid point only (single-point path)
+    assert curve.fitted
+
+
+def test_fit_degenerate_same_size():
+    """All models same size — should not crash, slope=0."""
+    curve = PerformanceCurve()
+    curve.fit(
+        [
+            {"model_size_gb": 7.0, "avg_tok_per_min": 80.0},
+            {"model_size_gb": 7.0, "avg_tok_per_min": 75.0},
+        ]
+    )
+    assert curve.fitted
+    result = curve.predict_tok_per_min(7.0)
+    assert result is not None
+
+
 def test_zero_model_size_returns_none():
     """model_size_gb <= 0 returns None instead of crashing."""
     curve = PerformanceCurve()

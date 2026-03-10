@@ -344,7 +344,8 @@ def _check_auto_promote_inner(db: Database, run_id: int) -> None:  # noqa: PLR09
             return
 
     # Gate 3: error_budget_used <= error_budget
-    error_budget = float(db.get_setting("eval.error_budget") or 0.30)
+    _eb = db.get_setting("eval.error_budget")
+    error_budget = float(_eb) if _eb is not None else 0.30
     item_count = run.get("item_count") or 0
     if item_count > 0:
         with db._lock:
@@ -1997,7 +1998,8 @@ def run_eval_generate(  # noqa: PLR0911
     except (json.JSONDecodeError, TypeError):
         # variants stored as a plain string (single variant ID) rather than JSON array
         variant_ids = [str(_raw_variants)]
-    error_budget: float = run.get("error_budget") or 0.30
+    _run_eb = run.get("error_budget")
+    error_budget: float = float(_run_eb) if _run_eb is not None else 0.30
     data_source_token: str = _get_eval_setting(db, "eval.data_source_token", "")
 
     # --- Mode dispatch setup ---

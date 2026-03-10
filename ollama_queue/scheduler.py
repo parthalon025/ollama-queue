@@ -64,9 +64,12 @@ class Scheduler:
         if now is None:
             now = time.time()
         due = self.db.get_due_recurring_jobs(now)
+        # Pre-fetch AoI parameters once — O(1) instead of O(N) DB reads during sort.
+        aoi_weight = float(self.db.get_setting("aoi_weight") or 0.3)
+        last_success_cache = {rj["id"]: self.db.get_last_successful_run_time(rj["id"]) for rj in due}
         # AoI sort: lower score = higher urgency. Ensures stale jobs promoted first
         # when multiple become due simultaneously.
-        due.sort(key=lambda rj: self._aoi_sort_key(rj, now))
+        due.sort(key=lambda rj: self._aoi_sort_key(rj, now, aoi_weight, last_success_cache.get(rj["id"])))
         new_ids = []
         next_run_updates: dict[int, float] = {}  # rj_id → new next_run; batched at end
         for rj in due:
@@ -127,7 +130,7 @@ class Scheduler:
             self.db.batch_set_recurring_next_runs(next_run_updates)
         return new_ids
 
-    def _aoi_sort_key(self, rj: dict, now: float) -> float:
+    def _aoi_sort_key(self, rj: dict, now: float, aoi_weight: float, last_success: float | None) -> float:
         """Compute AoI-weighted scheduling urgency score. Lower = higher priority.
 
         Score = priority_norm * (1 - aoi_weight) + (1 - staleness_norm) * aoi_weight
@@ -136,12 +139,8 @@ class Scheduler:
         staleness_norm: 0=fresh, 1=maximally stale (>=5 intervals), normalized to [0,1]
         aoi_weight=0.3 means exactly 30% of score from information staleness.
         """
-        aoi_weight = float(self.db.get_setting("aoi_weight") or 0.3)
-
         priority = max(1, min(10, int(rj.get("priority") or 5)))
         priority_norm = (priority - 1) / 9.0  # 0 = p1 (critical), 1 = p10 (background)
-
-        last_success = self.db.get_last_successful_run_time(rj["id"])
         if last_success is not None:
             interval = float(rj.get("interval_seconds") or 3600)
             # Note: cron jobs (interval_seconds=None) use 3600s fallback.
@@ -327,36 +326,55 @@ class Scheduler:
         return scores
 
     def load_map_extended(self, now: float | None = None) -> list[dict]:
-        """Build a 48-slot load map with VRAM estimates per slot.
+        """Build a 48-slot load map with VRAM estimates and scheduling metadata.
 
-        Returns list of dicts with 'load' (priority-weighted score) and
-        'vram_gb' (estimated VRAM commitment based on model sizes of scheduled jobs).
-        Uses per-job VRAM scoring alongside the standard load_map() logic.
+        Returns list of dicts with keys consumed by find_fitting_slot:
+        - load: priority-weighted score
+        - vram_committed_gb: estimated VRAM commitment
+        - is_pinned: True if slot is pinned (score >= PIN_SCORE)
+        - recurring_ids: list of recurring job IDs firing in this slot
+        - timestamp: wall-clock time for this slot (anchored to local midnight)
         """
+        import datetime as _dt
+
         if now is None:
             now = time.time()
 
         scores = self.load_map(now=now)
         vram: list[float] = [0.0] * self._SLOT_COUNT
+        slot_rj_ids: list[list[int]] = [[] for _ in range(self._SLOT_COUNT)]
+
+        local_midnight = _dt.datetime.combine(_dt.datetime.fromtimestamp(now).date(), _dt.time.min).timestamp()
 
         for rj in self._get_recurring_jobs():
             if not rj["enabled"]:
                 continue
             model = rj.get("model", "")
             model_vram = _estimate_model_vram(model)
-            if model_vram <= 0:
-                continue
+
             # Build a temporary score array to find which slots this job fires in
             tmp: list[float] = [0.0] * self._SLOT_COUNT
             if rj.get("cron_expression"):
                 self._score_cron_job(tmp, rj, 1.0, now)
             elif rj.get("interval_seconds"):
                 self._score_interval_job(tmp, rj, 1.0, now)
+
             for i in range(self._SLOT_COUNT):
                 if tmp[i] > 0:
-                    vram[i] += model_vram
+                    slot_rj_ids[i].append(rj["id"])
+                    if model_vram > 0:
+                        vram[i] += model_vram
 
-        return [{"load": scores[i], "vram_gb": round(vram[i], 1)} for i in range(self._SLOT_COUNT)]
+        return [
+            {
+                "load": scores[i],
+                "vram_committed_gb": round(vram[i], 1),
+                "is_pinned": scores[i] >= self._PIN_SCORE,
+                "recurring_ids": slot_rj_ids[i],
+                "timestamp": local_midnight + i * self._SLOT_SECONDS,
+            }
+            for i in range(self._SLOT_COUNT)
+        ]
 
     def suggest_time(
         self,
@@ -411,11 +429,11 @@ def _estimate_model_vram(model: str) -> float:
     """Estimate VRAM usage in GB from a model name like 'qwen2.5:7b'.
 
     Uses parameter count hints in the model name (e.g. '7b', '14b') and maps to
-    approximate VRAM at Q4 quantization. Returns 0 if no size hint found.
+    approximate VRAM at Q4 quantization. Returns 4.0 GB default if no size hint found.
     """
     match = _SIZE_PATTERN.search(model)
     if not match:
-        return 0.0
+        return 4.0
     params = float(match.group(1))
     # Find closest known size
     best_key = min(_PARAM_TO_VRAM, key=lambda k: abs(k - params))

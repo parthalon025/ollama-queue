@@ -994,7 +994,13 @@ class Database:
             row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
             if row is None:
                 return None
-            return json.loads(row["value"])
+            result = json.loads(row["value"])
+            # Defensively convert string "true"/"false" to Python bool so
+            # callers using truthiness checks (if db.get_setting(...):) behave
+            # correctly even when a string was stored instead of a JSON boolean.
+            if isinstance(result, str) and result.lower() in ("true", "false"):
+                return result.lower() == "true"
+            return result
 
     def set_setting(self, key: str, value) -> None:
         with self._lock:
@@ -1535,7 +1541,8 @@ class Database:
                    SET retry_count = retry_count + 1,
                        retry_after = ?,
                        last_retry_delay = ?,
-                       status = 'pending'
+                       status = 'pending',
+                       completed_at = NULL
                    WHERE id = ?""",
                 (retry_after, delay, job_id),
             )
@@ -1603,6 +1610,23 @@ class Database:
                    resolved_at = ?
                    WHERE id = ?""",
                 (now, rescheduled_job_id, rescheduled_for, reschedule_reasoning, now, dlq_id),
+            )
+            conn.commit()
+
+    def mark_dlq_scheduling(self, dlq_id: int, rescheduled_for: float, reschedule_reasoning: str | None = None) -> None:
+        """Mark a DLQ entry as being rescheduled (crash-safety marker).
+
+        Does NOT increment auto_reschedule_count or set resolution — those are
+        written by update_dlq_reschedule once the job is confirmed created.
+        """
+        with self._lock:
+            conn = self._connect()
+            conn.execute(
+                """UPDATE dlq SET auto_rescheduled_at = ?,
+                   rescheduled_for = ?,
+                   reschedule_reasoning = ?
+                   WHERE id = ?""",
+                (time.time(), rescheduled_for, reschedule_reasoning, dlq_id),
             )
             conn.commit()
 
@@ -1909,5 +1933,8 @@ class Database:
                 return
             now = time.time()
             conn.execute("UPDATE jobs SET status = 'pending' WHERE id = ?", (row["job_id"],))
-            conn.execute("UPDATE deferrals SET resumed_at = ? WHERE id = ?", (now, deferral_id))
+            conn.execute(
+                "UPDATE deferrals SET resumed_at = ?, scheduled_for = NULL WHERE id = ?",
+                (now, deferral_id),
+            )
             conn.commit()

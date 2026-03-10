@@ -1,5 +1,5 @@
 import { h } from 'preact';
-import { useState } from 'preact/hooks';
+import { useState, useRef, useEffect } from 'preact/hooks';
 // What it shows: Default judge (scorer) model configuration — which AI scores
 //   generated principles, from which provider, with what consistency setting.
 // Decision it drives: User sets the judge model used for all eval runs unless
@@ -22,6 +22,8 @@ export default function JudgeDefaultsForm() {
   const [saveError, setSaveError] = useState('');
   const [saveOk,    setSaveOk]    = useState(false);
   const [tempError, setTempError] = useState('');
+  const saveTimer = useRef(null);
+  useEffect(() => () => { if (saveTimer.current) clearTimeout(saveTimer.current); }, []);
 
   function validateTemperature(val) {
     const n = parseFloat(val);
@@ -45,7 +47,8 @@ export default function JudgeDefaultsForm() {
         'eval.judge_temperature': judgeTemperature,
       });
       setSaveOk(true);
-      setTimeout(() => setSaveOk(false), 2000);
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      saveTimer.current = setTimeout(() => setSaveOk(false), 2000);
     } catch (err) {
       setSaveError(err.message || 'Save failed');
     } finally {

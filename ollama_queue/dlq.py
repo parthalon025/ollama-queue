@@ -42,8 +42,8 @@ class DLQManager:
 
     def _schedule_retry(self, job_id: int, retry_count: int) -> str:
         settings = self.db.get_all_settings()
-        base = settings.get("retry_backoff_base_seconds", 60)
-        cap = settings.get("retry_backoff_cap_seconds", 3600)
+        base = float(settings.get("retry_backoff_base_seconds") or 60)
+        cap = float(settings.get("retry_backoff_cap_seconds") or 3600)
 
         # Decorrelated jitter: each delay is random in [base, prev_delay * 3]
         # Breaks synchronization between retrying jobs (prevents thundering herd)

@@ -21,6 +21,7 @@ def _linear_regression(x: list[float], y: list[float]) -> tuple[float, float]:
 
     denom = n * sum_x2 - sum_x**2
     if abs(denom) < 1e-10:
+        logger.debug("Linear regression degenerate (identical x-values): returning flat curve")
         return 0.0, sum_y / n if n else 0.0
 
     slope = (n * sum_xy - sum_x * sum_y) / denom
@@ -45,10 +46,20 @@ class PerformanceCurve:
 
         Each entry: {model_size_gb, avg_tok_per_min, avg_warmup_s (optional)}
         """
+        # Reset all fitted parameters so a failed re-fit doesn't leave stale values
+        self._tok_slope = None
+        self._tok_intercept = None
+        self._tok_residual_std = None
+        self._warmup_slope = None
+        self._warmup_intercept = None
+        self.fitted = False
+
         self._points = model_stats
 
         # tok/min curve: log-linear regression
-        valid_tok = [s for s in model_stats if s.get("avg_tok_per_min") and s.get("model_size_gb")]
+        valid_tok = [
+            s for s in model_stats if (s.get("avg_tok_per_min") or 0) > 0 and (s.get("model_size_gb") or 0) > 0
+        ]
         if len(valid_tok) >= 2:
             log_sizes = [math.log(s["model_size_gb"]) for s in valid_tok]
             log_rates = [math.log(s["avg_tok_per_min"]) for s in valid_tok]
@@ -57,7 +68,7 @@ class PerformanceCurve:
             predicted = [self._tok_slope * x + self._tok_intercept for x in log_sizes]
             residuals = [a - p for a, p in zip(log_rates, predicted, strict=False)]
             self._tok_residual_std = (
-                math.sqrt(sum(r**2 for r in residuals) / (len(residuals) - 2)) if len(residuals) > 2 else 0.3
+                math.sqrt(sum(r**2 for r in residuals) / max(len(residuals) - 2, 1)) if len(residuals) >= 2 else 0.3
             )
             self.fitted = True
         elif len(valid_tok) == 1:
@@ -69,7 +80,9 @@ class PerformanceCurve:
             self.fitted = True
 
         # warmup curve: linear regression on (size, warmup)
-        valid_warmup = [s for s in model_stats if s.get("avg_warmup_s") and s.get("model_size_gb")]
+        valid_warmup = [
+            s for s in model_stats if (s.get("avg_warmup_s") or 0) > 0 and (s.get("model_size_gb") or 0) > 0
+        ]
         if len(valid_warmup) >= 2:
             sizes = [s["model_size_gb"] for s in valid_warmup]
             warmups = [s["avg_warmup_s"] for s in valid_warmup]
@@ -88,6 +101,8 @@ class PerformanceCurve:
             return None
         log_rate = self._tok_slope * math.log(model_size_gb) + self._tok_intercept
         std = self._tok_residual_std or 0.3
+        if not self._tok_residual_std:
+            logger.debug("Using fallback residual_std=0.3 (zero or missing)")
         mean = math.exp(log_rate)
         lower = math.exp(log_rate - z * std)
         upper = math.exp(log_rate + z * std)
@@ -97,7 +112,10 @@ class PerformanceCurve:
         """Predict warmup time (seconds) for a model size."""
         if self._warmup_slope is None:
             return None
-        return max(0.1, self._warmup_slope * model_size_gb + self._warmup_intercept)
+        raw = self._warmup_slope * model_size_gb + self._warmup_intercept
+        if raw < 0.1:
+            logger.debug("Warmup prediction clamped to 0.1 for size=%.1f (raw=%.2f)", model_size_gb, raw)
+        return max(0.1, raw)
 
     def get_curve_data(self) -> dict:
         """Return fitted curve parameters for API/UI."""
@@ -108,6 +126,6 @@ class PerformanceCurve:
             "warmup_slope": self._warmup_slope,
             "warmup_intercept": self._warmup_intercept,
             "n_points": len(self._points),
-            "points": self._points,
+            "points": list(self._points),
             "fitted": self.fitted,
         }

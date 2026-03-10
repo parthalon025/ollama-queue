@@ -1,5 +1,5 @@
 import { h } from 'preact';
-import { useState, useRef, useCallback } from 'preact/hooks';
+import { useState, useRef, useCallback, useEffect } from 'preact/hooks';
 
 /**
  * What it shows: All queue configuration in fourteen sections. Each field saves on blur —
@@ -25,10 +25,13 @@ import { useState, useRef, useCallback } from 'preact/hooks';
  */
 export default function SettingsForm({ settings, daemonState, onSave, onPause, onResume, pauseFb, resumeFb }) {
   const [flashKey, setFlashKey] = useState(null);
+  const flashTimer = useRef(null);
+  useEffect(() => () => { if (flashTimer.current) clearTimeout(flashTimer.current); }, []);
 
   const flash = useCallback((key) => {
     setFlashKey(key);
-    setTimeout(() => setFlashKey(null), 1000);
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+    flashTimer.current = setTimeout(() => setFlashKey(null), 1000);
   }, []);
 
   const handleBlur = useCallback(async (key, raw) => {

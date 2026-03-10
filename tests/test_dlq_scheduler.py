@@ -82,6 +82,7 @@ class TestSweepNoEntries:
         result = sched._sweep([])
         assert result == []
         db.submit_job.assert_not_called()
+        db.mark_dlq_scheduling.assert_not_called()
         db.update_dlq_reschedule.assert_not_called()
 
 
@@ -102,11 +103,18 @@ class TestSweepFindsSlotAndReschedules:
         call_kw = db.submit_job.call_args
         assert call_kw[1]["command"] == "echo hello" or call_kw[0][0] == "echo hello"
 
-        # Verify DLQ entry was updated
+        # Verify DLQ entry was marked then finalized
+        # First call: mark_dlq_scheduling (crash-safety marker, no count increment)
+        db.mark_dlq_scheduling.assert_called_once()
+        mark_call = db.mark_dlq_scheduling.call_args
+        assert mark_call[0][0] == 1  # dlq_id
+        assert "rescheduled_for" in mark_call[1]
+        assert "reschedule_reasoning" in mark_call[1]
+        # Second call: update_dlq_reschedule (finalize with job ID, increments count)
         db.update_dlq_reschedule.assert_called_once()
-        dlq_call = db.update_dlq_reschedule.call_args
-        assert dlq_call[0][0] == 1  # dlq_id
-        assert dlq_call[1]["rescheduled_job_id"] == 42 or dlq_call[0][1] == 42
+        finalize_call = db.update_dlq_reschedule.call_args
+        assert finalize_call[0][0] == 1  # dlq_id
+        assert finalize_call[1]["rescheduled_job_id"] == 42
 
 
 class TestSweepSkipsChronicFailures:
@@ -150,22 +158,24 @@ class TestSweepSkipsPermanentFailures:
 
 class TestSweepPriorityOrdering:
     def test_sweep_priority_ordering(self):
-        """Higher priority entries are processed first."""
-        low = _make_entry(id=1, priority=1)
-        high = _make_entry(id=2, priority=10)
+        """Higher-importance entries (lower priority number) are processed first."""
+        critical = _make_entry(id=1, priority=1)  # priority 1 = critical (most important)
+        background = _make_entry(id=2, priority=10)  # priority 10 = background (least important)
         sched, db, _, _ = _make_scheduler(submit_return=99)
 
-        # Track order of submit_job calls via dlq_id in update_dlq_reschedule
-        update_calls = []
-        db.update_dlq_reschedule.side_effect = lambda *a, **kw: update_calls.append(a[0])
+        # Track order via mark_dlq_scheduling (pre-submit) and update_dlq_reschedule (post-submit)
+        mark_calls = []
+        finalize_calls = []
+        db.mark_dlq_scheduling.side_effect = lambda *a, **kw: mark_calls.append(a[0])
+        db.update_dlq_reschedule.side_effect = lambda *a, **kw: finalize_calls.append(a[0])
 
-        result = sched._sweep([low, high])
+        result = sched._sweep([background, critical])
 
         # Both should be rescheduled
         assert len(result) == 2
-        # High priority (id=2) should be processed first
-        assert update_calls[0] == 2
-        assert update_calls[1] == 1
+        # Critical (id=1, priority=1) should be processed before background (id=2, priority=10)
+        assert mark_calls == [1, 2]
+        assert finalize_calls == [1, 2]
 
 
 class TestSweepLockPreventsConcurrent:
@@ -193,8 +203,9 @@ class TestOnJobCompletedTriggersSweep:
 
         sched.on_job_completed(job_id=1)
 
-        # Should have attempted to reschedule
+        # Should have attempted to reschedule (mark + finalize)
         db.submit_job.assert_called_once()
+        db.mark_dlq_scheduling.assert_called_once()
         db.update_dlq_reschedule.assert_called_once()
 
     def test_on_job_completed_no_entries(self):
@@ -231,3 +242,19 @@ class TestSweepNoSlotAvailable:
 
         assert result == []
         db.submit_job.assert_not_called()
+
+
+class TestSweepPassesVramEstimate:
+    def test_sweep_passes_vram_estimate(self):
+        """Verify find_fitting_slot receives real VRAM estimate, not 0."""
+        entry = _make_entry(model="qwen2.5:14b")
+        sched, db, estimator, load_map_fn = _make_scheduler(entries=[entry], submit_return=50)
+
+        with patch("ollama_queue.dlq_scheduler.find_fitting_slot") as mock_ffs:
+            mock_ffs.return_value = {"slot_index": 2, "score": 10.0, "scheduled_time": time.time() + 3600}
+            sched._do_sweep([entry])
+            mock_ffs.assert_called_once()
+            call_kwargs = mock_ffs.call_args
+            # 14b model → ~8.5 GB VRAM — must be > 0
+            vram = call_kwargs.kwargs.get("job_vram_needed_gb", call_kwargs[1].get("job_vram_needed_gb", 0))
+            assert vram > 0, f"Expected positive VRAM estimate, got {vram}"

@@ -3,11 +3,13 @@
 Predicts how long a job will take based on model size, historical performance,
 and token throughput — all learned from this machine's actual behavior.
 
-Uses 4-tier hierarchy:
+Uses 3-tier hierarchy:
 1. Resource profile prior (weakest — generic bucket)
-2. Cross-model performance curve (interpolated from other models)
-3. Model-level tok/min history (direct observations)
-4. (Model, command) duration history (strongest — exact match)
+2. Model-level duration history (direct observations)
+3. (Model, command) duration history (strongest — exact match)
+
+Note: Cross-model PerformanceCurve is a separate module used externally
+by callers who want to interpolate from other models' performance.
 """
 
 import logging
@@ -59,13 +61,13 @@ class RuntimeEstimator:
         # Tier 1: resource profile prior
         prior = PROFILE_PRIORS.get(resource_profile, PROFILE_PRIORS["ollama"]).copy()
 
-        # Tier 2: cross-model curve — handled externally by PerformanceCurve
+        # (PerformanceCurve is used by callers externally, not within this estimator)
 
-        # Tier 3: model-level historical durations
+        # Tier 2: model-level historical durations
         durations = self.db.get_job_durations(model)
         n_obs = len(durations)
 
-        # Tier 4: (model, command) specific durations
+        # Tier 3: (model, command) specific durations
         if command:
             specific = self.db.get_job_durations(model, command)
             if len(specific) >= 3:
@@ -74,6 +76,9 @@ class RuntimeEstimator:
 
         # Bayesian update
         if durations:
+            bad = [d for d in durations if d <= 0]
+            if bad:
+                logger.warning("Clamping %d non-positive durations for model=%r: %s", len(bad), model, bad[:5])
             log_durations = [math.log(max(d, 0.1)) for d in durations]
             n = len(log_durations)
             sample_mean = sum(log_durations) / n
@@ -87,7 +92,10 @@ class RuntimeEstimator:
                 sample_var = sum((x - sample_mean) ** 2 for x in log_durations) / (n - 1)
             else:
                 sample_var = prior["log_std"] ** 2
-            post_std = math.sqrt((n0 * prior["log_std"] ** 2 + n * sample_var) / (n0 + n))
+            prior_precision = 1.0 / (prior["log_std"] ** 2)
+            sample_precision = n / sample_var if sample_var > 1e-10 else n / (prior["log_std"] ** 2)
+            post_precision = prior_precision + sample_precision
+            post_std = math.sqrt(1.0 / post_precision)
         else:
             post_mean = prior["log_mean"]
             post_std = prior["log_std"]
@@ -98,7 +106,7 @@ class RuntimeEstimator:
         # Warmup estimate
         warmup_mean = 0.0
         warmup_upper = 0.0
-        if loaded_models is None or model not in (loaded_models or []):
+        if loaded_models is None or model not in loaded_models:
             warmup_mean, warmup_upper = self._estimate_warmup(model)
 
         confidence = self._confidence_level(n_obs)
@@ -120,6 +128,9 @@ class RuntimeEstimator:
         prior = WARMUP_PRIOR.copy()
 
         if warmups:
+            bad = [w for w in warmups if w <= 0]
+            if bad:
+                logger.warning("Clamping %d non-positive warmup values for model=%r", len(bad), model)
             log_warmups = [math.log(max(w, 0.01)) for w in warmups]
             n = len(log_warmups)
             sample_mean = sum(log_warmups) / n
@@ -127,7 +138,10 @@ class RuntimeEstimator:
             post_mean = (n0 * prior["log_mean"] + n * sample_mean) / (n0 + n)
 
             sample_var = sum((x - sample_mean) ** 2 for x in log_warmups) / (n - 1) if n > 1 else prior["log_std"] ** 2
-            post_std = math.sqrt((n0 * prior["log_std"] ** 2 + n * sample_var) / (n0 + n))
+            prior_precision = 1.0 / (prior["log_std"] ** 2)
+            sample_precision = n / sample_var if sample_var > 1e-10 else n / (prior["log_std"] ** 2)
+            post_precision = prior_precision + sample_precision
+            post_std = math.sqrt(1.0 / post_precision)
         else:
             post_mean = prior["log_mean"]
             post_std = prior["log_std"]

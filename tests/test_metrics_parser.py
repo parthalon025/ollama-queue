@@ -64,7 +64,7 @@ class TestNonOllamaOutput:
 
 class TestMalformedInput:
     def test_truncated_json(self):
-        """Partial JSON that matches the regex but fails to parse."""
+        """Partial JSON that fails to parse."""
         stdout = '{"done":true,"eval_count":10'
         assert parse_ollama_metrics(stdout) is None
 
@@ -97,5 +97,23 @@ class TestMultilineOutput:
         """Non-JSON output followed by Ollama response."""
         stdout = 'Loading model...\nReady.\n{"done":true,"eval_count":50,"eval_duration":1000000000}\n'
         result = parse_ollama_metrics(stdout)
+        assert result is not None
+        assert result["eval_count"] == 50
+
+    def test_chat_format_nested_json(self):
+        """Ollama /api/chat wraps response in message object — regex would miss this."""
+        stdout = '{"model":"llama3","message":{"role":"assistant","content":"Hi"},"done":true,"eval_count":50,"eval_duration":1000000000,"total_duration":2000000000,"load_duration":500000000}\n'
+        result = parse_ollama_metrics(stdout)
+        assert result is not None
+        assert result["eval_count"] == 50
+
+    def test_malformed_line_mid_stream_still_finds_done(self):
+        """A malformed JSON line mid-stream should not prevent finding the done response."""
+        output = (
+            '{"model":"qwen2.5:7b","response":"hello"}\n'
+            "{CORRUPTED LINE\n"
+            '{"model":"qwen2.5:7b","done":true,"total_duration":1000000000,"eval_count":50,"eval_duration":500000000}\n'
+        )
+        result = parse_ollama_metrics(output)
         assert result is not None
         assert result["eval_count"] == 50

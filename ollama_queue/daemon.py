@@ -40,6 +40,9 @@ from ollama_queue.stall import StallDetector
 _log = logging.getLogger(__name__)
 
 
+_MAX_STDOUT_BYTES = 128 * 1024  # 128KB — enough for metrics JSON + tail
+
+
 def _drain_pipes_with_tracking(
     proc: subprocess.Popen,
     job_id: int,
@@ -49,6 +52,9 @@ def _drain_pipes_with_tracking(
 
     Uses non-blocking fds + select() to avoid: (1) deadlock on large output,
     (2) blocking the worker thread from observing process exit.
+
+    Stdout is capped at _MAX_STDOUT_BYTES to prevent OOM under MemoryMax=512M.
+    Only the tail is kept — sufficient for metrics parsing and stdout_tail storage.
     """
     import fcntl
     import select as _select
@@ -61,8 +67,19 @@ def _drain_pipes_with_tracking(
         fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
 
     stdout_chunks: list[bytes] = []
+    stdout_total: int = 0
     stderr_chunks: list[bytes] = []
     open_fds: set[int] = {stdout_fd, stderr_fd}
+
+    def _append_stdout(data: bytes) -> None:
+        nonlocal stdout_total
+        stdout_chunks.append(data)
+        stdout_total += len(data)
+        stall_detector.update_stdout_activity(job_id, time.time())
+        # Trim old chunks when over budget — keep tail
+        while stdout_total > _MAX_STDOUT_BYTES and len(stdout_chunks) > 1:
+            removed = stdout_chunks.pop(0)
+            stdout_total -= len(removed)
 
     while open_fds:
         try:
@@ -80,9 +97,10 @@ def _drain_pipes_with_tracking(
                             if not chunk:
                                 open_fds.discard(fd)
                                 break
-                            (stdout_chunks if fd == stdout_fd else stderr_chunks).append(chunk)
                             if fd == stdout_fd:
-                                stall_detector.update_stdout_activity(job_id, time.time())
+                                _append_stdout(chunk)
+                            else:
+                                stderr_chunks.append(chunk)
                     except (BlockingIOError, OSError):
                         open_fds.discard(fd)
                 break
@@ -98,8 +116,7 @@ def _drain_pipes_with_tracking(
                 open_fds.discard(fd)
                 continue
             if fd == stdout_fd:
-                stdout_chunks.append(chunk)
-                stall_detector.update_stdout_activity(job_id, time.time())
+                _append_stdout(chunk)
             else:
                 stderr_chunks.append(chunk)
 
@@ -152,8 +169,8 @@ class Daemon:
 
     def _get_load_map(self) -> list[dict]:
         """Load map accessor for DLQ/deferral schedulers."""
-        if hasattr(self.scheduler, "load_map"):
-            return self.scheduler.load_map()
+        if hasattr(self.scheduler, "load_map_extended"):
+            return self.scheduler.load_map_extended()
         return []
 
     # --- Concurrency helpers ---
@@ -230,8 +247,11 @@ class Daemon:
             )
             if result.returncode == 0:
                 return float(result.stdout.strip().split("\n")[0])
-        except Exception:
+        except (OSError, _subprocess.TimeoutExpired, ValueError):
             _log.debug("nvidia-smi unavailable for VRAM check")
+            return None
+        except Exception:
+            _log.warning("Unexpected error reading VRAM", exc_info=True)
         return None
 
     def _free_ram_mb(self) -> float:
@@ -707,26 +727,30 @@ class Daemon:
         if evaluation["should_pause"]:
             if not currently_paused:
                 _log.warning("Queue pausing (health): %s", evaluation["reason"])
-            self.db.update_daemon_state(
+            state_update = dict(
                 state="paused_health",
                 paused_reason=evaluation["reason"],
                 paused_since=now if not currently_paused else state.get("paused_since"),
                 last_poll_at=now,
-                current_job_id=None,
             )
+            if state.get("current_job_id") != -1:
+                state_update["current_job_id"] = None
+            self.db.update_daemon_state(**state_update)
             return
 
         # 7. Evaluate yield -> if interactive user, update state, return
         if evaluation["should_yield"]:
             if not currently_paused:
                 _log.info("Queue yielding to interactive Ollama user: %s", evaluation["reason"])
-            self.db.update_daemon_state(
+            state_update = dict(
                 state="paused_interactive",
                 paused_reason=evaluation["reason"],
                 paused_since=now if not currently_paused else state.get("paused_since"),
                 last_poll_at=now,
-                current_job_id=None,
             )
+            if state.get("current_job_id") != -1:
+                state_update["current_job_id"] = None
+            self.db.update_daemon_state(**state_update)
             return
 
         # Log recovery from health/interactive pause
@@ -735,8 +759,11 @@ class Daemon:
 
         # 8. Admit and dispatch
         # Guard: don't clobber proxy sentinel (same reason as step 5).
+        # Re-read current_job_id from DB — the snapshot from step 0 may be stale
+        # if a proxy was claimed between then and now (#82).
         if not self._can_admit(job, settings):
-            if state.get("current_job_id") == -1:
+            fresh_state = self.db.get_daemon_state()
+            if fresh_state.get("current_job_id") == -1:
                 self.db.update_daemon_state(state="idle", last_poll_at=now)
             else:
                 self.db.update_daemon_state(state="idle", last_poll_at=now, current_job_id=None)
@@ -802,6 +829,7 @@ class Daemon:
         # Sample VRAM before job for observed-VRAM recording
         vram_before = self._free_vram_mb()
 
+        out = b""
         try:
             proc = subprocess.Popen(
                 job["command"],
@@ -903,6 +931,18 @@ class Daemon:
                 with self._recent_models_lock:
                     self._recent_job_models[job["model"]] = time.time()
 
+            # Always capture Ollama metrics — job may have produced output before failing
+            full_stdout = out.decode("utf-8", errors="replace")
+            metrics = parse_ollama_metrics(full_stdout)
+            if metrics:
+                metrics["model"] = job.get("model", "")
+                metrics["command"] = job.get("command", "")
+                metrics["resource_profile"] = job.get("resource_profile", "ollama")
+                try:
+                    self.db.store_job_metrics(job["id"], metrics)
+                except Exception:
+                    _log.exception("Failed to store metrics for job #%d", job["id"])
+
             # Record duration if successful
             if exit_code == 0:
                 self.db.record_duration(
@@ -911,17 +951,6 @@ class Daemon:
                     duration=duration,
                     exit_code=exit_code,
                 )
-                # Capture Ollama performance metrics (graceful — non-Ollama jobs return None)
-                full_stdout = out.decode("utf-8", errors="replace")
-                metrics = parse_ollama_metrics(full_stdout)
-                if metrics:
-                    metrics["model"] = job.get("model", "")
-                    metrics["command"] = job.get("command", "")
-                    metrics["resource_profile"] = job.get("resource_profile", "ollama")
-                    try:
-                        self.db.store_job_metrics(job["id"], metrics)
-                    except Exception:
-                        _log.exception("Failed to store metrics for job #%d", job["id"])
                 # Record observed VRAM delta
                 vram_after = self._free_vram_mb()
                 if vram_before is not None and vram_after is not None and job.get("model"):
@@ -983,6 +1012,18 @@ class Daemon:
                     )
                 except Exception:
                     _log.exception("Failed to route job #%d to DLQ after internal error", job["id"])
+            # Attempt to capture any partial metrics from output before crash
+            if out:
+                try:
+                    full_stdout = out.decode("utf-8", errors="replace")
+                    metrics = parse_ollama_metrics(full_stdout)
+                    if metrics:
+                        metrics["model"] = job.get("model", "")
+                        metrics["command"] = job.get("command", "")
+                        metrics["resource_profile"] = job.get("resource_profile", "ollama")
+                        self.db.store_job_metrics(job["id"], metrics)
+                except Exception:
+                    _log.debug("Failed to capture partial metrics for job #%d", job["id"])
         finally:
             self.stall_detector.forget(job["id"])
             with self._running_lock:
@@ -1273,7 +1314,8 @@ class Daemon:
     def run(self, poll_interval: int | None = None) -> None:
         """Main loop: poll_once() every N seconds. Prunes old data daily."""
         if poll_interval is None:
-            poll_interval = self.db.get_setting("poll_interval_seconds") or 5
+            _pi = self.db.get_setting("poll_interval_seconds")
+            poll_interval = int(_pi) if _pi is not None else 5
 
         self._recover_orphans()
         self.db.update_daemon_state(state="idle", uptime_since=time.time())

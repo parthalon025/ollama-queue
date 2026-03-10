@@ -1,5 +1,5 @@
 import { h } from 'preact';
-import { useState } from 'preact/hooks';
+import { useState, useRef, useEffect } from 'preact/hooks';
 import {
     status, queue, history, healthData, durationData, settings,
     dlqCount, connectionStatus, currentTab, refreshQueue,
@@ -26,6 +26,9 @@ export default function Now() {
     const durations = durationData.value;
     const sett = settings.value;
     const dlqCnt = dlqCount.value;
+
+    const toastTimer = useRef(null);
+    useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
 
     const daemon = st?.daemon ?? null;
     const kpis = st?.kpis ?? null;
@@ -54,7 +57,8 @@ export default function Now() {
 
     function handleJobSubmitted(jobId) {
         setToast(`Job #${jobId} queued`);
-        setTimeout(() => setToast(null), 2000);
+        if (toastTimer.current) clearTimeout(toastTimer.current);
+        toastTimer.current = setTimeout(() => setToast(null), 2000);
         refreshQueue();
     }
 

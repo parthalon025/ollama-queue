@@ -28,7 +28,18 @@ def estimator(db):
 
 def _empty_load_map():
     """Return an empty 48-slot load map in the dict format find_fitting_slot expects."""
-    return [{"load": 0.0, "vram_gb": 0.0} for _ in range(48)]
+    now = time.time()
+    return [
+        {
+            "load": 0.0,
+            "vram_committed_gb": 0.0,
+            "timestamp": now + i * 1800,
+            "is_pinned": False,
+            "historical_quiet": True,
+            "queue_depth": 0,
+        }
+        for i in range(48)
+    ]
 
 
 def _fail_job(db, job_id, reason="error"):
@@ -79,7 +90,7 @@ class TestDLQAutoRescheduleIntegration:
         assert new_job is not None
         assert new_job["status"] == "pending"
         assert new_job["model"] == "qwen2.5:7b"
-        assert new_job["source"] == "integration-test"
+        assert new_job["source"] == "dlq-reschedule:integration-test"
 
     def test_chronic_failure_skipped(self, db, estimator):
         """Jobs that fail too many times are marked chronic and skipped."""

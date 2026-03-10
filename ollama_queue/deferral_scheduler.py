@@ -10,6 +10,7 @@ import logging
 import threading
 import time
 
+from ollama_queue.scheduler import _estimate_model_vram
 from ollama_queue.slot_scoring import find_fitting_slot
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,9 @@ class DeferralScheduler:
 
     def _do_sweep(self) -> list[dict]:
         """Process deferred jobs — resume scheduled-past entries and find slots for unscheduled."""
+        if not self.db.get_setting("defer.enabled"):
+            return []
+
         resumed = []
         now = time.time()
 
@@ -76,13 +80,15 @@ class DeferralScheduler:
                 job.get("resource_profile", "ollama"),
             )
 
+            model = job.get("model", "")
+            job_vram = _estimate_model_vram(model)
             estimated_slots = max(1, int(est.total_upper / 1800) + 1)
             slot = find_fitting_slot(
                 load_map,
-                job_vram_needed_gb=0,
-                total_vram_gb=24.0,
+                job_vram_needed_gb=job_vram,
+                total_vram_gb=24.0,  # TODO: get from health monitor
                 estimated_slots=estimated_slots,
-                job_model=job.get("model"),
+                job_model=model,
             )
 
             if slot is None:

@@ -99,13 +99,15 @@ export function ConsumerRow({ consumer }) {
               <option value="immediate">Apply now (restarts service)</option>
             </select>
             <button
-              class={`action-fb--${fb.phase}`}
               onClick={handleInclude}
               disabled={isDisabled}
               title={consumer.is_managed_job ? 'Cannot include managed queue jobs' : undefined}
             >
               {fb.phase === 'loading' ? fb.msg : 'Include'}
             </button>
+            {fb.msg && fb.phase !== 'loading' && fb.phase !== 'error' && (
+              <div class={`action-fb action-fb--${fb.phase}`}>{fb.msg}</div>
+            )}
             {consumer.status !== 'ignored' && (
               <button onClick={() => run('Ignoring…', () => ignoreConsumer(consumer.id), () => 'Ignored')}>
                 Ignore

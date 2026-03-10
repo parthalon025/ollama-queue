@@ -51,21 +51,21 @@ class SystemSnapshot:
             try:
                 snap.ram_used_pct = health_monitor.get_ram_pct()  # type: ignore[attr-defined]
             except Exception:
-                _log.debug("Failed to read RAM pct from health monitor")
+                _log.debug("Failed to read RAM pct from health monitor", exc_info=True)
             try:
                 snap.swap_used_pct = health_monitor.get_swap_pct()  # type: ignore[attr-defined]
             except Exception:
-                _log.debug("Failed to read swap pct from health monitor")
+                _log.debug("Failed to read swap pct from health monitor", exc_info=True)
             try:
                 snap.load_avg_1m = health_monitor.get_load_avg()  # type: ignore[attr-defined]
             except Exception:
-                _log.debug("Failed to read load avg from health monitor")
+                _log.debug("Failed to read load avg from health monitor", exc_info=True)
             try:
                 vram = health_monitor.get_vram_pct()  # type: ignore[attr-defined]
                 if vram is not None:
                     snap.vram_used_pct = vram
             except Exception:
-                _log.debug("Failed to read VRAM pct from health monitor")
+                _log.debug("Failed to read VRAM pct from health monitor", exc_info=True)
 
         return snap
 
