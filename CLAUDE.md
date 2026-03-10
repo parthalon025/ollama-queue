@@ -37,39 +37,43 @@ ollama_queue/
 scripts/
   migrate_timers.py            # Migrate 8 of 10 systemd timers to recurring jobs (--dry-run / --execute)
   migrate_dlq_max_retries.py   # Add max_retries column to existing dlq table (idempotent)
-tests/
-  test_eval_engine.py      # 145 tests
-  test_db.py               # 113 tests
-  test_api_eval_runs.py    # 78 tests
-  test_api.py              # 70 tests (incl. proxy priority, batch schedule, suggest endpoint)
-  test_daemon.py           # 66 tests
-  test_scheduler.py        # 37 tests
-  test_api_eval_variants.py # 36 tests
-  test_cli.py              # 27 tests
-  test_api_eval_settings.py # 27 tests
-  test_eval_analysis.py    # 26 tests
-  test_stall.py            # 24 tests
-  test_health.py           # 19 tests
-  test_models.py           # 18 tests
+tests/                           # 1,587 tests, 100% line coverage
+  test_eval_engine.py      # 251 tests
+  test_daemon.py           # 152 tests
+  test_db.py               # 137 tests
+  test_api.py              # 104 tests (incl. proxy priority, batch schedule, suggest endpoint)
+  test_api_eval_runs.py    # 93 tests
+  test_cli.py              # 85 tests
+  test_api_eval_variants.py # 56 tests
+  test_models.py           # 52 tests
+  test_scheduler.py        # 49 tests
+  test_api_cov_d.py        # 46 tests (api.py lines 1747-2757: consumers, intercept, eval schedule, SPA)
+  test_api_eval_settings.py # 43 tests
+  test_api_cov_c.py        # 36 tests (api.py lines 983-1671: eval variants, trends, catalog)
+  test_patcher.py          # 35 tests
+  test_health.py           # 34 tests
+  test_scanner.py          # 33 tests
+  test_stall.py            # 32 tests
+  test_eval_analysis.py    # 32 tests
+  test_consumers_api.py    # 27 tests (API endpoints)
+  test_proxy.py            # 24 tests
+  test_api_cov_a.py        # 22 tests (api.py lines 198-533: core routes, proxy error paths)
+  test_intercept.py        # 20 tests
+  test_system_snapshot.py  # 19 tests (10-factor scoring, VRAM gates, snapshot)
+  test_api_cov_b.py        # 18 tests (api.py lines 565-940: streaming, schedule, DLQ)
   test_slot_scoring.py     # 17 tests (find_fitting_slot, score ranking)
-  test_scanner.py          # 17 tests
-  test_system_snapshot.py  # 15 tests (10-factor scoring, VRAM gates, snapshot)
-  test_metrics_parser.py   # 15 tests (Ollama response parsing)
+  test_metrics_parser.py   # 16 tests (Ollama response parsing)
+  test_performance_curve.py # 14 tests (log-linear regression)
   test_estimator.py        # 14 tests
+  test_dlq_scheduler.py    # 14 tests (DLQ auto-reschedule sweep)
   test_embed_proxy.py      # 12 tests
-  test_dlq_scheduler.py    # 12 tests (DLQ auto-reschedule sweep)
-  test_performance_curve.py # 11 tests (log-linear regression)
+  test_dlq.py              # 12 tests
   test_integration_dlq_reschedule.py # 11 tests (DLQ + deferral + CLI end-to-end)
-  test_dlq.py              # 11 tests
-  test_consumers_api.py    # 11 tests (API endpoints)
-  test_proxy.py            # 10 tests
-  test_runtime_estimator.py # 9 tests (Bayesian log-normal estimation)
+  test_runtime_estimator.py # 10 tests (Bayesian log-normal estimation)
+  test_deferral_scheduler.py # 10 tests (two-phase sweep)
+  test_burst.py            # 10 tests
   test_intelligence.py     # 9 tests (LoadPatterns hourly/daily profiles)
-  test_deferral_scheduler.py # 9 tests (two-phase sweep)
-  test_patcher.py          # 7 tests
-  test_burst.py            # 7 tests
   test_job_metrics.py      # 6 tests
-  test_intercept.py        # 5 tests
   test_deferral.py         # 5 tests
   test_consumers.py        # 4 tests (DB layer)
 ```
@@ -81,7 +85,7 @@ tests/
 cd ~/Documents/projects/ollama-queue
 source .venv/bin/activate
 
-# Run tests (927 total)
+# Run tests (1,587 total, 100% line coverage)
 pytest
 
 # Start the server (daemon + API + dashboard)

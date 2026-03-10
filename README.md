@@ -324,7 +324,7 @@ systemd timers / apps / proxy clients
 | **Scheduling** | croniter, custom 48-slot load map |
 | **Dashboard** | Preact 10, @preact/signals, Tailwind v4, uPlot |
 | **CLI** | Click |
-| **Tests** | pytest, pytest-xdist (927 tests) |
+| **Tests** | pytest, pytest-xdist (1,587 tests, 100% line coverage) |
 
 ---
 
@@ -357,7 +357,7 @@ ollama_queue/
 scripts/
   migrate_timers.py              # Migrate systemd timers to recurring jobs
   migrate_dlq_max_retries.py     # Schema migration (idempotent)
-tests/                           # 927 tests (pytest-xdist parallel)
+tests/                           # 1,587 tests, 100% line coverage (pytest-xdist parallel)
 ```
 
 ---
@@ -387,7 +387,7 @@ Dev/test: `pip install -r requirements-dev.txt`
 
 ```bash
 source .venv/bin/activate
-pytest  # 927 tests, parallel by default
+pytest  # 1,587 tests, 100% line coverage, parallel by default
 ```
 
 ---
