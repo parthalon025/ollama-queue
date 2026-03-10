@@ -475,9 +475,12 @@ class JobsMixin:
             conn = self._connect()
             now = time.time()
 
-            job_retention = self.get_setting("job_log_retention_days") or 30
-            health_retention = self.get_setting("health_log_retention_days") or 7
-            duration_retention = self.get_setting("duration_stats_retention_days") or 90
+            _v = self.get_setting("job_log_retention_days")
+            job_retention = int(_v) if _v is not None else 30
+            _v = self.get_setting("health_log_retention_days")
+            health_retention = int(_v) if _v is not None else 7
+            _v = self.get_setting("duration_stats_retention_days")
+            duration_retention = int(_v) if _v is not None else 90
 
             conn.execute(
                 "DELETE FROM jobs WHERE completed_at IS NOT NULL AND completed_at < ?",

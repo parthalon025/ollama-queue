@@ -70,7 +70,8 @@ def get_queue():
 def submit_job(req: SubmitJobRequest):
     db = _api.db
     # Admission gate: reject with 429 when queue depth exceeds max_queue_depth
-    max_depth = int(db.get_setting("max_queue_depth") or 50)
+    _v = db.get_setting("max_queue_depth")
+    max_depth = int(_v) if _v is not None else 50
     pending = db.count_pending_jobs()
     # count_pending_jobs() excludes retry_after-deferred jobs (not actionable yet).
     # get_pending_jobs() returns all pending — the inline filter below must be preserved

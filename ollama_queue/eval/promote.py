@@ -145,10 +145,12 @@ def _check_auto_promote_inner(db: Database, run_id: int) -> None:  # noqa: PLR09
 
     if is_bayesian:
         quality_metric = "auc"
-        quality_threshold = float(db.get_setting("eval.auc_threshold") or 0.85)
+        _v = db.get_setting("eval.auc_threshold")
+        quality_threshold = float(_v) if _v is not None else 0.85
     else:
         quality_metric = "f1"
-        quality_threshold = float(db.get_setting("eval.f1_threshold") or 0.75)
+        _v = db.get_setting("eval.f1_threshold")
+        quality_threshold = float(_v) if _v is not None else 0.75
 
     winner_quality = (parsed_metrics.get(winner_variant) or {}).get(quality_metric)
     if winner_quality is None:
@@ -168,7 +170,8 @@ def _check_auto_promote_inner(db: Database, run_id: int) -> None:  # noqa: PLR09
 
     # Bayesian-specific gate: posterior separation must exceed minimum
     if is_bayesian:
-        min_separation = float(db.get_setting("eval.min_posterior_separation") or 0.4)
+        _v = db.get_setting("eval.min_posterior_separation")
+        min_separation = float(_v) if _v is not None else 0.4
         winner_separation = (parsed_metrics.get(winner_variant) or {}).get("separation")
         if winner_separation is None or winner_separation < min_separation:
             _log.info(
@@ -180,22 +183,23 @@ def _check_auto_promote_inner(db: Database, run_id: int) -> None:  # noqa: PLR09
             return
 
     # Gate 2: quality > production_quality + min_improvement
-    min_improvement = float(db.get_setting("eval.auto_promote_min_improvement") or 0.05)
+    _v = db.get_setting("eval.auto_promote_min_improvement")
+    min_improvement = float(_v) if _v is not None else 0.05
     production_quality: float | None = None
 
     with db._lock:
         conn = db._connect()
         prod_row = conn.execute("SELECT id FROM eval_variants WHERE is_production = 1 LIMIT 1").fetchone()
-
-    if prod_row is not None:
-        prod_id = prod_row["id"]
-        with db._lock:
-            conn = db._connect()
+        prod_run_row = None
+        if prod_row is not None:
+            prod_id = prod_row["id"]
             prod_run_row = conn.execute(
                 "SELECT metrics FROM eval_runs WHERE winner_variant = ? AND status = 'complete' "
                 "ORDER BY id DESC LIMIT 1",
                 (prod_id,),
             ).fetchone()
+
+    if prod_row is not None:
         if prod_run_row is not None:
             try:
                 m = json.loads(prod_run_row["metrics"]) if isinstance(prod_run_row["metrics"], str) else {}

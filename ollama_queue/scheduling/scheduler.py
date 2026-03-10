@@ -65,7 +65,8 @@ class Scheduler:
             now = time.time()
         due = self.db.get_due_recurring_jobs(now)
         # Pre-fetch AoI parameters once — O(1) instead of O(N) DB reads during sort.
-        aoi_weight = float(self.db.get_setting("aoi_weight") or 0.3)
+        _v = self.db.get_setting("aoi_weight")
+        aoi_weight = float(_v) if _v is not None else 0.3
         last_success_cache = {rj["id"]: self.db.get_last_successful_run_time(rj["id"]) for rj in due}
         # AoI sort: lower score = higher urgency. Ensures stale jobs promoted first
         # when multiple become due simultaneously.

@@ -129,8 +129,8 @@ class DLQMixin:
                 (
                     entry["command"],
                     entry["model"],
-                    entry["priority"] or 5,
-                    entry.get("timeout") or 600,
+                    entry["priority"] if entry["priority"] is not None else 5,
+                    entry["timeout"] if entry.get("timeout") is not None else 600,
                     entry["source"] or "dlq-retry",
                     time.time(),
                     entry.get("tag"),
