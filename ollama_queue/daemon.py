@@ -802,6 +802,7 @@ class Daemon:
         # Sample VRAM before job for observed-VRAM recording
         vram_before = self._free_vram_mb()
 
+        out = b""
         try:
             proc = subprocess.Popen(
                 job["command"],
@@ -984,6 +985,18 @@ class Daemon:
                     )
                 except Exception:
                     _log.exception("Failed to route job #%d to DLQ after internal error", job["id"])
+            # Attempt to capture any partial metrics from output before crash
+            if out:
+                try:
+                    full_stdout = out.decode("utf-8", errors="replace")
+                    metrics = parse_ollama_metrics(full_stdout)
+                    if metrics:
+                        metrics["model"] = job.get("model", "")
+                        metrics["command"] = job.get("command", "")
+                        metrics["resource_profile"] = job.get("resource_profile", "ollama")
+                        self.db.store_job_metrics(job["id"], metrics)
+                except Exception:
+                    _log.debug("Failed to capture partial metrics for job #%d", job["id"])
         finally:
             self.stall_detector.forget(job["id"])
             with self._running_lock:
