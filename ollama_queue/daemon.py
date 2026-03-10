@@ -230,8 +230,11 @@ class Daemon:
             )
             if result.returncode == 0:
                 return float(result.stdout.strip().split("\n")[0])
-        except Exception:
+        except (OSError, _subprocess.TimeoutExpired, ValueError):
             _log.debug("nvidia-smi unavailable for VRAM check")
+            return None
+        except Exception:
+            _log.warning("Unexpected error reading VRAM", exc_info=True)
         return None
 
     def _free_ram_mb(self) -> float:
@@ -707,26 +710,30 @@ class Daemon:
         if evaluation["should_pause"]:
             if not currently_paused:
                 _log.warning("Queue pausing (health): %s", evaluation["reason"])
-            self.db.update_daemon_state(
+            state_update = dict(
                 state="paused_health",
                 paused_reason=evaluation["reason"],
                 paused_since=now if not currently_paused else state.get("paused_since"),
                 last_poll_at=now,
-                current_job_id=None,
             )
+            if state.get("current_job_id") != -1:
+                state_update["current_job_id"] = None
+            self.db.update_daemon_state(**state_update)
             return
 
         # 7. Evaluate yield -> if interactive user, update state, return
         if evaluation["should_yield"]:
             if not currently_paused:
                 _log.info("Queue yielding to interactive Ollama user: %s", evaluation["reason"])
-            self.db.update_daemon_state(
+            state_update = dict(
                 state="paused_interactive",
                 paused_reason=evaluation["reason"],
                 paused_since=now if not currently_paused else state.get("paused_since"),
                 last_poll_at=now,
-                current_job_id=None,
             )
+            if state.get("current_job_id") != -1:
+                state_update["current_job_id"] = None
+            self.db.update_daemon_state(**state_update)
             return
 
         # Log recovery from health/interactive pause
