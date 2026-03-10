@@ -324,3 +324,183 @@ def test_positive_threshold_setting(client_and_db):
     resp = client.get("/api/eval/settings")
     data = resp.json()
     assert data.get("eval.positive_threshold") == 4
+
+
+# --- Coverage gap tests: eval settings validation & datasource ---
+
+
+def test_put_eval_settings_unknown_key_returns_422(client):
+    """PUT with a non-allowlisted key returns 422. Covers lines 1804-1805."""
+    resp = client.put("/api/eval/settings", json={"eval.nonexistent_key": "value"})
+    assert resp.status_code == 422
+    detail = resp.json()["detail"]
+    assert any("unknown" in str(e).lower() for e in detail)
+
+
+def test_put_eval_settings_same_cluster_targets_validation(client):
+    """same_cluster_targets must be 1-10. Covers lines 1813-1814."""
+    resp = client.put("/api/eval/settings", json={"eval.same_cluster_targets": 15})
+    assert resp.status_code == 422
+
+
+def test_put_eval_settings_diff_cluster_targets_validation(client):
+    """diff_cluster_targets must be 1-10. Covers lines 1813-1814."""
+    resp = client.put("/api/eval/settings", json={"eval.diff_cluster_targets": 0})
+    assert resp.status_code == 422
+
+
+def test_put_eval_settings_f1_threshold_validation(client):
+    """f1_threshold must be 0.0-1.0. Covers line 1820."""
+    resp = client.put("/api/eval/settings", json={"eval.f1_threshold": 1.5})
+    assert resp.status_code == 422
+
+
+def test_put_eval_settings_error_budget_validation(client):
+    """error_budget must be 0.0-1.0. Covers line 1820."""
+    resp = client.put("/api/eval/settings", json={"eval.error_budget": -0.1})
+    assert resp.status_code == 422
+
+
+def test_put_eval_settings_positive_threshold_out_of_range(client):
+    """positive_threshold must be integer 1-5. Covers line 1839."""
+    resp = client.put("/api/eval/settings", json={"eval.positive_threshold": 10})
+    assert resp.status_code == 422
+
+
+def test_put_eval_settings_positive_threshold_not_int(client):
+    """positive_threshold must be integer, not float. Covers line 1839."""
+    resp = client.put("/api/eval/settings", json={"eval.positive_threshold": 2.5})
+    assert resp.status_code == 422
+
+
+def test_get_eval_settings_masks_token(client_and_db):
+    """GET masks eval.data_source_token with ***. Covers line 1769."""
+    client, db = client_and_db
+    db.set_setting("eval.data_source_token", "secret-bearer-token")
+    resp = client.get("/api/eval/settings")
+    assert resp.status_code == 200
+    masked = "***"
+    assert resp.json()["eval.data_source_token"] == masked
+
+
+def test_post_eval_datasource_prime_http_status_error(client_and_db):
+    """POST prime returns 502 on HTTPStatusError. Covers lines 1747-1748."""
+    import httpx as _httpx
+
+    client, db = client_and_db
+    db.set_setting("eval.data_source_url", "http://127.0.0.1:7685")
+
+    mock_response = MagicMock()
+    mock_response.status_code = 500
+    exc = _httpx.HTTPStatusError(
+        "Server Error",
+        request=MagicMock(),
+        response=mock_response,
+    )
+
+    with patch("httpx.post", side_effect=exc):
+        resp = client.post("/api/eval/datasource/prime")
+
+    assert resp.status_code == 502
+    assert "500" in resp.json()["detail"]
+
+
+def test_create_eval_schedule_daily(client):
+    """Create a daily eval schedule. Covers lines 1860-1904 (daily path)."""
+    resp = client.post(
+        "/api/eval/schedule",
+        json={
+            "variants": ["A", "B"],
+            "per_cluster": 4,
+            "run_mode": "batch",
+            "recurrence": "daily",
+        },
+    )
+    assert resp.status_code == 200
+    assert "job_id" in resp.json()
+
+
+def test_create_eval_schedule_weekly(client):
+    """Create a weekly eval schedule. Covers line 1882."""
+    resp = client.post(
+        "/api/eval/schedule",
+        json={
+            "variants": ["A"],
+            "per_cluster": 4,
+            "run_mode": "batch",
+            "recurrence": "weekly",
+        },
+    )
+    assert resp.status_code == 200
+
+
+def test_create_eval_schedule_invalid_recurrence(client):
+    """Invalid recurrence returns 400. Covers line 1884."""
+    resp = client.post(
+        "/api/eval/schedule",
+        json={
+            "variants": ["A"],
+            "per_cluster": 4,
+            "run_mode": "batch",
+            "recurrence": "monthly",
+        },
+    )
+    assert resp.status_code == 400
+    assert "recurrence" in resp.json()["detail"].lower()
+
+
+def test_create_eval_schedule_invalid_variants(client):
+    """Non-alphanumeric variants return 400. Covers lines 1868-1871."""
+    resp = client.post(
+        "/api/eval/schedule",
+        json={
+            "variants": ["A; DROP TABLE"],
+            "per_cluster": 4,
+            "run_mode": "batch",
+            "recurrence": "daily",
+        },
+    )
+    assert resp.status_code == 400
+
+
+def test_create_eval_schedule_invalid_per_cluster(client):
+    """Out-of-range per_cluster returns 400. Covers lines 1872-1873."""
+    resp = client.post(
+        "/api/eval/schedule",
+        json={
+            "variants": ["A"],
+            "per_cluster": 99,
+            "run_mode": "batch",
+            "recurrence": "daily",
+        },
+    )
+    assert resp.status_code == 400
+
+
+def test_create_eval_schedule_invalid_run_mode(client):
+    """Invalid run_mode returns 400. Covers lines 1874-1877."""
+    resp = client.post(
+        "/api/eval/schedule",
+        json={
+            "variants": ["A"],
+            "per_cluster": 4,
+            "run_mode": "invalid",
+            "recurrence": "daily",
+        },
+    )
+    assert resp.status_code == 400
+
+
+def test_create_eval_schedule_duplicate_returns_409(client):
+    """Creating duplicate schedule returns 409. Covers lines 1899-1903."""
+    body = {
+        "variants": ["A"],
+        "per_cluster": 4,
+        "run_mode": "batch",
+        "recurrence": "daily",
+    }
+    resp1 = client.post("/api/eval/schedule", json=body)
+    assert resp1.status_code == 200
+
+    resp2 = client.post("/api/eval/schedule", json=body)
+    assert resp2.status_code == 409

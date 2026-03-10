@@ -161,3 +161,218 @@ def test_health_endpoint_returns_status(client, db):
         resp = client.get(f"/api/consumers/{cid}/health")
     assert resp.status_code == 200
     assert resp.json()["status"] == "confirmed"
+
+
+# --- Coverage gap tests: consumer/intercept error paths ---
+
+
+def test_include_consumer_not_found(client):
+    """Include on non-existent consumer returns 404. Covers line 2612."""
+    resp = client.post(
+        "/api/consumers/99999/include",
+        json={"restart_policy": "deferred"},
+    )
+    assert resp.status_code == 404
+
+
+def test_include_windows_consumer_returns_422(client, db):
+    """Include on Windows consumer returns 422. Covers line 2621."""
+    cid = _seed_consumer(db, platform="windows")
+    resp = client.post(
+        f"/api/consumers/{cid}/include",
+        json={"restart_policy": "deferred"},
+    )
+    assert resp.status_code == 422
+    assert "windows" in resp.json()["detail"].lower()
+
+
+def test_include_patch_exception_returns_500(client, db):
+    """Patch failure returns 500. Covers lines 2641-2642."""
+    cid = _seed_consumer(db, patch_path="/tmp/test.env", type="env_file")  # noqa: S108
+    with patch(
+        "ollama_queue.api.patch_consumer",
+        side_effect=RuntimeError("patch write error"),
+    ):
+        resp = client.post(
+            f"/api/consumers/{cid}/include",
+            json={"restart_policy": "deferred"},
+        )
+    assert resp.status_code == 500
+    assert "patch write error" in resp.json()["detail"]
+
+
+def test_include_patched_triggers_health_check(client, db, tmp_path):
+    """When patch returns status=patched, background health check runs. Covers lines 2658-2659."""
+    env = tmp_path / ".env"
+    env.write_text("OLLAMA_HOST=localhost:11434\n")
+    cid = _seed_consumer(db, patch_path=str(env), type="env_file")
+
+    health_called = []
+
+    def mock_check_health(consumer, db_ref):
+        health_called.append(True)
+        return {"status": "confirmed"}
+
+    with (
+        patch(
+            "ollama_queue.api.patch_consumer",
+            return_value={"patch_applied": True, "status": "patched", "patch_type": "env_file"},
+        ),
+        patch("ollama_queue.api.check_health", side_effect=mock_check_health),
+    ):
+        resp = client.post(
+            f"/api/consumers/{cid}/include",
+            json={"restart_policy": "immediate"},
+        )
+    assert resp.status_code == 200
+    # Allow background thread to run
+    import time
+
+    time.sleep(0.2)
+    assert len(health_called) == 1
+
+
+def test_include_health_check_exception_is_logged(client, db, tmp_path):
+    """Health check exception in background thread is caught. Covers line 2659."""
+    env = tmp_path / ".env"
+    env.write_text("OLLAMA_HOST=localhost:11434\n")
+    cid = _seed_consumer(db, patch_path=str(env), type="env_file")
+
+    with (
+        patch(
+            "ollama_queue.api.patch_consumer",
+            return_value={"patch_applied": True, "status": "patched", "patch_type": "env_file"},
+        ),
+        patch("ollama_queue.api.check_health", side_effect=RuntimeError("health check boom")),
+    ):
+        resp = client.post(
+            f"/api/consumers/{cid}/include",
+            json={"restart_policy": "immediate"},
+        )
+    assert resp.status_code == 200
+    # Background exception is caught — no crash
+    import time
+
+    time.sleep(0.2)
+
+
+def test_ignore_consumer_not_found(client):
+    """Ignore on non-existent consumer returns 404. Covers line 2669."""
+    resp = client.post("/api/consumers/99999/ignore")
+    assert resp.status_code == 404
+
+
+def test_revert_consumer_not_found(client):
+    """Revert on non-existent consumer returns 404. Covers line 2677."""
+    resp = client.post("/api/consumers/99999/revert")
+    assert resp.status_code == 404
+
+
+def test_revert_consumer_exception_returns_500(client, db):
+    """Revert failure returns 500. Covers lines 2680-2682."""
+    cid = _seed_consumer(db, status="patched", patch_applied=1)
+    with patch(
+        "ollama_queue.api.revert_consumer",
+        side_effect=RuntimeError("file revert failed"),
+    ):
+        resp = client.post(f"/api/consumers/{cid}/revert")
+    assert resp.status_code == 500
+    assert "file revert failed" in resp.json()["detail"]
+
+
+def test_health_consumer_not_found(client):
+    """Health on non-existent consumer returns 404. Covers line 2690."""
+    resp = client.get("/api/consumers/99999/health")
+    assert resp.status_code == 404
+
+
+def test_intercept_enable_non_linux_returns_422(client):
+    """Intercept enable on non-Linux returns 422. Covers lines 2697-2700."""
+    # The endpoint does `import platform as _plat` locally, so mock the module itself
+    import platform as _plat_mod
+
+    with patch.object(_plat_mod, "system", return_value="Darwin"):
+        resp = client.post("/api/consumers/intercept/enable")
+    assert resp.status_code == 422
+    assert "linux" in resp.json()["detail"].lower()
+
+
+def test_intercept_enable_no_consumers_returns_422(client):
+    """Intercept enable with no included consumers returns 422. Covers lines 2702-2706."""
+    import platform as _plat_mod
+
+    with patch.object(_plat_mod, "system", return_value="Linux"):
+        resp = client.post("/api/consumers/intercept/enable")
+    assert resp.status_code == 422
+    assert "consumer" in resp.json()["detail"].lower()
+
+
+def test_intercept_enable_success(client, db):
+    """Intercept enable with included consumer succeeds. Covers lines 2707-2713."""
+    import platform as _plat_mod
+
+    _seed_consumer(db, status="patched")
+    with (
+        patch.object(_plat_mod, "system", return_value="Linux"),
+        patch(
+            "ollama_queue.api.enable_intercept",
+            return_value={"enabled": True},
+        ),
+        patch("os.getuid", return_value=1000),
+    ):
+        resp = client.post("/api/consumers/intercept/enable")
+    assert resp.status_code == 200
+    assert resp.json()["enabled"] is True
+
+
+def test_intercept_enable_iptables_fail_returns_422(client, db):
+    """Intercept enable with iptables failure returns 422. Covers lines 2709-2710."""
+    import platform as _plat_mod
+
+    _seed_consumer(db, status="included")
+    with (
+        patch.object(_plat_mod, "system", return_value="Linux"),
+        patch(
+            "ollama_queue.api.enable_intercept",
+            return_value={"enabled": False, "error": "iptables not found"},
+        ),
+        patch("os.getuid", return_value=1000),
+    ):
+        resp = client.post("/api/consumers/intercept/enable")
+    assert resp.status_code == 422
+    assert "iptables" in resp.json()["detail"].lower()
+
+
+def test_intercept_disable_success(client, db):
+    """Intercept disable succeeds. Covers lines 2717-2722."""
+    db.set_setting("intercept_mode_uid", "1000")
+    with patch(
+        "ollama_queue.api.disable_intercept",
+        return_value={"enabled": False},
+    ):
+        resp = client.post("/api/consumers/intercept/disable")
+    assert resp.status_code == 200
+    assert resp.json()["enabled"] is False
+
+
+def test_intercept_disable_error_returns_500(client, db):
+    """Intercept disable with error returns 500. Covers lines 2719-2720."""
+    db.set_setting("intercept_mode_uid", "1000")
+    with patch(
+        "ollama_queue.api.disable_intercept",
+        return_value={"enabled": True, "error": "iptables -D failed"},
+    ):
+        resp = client.post("/api/consumers/intercept/disable")
+    assert resp.status_code == 500
+
+
+def test_intercept_status_endpoint(client, db):
+    """Intercept status returns current state. Covers lines 2726-2727."""
+    db.set_setting("intercept_mode_uid", "1000")
+    with patch(
+        "ollama_queue.api.get_intercept_status",
+        return_value={"enabled": False, "rules": []},
+    ):
+        resp = client.get("/api/consumers/intercept/status")
+    assert resp.status_code == 200
+    assert "enabled" in resp.json()
