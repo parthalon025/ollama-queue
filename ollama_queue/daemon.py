@@ -40,6 +40,9 @@ from ollama_queue.stall import StallDetector
 _log = logging.getLogger(__name__)
 
 
+_MAX_STDOUT_BYTES = 128 * 1024  # 128KB — enough for metrics JSON + tail
+
+
 def _drain_pipes_with_tracking(
     proc: subprocess.Popen,
     job_id: int,
@@ -49,6 +52,9 @@ def _drain_pipes_with_tracking(
 
     Uses non-blocking fds + select() to avoid: (1) deadlock on large output,
     (2) blocking the worker thread from observing process exit.
+
+    Stdout is capped at _MAX_STDOUT_BYTES to prevent OOM under MemoryMax=512M.
+    Only the tail is kept — sufficient for metrics parsing and stdout_tail storage.
     """
     import fcntl
     import select as _select
@@ -61,8 +67,19 @@ def _drain_pipes_with_tracking(
         fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
 
     stdout_chunks: list[bytes] = []
+    stdout_total: int = 0
     stderr_chunks: list[bytes] = []
     open_fds: set[int] = {stdout_fd, stderr_fd}
+
+    def _append_stdout(data: bytes) -> None:
+        nonlocal stdout_total
+        stdout_chunks.append(data)
+        stdout_total += len(data)
+        stall_detector.update_stdout_activity(job_id, time.time())
+        # Trim old chunks when over budget — keep tail
+        while stdout_total > _MAX_STDOUT_BYTES and len(stdout_chunks) > 1:
+            removed = stdout_chunks.pop(0)
+            stdout_total -= len(removed)
 
     while open_fds:
         try:
@@ -80,9 +97,10 @@ def _drain_pipes_with_tracking(
                             if not chunk:
                                 open_fds.discard(fd)
                                 break
-                            (stdout_chunks if fd == stdout_fd else stderr_chunks).append(chunk)
                             if fd == stdout_fd:
-                                stall_detector.update_stdout_activity(job_id, time.time())
+                                _append_stdout(chunk)
+                            else:
+                                stderr_chunks.append(chunk)
                     except (BlockingIOError, OSError):
                         open_fds.discard(fd)
                 break
@@ -98,8 +116,7 @@ def _drain_pipes_with_tracking(
                 open_fds.discard(fd)
                 continue
             if fd == stdout_fd:
-                stdout_chunks.append(chunk)
-                stall_detector.update_stdout_activity(job_id, time.time())
+                _append_stdout(chunk)
             else:
                 stderr_chunks.append(chunk)
 
@@ -742,8 +759,11 @@ class Daemon:
 
         # 8. Admit and dispatch
         # Guard: don't clobber proxy sentinel (same reason as step 5).
+        # Re-read current_job_id from DB — the snapshot from step 0 may be stale
+        # if a proxy was claimed between then and now (#82).
         if not self._can_admit(job, settings):
-            if state.get("current_job_id") == -1:
+            fresh_state = self.db.get_daemon_state()
+            if fresh_state.get("current_job_id") == -1:
                 self.db.update_daemon_state(state="idle", last_poll_at=now)
             else:
                 self.db.update_daemon_state(state="idle", last_poll_at=now, current_job_id=None)
