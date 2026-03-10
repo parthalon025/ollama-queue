@@ -1,6 +1,6 @@
 import { h } from 'preact';
 import { useState, useMemo } from 'preact/hooks';
-import { queue, API } from '../store';
+import { queue, API, refreshQueue } from '../store';
 
 /**
  * What it shows: Every job waiting to run, priority-ordered, with estimated duration.
@@ -28,10 +28,15 @@ function priorityColor(p) {
   return PRIORITY_COLORS.background;
 }
 
-async function cancelJob(id, isRunning) {
+async function cancelJob(id, isRunning, setError) {
   if (isRunning && !confirm('Cancel this running job? The process will be killed.')) return;
-  const res = await fetch(`${API}/queue/cancel/${id}`, { method: 'POST' }).catch(console.error);
-  if (res && !res.ok) console.error(`Cancel failed: HTTP ${res.status}`);
+  try {
+    const res = await fetch(`${API}/queue/cancel/${id}`, { method: 'POST' });
+    if (!res.ok) { setError(`Cancel failed: HTTP ${res.status}`); return; }
+    await refreshQueue();
+  } catch (e) {
+    setError(`Cancel failed: ${e.message}`);
+  }
 }
 
 export default function QueueList({ jobs, currentJob }) {
@@ -40,6 +45,7 @@ export default function QueueList({ jobs, currentJob }) {
   const [dragIdx, setDragIdx] = useState(null);
   const [dropIdx, setDropIdx] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
+  const [cancelError, setCancelError] = useState(null);
 
   const tags = useMemo(() => [...new Set(allItems.map(j => j.tag).filter(Boolean))], [allItems]);
   const items = tagFilter ? allItems.filter(j => j.tag === tagFilter) : allItems;
@@ -132,6 +138,11 @@ export default function QueueList({ jobs, currentJob }) {
         </div>
       )}
 
+      {cancelError && (
+        <div style="font-family: var(--font-mono); font-size: var(--type-label); color: var(--status-error); margin-bottom: 0.4rem;" role="alert">
+          {cancelError}
+        </div>
+      )}
       <div class="flex flex-col gap-1">
         {displayItems.map((job, idx) => {
           // Running job uses a fixed display index; pending jobs use idx offset by 1 if running job present
@@ -225,7 +236,7 @@ export default function QueueList({ jobs, currentJob }) {
                   class="t-btn"
                   style="background: none; border: none; color: var(--status-error); font-size: 14px; cursor: pointer; padding: 2px 6px; line-height: 1; flex-shrink: 0;"
                   title="Remove this job from the queue — cannot be undone"
-                  onClick={(e) => { e.stopPropagation(); cancelJob(job.id, job._isRunning); }}
+                  onClick={(e) => { e.stopPropagation(); cancelJob(job.id, job._isRunning, setCancelError); }}
                 >
                   ×
                 </button>

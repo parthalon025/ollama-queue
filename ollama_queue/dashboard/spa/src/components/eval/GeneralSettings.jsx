@@ -1,5 +1,5 @@
 import { h } from 'preact';
-import { useState } from 'preact/hooks';
+import { useState, useRef, useEffect } from 'preact/hooks';
 // What it shows: Numeric eval configuration fields — how much data each run
 //   generates and what quality thresholds trigger promotion.
 // Decision it drives: User tunes the quantity/quality trade-off. Higher
@@ -186,6 +186,8 @@ export default function GeneralSettings() {
   const [saveError, setSaveError] = useState('');
   const [saveOk,    setSaveOk]    = useState(false);
   const [analysisModel, setAnalysisModel] = useState(settings['eval.analysis_model'] ?? '');
+  const saveTimer = useRef(null);
+  useEffect(() => () => { if (saveTimer.current) clearTimeout(saveTimer.current); }, []);
 
   function handleChange(key, rawValue, def) {
     const parsed = def.parse(rawValue);
@@ -231,7 +233,8 @@ export default function GeneralSettings() {
       payload['eval.analysis_model'] = analysisModel;
       await saveEvalSettings(payload);
       setSaveOk(true);
-      setTimeout(() => setSaveOk(false), 2000);
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      saveTimer.current = setTimeout(() => setSaveOk(false), 2000);
     } catch (err) {
       setSaveError(err.message || 'Save failed');
     } finally {

@@ -1,5 +1,5 @@
 import { h } from 'preact';
-import { useState } from 'preact/hooks';
+import { useState, useRef, useEffect } from 'preact/hooks';
 import { EVAL_TRANSLATIONS } from './translations.js';
 import ResultsTable from './ResultsTable.jsx';
 import ConfusionMatrix from './ConfusionMatrix.jsx';
@@ -71,6 +71,8 @@ export default function RunRow({ run }) {
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [showBreakdown, setShowBreakdown] = useState(false);
   const [showAllItems, setShowAllItems] = useState(false);
+  const refreshTimer = useRef(null);
+  useEffect(() => () => { if (refreshTimer.current) clearTimeout(refreshTimer.current); }, []);
 
   const {
     id,
@@ -109,7 +111,8 @@ export default function RunRow({ run }) {
         try { data = await res.json(); } catch { /* non-JSON body */ }
         if (!res.ok) throw new Error(data?.detail || `Analyze failed: ${res.status}`);
         // Refresh runs list so analysis_md appears once the background job finishes
-        setTimeout(() => fetchEvalRuns(), 8000);
+        if (refreshTimer.current) clearTimeout(refreshTimer.current);
+        refreshTimer.current = setTimeout(() => fetchEvalRuns(), 8000);
         return data;
       },
       () => `Analysis started for run #${id} — refresh in a moment`
