@@ -4,7 +4,7 @@ from unittest.mock import patch as mock_patch
 
 import pytest
 
-from ollama_queue.patcher import patch_consumer, revert_consumer
+from ollama_queue.config.patcher import patch_consumer, revert_consumer
 
 
 @pytest.fixture
@@ -24,8 +24,8 @@ def env_file(tmp_path):
 
 
 def test_patch_systemd_injects_env(systemd_unit, monkeypatch):
-    monkeypatch.setattr("ollama_queue.patcher._reload_systemd", lambda: None)
-    monkeypatch.setattr("ollama_queue.patcher._restart_service", lambda name: None)
+    monkeypatch.setattr("ollama_queue.config.patcher._reload_systemd", lambda: None)
+    monkeypatch.setattr("ollama_queue.config.patcher._restart_service", lambda name: None)
     consumer = {
         "name": "aria.service",
         "type": "systemd",
@@ -39,8 +39,8 @@ def test_patch_systemd_injects_env(systemd_unit, monkeypatch):
 
 
 def test_patch_systemd_creates_backup(systemd_unit, monkeypatch):
-    monkeypatch.setattr("ollama_queue.patcher._reload_systemd", lambda: None)
-    monkeypatch.setattr("ollama_queue.patcher._restart_service", lambda name: None)
+    monkeypatch.setattr("ollama_queue.config.patcher._reload_systemd", lambda: None)
+    monkeypatch.setattr("ollama_queue.config.patcher._restart_service", lambda name: None)
     consumer = {
         "name": "aria.service",
         "type": "systemd",
@@ -53,8 +53,8 @@ def test_patch_systemd_creates_backup(systemd_unit, monkeypatch):
 
 
 def test_revert_systemd_restores_original(systemd_unit, monkeypatch):
-    monkeypatch.setattr("ollama_queue.patcher._reload_systemd", lambda: None)
-    monkeypatch.setattr("ollama_queue.patcher._restart_service", lambda name: None)
+    monkeypatch.setattr("ollama_queue.config.patcher._reload_systemd", lambda: None)
+    monkeypatch.setattr("ollama_queue.config.patcher._restart_service", lambda name: None)
     consumer = {
         "name": "aria.service",
         "type": "systemd",
@@ -84,7 +84,7 @@ def test_patch_env_file_appends_if_missing(tmp_path):
     assert "OLLAMA_HOST=localhost:7683" in env.read_text()
 
 
-from ollama_queue.patcher import check_health
+from ollama_queue.config.patcher import check_health
 
 
 def test_health_confirmed_when_both_signals_clear(tmp_path):
@@ -106,7 +106,7 @@ def test_health_confirmed_when_both_signals_clear(tmp_path):
     )
     consumer = db.get_consumer(consumer_id)
 
-    with mock_patch("ollama_queue.patcher._port_has_process", side_effect=[False, True]):
+    with mock_patch("ollama_queue.config.patcher._port_has_process", side_effect=[False, True]):
         result = check_health(consumer, db, plat="linux")
 
     assert result["old_port_clear"] is True
@@ -131,7 +131,7 @@ def test_health_partial_when_only_old_port_clear(tmp_path):
     )
     consumer = db.get_consumer(consumer_id)
 
-    with mock_patch("ollama_queue.patcher._port_has_process", side_effect=[False, False]):
+    with mock_patch("ollama_queue.config.patcher._port_has_process", side_effect=[False, False]):
         result = check_health(consumer, db, plat="linux")
 
     assert result["old_port_clear"] is True
@@ -271,7 +271,7 @@ class TestPatchConsumerErrorBranch:
         f.write_text("OLLAMA_HOST=old")
         consumer = {"name": "app", "type": "env_file", "patch_path": str(f)}
         with (
-            mock_patch("ollama_queue.patcher._patch_env", side_effect=OSError("disk full")),
+            mock_patch("ollama_queue.config.patcher._patch_env", side_effect=OSError("disk full")),
             pytest.raises(OSError, match="disk full"),
         ):
             patch_consumer(consumer)
@@ -281,8 +281,8 @@ class TestPatchSystemdIdempotent:
     """_patch_systemd returns early if inject already present (line 95)."""
 
     def test_systemd_idempotent(self, systemd_unit, monkeypatch):
-        monkeypatch.setattr("ollama_queue.patcher._reload_systemd", lambda: None)
-        monkeypatch.setattr("ollama_queue.patcher._restart_service", lambda name: None)
+        monkeypatch.setattr("ollama_queue.config.patcher._reload_systemd", lambda: None)
+        monkeypatch.setattr("ollama_queue.config.patcher._restart_service", lambda name: None)
         consumer = {
             "name": "aria.service",
             "type": "systemd",
@@ -308,8 +308,8 @@ class TestRevertConsumer:
     def test_revert_systemd_immediate_restarts(self, systemd_unit, monkeypatch):
         reload_calls = []
         restart_calls = []
-        monkeypatch.setattr("ollama_queue.patcher._reload_systemd", lambda: reload_calls.append(1))
-        monkeypatch.setattr("ollama_queue.patcher._restart_service", lambda name: restart_calls.append(name))
+        monkeypatch.setattr("ollama_queue.config.patcher._reload_systemd", lambda: reload_calls.append(1))
+        monkeypatch.setattr("ollama_queue.config.patcher._restart_service", lambda name: restart_calls.append(name))
         consumer = {
             "name": "aria.service",
             "type": "systemd",
@@ -329,23 +329,23 @@ class TestReloadSystemd:
     """_reload_systemd() exercises lines 142-155."""
 
     def test_reload_systemd_success(self):
-        from ollama_queue.patcher import _reload_systemd
+        from ollama_queue.config.patcher import _reload_systemd
 
-        with mock_patch("ollama_queue.patcher.subprocess.run") as mock_run:
+        with mock_patch("ollama_queue.config.patcher.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stderr="")
             assert _reload_systemd() is True
 
     def test_reload_systemd_nonzero(self):
-        from ollama_queue.patcher import _reload_systemd
+        from ollama_queue.config.patcher import _reload_systemd
 
-        with mock_patch("ollama_queue.patcher.subprocess.run") as mock_run:
+        with mock_patch("ollama_queue.config.patcher.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=1, stderr="error msg")
             assert _reload_systemd() is False
 
     def test_reload_systemd_exception(self):
-        from ollama_queue.patcher import _reload_systemd
+        from ollama_queue.config.patcher import _reload_systemd
 
-        with mock_patch("ollama_queue.patcher.subprocess.run", side_effect=OSError("no systemctl")):
+        with mock_patch("ollama_queue.config.patcher.subprocess.run", side_effect=OSError("no systemctl")):
             assert _reload_systemd() is False
 
 
@@ -353,23 +353,23 @@ class TestRestartService:
     """_restart_service() exercises lines 159-172."""
 
     def test_restart_service_success(self):
-        from ollama_queue.patcher import _restart_service
+        from ollama_queue.config.patcher import _restart_service
 
-        with mock_patch("ollama_queue.patcher.subprocess.run") as mock_run:
+        with mock_patch("ollama_queue.config.patcher.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stderr="")
             assert _restart_service("aria.service") is True
 
     def test_restart_service_nonzero(self):
-        from ollama_queue.patcher import _restart_service
+        from ollama_queue.config.patcher import _restart_service
 
-        with mock_patch("ollama_queue.patcher.subprocess.run") as mock_run:
+        with mock_patch("ollama_queue.config.patcher.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=1, stderr="fail")
             assert _restart_service("aria.service") is False
 
     def test_restart_service_exception(self):
-        from ollama_queue.patcher import _restart_service
+        from ollama_queue.config.patcher import _restart_service
 
-        with mock_patch("ollama_queue.patcher.subprocess.run", side_effect=OSError("no systemctl")):
+        with mock_patch("ollama_queue.config.patcher.subprocess.run", side_effect=OSError("no systemctl")):
             assert _restart_service("aria.service") is False
 
 
@@ -392,7 +392,7 @@ class TestCheckHealthFailed:
         )
         consumer = db.get_consumer(consumer_id)
         # old_port NOT clear (True = process on 11434), new_port active
-        with mock_patch("ollama_queue.patcher._port_has_process", side_effect=[True, True]):
+        with mock_patch("ollama_queue.config.patcher._port_has_process", side_effect=[True, True]):
             result = check_health(consumer, db, plat="linux")
         assert result["status"] == "failed"
 
@@ -401,67 +401,67 @@ class TestPortHasProcess:
     """_port_has_process exercises lines 205-231."""
 
     def test_linux_found(self):
-        from ollama_queue.patcher import _port_has_process
+        from ollama_queue.config.patcher import _port_has_process
 
         ss_output = 'State  Recv-Q Send-Q  Local Address:Port  Peer Address:Port\nESTAB  0      0      127.0.0.1:7683    127.0.0.1:5432  users:(("aria",pid=1234,fd=5))'
-        with mock_patch("ollama_queue.patcher.subprocess.run") as mock_run:
+        with mock_patch("ollama_queue.config.patcher.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout=ss_output, stderr="")
             result = _port_has_process("7683", "aria.service", "linux")
         assert result is True
 
     def test_linux_not_found(self):
-        from ollama_queue.patcher import _port_has_process
+        from ollama_queue.config.patcher import _port_has_process
 
         ss_output = 'State  Recv-Q Send-Q  Local Address:Port  Peer Address:Port\nESTAB  0      0      127.0.0.1:5432    127.0.0.1:5432  users:(("postgres",pid=1234,fd=5))'
-        with mock_patch("ollama_queue.patcher.subprocess.run") as mock_run:
+        with mock_patch("ollama_queue.config.patcher.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout=ss_output, stderr="")
             result = _port_has_process("7683", "aria.service", "linux")
         assert result is False
 
     def test_linux_nonzero_returncode(self):
-        from ollama_queue.patcher import _port_has_process
+        from ollama_queue.config.patcher import _port_has_process
 
-        with mock_patch("ollama_queue.patcher.subprocess.run") as mock_run:
+        with mock_patch("ollama_queue.config.patcher.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="error")
             result = _port_has_process("7683", "aria.service", "linux")
         assert result is False
 
     def test_macos_found(self):
-        from ollama_queue.patcher import _port_has_process
+        from ollama_queue.config.patcher import _port_has_process
 
         lsof_output = "COMMAND  PID  USER  FD  TYPE  DEVICE  SIZE/OFF  NODE  NAME\naria  1234  user  5u  IPv4  12345  0t0  TCP  *:7683 (LISTEN)"
-        with mock_patch("ollama_queue.patcher.subprocess.run") as mock_run:
+        with mock_patch("ollama_queue.config.patcher.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout=lsof_output, stderr="")
             result = _port_has_process("7683", "aria.service", "macos")
         assert result is True
 
     def test_macos_not_found(self):
-        from ollama_queue.patcher import _port_has_process
+        from ollama_queue.config.patcher import _port_has_process
 
         lsof_output = "COMMAND  PID  USER  FD  TYPE  DEVICE  SIZE/OFF  NODE  NAME\npostgres  1234  user  5u  IPv4  12345  0t0  TCP  *:5432 (LISTEN)"
-        with mock_patch("ollama_queue.patcher.subprocess.run") as mock_run:
+        with mock_patch("ollama_queue.config.patcher.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout=lsof_output, stderr="")
             result = _port_has_process("7683", "aria.service", "macos")
         assert result is False
 
     def test_macos_nonzero_returncode(self):
-        from ollama_queue.patcher import _port_has_process
+        from ollama_queue.config.patcher import _port_has_process
 
-        with mock_patch("ollama_queue.patcher.subprocess.run") as mock_run:
+        with mock_patch("ollama_queue.config.patcher.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="error")
             result = _port_has_process("7683", "aria.service", "macos")
         assert result is False
 
     def test_unsupported_platform(self):
-        from ollama_queue.patcher import _port_has_process
+        from ollama_queue.config.patcher import _port_has_process
 
         result = _port_has_process("7683", "aria.service", "windows")
         assert result is False
 
     def test_exception_returns_false(self):
-        from ollama_queue.patcher import _port_has_process
+        from ollama_queue.config.patcher import _port_has_process
 
-        with mock_patch("ollama_queue.patcher.subprocess.run", side_effect=OSError("no ss")):
+        with mock_patch("ollama_queue.config.patcher.subprocess.run", side_effect=OSError("no ss")):
             result = _port_has_process("7683", "aria.service", "linux")
         assert result is False
 

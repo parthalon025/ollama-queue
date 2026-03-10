@@ -10,8 +10,8 @@ from pydantic import BaseModel
 
 import ollama_queue.api as _api
 from ollama_queue.db import Database
-from ollama_queue.estimator import DurationEstimator
-from ollama_queue.models import OllamaModels
+from ollama_queue.models.client import OllamaModels
+from ollama_queue.models.estimator import DurationEstimator
 
 _log = logging.getLogger(__name__)
 
@@ -140,7 +140,7 @@ def list_schedule():
 @router.post("/api/schedule/rebalance")
 def trigger_rebalance():
     db = _api.db
-    from ollama_queue.scheduler import Scheduler
+    from ollama_queue.scheduling.scheduler import Scheduler
 
     changes = Scheduler(db).rebalance()
     return {"rebalanced": len(changes), "changes": changes}
@@ -155,7 +155,7 @@ def get_schedule_events(limit: int = 100):
 @router.get("/api/schedule/load-map")
 def get_load_map():
     db = _api.db
-    from ollama_queue.scheduler import Scheduler
+    from ollama_queue.scheduling.scheduler import Scheduler
 
     slots = Scheduler(db).load_map()
     return {"slots": slots, "slot_minutes": 30, "count": len(slots)}
@@ -164,7 +164,7 @@ def get_load_map():
 @router.get("/api/schedule/suggest")
 def suggest_schedule_time(priority: int = 5, top_n: int = 3):
     db = _api.db
-    from ollama_queue.scheduler import Scheduler
+    from ollama_queue.scheduling.scheduler import Scheduler
 
     suggestions = Scheduler(db).suggest_time(priority=priority, top_n=top_n)
     results = []
@@ -220,7 +220,7 @@ def add_schedule(body: RecurringJobCreate):
     db = _api.db
     import threading as _threading
 
-    from ollama_queue.scheduler import Scheduler
+    from ollama_queue.scheduling.scheduler import Scheduler
 
     rj_id = db.add_recurring_job(**body.model_dump())
     Scheduler(db).rebalance()
@@ -243,7 +243,7 @@ def update_schedule(rj_id: int, body: RecurringJobUpdate):
         raise HTTPException(status_code=404, detail="Recurring job not found")
     # Rebalance next_run after edit
     try:
-        from ollama_queue.scheduler import Scheduler
+        from ollama_queue.scheduling.scheduler import Scheduler
 
         Scheduler(db).rebalance()
     except Exception:

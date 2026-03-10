@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from ollama_queue.app import create_app
 from ollama_queue.db import Database
-from ollama_queue.scheduler import Scheduler
+from ollama_queue.scheduling.scheduler import Scheduler
 
 
 @pytest.fixture
@@ -365,10 +365,10 @@ def test_get_models_returns_list(client):
 
     with (
         patch(
-            "ollama_queue.models.OllamaModels.list_local",
+            "ollama_queue.models.client.OllamaModels.list_local",
             return_value=[{"name": "qwen2.5:7b", "size_bytes": 4_700_000_000, "modified": "1w"}],
         ),
-        patch("ollama_queue.models.OllamaModels.get_loaded", return_value=[]),
+        patch("ollama_queue.models.client.OllamaModels.get_loaded", return_value=[]),
     ):
         resp = client.get("/api/models")
     assert resp.status_code == 200
@@ -395,7 +395,7 @@ def test_queue_etas_endpoint(client):
 def test_post_models_pull(client):
     from unittest.mock import patch
 
-    with patch("ollama_queue.models.OllamaModels.pull", return_value=1):
+    with patch("ollama_queue.models.client.OllamaModels.pull", return_value=1):
         resp = client.post("/api/models/pull", json={"model": "llama3.2:3b"})
     assert resp.status_code == 200
     assert resp.json()["pull_id"] == 1
@@ -969,7 +969,7 @@ def test_update_schedule_rebalance_exception(client_and_db):
 
     client, db = client_and_db
     client.post("/api/schedule", json={"name": "j1", "command": "echo hi", "interval_seconds": 3600})
-    with patch("ollama_queue.scheduler.Scheduler.rebalance", side_effect=Exception("boom")):
+    with patch("ollama_queue.scheduling.scheduler.Scheduler.rebalance", side_effect=Exception("boom")):
         resp = client.put("/api/schedule/1", json={"enabled": False})
     assert resp.status_code == 200
 
@@ -1155,7 +1155,9 @@ def test_get_pull_status(client_and_db):
     from unittest.mock import patch
 
     client, db = client_and_db
-    with patch("ollama_queue.models.OllamaModels.get_pull_status", return_value={"status": "downloading", "pct": 50}):
+    with patch(
+        "ollama_queue.models.client.OllamaModels.get_pull_status", return_value={"status": "downloading", "pct": 50}
+    ):
         resp = client.get("/api/models/pull/1")
     assert resp.status_code == 200
     assert resp.json()["status"] == "downloading"
@@ -1165,7 +1167,7 @@ def test_get_pull_status_not_found(client):
     """GET /api/models/pull/{pull_id} returns 404 for unknown pull."""
     from unittest.mock import patch
 
-    with patch("ollama_queue.models.OllamaModels.get_pull_status", return_value={"error": "not found"}):
+    with patch("ollama_queue.models.client.OllamaModels.get_pull_status", return_value={"error": "not found"}):
         resp = client.get("/api/models/pull/999")
     assert resp.status_code == 404
 
@@ -1174,7 +1176,7 @@ def test_cancel_pull(client):
     """DELETE /api/models/pull/{pull_id} cancels a pull."""
     from unittest.mock import patch
 
-    with patch("ollama_queue.models.OllamaModels.cancel_pull", return_value=True):
+    with patch("ollama_queue.models.client.OllamaModels.cancel_pull", return_value=True):
         resp = client.delete("/api/models/pull/1")
     assert resp.status_code == 200
     assert resp.json()["cancelled"] is True

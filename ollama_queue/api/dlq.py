@@ -52,7 +52,7 @@ def clear_dlq():
 def dlq_schedule_preview():
     """Preview what the next DLQ auto-reschedule sweep would do."""
     db = _api.db
-    from ollama_queue.system_snapshot import classify_failure
+    from ollama_queue.sensing.system_snapshot import classify_failure
 
     unscheduled = db.list_dlq(unscheduled_only=True)
     if not unscheduled:
@@ -88,7 +88,7 @@ def dlq_schedule_preview():
 def reschedule_dlq_entry(dlq_id: int):
     """Manually trigger reschedule for a single DLQ entry."""
     db = _api.db
-    from ollama_queue.system_snapshot import classify_failure
+    from ollama_queue.sensing.system_snapshot import classify_failure
 
     entry = None
     for e in db.list_dlq():

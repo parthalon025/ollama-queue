@@ -9,9 +9,9 @@ import time
 import pytest
 
 from ollama_queue.db import Database
-from ollama_queue.deferral_scheduler import DeferralScheduler
-from ollama_queue.dlq_scheduler import DLQScheduler
-from ollama_queue.runtime_estimator import RuntimeEstimator
+from ollama_queue.models.runtime_estimator import RuntimeEstimator
+from ollama_queue.scheduling.deferral import DeferralScheduler
+from ollama_queue.scheduling.dlq_scheduler import DLQScheduler
 
 
 @pytest.fixture

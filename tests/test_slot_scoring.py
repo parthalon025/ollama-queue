@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ollama_queue.slot_scoring import find_fitting_slot, score_slot
+from ollama_queue.scheduling.slot_scoring import find_fitting_slot, score_slot
 
 # ---------------------------------------------------------------------------
 # score_slot tests

@@ -2,7 +2,7 @@
 
 import pytest
 
-from ollama_queue.estimator import DurationEstimator
+from ollama_queue.models.estimator import DurationEstimator
 
 
 @pytest.fixture
@@ -65,7 +65,7 @@ class TestEstimateWithVariance:
 
     def test_estimate_with_variance_returns_tuple(self, db):
         """Returns (mean, cv_squared) tuple."""
-        from ollama_queue.estimator import DurationEstimator
+        from ollama_queue.models.estimator import DurationEstimator
 
         estimator = DurationEstimator(db)
         mean, cv_sq = estimator.estimate_with_variance("unknown-src")
@@ -76,7 +76,7 @@ class TestEstimateWithVariance:
         """Uses actual duration history when available."""
         import time
 
-        from ollama_queue.estimator import DurationEstimator
+        from ollama_queue.models.estimator import DurationEstimator
 
         now = time.time()
         # Insert predictable history: all same duration → variance = 0
@@ -95,7 +95,7 @@ class TestEstimateWithVariance:
         """High variance history produces cv_squared > 1.0."""
         import time
 
-        from ollama_queue.estimator import DurationEstimator
+        from ollama_queue.models.estimator import DurationEstimator
 
         now = time.time()
         # Very mixed durations: 100, 1000, 100, 1000 (high variance)
@@ -111,7 +111,7 @@ class TestEstimateWithVariance:
 
     def test_estimate_with_variance_uses_cached_mean(self, db):
         """Uses cached bulk dict for mean when no db stats available."""
-        from ollama_queue.estimator import DurationEstimator
+        from ollama_queue.models.estimator import DurationEstimator
 
         estimator = DurationEstimator(db)
         cached = {"cached-src": 300.0}
@@ -121,7 +121,7 @@ class TestEstimateWithVariance:
 
     def test_estimate_with_variance_default_cv_sq_is_conservative(self, db):
         """Returns cv_squared=1.5 when no history exists (conservative default)."""
-        from ollama_queue.estimator import DurationEstimator
+        from ollama_queue.models.estimator import DurationEstimator
 
         estimator = DurationEstimator(db)
         _, cv_sq = estimator.estimate_with_variance("no-history-src")
@@ -129,7 +129,7 @@ class TestEstimateWithVariance:
 
     def test_estimate_with_variance_uses_model_default(self, db):
         """Model-name default tier used when no db history and no cached dict."""
-        from ollama_queue.estimator import DurationEstimator
+        from ollama_queue.models.estimator import DurationEstimator
 
         estimator = DurationEstimator(db)
         mean, cv_sq = estimator.estimate_with_variance("no-history-src", model="deepseek-r1:8b")
@@ -141,15 +141,15 @@ def test_queue_etas_accepts_om_parameter(db):
     """queue_etas() reuses a passed OllamaModels instance instead of creating a new one."""
     from unittest.mock import patch
 
-    from ollama_queue.estimator import DurationEstimator
-    from ollama_queue.models import OllamaModels
+    from ollama_queue.models.client import OllamaModels
+    from ollama_queue.models.estimator import DurationEstimator
 
     estimator = DurationEstimator(db)
     jobs = [{"source": "test", "model": "qwen2.5:7b", "resource_profile": "ollama"}]
 
     shared_om = OllamaModels()
 
-    with patch("ollama_queue.estimator.OllamaModels") as mock_cls:
+    with patch("ollama_queue.models.estimator.OllamaModels") as mock_cls:
         # When om is passed, OllamaModels() constructor should NOT be called
         estimator.queue_etas(jobs, om=shared_om)
         mock_cls.assert_not_called()
@@ -159,12 +159,12 @@ def test_queue_etas_creates_om_when_none(db):
     """queue_etas() creates OllamaModels when om=None (default)."""
     from unittest.mock import patch
 
-    from ollama_queue.estimator import DurationEstimator
+    from ollama_queue.models.estimator import DurationEstimator
 
     estimator = DurationEstimator(db)
     jobs = [{"source": "test", "model": "qwen2.5:7b", "resource_profile": "ollama"}]
 
-    with patch("ollama_queue.estimator.OllamaModels") as mock_cls:
+    with patch("ollama_queue.models.estimator.OllamaModels") as mock_cls:
         mock_cls.return_value.classify.return_value = {"resource_profile": "ollama"}
         estimator.queue_etas(jobs)  # om=None by default
         mock_cls.assert_called_once()

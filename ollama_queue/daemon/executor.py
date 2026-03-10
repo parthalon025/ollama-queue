@@ -16,8 +16,8 @@ import subprocess as _subprocess  # real module — not replaced by test mocks t
 import time
 from subprocess import TimeoutExpired as _TimeoutExpired
 
-from ollama_queue.health import HealthMonitor
 from ollama_queue.metrics_parser import parse_ollama_metrics
+from ollama_queue.sensing.health import HealthMonitor
 
 _log = logging.getLogger(__name__)
 

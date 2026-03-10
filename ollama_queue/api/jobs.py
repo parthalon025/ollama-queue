@@ -12,9 +12,9 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 import ollama_queue.api as _api
-from ollama_queue.burst import _default_detector as _burst_detector
 from ollama_queue.db import DEFAULTS, Database
-from ollama_queue.estimator import DurationEstimator
+from ollama_queue.models.estimator import DurationEstimator
+from ollama_queue.sensing.burst import _default_detector as _burst_detector
 
 _log = logging.getLogger(__name__)
 

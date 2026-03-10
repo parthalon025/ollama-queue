@@ -3,8 +3,8 @@
 import time
 from unittest.mock import MagicMock, patch
 
-from ollama_queue.deferral_scheduler import DeferralScheduler
-from ollama_queue.runtime_estimator import Estimate
+from ollama_queue.models.runtime_estimator import Estimate
+from ollama_queue.scheduling.deferral import DeferralScheduler
 
 
 def _make_scheduler(deferred=None, jobs=None, slot=None, load_map=None):
@@ -36,7 +36,7 @@ class TestSweepNoDeferred:
 
 
 class TestSweepResumesImmediately:
-    @patch("ollama_queue.deferral_scheduler.find_fitting_slot")
+    @patch("ollama_queue.scheduling.deferral.find_fitting_slot")
     def test_slot_index_zero_resumes(self, mock_find):
         mock_find.return_value = {"slot_index": 0, "score": 8.5, "scheduled_time": time.time()}
         deferred = [{"id": 10, "job_id": 42, "scheduled_for": None}]
@@ -52,7 +52,7 @@ class TestSweepResumesImmediately:
 
 
 class TestSweepSchedulesFutureSlot:
-    @patch("ollama_queue.deferral_scheduler.find_fitting_slot")
+    @patch("ollama_queue.scheduling.deferral.find_fitting_slot")
     def test_slot_index_gt_zero_schedules(self, mock_find):
         future_time = time.time() + 3600
         mock_find.return_value = {"slot_index": 3, "score": 7.2, "scheduled_time": future_time}
@@ -71,7 +71,7 @@ class TestSweepSchedulesFutureSlot:
 
 
 class TestSweepSkipsNonDeferredStatus:
-    @patch("ollama_queue.deferral_scheduler.find_fitting_slot")
+    @patch("ollama_queue.scheduling.deferral.find_fitting_slot")
     def test_running_job_skipped(self, mock_find):
         deferred = [{"id": 30, "job_id": 99, "scheduled_for": None}]
         jobs = {99: {"status": "running", "model": "test", "command": "x", "resource_profile": "ollama"}}
@@ -113,7 +113,7 @@ class TestSweepLockPreventsConcurrent:
 
 
 class TestSweepPreservesJobId:
-    @patch("ollama_queue.deferral_scheduler.find_fitting_slot")
+    @patch("ollama_queue.scheduling.deferral.find_fitting_slot")
     def test_resumed_job_keeps_original_id(self, mock_find):
         """Resumed jobs keep their original job_id — no new job is created."""
         mock_find.return_value = {"slot_index": 0, "score": 9.0, "scheduled_time": time.time()}
@@ -190,7 +190,7 @@ class TestSweepPassesVramEstimate:
             for i in range(48)
         ]
         sched = DeferralScheduler(db, est, lambda: load_map)
-        with patch("ollama_queue.deferral_scheduler.find_fitting_slot") as mock_ffs:
+        with patch("ollama_queue.scheduling.deferral.find_fitting_slot") as mock_ffs:
             mock_ffs.return_value = {"slot_index": 5, "score": 10.0, "scheduled_time": time.time() + 9000}
             sched.sweep()
             mock_ffs.assert_called_once()

@@ -1101,8 +1101,8 @@ class TestPreemption:
 
 def test_daemon_has_burst_detector(db):
     """Daemon initializes with a BurstDetector instance."""
-    from ollama_queue.burst import BurstDetector
     from ollama_queue.daemon import Daemon
+    from ollama_queue.sensing.burst import BurstDetector
 
     daemon = Daemon(db)
     assert hasattr(daemon, "_burst_detector")
@@ -1372,7 +1372,7 @@ class TestDrainPipesWithTracking:
         import subprocess as _sp
 
         from ollama_queue.daemon import _drain_pipes_with_tracking
-        from ollama_queue.stall import StallDetector
+        from ollama_queue.sensing.stall import StallDetector
 
         proc = _sp.Popen(
             ["bash", "-c", "echo hello; echo errout >&2"],
@@ -1391,7 +1391,7 @@ class TestDrainPipesWithTracking:
         import subprocess as _sp
 
         from ollama_queue.daemon import _MAX_STDOUT_BYTES, _drain_pipes_with_tracking
-        from ollama_queue.stall import StallDetector
+        from ollama_queue.sensing.stall import StallDetector
 
         # Generate more than 128KB of stdout via dd (fast, predictable)
         size = _MAX_STDOUT_BYTES + 50000
@@ -1410,7 +1410,7 @@ class TestDrainPipesWithTracking:
         import subprocess as _sp
 
         from ollama_queue.daemon import _drain_pipes_with_tracking
-        from ollama_queue.stall import StallDetector
+        from ollama_queue.sensing.stall import StallDetector
 
         proc = _sp.Popen(["true"], stdout=_sp.PIPE, stderr=_sp.PIPE)
         sd = StallDetector()
@@ -1423,7 +1423,7 @@ class TestDrainPipesWithTracking:
         import subprocess as _sp
 
         from ollama_queue.daemon import _drain_pipes_with_tracking
-        from ollama_queue.stall import StallDetector
+        from ollama_queue.sensing.stall import StallDetector
 
         proc = _sp.Popen(
             ["bash", "-c", "echo -n stdout_data; echo -n stderr_data >&2; exit 0"],
@@ -1440,7 +1440,7 @@ class TestDrainPipesWithTracking:
         import subprocess as _sp
 
         from ollama_queue.daemon import _drain_pipes_with_tracking
-        from ollama_queue.stall import StallDetector
+        from ollama_queue.sensing.stall import StallDetector
 
         proc = _sp.Popen(["echo", "hi"], stdout=_sp.PIPE, stderr=_sp.PIPE)
         proc.wait()  # let it finish
@@ -1455,7 +1455,7 @@ class TestDrainPipesWithTracking:
         import subprocess as _sp
 
         from ollama_queue.daemon import _drain_pipes_with_tracking
-        from ollama_queue.stall import StallDetector
+        from ollama_queue.sensing.stall import StallDetector
 
         proc = _sp.Popen(["echo", "test"], stdout=_sp.PIPE, stderr=_sp.PIPE)
         sd = StallDetector()
@@ -2959,7 +2959,7 @@ def test_drain_process_exits_during_select_timeout():
     import subprocess as _sp
 
     from ollama_queue.daemon import _drain_pipes_with_tracking
-    from ollama_queue.stall import StallDetector
+    from ollama_queue.sensing.stall import StallDetector
 
     proc = _sp.Popen(
         ["bash", "-c", "echo -n STDOUT_BUF; echo -n STDERR_BUF >&2"],
@@ -2992,7 +2992,7 @@ def test_drain_read_raises_blocking_io_error():
     import subprocess as _sp
 
     from ollama_queue.daemon import _drain_pipes_with_tracking
-    from ollama_queue.stall import StallDetector
+    from ollama_queue.sensing.stall import StallDetector
 
     proc = _sp.Popen(["echo", "data"], stdout=_sp.PIPE, stderr=_sp.PIPE)
     sd = StallDetector()
@@ -3019,7 +3019,7 @@ def test_drain_post_exit_read_oserror():
     import subprocess as _sp
 
     from ollama_queue.daemon import _drain_pipes_with_tracking
-    from ollama_queue.stall import StallDetector
+    from ollama_queue.sensing.stall import StallDetector
 
     proc = _sp.Popen(
         ["bash", "-c", "echo -n X; exit 0"],
@@ -3057,7 +3057,7 @@ def test_drain_select_timeout_process_still_running():
     import subprocess as _sp
 
     from ollama_queue.daemon import _drain_pipes_with_tracking
-    from ollama_queue.stall import StallDetector
+    from ollama_queue.sensing.stall import StallDetector
 
     # Process that runs briefly then exits with output
     proc = _sp.Popen(

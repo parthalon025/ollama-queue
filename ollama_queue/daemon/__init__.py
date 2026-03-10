@@ -17,7 +17,6 @@ import threading
 from collections import deque
 from concurrent.futures import Future
 
-from ollama_queue.burst import _default_detector as _burst_singleton
 from ollama_queue.daemon.executor import (  # noqa: F401
     _MAX_STDOUT_BYTES,
     ExecutorMixin,
@@ -25,15 +24,16 @@ from ollama_queue.daemon.executor import (  # noqa: F401
 )
 from ollama_queue.daemon.loop import LoopMixin
 from ollama_queue.db import Database
-from ollama_queue.deferral_scheduler import DeferralScheduler
 from ollama_queue.dlq import DLQManager
-from ollama_queue.dlq_scheduler import DLQScheduler
-from ollama_queue.estimator import DurationEstimator
-from ollama_queue.health import HealthMonitor
-from ollama_queue.models import OllamaModels
-from ollama_queue.runtime_estimator import RuntimeEstimator
-from ollama_queue.scheduler import Scheduler
-from ollama_queue.stall import StallDetector
+from ollama_queue.models.client import OllamaModels
+from ollama_queue.models.estimator import DurationEstimator
+from ollama_queue.models.runtime_estimator import RuntimeEstimator
+from ollama_queue.scheduling.deferral import DeferralScheduler
+from ollama_queue.scheduling.dlq_scheduler import DLQScheduler
+from ollama_queue.scheduling.scheduler import Scheduler
+from ollama_queue.sensing.burst import _default_detector as _burst_singleton
+from ollama_queue.sensing.health import HealthMonitor
+from ollama_queue.sensing.stall import StallDetector
 
 
 class Daemon(LoopMixin, ExecutorMixin):

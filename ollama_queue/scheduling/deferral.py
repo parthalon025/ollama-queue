@@ -10,8 +10,8 @@ import logging
 import threading
 import time
 
-from ollama_queue.scheduler import _estimate_model_vram
-from ollama_queue.slot_scoring import find_fitting_slot
+from ollama_queue.scheduling.scheduler import _estimate_model_vram
+from ollama_queue.scheduling.slot_scoring import find_fitting_slot
 
 logger = logging.getLogger(__name__)
 

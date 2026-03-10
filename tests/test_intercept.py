@@ -1,7 +1,7 @@
 # tests/test_intercept.py
 from unittest.mock import MagicMock, patch
 
-from ollama_queue.intercept import (
+from ollama_queue.config.intercept import (
     _rule_present,
     disable_intercept,
     enable_intercept,
@@ -9,7 +9,7 @@ from ollama_queue.intercept import (
 
 
 def test_enable_intercept_runs_iptables():
-    with patch("ollama_queue.intercept.subprocess.run") as mock_run:
+    with patch("ollama_queue.config.intercept.subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         result = enable_intercept(uid=1000, queue_port=7683)
     assert result["enabled"] is True
@@ -22,7 +22,7 @@ def test_enable_intercept_runs_iptables():
 
 
 def test_disable_intercept_removes_rule():
-    with patch("ollama_queue.intercept.subprocess.run") as mock_run:
+    with patch("ollama_queue.config.intercept.subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         disable_intercept(uid=1000, queue_port=7683)
     cmd = " ".join(mock_run.call_args[0][0])
@@ -35,19 +35,19 @@ def test_rule_present_parses_iptables_output():
         "target  prot  opt  source  destination\n"
         "REDIRECT tcp  --  anywhere  anywhere  tcp dpt:11434 owner UID match !1000 redir ports 7683\n"
     )
-    with patch("ollama_queue.intercept.subprocess.run") as mock_run:
+    with patch("ollama_queue.config.intercept.subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=0, stdout=sample)
         assert _rule_present(uid=1000, queue_port=7683) is True
 
 
 def test_rule_not_present_when_absent():
-    with patch("ollama_queue.intercept.subprocess.run") as mock_run:
+    with patch("ollama_queue.config.intercept.subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=0, stdout="Chain OUTPUT\n")
         assert _rule_present(uid=1000, queue_port=7683) is False
 
 
 def test_enable_intercept_fails_on_non_linux():
-    with patch("ollama_queue.intercept.platform.system", return_value="Darwin"):
+    with patch("ollama_queue.config.intercept.platform.system", return_value="Darwin"):
         result = enable_intercept(uid=1000, queue_port=7683)
     assert result["enabled"] is False
     assert "linux" in result["error"].lower()
@@ -57,7 +57,7 @@ def test_enable_intercept_fails_on_non_linux():
 # Coverage gap tests
 # ---------------------------------------------------------------------------
 
-from ollama_queue.intercept import _persist_rules, get_intercept_status
+from ollama_queue.config.intercept import _persist_rules, get_intercept_status
 
 
 class TestEnableInterceptErrors:
@@ -66,8 +66,8 @@ class TestEnableInterceptErrors:
     def test_enable_returns_error_on_nonzero_exit(self):
         """iptables returns nonzero — line 27."""
         with (
-            patch("ollama_queue.intercept.platform.system", return_value="Linux"),
-            patch("ollama_queue.intercept.subprocess.run") as mock_run,
+            patch("ollama_queue.config.intercept.platform.system", return_value="Linux"),
+            patch("ollama_queue.config.intercept.subprocess.run") as mock_run,
         ):
             mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="iptables: bad rule")
             result = enable_intercept(uid=1000, queue_port=7683)
@@ -77,8 +77,8 @@ class TestEnableInterceptErrors:
     def test_enable_returns_error_on_oserror(self):
         """subprocess raises OSError — lines 30-31."""
         with (
-            patch("ollama_queue.intercept.platform.system", return_value="Linux"),
-            patch("ollama_queue.intercept.subprocess.run", side_effect=OSError("no sudo")),
+            patch("ollama_queue.config.intercept.platform.system", return_value="Linux"),
+            patch("ollama_queue.config.intercept.subprocess.run", side_effect=OSError("no sudo")),
         ):
             result = enable_intercept(uid=1000, queue_port=7683)
         assert result["enabled"] is False
@@ -89,8 +89,11 @@ class TestEnableInterceptErrors:
         import subprocess as sp
 
         with (
-            patch("ollama_queue.intercept.platform.system", return_value="Linux"),
-            patch("ollama_queue.intercept.subprocess.run", side_effect=sp.TimeoutExpired(cmd="iptables", timeout=10)),
+            patch("ollama_queue.config.intercept.platform.system", return_value="Linux"),
+            patch(
+                "ollama_queue.config.intercept.subprocess.run",
+                side_effect=sp.TimeoutExpired(cmd="iptables", timeout=10),
+            ),
         ):
             result = enable_intercept(uid=1000, queue_port=7683)
         assert result["enabled"] is False
@@ -98,9 +101,9 @@ class TestEnableInterceptErrors:
     def test_enable_calls_persist_on_success(self):
         """After successful iptables -A, _persist_rules is called (line 28-29)."""
         with (
-            patch("ollama_queue.intercept.platform.system", return_value="Linux"),
-            patch("ollama_queue.intercept.subprocess.run") as mock_run,
-            patch("ollama_queue.intercept._persist_rules") as mock_persist,
+            patch("ollama_queue.config.intercept.platform.system", return_value="Linux"),
+            patch("ollama_queue.config.intercept.subprocess.run") as mock_run,
+            patch("ollama_queue.config.intercept._persist_rules") as mock_persist,
         ):
             mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
             result = enable_intercept(uid=1000, queue_port=7683)
@@ -113,7 +116,7 @@ class TestDisableInterceptErrors:
 
     def test_disable_non_linux(self):
         """Non-Linux returns immediately — line 37."""
-        with patch("ollama_queue.intercept.platform.system", return_value="Darwin"):
+        with patch("ollama_queue.config.intercept.platform.system", return_value="Darwin"):
             result = disable_intercept(uid=1000, queue_port=7683)
         assert result["enabled"] is False
         assert "Linux-only" in result["error"]
@@ -121,8 +124,8 @@ class TestDisableInterceptErrors:
     def test_disable_nonzero_exit(self):
         """iptables -D fails with nonzero — lines 48-49."""
         with (
-            patch("ollama_queue.intercept.platform.system", return_value="Linux"),
-            patch("ollama_queue.intercept.subprocess.run") as mock_run,
+            patch("ollama_queue.config.intercept.platform.system", return_value="Linux"),
+            patch("ollama_queue.config.intercept.subprocess.run") as mock_run,
         ):
             mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="rule not found")
             result = disable_intercept(uid=1000, queue_port=7683)
@@ -132,8 +135,8 @@ class TestDisableInterceptErrors:
     def test_disable_oserror(self):
         """subprocess raises OSError — lines 51-53."""
         with (
-            patch("ollama_queue.intercept.platform.system", return_value="Linux"),
-            patch("ollama_queue.intercept.subprocess.run", side_effect=OSError("no sudo")),
+            patch("ollama_queue.config.intercept.platform.system", return_value="Linux"),
+            patch("ollama_queue.config.intercept.subprocess.run", side_effect=OSError("no sudo")),
         ):
             result = disable_intercept(uid=1000, queue_port=7683)
         assert result["enabled"] is True
@@ -144,8 +147,11 @@ class TestDisableInterceptErrors:
         import subprocess as sp
 
         with (
-            patch("ollama_queue.intercept.platform.system", return_value="Linux"),
-            patch("ollama_queue.intercept.subprocess.run", side_effect=sp.TimeoutExpired(cmd="iptables", timeout=10)),
+            patch("ollama_queue.config.intercept.platform.system", return_value="Linux"),
+            patch(
+                "ollama_queue.config.intercept.subprocess.run",
+                side_effect=sp.TimeoutExpired(cmd="iptables", timeout=10),
+            ),
         ):
             result = disable_intercept(uid=1000, queue_port=7683)
         assert result["enabled"] is True
@@ -155,14 +161,14 @@ class TestGetInterceptStatus:
     """get_intercept_status exercises lines 58-59."""
 
     def test_status_enabled(self):
-        with patch("ollama_queue.intercept._rule_present", return_value=True):
+        with patch("ollama_queue.config.intercept._rule_present", return_value=True):
             result = get_intercept_status(uid=1000, queue_port=7683)
         assert result["enabled"] is True
         assert result["rule_present"] is True
         assert result["uid"] == 1000
 
     def test_status_disabled(self):
-        with patch("ollama_queue.intercept._rule_present", return_value=False):
+        with patch("ollama_queue.config.intercept._rule_present", return_value=False):
             result = get_intercept_status(uid=1000, queue_port=7683)
         assert result["enabled"] is False
         assert result["rule_present"] is False
@@ -173,13 +179,13 @@ class TestRulePresentErrors:
 
     def test_rule_present_nonzero_exit(self):
         """iptables -L returns nonzero — lines 72-73."""
-        with patch("ollama_queue.intercept.subprocess.run") as mock_run:
+        with patch("ollama_queue.config.intercept.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="permission denied")
             assert _rule_present(uid=1000, queue_port=7683) is False
 
     def test_rule_present_exception(self):
         """subprocess raises — lines 75-77."""
-        with patch("ollama_queue.intercept.subprocess.run", side_effect=OSError("no iptables")):
+        with patch("ollama_queue.config.intercept.subprocess.run", side_effect=OSError("no iptables")):
             assert _rule_present(uid=1000, queue_port=7683) is False
 
 
@@ -190,7 +196,7 @@ class TestPersistRules:
         """Successful iptables-save writes to rules file — line 106."""
         rules_content = "*nat\n:OUTPUT ACCEPT\n-A OUTPUT ...\nCOMMIT\n"
         with (
-            patch("ollama_queue.intercept.subprocess.run") as mock_run,
+            patch("ollama_queue.config.intercept.subprocess.run") as mock_run,
             patch("builtins.open", create=True) as mock_open,
         ):
             mock_run.return_value = MagicMock(returncode=0, stdout=rules_content)
@@ -200,7 +206,7 @@ class TestPersistRules:
     def test_persist_rules_nonzero_no_write(self):
         """iptables-save nonzero — does not write."""
         with (
-            patch("ollama_queue.intercept.subprocess.run") as mock_run,
+            patch("ollama_queue.config.intercept.subprocess.run") as mock_run,
             patch("builtins.open", create=True) as mock_open,
         ):
             mock_run.return_value = MagicMock(returncode=1, stdout="")
@@ -209,6 +215,6 @@ class TestPersistRules:
 
     def test_persist_rules_exception_caught(self):
         """Exception in iptables-save is caught (best-effort)."""
-        with patch("ollama_queue.intercept.subprocess.run", side_effect=OSError("no iptables-save")):
+        with patch("ollama_queue.config.intercept.subprocess.run", side_effect=OSError("no iptables-save")):
             # Should not raise
             _persist_rules()

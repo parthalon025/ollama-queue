@@ -252,7 +252,7 @@ def test_update_schedule_rebalance_fails(client, db):
     rj_id = jobs[0]["id"]
 
     with patch(
-        "ollama_queue.scheduler.Scheduler.rebalance",
+        "ollama_queue.scheduling.scheduler.Scheduler.rebalance",
         side_effect=RuntimeError("scheduler boom"),
     ):
         resp = client.put(f"/api/schedule/{rj_id}", json={"enabled": False})
@@ -379,7 +379,7 @@ def test_reschedule_permanent_failure_rejected(client, db):
     assert len(dlq_entries) >= 1
     dlq_id = dlq_entries[0]["id"]
 
-    with patch("ollama_queue.system_snapshot.classify_failure", return_value="permanent"):
+    with patch("ollama_queue.sensing.system_snapshot.classify_failure", return_value="permanent"):
         resp = client.post(f"/api/dlq/{dlq_id}/reschedule")
     assert resp.status_code == 400
     assert "permanent" in resp.json()["detail"].lower()

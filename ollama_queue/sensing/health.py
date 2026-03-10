@@ -120,7 +120,7 @@ class HealthMonitor:
 
     def get_loaded_models(self) -> list[dict]:
         """Return all currently loaded Ollama models. Multi-model aware."""
-        from ollama_queue.models import OllamaModels
+        from ollama_queue.models.client import OllamaModels
 
         return OllamaModels().get_loaded()
 

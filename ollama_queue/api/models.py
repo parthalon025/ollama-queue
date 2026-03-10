@@ -8,8 +8,8 @@ import time as _time
 from fastapi import APIRouter, Body, HTTPException
 
 import ollama_queue.api as _api
-from ollama_queue.estimator import DurationEstimator
-from ollama_queue.models import OllamaModels
+from ollama_queue.models.client import OllamaModels
+from ollama_queue.models.estimator import DurationEstimator
 
 _log = logging.getLogger(__name__)
 
@@ -154,7 +154,7 @@ def get_model_metrics():
 def get_performance_curve():
     """Fitted cross-model performance curve."""
     db = _api.db
-    from ollama_queue.performance_curve import PerformanceCurve
+    from ollama_queue.models.performance_curve import PerformanceCurve
 
     stats = db.get_model_stats()
     curve = PerformanceCurve()

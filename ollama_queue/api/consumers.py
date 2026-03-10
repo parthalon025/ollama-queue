@@ -9,9 +9,9 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 import ollama_queue.api as _api
-from ollama_queue.intercept import disable_intercept, enable_intercept, get_intercept_status
-from ollama_queue.patcher import check_health, patch_consumer, revert_consumer
-from ollama_queue.scanner import run_scan
+from ollama_queue.config.intercept import disable_intercept, enable_intercept, get_intercept_status
+from ollama_queue.config.patcher import check_health, patch_consumer, revert_consumer
+from ollama_queue.config.scanner import run_scan
 
 _log = logging.getLogger(__name__)
 

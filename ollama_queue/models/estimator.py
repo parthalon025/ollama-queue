@@ -12,7 +12,7 @@ what ETA do we show for each item in the queue?
 from typing import ClassVar
 
 from ollama_queue.db import Database
-from ollama_queue.models import OllamaModels
+from ollama_queue.models.client import OllamaModels
 
 
 class DurationEstimator:

@@ -3,8 +3,8 @@
 import time
 from unittest.mock import MagicMock, patch
 
-from ollama_queue.dlq_scheduler import DLQScheduler
-from ollama_queue.runtime_estimator import Estimate
+from ollama_queue.models.runtime_estimator import Estimate
+from ollama_queue.scheduling.dlq_scheduler import DLQScheduler
 
 
 def _make_entry(
@@ -149,7 +149,7 @@ class TestSweepSkipsPermanentFailures:
         entry = _make_entry(failure_reason="command not found")
         sched, db, _, _ = _make_scheduler(entries=[entry])
 
-        with patch("ollama_queue.dlq_scheduler.classify_failure", return_value="permanent"):
+        with patch("ollama_queue.scheduling.dlq_scheduler.classify_failure", return_value="permanent"):
             result = sched._sweep([entry])
 
         assert result == []
@@ -276,7 +276,7 @@ class TestSweepPassesVramEstimate:
         entry = _make_entry(model="qwen2.5:14b")
         sched, db, estimator, load_map_fn = _make_scheduler(entries=[entry], submit_return=50)
 
-        with patch("ollama_queue.dlq_scheduler.find_fitting_slot") as mock_ffs:
+        with patch("ollama_queue.scheduling.dlq_scheduler.find_fitting_slot") as mock_ffs:
             mock_ffs.return_value = {"slot_index": 2, "score": 10.0, "scheduled_time": time.time() + 3600}
             sched._do_sweep([entry])
             mock_ffs.assert_called_once()

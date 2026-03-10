@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from ollama_queue.runtime_estimator import Estimate, RuntimeEstimator
+from ollama_queue.models.runtime_estimator import Estimate, RuntimeEstimator
 
 
 @pytest.fixture

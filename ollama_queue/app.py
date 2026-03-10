@@ -9,8 +9,8 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
+from ollama_queue.config.scanner import run_scan
 from ollama_queue.db import Database
-from ollama_queue.scanner import run_scan
 
 _log = logging.getLogger(__name__)
 

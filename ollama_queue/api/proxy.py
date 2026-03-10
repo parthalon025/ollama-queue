@@ -13,7 +13,7 @@ from starlette.background import BackgroundTask
 from starlette.responses import StreamingResponse
 
 import ollama_queue.api as _api
-from ollama_queue.models import OllamaModels
+from ollama_queue.models.client import OllamaModels
 
 _log = logging.getLogger(__name__)
 
