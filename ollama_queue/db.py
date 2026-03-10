@@ -1846,3 +1846,59 @@ class Database:
                 [*kwargs.values(), consumer_id],
             )
             conn.commit()
+
+    # ── Deferral lifecycle ──────────────────────────────────────────────
+
+    def defer_job(self, job_id: int, reason: str, context: str = "") -> int:
+        """Defer a job — sets status to 'deferred' and creates deferral record."""
+        with self._lock:
+            conn = self._connect()
+            now = time.time()
+            conn.execute("UPDATE jobs SET status = 'deferred' WHERE id = ?", (job_id,))
+            cursor = conn.execute(
+                """INSERT INTO deferrals (job_id, reason, context, deferred_at)
+                   VALUES (?, ?, ?, ?)""",
+                (job_id, reason, context, now),
+            )
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_deferral(self, deferral_id: int) -> dict | None:
+        with self._lock:
+            conn = self._connect()
+            row = conn.execute("SELECT * FROM deferrals WHERE id = ?", (deferral_id,)).fetchone()
+            return dict(row) if row else None
+
+    def list_deferred(self, unscheduled_only: bool = False) -> list[dict]:
+        with self._lock:
+            conn = self._connect()
+            where = "WHERE resumed_at IS NULL"
+            if unscheduled_only:
+                where += " AND scheduled_for IS NULL"
+            return [
+                dict(r) for r in conn.execute(f"SELECT * FROM deferrals {where} ORDER BY deferred_at ASC").fetchall()
+            ]
+
+    def update_deferral_schedule(
+        self, deferral_id: int, scheduled_for: float, scoring_snapshot: str | None = None
+    ) -> None:
+        with self._lock:
+            conn = self._connect()
+            conn.execute(
+                """UPDATE deferrals SET scheduled_for = ?, scoring_snapshot = ?
+                   WHERE id = ?""",
+                (scheduled_for, scoring_snapshot, deferral_id),
+            )
+            conn.commit()
+
+    def resume_deferred_job(self, deferral_id: int) -> None:
+        """Resume a deferred job — flip status back to pending, mark deferral as resumed."""
+        with self._lock:
+            conn = self._connect()
+            row = conn.execute("SELECT job_id FROM deferrals WHERE id = ?", (deferral_id,)).fetchone()
+            if not row:
+                return
+            now = time.time()
+            conn.execute("UPDATE jobs SET status = 'pending' WHERE id = ?", (row["job_id"],))
+            conn.execute("UPDATE deferrals SET resumed_at = ? WHERE id = ?", (now, deferral_id))
+            conn.commit()
