@@ -52,6 +52,7 @@ ollama_queue/
     judge.py          # run_eval_judge: LLM-based scoring with agreement tracking
     promote.py        # do_promote_eval_run, check_auto_promote (3-gate auto-promote logic)
     analysis.py       # Pure analysis (no DB/HTTP): per-item breakdown, bootstrap CI, stability, config diff
+    metrics.py        # Pure metric computation: F1/precision/recall, tournament/Bayesian aggregates, report rendering
 
   scheduling/         # Time-based job orchestration
     __init__.py       # Re-exports: Scheduler
