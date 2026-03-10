@@ -430,11 +430,11 @@ def _estimate_model_vram(model: str) -> float:
     """Estimate VRAM usage in GB from a model name like 'qwen2.5:7b'.
 
     Uses parameter count hints in the model name (e.g. '7b', '14b') and maps to
-    approximate VRAM at Q4 quantization. Returns 0 if no size hint found.
+    approximate VRAM at Q4 quantization. Returns 4.0 GB default if no size hint found.
     """
     match = _SIZE_PATTERN.search(model)
     if not match:
-        return 0.0
+        return 4.0
     params = float(match.group(1))
     # Find closest known size
     best_key = min(_PARAM_TO_VRAM, key=lambda k: abs(k - params))

@@ -64,7 +64,7 @@ class DLQScheduler:
         sorted_entries = sorted(entries, key=lambda e: e.get("priority", 0), reverse=True)
 
         # Check chronic failure threshold
-        chronic_threshold = self.db.get_setting("dlq.chronic_failure_threshold") or 5
+        chronic_threshold = self.db.get_setting("dlq.chronic_failure_threshold") or 3
 
         load_map = self.load_map_fn()
 
@@ -132,10 +132,10 @@ class DLQScheduler:
                 }
             )
 
-            # Mark DLQ entry BEFORE submitting job (crash-safe ordering)
-            self.db.update_dlq_reschedule(
+            # Mark DLQ entry BEFORE submitting job (crash-safe ordering).
+            # mark_dlq_scheduling does NOT increment count or set resolution.
+            self.db.mark_dlq_scheduling(
                 entry["id"],
-                rescheduled_job_id=None,
                 rescheduled_for=slot["scheduled_time"],
                 reschedule_reasoning=reasoning,
             )
