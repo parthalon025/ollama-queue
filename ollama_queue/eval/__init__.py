@@ -12,13 +12,11 @@ from ollama_queue.eval.analysis import (
     extract_failure_cases,
 )
 from ollama_queue.eval.engine import (
-    compute_metrics,
     compute_run_analysis,
     create_eval_run,
     get_eval_run,
     get_eval_variant,
     insert_eval_result,
-    render_report,
     run_eval_session,
     update_eval_run,
     update_eval_variant,
@@ -27,6 +25,10 @@ from ollama_queue.eval.judge import (
     build_judge_prompt,
     parse_judge_response,
     run_eval_judge,
+)
+from ollama_queue.eval.metrics import (
+    compute_metrics,
+    render_report,
 )
 from ollama_queue.eval.promote import (
     check_auto_promote,
