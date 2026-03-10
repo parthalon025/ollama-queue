@@ -158,9 +158,9 @@ class TestSweepSkipsPermanentFailures:
 
 class TestSweepPriorityOrdering:
     def test_sweep_priority_ordering(self):
-        """Higher priority entries are processed first."""
-        low = _make_entry(id=1, priority=1)
-        high = _make_entry(id=2, priority=10)
+        """Higher-importance entries (lower priority number) are processed first."""
+        critical = _make_entry(id=1, priority=1)  # priority 1 = critical (most important)
+        background = _make_entry(id=2, priority=10)  # priority 10 = background (least important)
         sched, db, _, _ = _make_scheduler(submit_return=99)
 
         # Track order via mark_dlq_scheduling (pre-submit) and update_dlq_reschedule (post-submit)
@@ -169,13 +169,13 @@ class TestSweepPriorityOrdering:
         db.mark_dlq_scheduling.side_effect = lambda *a, **kw: mark_calls.append(a[0])
         db.update_dlq_reschedule.side_effect = lambda *a, **kw: finalize_calls.append(a[0])
 
-        result = sched._sweep([low, high])
+        result = sched._sweep([background, critical])
 
         # Both should be rescheduled
         assert len(result) == 2
-        # High priority (id=2) should be processed first
-        assert mark_calls == [2, 1]
-        assert finalize_calls == [2, 1]
+        # Critical (id=1, priority=1) should be processed before background (id=2, priority=10)
+        assert mark_calls == [1, 2]
+        assert finalize_calls == [1, 2]
 
 
 class TestSweepLockPreventsConcurrent:

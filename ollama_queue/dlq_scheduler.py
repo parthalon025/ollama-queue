@@ -60,11 +60,12 @@ class DLQScheduler:
             return []
 
         rescheduled = []
-        # Sort by priority descending (higher priority = try first)
-        sorted_entries = sorted(entries, key=lambda e: e.get("priority", 0), reverse=True)
+        # Sort by priority ascending (lower number = higher importance: 1=critical, 10=background)
+        sorted_entries = sorted(entries, key=lambda e: e.get("priority", 0))
 
-        # Check chronic failure threshold
-        chronic_threshold = self.db.get_setting("dlq.chronic_failure_threshold") or 3
+        # Check chronic failure threshold (int cast guards against string-stored settings)
+        raw_threshold = self.db.get_setting("dlq.chronic_failure_threshold")
+        chronic_threshold = int(raw_threshold) if raw_threshold is not None else 3
 
         load_map = self.load_map_fn()
 

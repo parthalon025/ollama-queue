@@ -580,7 +580,8 @@ def dlq_schedule_preview(ctx):
         return
     from ollama_queue.system_snapshot import classify_failure
 
-    chronic_threshold = db.get_setting("dlq.chronic_failure_threshold") or 5
+    _ct = db.get_setting("dlq.chronic_failure_threshold")
+    chronic_threshold = int(_ct) if _ct is not None else 3
     eligible = []
     for e in entries:
         cat = classify_failure(e.get("failure_reason", ""), e.get("exit_code"))

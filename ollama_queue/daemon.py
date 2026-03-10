@@ -1294,7 +1294,8 @@ class Daemon:
     def run(self, poll_interval: int | None = None) -> None:
         """Main loop: poll_once() every N seconds. Prunes old data daily."""
         if poll_interval is None:
-            poll_interval = self.db.get_setting("poll_interval_seconds") or 5
+            _pi = self.db.get_setting("poll_interval_seconds")
+            poll_interval = int(_pi) if _pi is not None else 5
 
         self._recover_orphans()
         self.db.update_daemon_state(state="idle", uptime_since=time.time())

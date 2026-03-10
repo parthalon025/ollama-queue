@@ -614,6 +614,7 @@ def create_app(db: Database) -> FastAPI:
             rp_resp = await async_client.send(rp_req, stream=True)
         except Exception as e:
             _log.error("proxy:/api/generate streaming setup failed for job %d: %s", job_id, e, exc_info=True)
+            await async_client.aclose()
             db.complete_job(
                 job_id, exit_code=1, stdout_tail="", stderr_tail=str(e)[:500], outcome_reason=f"proxy error: {e}"
             )
@@ -896,7 +897,8 @@ def create_app(db: Database) -> FastAPI:
         if not unscheduled:
             return {"entries": [], "count": 0}
 
-        chronic_threshold = db.get_setting("dlq.chronic_failure_threshold") or 5
+        _ct = db.get_setting("dlq.chronic_failure_threshold")
+        chronic_threshold = int(_ct) if _ct is not None else 3
         preview = []
         for entry in unscheduled:
             cat = classify_failure(entry.get("failure_reason", ""))

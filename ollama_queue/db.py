@@ -1541,7 +1541,8 @@ class Database:
                    SET retry_count = retry_count + 1,
                        retry_after = ?,
                        last_retry_delay = ?,
-                       status = 'pending'
+                       status = 'pending',
+                       completed_at = NULL
                    WHERE id = ?""",
                 (retry_after, delay, job_id),
             )
