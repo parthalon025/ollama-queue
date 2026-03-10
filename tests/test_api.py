@@ -1094,7 +1094,7 @@ def test_dlq_reschedule_permanent_failure(client_and_db):
     job_id = db.submit_job("echo hi", "test-model", priority=5, timeout=60, source="test")
     db.start_job(job_id)
     db.complete_job(job_id, exit_code=1, stdout_tail="", stderr_tail="", outcome_reason="exit code 1")
-    db.move_to_dlq(job_id, "ModuleNotFoundError: No module named 'xyz'")
+    db.move_to_dlq(job_id, "command not found")
     entries = db.list_dlq()
     resp = client.post(f"/api/dlq/{entries[0]['id']}/reschedule")
     assert resp.status_code == 400

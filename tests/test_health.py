@@ -250,6 +250,20 @@ def test_yield_when_model_is_truly_interactive():
     assert decision["should_yield"] is True
 
 
+def test_get_loaded_model_success():
+    """get_loaded_model() returns first model name from ollama ps. Covers lines 116-117."""
+    from unittest.mock import MagicMock, patch
+
+    mock = MagicMock()
+    mock.returncode = 0
+    mock.stdout = (
+        "NAME    ID    SIZE    PROCESSOR    UNTIL\nllama3.2:3b    abc123    3.2 GB    100% GPU    4 minutes from now\n"
+    )
+    with patch("subprocess.run", return_value=mock):
+        result = HealthMonitor().get_ollama_active_model()
+    assert result == "llama3.2:3b"
+
+
 # --- T4: get_loaded_models() multi-model support ---
 
 
