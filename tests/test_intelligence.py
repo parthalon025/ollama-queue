@@ -80,6 +80,20 @@ class TestLoadPatterns:
         assert result["peak_hour"] == 19
         assert result["quietest_hour"] == 3
 
+    def test_quietest_hour_ignores_unobserved(self):
+        """quietest_hour should only consider hours with actual data."""
+        lp = LoadPatterns()
+        # Only hours 10 and 14 have data
+        hour10 = time.mktime(time.strptime("2026-03-09 10:00:00", "%Y-%m-%d %H:%M:%S"))
+        hour14 = time.mktime(time.strptime("2026-03-09 14:00:00", "%Y-%m-%d %H:%M:%S"))
+        log = [
+            {"recorded_at": hour10, "load": 5.0},  # hour 10
+            {"recorded_at": hour14, "load": 2.0},  # hour 14
+        ]
+        result = lp.compute(log)
+        # quietest_hour should be 14 (load=2.0), not hour 0 (no data = 0.0)
+        assert result["quietest_hour"] == 14
+
     def test_profiles_are_copies(self):
         lp = LoadPatterns()
         lp.compute([])

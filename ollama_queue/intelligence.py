@@ -48,11 +48,13 @@ class LoadPatterns:
         self._daily = [daily_sums[d] / daily_counts[d] if daily_counts[d] > 0 else 0.0 for d in range(7)]
         self._computed = True
 
+        observed_hours = [(self._hourly[h], h) for h in range(24) if hourly_counts[h] > 0]
+
         return {
             "hourly_points": sum(hourly_counts),
             "daily_points": sum(daily_counts),
-            "peak_hour": self._hourly.index(max(self._hourly)) if any(self._hourly) else None,
-            "quietest_hour": self._hourly.index(min(self._hourly)) if any(self._hourly) else None,
+            "peak_hour": max(observed_hours)[1] if observed_hours else None,
+            "quietest_hour": min(observed_hours)[1] if observed_hours else None,
         }
 
     def get_hourly_profile(self) -> list[float]:
