@@ -26,10 +26,14 @@ from subprocess import TimeoutExpired as _TimeoutExpired
 
 from ollama_queue.burst import _default_detector as _burst_singleton
 from ollama_queue.db import Database
+from ollama_queue.deferral_scheduler import DeferralScheduler
 from ollama_queue.dlq import DLQManager
+from ollama_queue.dlq_scheduler import DLQScheduler
 from ollama_queue.estimator import DurationEstimator
 from ollama_queue.health import HealthMonitor
+from ollama_queue.metrics_parser import parse_ollama_metrics
 from ollama_queue.models import OllamaModels
+from ollama_queue.runtime_estimator import RuntimeEstimator
 from ollama_queue.scheduler import Scheduler
 from ollama_queue.stall import StallDetector
 
@@ -140,6 +144,17 @@ class Daemon:
         # calls (on /api/queue/submit) feed into the same detector the daemon reads.
         self._burst_detector = _burst_singleton
         self._burst_regime: str = "unknown"  # cached for /api/health
+        # DLQ auto-reschedule + deferral schedulers
+        self._runtime_estimator = RuntimeEstimator(db)
+        self._dlq_scheduler = DLQScheduler(db, self._runtime_estimator, self._get_load_map)
+        self._deferral_scheduler = DeferralScheduler(db, self._runtime_estimator, self._get_load_map)
+        self._last_dlq_sweep: float = 0.0
+
+    def _get_load_map(self) -> list[dict]:
+        """Load map accessor for DLQ/deferral schedulers."""
+        if hasattr(self.scheduler, "load_map"):
+            return self.scheduler.load_map()
+        return []
 
     # --- Concurrency helpers ---
 
@@ -335,6 +350,16 @@ class Daemon:
                 health_eval["should_pause"],
                 health_eval.get("reason", ""),
             )
+            # Proactive deferral: if resources won't fit and deferral is enabled,
+            # defer the job so the scheduler can place it in a better time slot
+            defer_enabled = settings.get("defer.enabled") if settings else self.db.get_setting("defer.enabled")
+            if defer_enabled is not False and not resource_ok:
+                try:
+                    context = f"committed_vram={committed_vram:.0f}MB, model_vram={model_vram:.0f}MB"
+                    self.db.defer_job(job["id"], reason="resource", context=context)
+                    _log.info("Deferred job #%d: resource contention (%s)", job["id"], context)
+                except Exception:
+                    _log.exception("Failed to defer job #%d", job["id"])
             return False
 
         # Shadow mode — log but don't admit second job yet
@@ -638,6 +663,16 @@ class Daemon:
         except Exception:
             _log.exception("Burst regime check failed; continuing")
 
+        # 3e. Periodic DLQ/deferral sweep (fallback for event-driven sweep)
+        sweep_interval = float(settings.get("dlq.sweep_fallback_minutes") or 30) * 60
+        if now - self._last_dlq_sweep >= sweep_interval:
+            try:
+                self._dlq_scheduler.periodic_sweep()
+                self._deferral_scheduler.sweep()
+            except Exception:
+                _log.exception("Periodic DLQ/deferral sweep failed; continuing")
+            self._last_dlq_sweep = now
+
         # 4. Get next pending job — SJF + aging sort
         estimates = self.db.estimate_duration_bulk([j["source"] for j in pending_jobs])
         job = self._dequeue_next_job(pending_jobs, estimates, now)
@@ -876,6 +911,17 @@ class Daemon:
                     duration=duration,
                     exit_code=exit_code,
                 )
+                # Capture Ollama performance metrics (graceful — non-Ollama jobs return None)
+                full_stdout = out.decode("utf-8", errors="replace")
+                metrics = parse_ollama_metrics(full_stdout)
+                if metrics:
+                    metrics["model"] = job.get("model", "")
+                    metrics["command"] = job.get("command", "")
+                    metrics["resource_profile"] = job.get("resource_profile", "ollama")
+                    try:
+                        self.db.store_job_metrics(job["id"], metrics)
+                    except Exception:
+                        _log.exception("Failed to store metrics for job #%d", job["id"])
                 # Record observed VRAM delta
                 vram_after = self._free_vram_mb()
                 if vram_before is not None and vram_after is not None and job.get("model"):
@@ -907,6 +953,12 @@ class Daemon:
                     )
                 except Exception:
                     _log.exception("Scheduler next_run update failed for job #%d", job["id"])
+
+            # Trigger DLQ auto-reschedule sweep (event-driven)
+            try:
+                self._dlq_scheduler.on_job_completed(job["id"])
+            except Exception:
+                _log.exception("DLQ auto-reschedule sweep failed after job #%d", job["id"])
 
         except Exception as exc:
             _log.exception("Unhandled exception in worker thread for job #%d; marking failed", job["id"])
