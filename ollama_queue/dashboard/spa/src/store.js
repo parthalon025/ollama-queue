@@ -479,7 +479,8 @@ export async function fetchDLQ() {
 
 export async function retryDLQEntry(id) {
     try {
-        await fetch(`${API}/dlq/${id}/retry`, { method: 'POST' });
+        const res = await fetch(`${API}/dlq/${id}/retry`, { method: 'POST' });
+        if (!res.ok) throw new Error(`retryDLQEntry failed: HTTP ${res.status}`);
         await fetchDLQ();
     } catch (e) {
         console.error('retryDLQEntry failed:', e);
@@ -488,7 +489,8 @@ export async function retryDLQEntry(id) {
 
 export async function retryAllDLQ() {
     try {
-        await fetch(`${API}/dlq/retry-all`, { method: 'POST' });
+        const res = await fetch(`${API}/dlq/retry-all`, { method: 'POST' });
+        if (!res.ok) throw new Error(`retryAllDLQ failed: HTTP ${res.status}`);
         await fetchDLQ();
     } catch (e) {
         console.error('retryAllDLQ failed:', e);
@@ -497,7 +499,8 @@ export async function retryAllDLQ() {
 
 export async function dismissDLQEntry(id) {
     try {
-        await fetch(`${API}/dlq/${id}/dismiss`, { method: 'POST' });
+        const res = await fetch(`${API}/dlq/${id}/dismiss`, { method: 'POST' });
+        if (!res.ok) throw new Error(`dismissDLQEntry failed: HTTP ${res.status}`);
         await fetchDLQ();
     } catch (e) {
         console.error('dismissDLQEntry failed:', e);
@@ -506,7 +509,8 @@ export async function dismissDLQEntry(id) {
 
 export async function clearDLQ() {
     try {
-        await fetch(`${API}/dlq`, { method: 'DELETE' });
+        const res = await fetch(`${API}/dlq`, { method: 'DELETE' });
+        if (!res.ok) throw new Error(`clearDLQ failed: HTTP ${res.status}`);
         await fetchDLQ();
     } catch (e) {
         console.error('clearDLQ failed:', e);

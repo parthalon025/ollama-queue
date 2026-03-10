@@ -126,7 +126,7 @@ export default function RunRow({ run }) {
         try { data = await res.json(); } catch { /* non-JSON body */ }
         if (!res.ok) throw new Error(data?.detail || `Repeat failed: ${res.status}`);
         evalSubTab.value = 'runs';
-        const activeState = { run_id: data.run_id, status: 'pending' };
+        const activeState = { run_id: data.run_id, status: 'queued' };
         evalActiveRun.value = activeState;
         sessionStorage.setItem('evalActiveRun', JSON.stringify(activeState));
         startEvalPoll(data.run_id);

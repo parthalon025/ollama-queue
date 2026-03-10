@@ -90,7 +90,7 @@ export default function VariantRow({ variant }) {
         aria-expanded={level >= 2}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1, flexWrap: 'wrap' }}>
-          {is_recommended ? <span class="eval-badge eval-badge-recommended">★</span> : null}
+          {(is_recommended || is_production) ? <span class="eval-badge eval-badge-recommended">★</span> : null}
           <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--accent)', fontWeight: 600 }}>
             {id}
           </span>
@@ -100,8 +100,8 @@ export default function VariantRow({ variant }) {
           <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)' }}>
             · {model}
           </span>
-          {is_recommended ? <span class="eval-badge eval-badge-recommended">★ Recommended</span> : null}
-          {is_production ? <span class="eval-badge eval-badge-production">Production</span> : null}
+          {is_production ? <span class="eval-badge eval-badge-production">★ Production</span> : null}
+          {is_recommended && !is_production ? <span class="eval-badge eval-badge-recommended">★ Recommended</span> : null}
           {latest_f1 != null && (
             <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-secondary)' }}>
               {EVAL_TRANSLATIONS.f1.label}: {Math.round(latest_f1 * 100)}%

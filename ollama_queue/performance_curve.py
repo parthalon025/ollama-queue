@@ -46,6 +46,14 @@ class PerformanceCurve:
 
         Each entry: {model_size_gb, avg_tok_per_min, avg_warmup_s (optional)}
         """
+        # Reset all fitted parameters so a failed re-fit doesn't leave stale values
+        self._tok_slope = None
+        self._tok_intercept = None
+        self._tok_residual_std = None
+        self._warmup_slope = None
+        self._warmup_intercept = None
+        self.fitted = False
+
         self._points = model_stats
 
         # tok/min curve: log-linear regression

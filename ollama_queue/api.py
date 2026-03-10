@@ -2065,6 +2065,9 @@ def create_app(db: Database) -> FastAPI:
         if run is None:
             raise HTTPException(status_code=404, detail=f"Eval run {run_id} not found")
 
+        # Never leak the data source token via the API
+        run.pop("data_source_token", None)
+
         # Parse metrics JSON field
         if run.get("metrics"):
             try:

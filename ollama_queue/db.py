@@ -994,7 +994,13 @@ class Database:
             row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
             if row is None:
                 return None
-            return json.loads(row["value"])
+            result = json.loads(row["value"])
+            # Defensively convert string "true"/"false" to Python bool so
+            # callers using truthiness checks (if db.get_setting(...):) behave
+            # correctly even when a string was stored instead of a JSON boolean.
+            if isinstance(result, str) and result.lower() in ("true", "false"):
+                return result.lower() == "true"
+            return result
 
     def set_setting(self, key: str, value) -> None:
         with self._lock:
@@ -1926,5 +1932,8 @@ class Database:
                 return
             now = time.time()
             conn.execute("UPDATE jobs SET status = 'pending' WHERE id = ?", (row["job_id"],))
-            conn.execute("UPDATE deferrals SET resumed_at = ? WHERE id = ?", (now, deferral_id))
+            conn.execute(
+                "UPDATE deferrals SET resumed_at = ?, scheduled_for = NULL WHERE id = ?",
+                (now, deferral_id),
+            )
             conn.commit()
