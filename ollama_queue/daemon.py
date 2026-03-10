@@ -152,8 +152,8 @@ class Daemon:
 
     def _get_load_map(self) -> list[dict]:
         """Load map accessor for DLQ/deferral schedulers."""
-        if hasattr(self.scheduler, "load_map"):
-            return self.scheduler.load_map()
+        if hasattr(self.scheduler, "load_map_extended"):
+            return self.scheduler.load_map_extended()
         return []
 
     # --- Concurrency helpers ---
@@ -903,6 +903,18 @@ class Daemon:
                 with self._recent_models_lock:
                     self._recent_job_models[job["model"]] = time.time()
 
+            # Always capture Ollama metrics — job may have produced output before failing
+            full_stdout = out.decode("utf-8", errors="replace")
+            metrics = parse_ollama_metrics(full_stdout)
+            if metrics:
+                metrics["model"] = job.get("model", "")
+                metrics["command"] = job.get("command", "")
+                metrics["resource_profile"] = job.get("resource_profile", "ollama")
+                try:
+                    self.db.store_job_metrics(job["id"], metrics)
+                except Exception:
+                    _log.exception("Failed to store metrics for job #%d", job["id"])
+
             # Record duration if successful
             if exit_code == 0:
                 self.db.record_duration(
@@ -911,17 +923,6 @@ class Daemon:
                     duration=duration,
                     exit_code=exit_code,
                 )
-                # Capture Ollama performance metrics (graceful — non-Ollama jobs return None)
-                full_stdout = out.decode("utf-8", errors="replace")
-                metrics = parse_ollama_metrics(full_stdout)
-                if metrics:
-                    metrics["model"] = job.get("model", "")
-                    metrics["command"] = job.get("command", "")
-                    metrics["resource_profile"] = job.get("resource_profile", "ollama")
-                    try:
-                        self.db.store_job_metrics(job["id"], metrics)
-                    except Exception:
-                        _log.exception("Failed to store metrics for job #%d", job["id"])
                 # Record observed VRAM delta
                 vram_after = self._free_vram_mb()
                 if vram_before is not None and vram_after is not None and job.get("model"):

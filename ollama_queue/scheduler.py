@@ -330,7 +330,7 @@ class Scheduler:
         """Build a 48-slot load map with VRAM estimates per slot.
 
         Returns list of dicts with 'load' (priority-weighted score) and
-        'vram_gb' (estimated VRAM commitment based on model sizes of scheduled jobs).
+        'vram_committed_gb' (estimated VRAM commitment based on model sizes of scheduled jobs).
         Uses per-job VRAM scoring alongside the standard load_map() logic.
         """
         if now is None:
@@ -356,7 +356,7 @@ class Scheduler:
                 if tmp[i] > 0:
                     vram[i] += model_vram
 
-        return [{"load": scores[i], "vram_gb": round(vram[i], 1)} for i in range(self._SLOT_COUNT)]
+        return [{"load": scores[i], "vram_committed_gb": round(vram[i], 1)} for i in range(self._SLOT_COUNT)]
 
     def suggest_time(
         self,

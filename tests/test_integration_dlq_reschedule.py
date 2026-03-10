@@ -28,7 +28,18 @@ def estimator(db):
 
 def _empty_load_map():
     """Return an empty 48-slot load map in the dict format find_fitting_slot expects."""
-    return [{"load": 0.0, "vram_gb": 0.0} for _ in range(48)]
+    now = time.time()
+    return [
+        {
+            "load": 0.0,
+            "vram_committed_gb": 0.0,
+            "timestamp": now + i * 1800,
+            "is_pinned": False,
+            "historical_quiet": True,
+            "queue_depth": 0,
+        }
+        for i in range(48)
+    ]
 
 
 def _fail_job(db, job_id, reason="error"):
