@@ -2,7 +2,7 @@ import { h } from 'preact';
 import {
     dlqEntries, dlqCount, durationData, heatmapData, history,
     fetchDLQ, rescheduleDLQEntry, API,
-} from '../store';
+} from '../stores';
 import { useEffect, useState } from 'preact/hooks';
 import { useActionFeedback } from '../hooks/useActionFeedback.js';
 import ActivityHeatmap from '../components/ActivityHeatmap.jsx';

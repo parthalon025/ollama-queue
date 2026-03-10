@@ -1,8 +1,8 @@
-"""Tests for ollama_queue.eval_analysis — pure analysis functions."""
+"""Tests for ollama_queue.eval.analysis — pure analysis functions."""
 
 from __future__ import annotations
 
-from ollama_queue.eval_analysis import (
+from ollama_queue.eval.analysis import (
     _is_positive,
     bootstrap_f1_ci,
     compute_per_item_breakdown,

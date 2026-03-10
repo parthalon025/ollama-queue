@@ -333,31 +333,25 @@ systemd timers / apps / proxy clients
 ```
 ollama_queue/
   cli.py              # Click CLI entry point
-  db.py               # SQLite schema + CRUD (threading.RLock, WAL mode)
-  daemon.py           # 5s poll loop: health → scheduler → dequeue → subprocess → DLQ
-  health.py           # RAM/VRAM/load/swap metrics with hysteresis
-  estimator.py        # Duration prediction: rolling avg + model-based defaults
-  runtime_estimator.py # Bayesian log-normal runtime estimation (4-tier hierarchy)
-  performance_curve.py # Log-linear cross-model performance regression
-  scheduler.py        # Recurring job promotion, rebalance, cron pin slots, load_map_extended
-  dlq.py              # Dead-letter queue: retry with backoff, max_retries, move_to_dlq
-  dlq_scheduler.py    # DLQ auto-reschedule: failure classification, slot fitting
-  deferral_scheduler.py # Proactive job deferral: two-phase sweep
+  dlq.py              # DLQManager: handle_failure routes to retry or DLQ
   intelligence.py     # LoadPatterns: hourly/daily load profiles
-  system_snapshot.py  # 10-factor slot scoring with VRAM hard gates
   metrics_parser.py   # Ollama response metrics parser
-  slot_scoring.py     # Score-ranked slot selection for scheduling
-  scanner.py          # 4-phase consumer detection (live/static/stream/deadlock)
-  patcher.py          # Config rewriter + health checker (systemd/env/yaml/toml)
-  intercept.py        # iptables REDIRECT intercept mode (Linux only)
-  eval_analysis.py    # Pure analysis functions (per-item, bootstrap CI, stability)
-  api.py              # FastAPI REST API + Ollama proxy + static SPA serving
-  eval_engine.py      # Eval session runner, LLM judge, auto-promote logic
+  app.py              # FastAPI app factory: create_app(db)
+
+  api/                # FastAPI REST API (90+ endpoints, APIRouter per domain)
+  db/                 # SQLite persistence (mixin pattern → single Database class)
+  daemon/             # Polling loop + job executor (mixin pattern → single Daemon class)
+  eval/               # Eval pipeline: generate, judge, promote, analysis, metrics
+  scheduling/         # Scheduler, slot scoring, deferral, DLQ scheduling
+  sensing/            # Health monitoring, stall/burst detection, system snapshots
+  models/             # Ollama model management, duration/runtime estimation, perf curve
+  config/             # Consumer detection (scanner), config rewriting (patcher), intercept
+
   dashboard/spa/      # Preact SPA (build with npm run build)
 scripts/
   migrate_timers.py              # Migrate systemd timers to recurring jobs
   migrate_dlq_max_retries.py     # Schema migration (idempotent)
-tests/                           # 1,587 tests, 100% line coverage (pytest-xdist parallel)
+tests/                           # 1,588 tests, 100% line coverage (pytest-xdist parallel)
 ```
 
 ---

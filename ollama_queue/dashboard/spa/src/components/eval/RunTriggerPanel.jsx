@@ -5,7 +5,7 @@ import {
   evalVariants, evalSettings,
   triggerEvalRun, fetchEvalRuns, startEvalPoll, evalActiveRun,
   testDataSource, primeDataSource,
-} from '../../store.js';
+} from '../../stores';
 import { EVAL_TRANSLATIONS } from './translations.js';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
 import SchedulingModeSelector from './SchedulingModeSelector.jsx';

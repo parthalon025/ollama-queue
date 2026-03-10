@@ -1,5 +1,5 @@
 import { h } from 'preact';
-import { evalVariants } from '../../store.js';
+import { evalVariants } from '../../stores';
 import VariantRow from './VariantRow.jsx';
 // What it shows: The full list of eval variant configs — system defaults first,
 //   then user-created. Each row is expandable to model/template details and

@@ -5,7 +5,7 @@ import time
 import pytest
 
 from ollama_queue.db import Database
-from ollama_queue.scheduler import Scheduler
+from ollama_queue.scheduling.scheduler import Scheduler
 
 
 @pytest.fixture
@@ -584,7 +584,7 @@ class TestLoadMapExtendedCoverageGaps:
 class TestEstimateModelVramCoverageGaps:
     def test_interpolation_fallback_for_unusual_size(self):
         """Line 442: model size far from any known key uses linear interpolation."""
-        from ollama_queue.scheduler import _estimate_model_vram
+        from ollama_queue.scheduling.scheduler import _estimate_model_vram
 
         # 200b is far from any key in _PARAM_TO_VRAM (max is 70); |70-200|/200 = 0.65 > 0.5
         result = _estimate_model_vram("custom-model:200b")
@@ -592,7 +592,7 @@ class TestEstimateModelVramCoverageGaps:
 
     def test_no_size_hint_returns_default(self):
         """Line 436: model name with no size hint returns 4.0 default."""
-        from ollama_queue.scheduler import _estimate_model_vram
+        from ollama_queue.scheduling.scheduler import _estimate_model_vram
 
         result = _estimate_model_vram("my-custom-model:latest")
         assert result == 4.0

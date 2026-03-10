@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from ollama_queue.api import create_app
+from ollama_queue.app import create_app
 from ollama_queue.db import Database
 
 
@@ -43,7 +43,7 @@ def test_embed_proxy_returns_ollama_response(client):
         "embeddings": [[0.1, 0.2, 0.3]],
     }
 
-    with patch("ollama_queue.api.httpx.AsyncClient") as mock_cls:
+    with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
         mock_cls.return_value = _make_mock_client(embed_response)
         resp = client.post(
             "/api/embed",
@@ -63,7 +63,7 @@ def test_embed_proxy_array_input(client):
         "embeddings": [[0.1, 0.2], [0.3, 0.4]],
     }
 
-    with patch("ollama_queue.api.httpx.AsyncClient") as mock_cls:
+    with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
         mock_cls.return_value = _make_mock_client(embed_response)
         resp = client.post(
             "/api/embed",
@@ -87,7 +87,7 @@ def test_embed_proxy_rejects_when_paused(client):
 
 def test_embed_proxy_releases_on_error(client, db):
     """Daemon state released back to idle even when Ollama errors."""
-    with patch("ollama_queue.api.httpx.AsyncClient") as mock_cls:
+    with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
         mock_client = AsyncMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
@@ -109,7 +109,7 @@ def test_embed_proxy_logs_job(client, db):
     """Proxy embed request is logged in the jobs table."""
     embed_response = {"model": "nomic-embed-text", "embeddings": [[0.5, 0.6]]}
 
-    with patch("ollama_queue.api.httpx.AsyncClient") as mock_cls:
+    with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
         mock_cls.return_value = _make_mock_client(embed_response)
         resp = client.post(
             "/api/embed",
@@ -128,7 +128,7 @@ def test_embed_proxy_extracts_priority_fields(client, db):
     """_priority, _source, _timeout are extracted and not forwarded to Ollama."""
     embed_response = {"model": "nomic-embed-text", "embeddings": [[0.1]]}
 
-    with patch("ollama_queue.api.httpx.AsyncClient") as mock_cls:
+    with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
         mock_client = _make_mock_client(embed_response)
         mock_cls.return_value = mock_client
 
@@ -168,7 +168,10 @@ def test_embed_proxy_timeout_when_busy(client, db):
         conn.commit()
     db.update_daemon_state(state="running", current_job_id=job_id)
 
-    with patch("ollama_queue.api.PROXY_WAIT_TIMEOUT", 1), patch("ollama_queue.api.PROXY_POLL_INTERVAL", 0.1):
+    with (
+        patch("ollama_queue.api.proxy.PROXY_WAIT_TIMEOUT", 1),
+        patch("ollama_queue.api.proxy.PROXY_POLL_INTERVAL", 0.1),
+    ):
         resp = client.post(
             "/api/embed",
             json={"model": "nomic-embed-text", "input": "hello"},
@@ -181,7 +184,7 @@ def test_embed_proxy_forwards_to_correct_url(client):
     """Proxy forwards to /api/embed on OLLAMA_URL, not /api/generate."""
     embed_response = {"model": "nomic-embed-text", "embeddings": [[0.1]]}
 
-    with patch("ollama_queue.api.httpx.AsyncClient") as mock_cls:
+    with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
         mock_client = _make_mock_client(embed_response)
         mock_cls.return_value = mock_client
 
@@ -200,7 +203,7 @@ def test_embed_proxy_forces_stream_false(client):
     """Proxy forces stream=False even if caller sends stream=True (Fix 1)."""
     embed_response = {"model": "nomic-embed-text", "embeddings": [[0.1]]}
 
-    with patch("ollama_queue.api.httpx.AsyncClient") as mock_cls:
+    with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
         mock_client = _make_mock_client(embed_response)
         mock_cls.return_value = mock_client
 
@@ -218,7 +221,7 @@ def test_embed_proxy_sets_embed_resource_profile_for_embed_model(client, db):
     """Jobs submitted via /api/embed with embed model get resource_profile='embed' (Fix 2)."""
     embed_response = {"model": "nomic-embed-text", "embeddings": [[0.1]]}
 
-    with patch("ollama_queue.api.httpx.AsyncClient") as mock_cls:
+    with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
         mock_cls.return_value = _make_mock_client(embed_response)
         client.post(
             "/api/embed",
@@ -235,7 +238,7 @@ def test_embed_proxy_empty_model_defaults_embed_profile(client, db):
     """Jobs via /api/embed with no model name get resource_profile='embed' (Fix 2)."""
     embed_response = {"embeddings": [[0.1]]}
 
-    with patch("ollama_queue.api.httpx.AsyncClient") as mock_cls:
+    with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
         mock_cls.return_value = _make_mock_client(embed_response)
         client.post(
             "/api/embed",

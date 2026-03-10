@@ -1,6 +1,6 @@
 import pytest
 
-from ollama_queue.health import HealthMonitor
+from ollama_queue.sensing.health import HealthMonitor
 
 
 @pytest.fixture
@@ -329,7 +329,7 @@ def test_check_includes_loaded_models_list():
 def test_get_vram_pct_cached(monkeypatch):
     """nvidia-smi subprocess called at most once per TTL window."""
 
-    from ollama_queue.health import HealthMonitor
+    from ollama_queue.sensing.health import HealthMonitor
 
     call_count = 0
 
@@ -338,7 +338,7 @@ def test_get_vram_pct_cached(monkeypatch):
         call_count += 1
         return type("R", (), {"returncode": 0, "stdout": "1024\n"})()
 
-    monkeypatch.setattr("ollama_queue.health.subprocess.run", fake_run)
+    monkeypatch.setattr("ollama_queue.sensing.health.subprocess.run", fake_run)
     h = HealthMonitor()
     h.get_vram_pct()
     h.get_vram_pct()
@@ -377,7 +377,7 @@ def test_fetch_vram_pct_nonzero_returncode():
     """Line 85: nvidia-smi non-zero returncode returns None."""
     m = HealthMonitor()
     mock_result = MagicMock(returncode=1, stdout="", stderr="error")
-    with patch("ollama_queue.health.subprocess.run", return_value=mock_result):
+    with patch("ollama_queue.sensing.health.subprocess.run", return_value=mock_result):
         assert m._fetch_vram_pct() is None
 
 
@@ -385,7 +385,7 @@ def test_fetch_vram_pct_zero_total():
     """Line 92: nvidia-smi reports 0 total VRAM returns 0.0."""
     m = HealthMonitor()
     mock_result = MagicMock(returncode=0, stdout="0, 0\n")
-    with patch("ollama_queue.health.subprocess.run", return_value=mock_result):
+    with patch("ollama_queue.sensing.health.subprocess.run", return_value=mock_result):
         assert m._fetch_vram_pct() == 0.0
 
 
@@ -393,7 +393,7 @@ def test_get_ollama_active_model_nonzero_returncode():
     """Line 110: ollama ps non-zero returncode returns None."""
     m = HealthMonitor()
     mock_result = MagicMock(returncode=1, stdout="", stderr="err")
-    with patch("ollama_queue.health.subprocess.run", return_value=mock_result):
+    with patch("ollama_queue.sensing.health.subprocess.run", return_value=mock_result):
         assert m.get_ollama_active_model() is None
 
 
@@ -401,14 +401,14 @@ def test_get_ollama_active_model_header_only():
     """Line 114: ollama ps with only header (< 2 lines) returns None."""
     m = HealthMonitor()
     mock_result = MagicMock(returncode=0, stdout="NAME  ID  SIZE  PROCESSOR  UNTIL\n")
-    with patch("ollama_queue.health.subprocess.run", return_value=mock_result):
+    with patch("ollama_queue.sensing.health.subprocess.run", return_value=mock_result):
         assert m.get_ollama_active_model() is None
 
 
 def test_get_ollama_active_model_exception():
     """Lines 118-119: ollama ps subprocess raises returns None."""
     m = HealthMonitor()
-    with patch("ollama_queue.health.subprocess.run", side_effect=OSError("not found")):
+    with patch("ollama_queue.sensing.health.subprocess.run", side_effect=OSError("not found")):
         assert m.get_ollama_active_model() is None
 
 

@@ -4,7 +4,7 @@ import { h } from 'preact';
 // Decision it drives: Whether the trend line is trustworthy enough to act on
 //   or needs more runs to be statistically meaningful.
 
-import { evalTrends } from '../../store.js';
+import { evalTrends } from '../../stores';
 import { EVAL_TRANSLATIONS } from './translations.js';
 
 export default function SignalQualityPanel() {

@@ -6,7 +6,7 @@ import { useState, useEffect } from 'preact/hooks';
 // Decision it drives: Which variant to promote or investigate based on trend
 //   direction, quality delta, historical run-by-run scores, and cross-run consistency.
 
-import { evalTrends, evalStability, fetchVariantStability } from '../../store.js';
+import { evalTrends, evalStability, fetchVariantStability } from '../../stores';
 
 // Direction indicator: dot colour + text
 const DIRECTION_META = {

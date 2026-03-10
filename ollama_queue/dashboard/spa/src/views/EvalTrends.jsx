@@ -4,7 +4,7 @@ import { useEffect } from 'preact/hooks';
 // Decision it drives: Is the eval system improving? Which variant is best?
 //   Should the user act on a regression or stay the course?
 
-import { fetchEvalTrends, fetchEvalVariants } from '../store.js';
+import { fetchEvalTrends, fetchEvalVariants } from '../stores';
 import TrendSummaryBar       from '../components/eval/TrendSummaryBar.jsx';
 import F1LineChart           from '../components/eval/F1LineChart.jsx';
 import VariantStabilityTable from '../components/eval/VariantStabilityTable.jsx';

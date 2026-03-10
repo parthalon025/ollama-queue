@@ -1,6 +1,6 @@
 import { h } from 'preact';
 import { useState } from 'preact/hooks';
-import { API, evalTemplates, fetchEvalVariants } from '../../store.js';
+import { API, evalTemplates, fetchEvalVariants } from '../../stores';
 import { EVAL_TRANSLATIONS } from './translations.js';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
 import ModelSelect from '../ModelSelect.jsx';

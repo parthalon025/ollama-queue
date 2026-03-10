@@ -1,5 +1,5 @@
 import { h } from 'preact';
-import { API, evalActiveRun, cancelEvalRun, startEvalPoll } from '../../store.js';
+import { API, evalActiveRun, cancelEvalRun, startEvalPoll } from '../../stores';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
 import EvalPipelineSwimline from './EvalPipelineSwimline.jsx';
 // What it shows: Live progress of the currently-running eval run, including

@@ -1,6 +1,6 @@
 import { h } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
-import { API } from '../../store.js';
+import { API } from '../../stores';
 // What it shows: Cross-cluster transfer score heatmap for a completed eval run.
 //   Diagonal cells (same cluster) should be high; off-diagonal (cross-cluster) should be low.
 //   Red off-diagonal cells indicate "principle bleed" — clusters that share enough structure

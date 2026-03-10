@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from ollama_queue.api import create_app
+from ollama_queue.app import create_app
 from ollama_queue.db import Database
 
 
@@ -31,7 +31,7 @@ def test_generate_proxy_returns_ollama_response(client):
     mock_response.json.return_value = {"response": "Hello!", "done": True}
     mock_response.raise_for_status = MagicMock()
 
-    with patch("ollama_queue.api.httpx.AsyncClient") as mock_client_cls:
+    with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_client_cls:
         mock_client = AsyncMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
@@ -71,7 +71,7 @@ def test_generate_proxy_non_stream_unchanged(client):
     mock_response.json.return_value = {"response": "Hello!", "done": True}
     mock_response.raise_for_status = MagicMock()
 
-    with patch("ollama_queue.api.httpx.AsyncClient") as mock_cls:
+    with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
         mock_client = AsyncMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
@@ -100,7 +100,7 @@ def test_generate_proxy_streams_ndjson_when_stream_true(client):
     mock_resp.aiter_raw = fake_aiter_raw
     mock_resp.aclose = AsyncMock()
 
-    with patch("ollama_queue.api.httpx.AsyncClient") as mock_cls:
+    with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
         mock_client = AsyncMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
@@ -133,7 +133,7 @@ def test_generate_proxy_buffers_misaligned_chunks(client):
     mock_resp.aiter_raw = fake_aiter_raw
     mock_resp.aclose = AsyncMock()
 
-    with patch("ollama_queue.api.httpx.AsyncClient") as mock_cls:
+    with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
         mock_client = AsyncMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
@@ -152,7 +152,7 @@ def test_generate_proxy_buffers_misaligned_chunks(client):
 
 def test_generate_proxy_releases_on_error(client, db):
     """State released back to idle even if Ollama errors."""
-    with patch("ollama_queue.api.httpx.AsyncClient") as mock_client_cls:
+    with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_client_cls:
         mock_client = AsyncMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
@@ -180,7 +180,7 @@ def test_generate_proxy_logs_job(client, db):
     mock_response.json.return_value = {"response": "ok", "done": True}
     mock_response.raise_for_status = MagicMock()
 
-    with patch("ollama_queue.api.httpx.AsyncClient") as mock_client_cls:
+    with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_client_cls:
         mock_client = AsyncMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
@@ -217,7 +217,10 @@ def test_generate_proxy_timeout_when_busy(client, db):
         conn.commit()
     db.update_daemon_state(state="running", current_job_id=job_id)
 
-    with patch("ollama_queue.api.PROXY_WAIT_TIMEOUT", 1), patch("ollama_queue.api.PROXY_POLL_INTERVAL", 0.1):
+    with (
+        patch("ollama_queue.api.proxy.PROXY_WAIT_TIMEOUT", 1),
+        patch("ollama_queue.api.proxy.PROXY_POLL_INTERVAL", 0.1),
+    ):
         resp = client.post(
             "/api/generate",
             json={
@@ -255,7 +258,7 @@ def test_proxy_read_timeout_returns_504(client, db):
     """ReadTimeout from Ollama produces 504 with descriptive message. Covers lines 510-518."""
     import httpx as _httpx
 
-    with patch("ollama_queue.api.httpx.AsyncClient") as mock_cls:
+    with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
         mock_client = AsyncMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
@@ -284,7 +287,7 @@ def test_proxy_release_claim_exception_still_completes(client, db):
     mock_response.raise_for_status = MagicMock()
 
     with (
-        patch("ollama_queue.api.httpx.AsyncClient") as mock_cls,
+        patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls,
         patch.object(db, "release_proxy_claim", side_effect=RuntimeError("release failed")),
     ):
         mock_client = AsyncMock()
@@ -323,7 +326,10 @@ def test_streaming_proxy_timeout_returns_504(client, db):
         conn.commit()
     db.update_daemon_state(state="running", current_job_id=job_id)
 
-    with patch("ollama_queue.api.PROXY_WAIT_TIMEOUT", 1), patch("ollama_queue.api.PROXY_POLL_INTERVAL", 0.1):
+    with (
+        patch("ollama_queue.api.proxy.PROXY_WAIT_TIMEOUT", 1),
+        patch("ollama_queue.api.proxy.PROXY_POLL_INTERVAL", 0.1),
+    ):
         resp = client.post(
             "/api/generate",
             json={"model": "test", "prompt": "hello", "stream": True},
@@ -334,7 +340,7 @@ def test_streaming_proxy_timeout_returns_504(client, db):
 
 def test_streaming_proxy_setup_exception_returns_502(client, db):
     """Streaming setup exception returns 502 and cleans up. Covers lines 615-622."""
-    with patch("ollama_queue.api.httpx.AsyncClient") as mock_cls:
+    with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
         mock_client = AsyncMock()
         mock_client.build_request = MagicMock(side_effect=Exception("connection refused"))
         mock_client.aclose = AsyncMock()
@@ -371,7 +377,7 @@ def test_streaming_release_fn_complete_job_exception(client, db):
     def failing_complete(*args, **kwargs):
         raise RuntimeError("DB error")
 
-    with patch("ollama_queue.api.httpx.AsyncClient") as mock_cls:
+    with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
         mock_client = AsyncMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
@@ -406,7 +412,7 @@ def test_streaming_release_fn_release_claim_exception(client, db):
     mock_resp.aclose = AsyncMock()
     mock_resp.headers = {"content-type": "application/x-ndjson"}
 
-    with patch("ollama_queue.api.httpx.AsyncClient") as mock_cls:
+    with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
         mock_client = AsyncMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
@@ -447,7 +453,7 @@ def test_proxy_consumer_request_count_tracking(client, db):
     mock_response.json.return_value = {"response": "ok", "done": True}
     mock_response.raise_for_status = MagicMock()
 
-    with patch("ollama_queue.api.httpx.AsyncClient") as mock_cls:
+    with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
         mock_client = AsyncMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
@@ -472,7 +478,7 @@ def test_proxy_consumer_request_count_tracking_exception(client, db):
     mock_response.raise_for_status = MagicMock()
 
     with (
-        patch("ollama_queue.api.httpx.AsyncClient") as mock_cls,
+        patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls,
         patch.object(db, "list_consumers", side_effect=RuntimeError("db error")),
     ):
         mock_client = AsyncMock()
@@ -520,7 +526,7 @@ def test_streaming_consumer_request_count_tracking(client, db):
     mock_resp.aclose = AsyncMock()
     mock_resp.headers = {"content-type": "application/x-ndjson"}
 
-    with patch("ollama_queue.api.httpx.AsyncClient") as mock_cls:
+    with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
         mock_client = AsyncMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
@@ -556,7 +562,7 @@ def test_iter_ndjson_empty_line_skipped(client):
     mock_resp.aclose = AsyncMock()
     mock_resp.headers = {"content-type": "application/x-ndjson"}
 
-    with patch("ollama_queue.api.httpx.AsyncClient") as mock_cls:
+    with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
         mock_client = AsyncMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
@@ -592,7 +598,7 @@ def test_iter_ndjson_invalid_json_in_done_check(client):
     mock_resp.aclose = AsyncMock()
     mock_resp.headers = {"content-type": "application/x-ndjson"}
 
-    with patch("ollama_queue.api.httpx.AsyncClient") as mock_cls:
+    with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
         mock_client = AsyncMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
@@ -624,7 +630,7 @@ def test_iter_ndjson_trailing_buffer_emitted(client):
     mock_resp.aclose = AsyncMock()
     mock_resp.headers = {"content-type": "application/x-ndjson"}
 
-    with patch("ollama_queue.api.httpx.AsyncClient") as mock_cls:
+    with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
         mock_client = AsyncMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
@@ -655,7 +661,7 @@ def test_iter_ndjson_release_on_error(client, db):
     mock_resp.aclose = AsyncMock()
     mock_resp.headers = {"content-type": "application/x-ndjson"}
 
-    with patch("ollama_queue.api.httpx.AsyncClient") as mock_cls:
+    with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
         mock_client = AsyncMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)

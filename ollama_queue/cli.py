@@ -178,23 +178,25 @@ def cancel(ctx, job_id):
 
 @main.command()
 @click.option("--port", default=7683, type=int, help="Port for FastAPI server")
+@click.option("--debug", is_flag=True, default=False, help="Enable DEBUG logging for all ollama_queue modules")
 @click.pass_context
-def serve(ctx, port):
+def serve(ctx, port, debug):
     """Start the daemon and FastAPI server."""
     import threading
 
     import uvicorn
 
-    # Scope INFO to our package only — root stays at WARNING so third-party
-    # libraries (uvicorn internals, urllib3, etc.) don't flood the journal.
+    # Scope INFO (or DEBUG with --debug) to our package only — root stays at
+    # WARNING so third-party libraries don't flood the journal.
     # Lesson #246: set package logger level, not root logger level.
+    _level = logging.DEBUG if debug else logging.INFO
     _handler = logging.StreamHandler()
     _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
     logging.getLogger().addHandler(_handler)
     logging.getLogger().setLevel(logging.WARNING)
-    logging.getLogger("ollama_queue").setLevel(logging.INFO)
+    logging.getLogger("ollama_queue").setLevel(_level)
 
-    from ollama_queue.api import create_app
+    from ollama_queue.app import create_app
     from ollama_queue.daemon import Daemon
 
     db = ctx.obj["db"]
@@ -220,7 +222,7 @@ def _parse_interval(interval_str: str) -> int:
 
 def _auto_suggest_slot(db, priority: int) -> tuple[str, float]:
     """Use Scheduler.suggest_time to pick the best available cron slot."""
-    from ollama_queue.scheduler import Scheduler
+    from ollama_queue.scheduling.scheduler import Scheduler
 
     suggestions = Scheduler(db).suggest_time(priority=priority, top_n=1)
     if not suggestions:
@@ -327,7 +329,7 @@ def schedule_add(
     command,
 ):
     db = ctx.obj["db"]
-    from ollama_queue.scheduler import Scheduler
+    from ollama_queue.scheduling.scheduler import Scheduler
 
     interval_seconds, cron_expression, auto_score = _parse_schedule_spec(
         interval, at, cron, days, priority=priority, db=db
@@ -402,7 +404,7 @@ def schedule_list(ctx):
 def schedule_suggest(ctx, priority, top):
     """Show optimal time slots for a new job at the given priority."""
     db = ctx.obj["db"]
-    from ollama_queue.scheduler import Scheduler
+    from ollama_queue.scheduling.scheduler import Scheduler
 
     suggestions = Scheduler(db).suggest_time(priority=priority, top_n=top)
     if not suggestions:
@@ -453,7 +455,7 @@ def schedule_edit(ctx, name, priority, interval, new_command, pin, check_command
     db.update_recurring_job(rj["id"], **fields)
     schedule_fields = {"priority", "interval_seconds", "pinned"}
     if fields.keys() & schedule_fields:
-        from ollama_queue.scheduler import Scheduler
+        from ollama_queue.scheduling.scheduler import Scheduler
 
         Scheduler(db).rebalance()
     click.echo(f"Updated '{name}': {', '.join(f'{k}={v}' for k, v in fields.items())}")
@@ -465,7 +467,7 @@ def schedule_edit(ctx, name, priority, interval, new_command, pin, check_command
 def schedule_enable(ctx, name):
     db = ctx.obj["db"]
     if db.set_recurring_job_enabled(name, True):
-        from ollama_queue.scheduler import Scheduler
+        from ollama_queue.scheduling.scheduler import Scheduler
 
         Scheduler(db).rebalance()
         click.echo(f"Enabled '{name}' and rebalanced.")
@@ -499,7 +501,7 @@ def schedule_remove(ctx, name):
 @click.pass_context
 def schedule_rebalance(ctx):
     db = ctx.obj["db"]
-    from ollama_queue.scheduler import Scheduler
+    from ollama_queue.scheduling.scheduler import Scheduler
 
     changes = Scheduler(db).rebalance()
     click.echo(f"Rebalanced {len(changes)} jobs.")
@@ -578,7 +580,7 @@ def dlq_schedule_preview(ctx):
     if not entries:
         click.echo("No unscheduled DLQ entries.")
         return
-    from ollama_queue.system_snapshot import classify_failure
+    from ollama_queue.sensing.system_snapshot import classify_failure
 
     _ct = db.get_setting("dlq.chronic_failure_threshold")
     chronic_threshold = int(_ct) if _ct is not None else 3
@@ -682,7 +684,7 @@ def metrics_models(ctx):
 @click.pass_context
 def metrics_curve(ctx):
     """Show fitted performance curve parameters."""
-    from ollama_queue.performance_curve import PerformanceCurve
+    from ollama_queue.models.performance_curve import PerformanceCurve
 
     db = ctx.obj["db"]
     stats = db.get_model_stats()

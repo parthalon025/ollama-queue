@@ -102,12 +102,12 @@ class TestJobs:
         conn.commit()
 
         # Job is not available while retry_after is in the future
-        with patch("ollama_queue.db.time") as mock_time:
+        with patch("ollama_queue.db.jobs.time") as mock_time:
             mock_time.time.return_value = future_retry - 1
             assert db.get_next_job() is None
 
         # Job becomes available once time passes retry_after
-        with patch("ollama_queue.db.time") as mock_time:
+        with patch("ollama_queue.db.jobs.time") as mock_time:
             mock_time.time.return_value = future_retry + 1
             job = db.get_next_job()
             assert job is not None
@@ -1293,7 +1293,7 @@ class TestUpdateRecurringNextRunNotFound:
     """Lines 1342-1343: update_recurring_next_run when recurring job is deleted."""
 
     def test_missing_recurring_job_logs_and_returns(self, db):
-        with patch("ollama_queue.db._log") as mock_log:
+        with patch("ollama_queue.db.schedule._log") as mock_log:
             db.update_recurring_next_run(99999, completed_at=time.time())
             mock_log.error.assert_called_once()
             assert "not found" in mock_log.error.call_args[0][0]

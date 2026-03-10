@@ -1,5 +1,5 @@
 import { h } from 'preact';
-import { dlqSchedulePreview, deferredJobs } from '../store';
+import { dlqSchedulePreview, deferredJobs } from '../stores';
 
 /**
  * What it shows: A 48-bar histogram of the next 24 hours split into 30-min slots.

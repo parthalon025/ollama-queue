@@ -9,73 +9,93 @@ Ollama job queue scheduler with priority, health monitoring, and web dashboard. 
 ```
 ollama_queue/
   __init__.py
+  app.py              # FastAPI app factory: create_app(db) → mounts all routers + static SPA
   cli.py              # Click CLI: submit, status, queue, history, pause, resume, cancel, serve, schedule, dlq, defer, metrics, settings
-  db.py               # SQLite schema and CRUD (synchronous sqlite3, threading.RLock)
-  daemon.py           # Polling loop: health check → scheduler → dequeue → subprocess → DLQ routing
-  health.py           # System metrics: RAM/VRAM/load/swap/ollama-ps with hysteresis
-  estimator.py        # Duration prediction: rolling avg + model-based defaults
-  runtime_estimator.py # Bayesian log-normal runtime estimation (4-tier hierarchy: job → model → family → global)
-  performance_curve.py # Log-linear cross-model performance regression (tok/min vs param count)
-  scheduler.py        # Recurring job promotion: promote_due_jobs, update_next_run, rebalance, load_map_extended
   dlq.py              # DLQManager: handle_failure routes to retry (backoff) or DLQ
-  dlq_scheduler.py    # DLQ auto-reschedule: failure classification, slot fitting, chronic skip
-  deferral_scheduler.py # Proactive job deferral: two-phase sweep (resume past-scheduled + find slots)
   intelligence.py     # LoadPatterns: hourly/daily load profiles from health log history
-  system_snapshot.py  # SystemSnapshot: 10-factor slot scoring with VRAM hard gates
   metrics_parser.py   # Ollama response metrics parser (tok/min, eval duration)
-  slot_scoring.py     # find_fitting_slot: score-ranked slot selection for DLQ/deferral scheduling
-  scanner.py          # 4-phase consumer detection: live (ss/lsof/netstat), static (config files), stream (streaming_confirmed flag), deadlock (queue-recursive call guard)
-  patcher.py          # Config rewriter (systemd/env/yaml/toml) + health checker + backup/revert; patch_consumer(), revert_consumer(), check_health()
-  intercept.py        # iptables REDIRECT intercept mode (Linux only); enable_intercept(), disable_intercept(), get_intercept_status()
-  eval_analysis.py    # Pure analysis functions (no DB/HTTP): per-item breakdown, failure cases, bootstrap CI, stability, config diff
-  api.py              # FastAPI REST API (90+ endpoints including /api/generate + /api/embed proxy, eval pipeline, consumer management) + static SPA serving
+
+  api/                # FastAPI REST API (90+ endpoints, APIRouter per domain)
+    __init__.py       # register_routes() — sets module db ref, includes all APIRouters
+    consumers.py      # Consumer management endpoints (scan, patch, revert, health)
+    dlq.py            # DLQ list/retry/clear/schedule endpoints
+    eval_runs.py      # Eval run CRUD, progress, results, analysis, promote
+    eval_settings.py  # Eval settings + data source + setup checklist
+    eval_trends.py    # Eval trend aggregation endpoints
+    eval_variants.py  # Eval variant CRUD, stability, config diff
+    health.py         # /api/health endpoint
+    jobs.py           # Job submit, status, queue, history, cancel, batch
+    models.py         # Model stats, catalog search, performance curve
+    proxy.py          # /api/generate + /api/embed Ollama proxy (priority, streaming)
+    schedule.py       # Recurring jobs, load-map, suggest, rebalance
+    settings.py       # Settings CRUD endpoints
+
+  daemon/             # Polling loop + job executor (mixin pattern → single Daemon class)
+    __init__.py       # Daemon class: assembles LoopMixin + ExecutorMixin, holds all state
+    executor.py       # ExecutorMixin: _run_job, _can_admit, preemption, stall checks, resource helpers
+    loop.py           # LoopMixin: poll_once, run, shutdown, circuit breaker, entropy, orphan recovery
+
+  db/                 # SQLite persistence (mixin pattern → single Database class)
+    __init__.py       # Database class: assembles all mixins, holds _conn + _lock
+    schema.py         # SchemaMixin: CREATE TABLE, migrations, seed data, initialize()
+    jobs.py           # JobsMixin: CRUD for jobs table (submit, claim, complete, cancel, retry)
+    schedule.py       # ScheduleMixin: recurring_jobs CRUD, promote_due, next_run, load_map
+    dlq.py            # DLQMixin: dlq table CRUD, move_to_dlq, retry, reschedule tracking
+    health.py         # HealthMixin: health_log, daemon_state, prune_old_data
+    settings.py       # SettingsMixin: key-value settings table
+    eval.py           # EvalMixin: eval_runs, eval_results, eval_variants tables
+
+  eval/               # Eval pipeline — prompt evaluation with A/B variants + LLM judge
+    __init__.py       # Re-exports public names from engine, judge, metrics, promote, analysis
+    engine.py         # Session orchestration, run CRUD, scheduling modes, seed/reproducibility
+    generate.py       # run_eval_generate: variant-based generation with cooperative cancellation
+    judge.py          # run_eval_judge: LLM-based scoring with agreement tracking
+    promote.py        # do_promote_eval_run, check_auto_promote (3-gate auto-promote logic)
+    analysis.py       # Pure analysis (no DB/HTTP): per-item breakdown, bootstrap CI, stability, config diff
+    metrics.py        # Pure metric computation: F1/precision/recall, tournament/Bayesian aggregates, report rendering
+
+  scheduling/         # Time-based job orchestration
+    __init__.py       # Re-exports: Scheduler
+    scheduler.py      # Recurring job promotion, rebalance, load_map_extended, pin enforcement
+    slot_scoring.py   # find_fitting_slot: score-ranked slot selection for DLQ/deferral
+    deferral.py       # DeferralScheduler: two-phase sweep (resume past-scheduled + find slots)
+    dlq_scheduler.py  # DLQScheduler: failure classification, slot fitting, chronic skip
+
+  sensing/            # System monitoring + anomaly detection
+    __init__.py       # Re-exports: HealthMonitor
+    health.py         # HealthMonitor: RAM/VRAM/load/swap/ollama-ps with hysteresis
+    stall.py          # StallDetector: stdout silence + CPU usage tracking
+    burst.py          # BurstDetector: submission rate regime detection (calm/burst/storm)
+    system_snapshot.py # SystemSnapshot: 10-factor slot scoring with VRAM hard gates
+
+  models/             # Ollama model management + performance estimation
+    __init__.py       # Re-exports: OllamaModels
+    client.py         # OllamaModels: list_local, model_info, VRAM estimation, cache
+    estimator.py      # DurationEstimator: rolling avg + model-based duration defaults
+    runtime_estimator.py # RuntimeEstimator: Bayesian log-normal (4-tier: job → model → family → global)
+    performance_curve.py # PerformanceCurve: log-linear regression (tok/min vs param count)
+
+  config/             # Consumer configuration + traffic intercept
+    __init__.py
+    scanner.py        # 4-phase consumer detection: live (ss/lsof/netstat), static, stream, deadlock
+    patcher.py        # Config rewriter (systemd/env/yaml/toml) + health checker + backup/revert
+    intercept.py      # iptables REDIRECT intercept mode (Linux only)
+
   dashboard/
     spa/              # Preact SPA (built separately, served as static)
-      src/            # Source: JSX components, signals store, CSS tokens
+      src/
+        components/   # UI components (eval/, consumers/, SettingsForm/, RunRow/, Plan/)
         hooks/        # Shared Preact hooks (useActionFeedback)
+        pages/        # Page-level components (Now, Plan/, History, Models, etc.)
+        stores/       # Signal stores by domain (eval, health, models, queue, schedule, settings)
+        views/        # Eval sub-views (Runs, Variants, Trends, Settings)
       dist/           # Production build output (gitignored)
+
 scripts/
-  migrate_timers.py            # Migrate 8 of 10 systemd timers to recurring jobs (--dry-run / --execute)
+  migrate_timers.py            # Migrate 8 of 10 systemd timers to recurring jobs
   migrate_dlq_max_retries.py   # Add max_retries column to existing dlq table (idempotent)
-tests/                           # 1,587 tests, 100% line coverage
-  test_eval_engine.py      # 251 tests
-  test_daemon.py           # 152 tests
-  test_db.py               # 137 tests
-  test_api.py              # 104 tests (incl. proxy priority, batch schedule, suggest endpoint)
-  test_api_eval_runs.py    # 93 tests
-  test_cli.py              # 85 tests
-  test_api_eval_variants.py # 56 tests
-  test_models.py           # 52 tests
-  test_scheduler.py        # 49 tests
-  test_api_cov_d.py        # 46 tests (api.py lines 1747-2757: consumers, intercept, eval schedule, SPA)
-  test_api_eval_settings.py # 43 tests
-  test_api_cov_c.py        # 36 tests (api.py lines 983-1671: eval variants, trends, catalog)
-  test_patcher.py          # 35 tests
-  test_health.py           # 34 tests
-  test_scanner.py          # 33 tests
-  test_stall.py            # 32 tests
-  test_eval_analysis.py    # 32 tests
-  test_consumers_api.py    # 27 tests (API endpoints)
-  test_proxy.py            # 24 tests
-  test_api_cov_a.py        # 22 tests (api.py lines 198-533: core routes, proxy error paths)
-  test_intercept.py        # 20 tests
-  test_system_snapshot.py  # 19 tests (10-factor scoring, VRAM gates, snapshot)
-  test_api_cov_b.py        # 18 tests (api.py lines 565-940: streaming, schedule, DLQ)
-  test_slot_scoring.py     # 17 tests (find_fitting_slot, score ranking)
-  test_metrics_parser.py   # 16 tests (Ollama response parsing)
-  test_performance_curve.py # 14 tests (log-linear regression)
-  test_estimator.py        # 14 tests
-  test_dlq_scheduler.py    # 14 tests (DLQ auto-reschedule sweep)
-  test_embed_proxy.py      # 12 tests
-  test_dlq.py              # 12 tests
-  test_integration_dlq_reschedule.py # 11 tests (DLQ + deferral + CLI end-to-end)
-  test_runtime_estimator.py # 10 tests (Bayesian log-normal estimation)
-  test_deferral_scheduler.py # 10 tests (two-phase sweep)
-  test_burst.py            # 10 tests
-  test_intelligence.py     # 9 tests (LoadPatterns hourly/daily profiles)
-  test_job_metrics.py      # 6 tests
-  test_deferral.py         # 5 tests
-  test_consumers.py        # 4 tests (DB layer)
+
+tests/                           # 1,588 tests, 100% line coverage
 ```
 
 ## How to Run
@@ -149,7 +169,7 @@ Sidebar nav (desktop) + bottom tab bar (mobile). 8 views: **Now** (2-column comm
 
 Route IDs: `now` | `plan` | `history` | `models` | `settings` | `eval` | `consumers` | `performance`. Sidebar: 200px desktop, 64px icon-only (768–1023px), hidden on mobile. CSS classes: `layout-root`, `layout-sidebar`, `layout-main`, `now-grid`, `history-top-grid`, `mobile-bottom-nav`.
 
-**Eval tab** (4 sub-views): Runs (run list + active progress + repeat + judge-rerun + per-run analysis panel with `simpleRenderMd()` + Analyze/Re-analyze button; winner label shows variant label + model name; L2 shows bootstrap CI inline in metrics + per-item breakdown panel sorted worst-first + Compute/Re-analyze button for `analysis_json`; L3 ResultsTable has TP/TN/FP/FN filter tabs with classification from `eval.positive_threshold`), Variants (prompt variant CRUD + stability table with cross-run F1 stdev/stable badge from `/api/eval/variants/stability` + ConfigDiffPanel for side-by-side comparison via `/api/eval/variants/{a}/diff/{b}`; `latest_f1` score shown inline; two-click inline delete replaces `confirm()` dialog; `description` field shown per row), Trends (F1 line chart + trend summary), Settings (judge defaults + data source + scheduling mode + setup checklist [2 gates: data source connected + first run exists] + `eval.analysis_model` — empty string means use judge model; judge mode inline description; "1–20" range hint on Lessons per Group; variant descriptions shown in checkbox list; alert()-based tooltips replaced with inline reveal). `eval_variants` rows have a `description TEXT` column; `GET /api/eval/variants` includes `description` in response; live DB migration backfills pre-existing rows via `UPDATE WHERE description IS NULL`. Eval state: `evalActiveRun`, `evalSubTab`, `fetchEvalRuns` in `store.js`. Key invariants: `repeat` starts a background thread (not just a DB row); `judge-rerun` copies gen_results from source run before judging; cancel sets `completed_at`; all fetch calls check `res.ok`; `generate_eval_analysis()` runs automatically after each eval run completes and stores markdown to `eval_runs.analysis_md`; `compute_run_analysis()` stores structured `analysis_json` (per-item breakdown, failure cases, bootstrap CI) per run. `eval_analysis.py` is the pure analysis module (no DB/HTTP) — 5 public functions. Graceful no-cluster degradation: returns `{"status": "no_cluster_data"}` for projects without cluster labels.
+**Eval tab** (4 sub-views): Runs (run list + active progress + repeat + judge-rerun + per-run analysis panel with `simpleRenderMd()` + Analyze/Re-analyze button; winner label shows variant label + model name; L2 shows bootstrap CI inline in metrics + per-item breakdown panel sorted worst-first + Compute/Re-analyze button for `analysis_json`; L3 ResultsTable has TP/TN/FP/FN filter tabs with classification from `eval.positive_threshold`), Variants (prompt variant CRUD + stability table with cross-run F1 stdev/stable badge from `/api/eval/variants/stability` + ConfigDiffPanel for side-by-side comparison via `/api/eval/variants/{a}/diff/{b}`; `latest_f1` score shown inline; two-click inline delete replaces `confirm()` dialog; `description` field shown per row), Trends (F1 line chart + trend summary), Settings (judge defaults + data source + scheduling mode + setup checklist [2 gates: data source connected + first run exists] + `eval.analysis_model` — empty string means use judge model; judge mode inline description; "1–20" range hint on Lessons per Group; variant descriptions shown in checkbox list; alert()-based tooltips replaced with inline reveal). `eval_variants` rows have a `description TEXT` column; `GET /api/eval/variants` includes `description` in response; live DB migration backfills pre-existing rows via `UPDATE WHERE description IS NULL`. Eval state: `evalActiveRun`, `evalSubTab`, `fetchEvalRuns` in `stores/eval.js`. Key invariants: `repeat` starts a background thread (not just a DB row); `judge-rerun` copies gen_results from source run before judging; cancel sets `completed_at`; all fetch calls check `res.ok`; `generate_eval_analysis()` runs automatically after each eval run completes and stores markdown to `eval_runs.analysis_md`; `compute_run_analysis()` stores structured `analysis_json` (per-item breakdown, failure cases, bootstrap CI) per run. `eval/analysis.py` is the pure analysis module (no DB/HTTP) — 5 public functions. Graceful no-cluster degradation: returns `{"status": "no_cluster_data"}` for projects without cluster labels.
 
 ### UI Layman Comments (always required)
 
@@ -164,7 +184,7 @@ Format (JSX file-level or component-level):
 //   so they can decide to cancel, wait, or submit more work.
 ```
 
-This applies to: component files, store transformations in `store.js`, computed values, and any non-obvious data shaping. Skip for pure layout/styling helpers with self-evident names.
+This applies to: component files, store transformations in `stores/`, computed values, and any non-obvious data shaping. Skip for pure layout/styling helpers with self-evident names.
 
 ## Pipeline Verification
 
@@ -190,8 +210,8 @@ This applies to: component files, store transformations in `store.js`, computed 
 - **`burst_regime` column** — added post-v2. If upgrading a live DB, run `ALTER TABLE daemon_state ADD COLUMN burst_regime TEXT DEFAULT 'unknown'` before restarting. Missing column causes `Burst regime check failed` error every poll cycle.
 - **`analysis_md` column** — added post-v2. If upgrading a live DB, run `ALTER TABLE eval_runs ADD COLUMN analysis_md TEXT` before restarting.
 - **`analysis_json` column** — added for structured analysis. If upgrading a live DB, run `ALTER TABLE eval_runs ADD COLUMN analysis_json TEXT` before restarting. Also add title columns: `ALTER TABLE eval_results ADD COLUMN source_item_title TEXT; ALTER TABLE eval_results ADD COLUMN target_item_title TEXT`. Index: `CREATE INDEX IF NOT EXISTS idx_eval_results_run_variant ON eval_results(run_id, variant)`.
-- **`eval_analysis.py` is pure** — no DB, no HTTP, no side effects. Takes lists of dicts, returns lists of dicts. All DB access happens in `eval_engine.py:compute_run_analysis()`. Never import `db` or `api` into `eval_analysis`.
-- **`score_transfer=0` is valid, not missing** — `_get_score()` in `eval_analysis.py` uses `s if s is not None else fallback` (explicit None check). The `x or fallback` pattern treats 0 as falsy and silently drops valid zero scores. Same applies to any numeric field that can legitimately be 0.
+- **`eval/analysis.py` is pure** — no DB, no HTTP, no side effects. Takes lists of dicts, returns lists of dicts. All DB access happens in `eval/engine.py:compute_run_analysis()`. Never import `db` or `api` into `eval/analysis`.
+- **`score_transfer=0` is valid, not missing** — `_get_score()` in `eval/analysis.py` uses `s if s is not None else fallback` (explicit None check). The `x or fallback` pattern treats 0 as falsy and silently drops valid zero scores. Same applies to any numeric field that can legitimately be 0.
 - **`eval.positive_threshold` setting** — integer 1-5, default 3. Controls TP/FP/FN classification in analysis and results API. Stored in settings table, read by `compute_run_analysis()` and `GET /api/eval/runs/{id}/results?classification=...`.
 - **`/api/eval/variants/stability` must register before `/{variant_id}`** — FastAPI matches routes in registration order. If the parameterized route `/{variant_id}` is registered first, `GET /stability` will match it with `variant_id="stability"` and return 404. Literal paths always go before parameterized paths.
 - **Shell scripts must exit 0 for "nothing to do"** — any non-zero exit code from a queued job is treated as failure. 3 consecutive failures open the circuit breaker, blocking all jobs. Scripts that check preconditions and bail early (e.g. "all work already done") must exit 0, not 1 or 2.
@@ -203,16 +223,16 @@ This applies to: component files, store transformations in `store.js`, computed 
 - **`repeat_eval_run` must start a background thread** — the endpoint creates a new DB run row and then must call `threading.Thread(target=run_eval_session, ...).start()`. The row alone does nothing; the daemon does not poll `eval_runs` for pending sessions. Previously the row was created but execution never started, producing a permanently-pending run.
 - **`judge_rerun_eval_run` must copy gen_results from the source run** — the judge-rerun endpoint creates a new run row and calls the judge phase directly, bypassing generation. If `gen_results` is not copied from the original run to the new row before judging, the judge has nothing to score and returns empty metrics (precision=0, recall=0, F1=0).
 - **`db._lock` must wrap every `db._connect()` call in eval endpoints** — `get_eval_trends` and any other eval read endpoint that calls `db._connect()` directly (outside the standard CRUD helpers) must do so inside `with db._lock:`. The RLock is reentrant, so nested acquisition is safe, but unguarded reads race against concurrent writes from background eval threads.
-- **SPA fetch errors must be checked explicitly** — `fetch()` resolves (does not throw) on 4xx/5xx responses; only network failures reject. Always check `res.ok` and throw on failure, otherwise the UI silently ignores HTTP errors and shows stale state. `cancelEvalRun` in `store.js` was missing this check.
+- **SPA fetch errors must be checked explicitly** — `fetch()` resolves (does not throw) on 4xx/5xx responses; only network failures reject. Always check `res.ok` and throw on failure, otherwise the UI silently ignores HTTP errors and shows stale state. `cancelEvalRun` in `stores/eval.js` was missing this check.
 - **Action button feedback: use `useActionFeedback` hook** — all non-immediate action buttons (cancel, submit, pause, retry, etc.) use `src/hooks/useActionFeedback.js`. Pattern: `const [fb, act] = useActionFeedback(); <button disabled={fb.phase==='loading'} onClick={() => act('Loading…', fn, result => `Done: ${result.id}`)}>`; render `{fb.msg && <div class={`action-fb action-fb--${fb.phase}`}>{fb.msg}</div>}` below the button. Success labels must be specific (e.g. `"Run #12 started"`, `"Job #6350 queued"`), not generic "Done". Hook lives in `src/hooks/useActionFeedback.js` — one instance per button.
 - **`useActionFeedback` double-click guard** — `run()` returns early if `state.phase === 'loading'`. Place this check as the first line to prevent concurrent executions from the same button.
 - **Rules of Hooks in action buttons** — all `useActionFeedback()` calls must appear before any conditional `return null` in the component. If an early guard precedes the hooks, React will throw "rendered fewer hooks than previous render" on re-render. Move hook calls to the top of the function body.
-- **`evalActiveRun` sessionStorage staleness** — on store init, if `evalActiveRun` is loaded from sessionStorage (service restart), immediately verify via `GET /api/eval/runs/{id}/progress`. If status is terminal or fetch fails, clear `evalActiveRun.value` and remove the sessionStorage key. Use an identity guard (`run_id !== _storedId`) to prevent the async `.then()` from clobbering a new run started during the fetch window. See `store.js` after `API` declaration.
-- **`promote_eval_run` auto-resolves winner from DB** — the promote endpoint accepts an empty body `{}` and resolves model/prompt_template_id/temperature/num_ctx from `run.winner_variant` → `eval_variants` row. The shared core is `do_promote_eval_run()` in `eval_engine.py`; both the API endpoint and `check_auto_promote()` call it. Error routing: run-not-found → 404; not-complete/no-winner/variant-not-in-db → 400; lessons-db unreachable → 502.
+- **`evalActiveRun` sessionStorage staleness** — on store init, if `evalActiveRun` is loaded from sessionStorage (service restart), immediately verify via `GET /api/eval/runs/{id}/progress`. If status is terminal or fetch fails, clear `evalActiveRun.value` and remove the sessionStorage key. Use an identity guard (`run_id !== _storedId`) to prevent the async `.then()` from clobbering a new run started during the fetch window. See `stores/eval.js` after `API` declaration.
+- **`promote_eval_run` auto-resolves winner from DB** — the promote endpoint accepts an empty body `{}` and resolves model/prompt_template_id/temperature/num_ctx from `run.winner_variant` → `eval_variants` row. The shared core is `do_promote_eval_run()` in `eval/promote.py`; both the API endpoint and `check_auto_promote()` call it. Error routing: run-not-found → 404; not-complete/no-winner/variant-not-in-db → 400; lessons-db unreachable → 502.
 - **`check_auto_promote` never raises** — wraps `_check_auto_promote_inner` in `try/except Exception` and logs on any error. Same pattern as `generate_eval_analysis`. Called from `run_eval_session` after `generate_eval_analysis` completes. Three gates: winner F1 ≥ `eval.f1_threshold`; winner F1 > production F1 + `eval.auto_promote_min_improvement`; `error_budget_used ≤ eval.error_budget`. Auto-promote is off by default (`eval.auto_promote = false`) — must be explicitly enabled. Stability window gate: if `eval.stability_window > 0`, winner must have passed threshold in the last N completed runs.
 - **`is_production`/`is_recommended` cleared on all variants at promote time** — `do_promote_eval_run` sets winner to `is_recommended=1, is_production=1` then clears all other variants to 0 in the same DB transaction. The VariantRow badges (`★ Recommended`, `Production`) update automatically on the next `fetchEvalVariants()` call.
 - **`repeat_eval_run` must insert `status='queued'` not `'pending'`** — `_recover_orphans()` queries `status IN ('generating', 'judging', 'pending')` on daemon restart and marks all matches `failed`. A repeat run inserted as `'pending'` will be killed on the next restart before it does any work. `create_eval_run()` always uses `'queued'`; any raw INSERT bypass must match. Issue #41.
-- **`db._connect()` must always be called INSIDE `with self._lock:`** — every write method in `db.py` follows the pattern `with self._lock: conn = self._connect()`. Reversing the order (`conn = self._connect()` before the lock) creates a race window between connection acquisition and lock protection. The three recurring-job methods (`delete_recurring_job`, `update_recurring_job`, `delete_recurring_job_by_id`) had this reversed — see issue #39.
+- **`db._connect()` must always be called INSIDE `with self._lock:`** — every write method in `db/` follows the pattern `with self._lock: conn = self._connect()`. Reversing the order (`conn = self._connect()` before the lock) creates a race window between connection acquisition and lock protection. The three recurring-job methods (`delete_recurring_job`, `update_recurring_job`, `delete_recurring_job_by_id`) had this reversed — see issue #39.
 - **`move_to_dlq` must set `completed_at` on the job row** — `prune_old_data()` filters `WHERE completed_at IS NOT NULL`. Jobs marked `status='dead'` without `completed_at` are invisible to the pruner and accumulate indefinitely. Issue #49.
 - **`_call_generate_description` must go through the queue proxy** — background description generation must call `POST http://127.0.0.1:7683/api/generate`, not `localhost:11434` directly. Direct Ollama calls bypass concurrency serialization and can collide with running queue jobs. Issue #54.
 - **Auto-promote gate 2 must never silently skip** — `_check_auto_promote_inner` must log and `return` (not `pass`) when production metrics are unparseable. A silent `pass` leaves `production_f1=None`, which causes gate 2 (`F1 > production + min_improvement`) to silently evaluate as skipped — allowing a regression to auto-promote. Issue #43.
@@ -228,10 +248,10 @@ This applies to: component files, store transformations in `store.js`, computed 
 - **Scanner `deadlock_check` needs `with db._lock:`** — `deadlock_check()` calls `db._connect()` to look up active jobs. Must always be wrapped in `with db._lock:` (same as all other `_connect()` calls). Missing the lock causes a race with daemon write transactions.
 - **`_live_scan_*` functions: check returncode, not just exception** — `subprocess.run()` on `ss`/`lsof`/`netstat` does not raise on non-zero exit; it returns a `CompletedProcess` with `returncode != 0`. Log a WARNING and return `[]` on non-zero rather than silently returning an empty list on success. Same pattern in `_reload_systemd` and `_restart_service` in patcher.py.
 - **Consumer `patch_path` may be empty** — `revert_consumer()` must check `patch_path` before calling `Path(patch_path).exists()`. An empty string produces a false-positive hit on the current directory.
-- **scanner.py and patcher.py use `subprocess` with known system binaries** — `S603`/`S607` (bandit/ruff subprocess rules) are suppressed via `per-file-ignores` in `ruff.toml`, matching the same pattern as `daemon.py`. Do not add inline `# noqa` comments — they will be flagged as RUF100 (redundant) if the per-file-ignore is already in effect.
-- **`GET /api/eval/trends` returns `variants` as an object keyed by variant id, not an array** — SPA components must not iterate `variants` directly with `.map()`. Call `normalizeTrends()` in `store.js` before assigning to `evalTrends.value`; this converts the object to an array (with `id` attached), aggregates `trend_direction`/`completed_runs`/`judge_reliability`/`item_count_growing` at the top level, and normalises `started_at` ISO strings to unix `timestamp` fields. Any new Trends-tab component must consume the normalised shape, not the raw API response.
+- **config/scanner.py and config/patcher.py use `subprocess` with known system binaries** — `S603`/`S607` (bandit/ruff subprocess rules) are suppressed via `per-file-ignores` in `ruff.toml`, matching the same pattern as `daemon/`. Do not add inline `# noqa` comments — they will be flagged as RUF100 (redundant) if the per-file-ignore is already in effect.
+- **`GET /api/eval/trends` returns `variants` as an object keyed by variant id, not an array** — SPA components must not iterate `variants` directly with `.map()`. Call `normalizeTrends()` in `stores/eval.js` before assigning to `evalTrends.value`; this converts the object to an array (with `id` attached), aggregates `trend_direction`/`completed_runs`/`judge_reliability`/`item_count_growing` at the top level, and normalises `started_at` ISO strings to unix `timestamp` fields. Any new Trends-tab component must consume the normalised shape, not the raw API response.
 - **`INSERT OR IGNORE` skips pre-existing seeded rows — always pair with `UPDATE WHERE column IS NULL` backfill** — when adding a new column to a table that has seeded rows (e.g. `eval_variants` system variants A–H + M), `ALTER TABLE ADD COLUMN` sets the column to NULL on existing rows. The seed `INSERT OR IGNORE` then silently skips those rows, leaving the new column unpopulated. Always follow the migration with `UPDATE <table> SET <column> = <value> WHERE <column> IS NULL` to backfill pre-existing rows.
-- **`poll_once()` must not clobber the proxy sentinel** — the daemon's "set idle" transitions (`job is None`, `cannot admit`) must guard against `current_job_id == -1`. If a proxy is in-flight, omit `current_job_id` from the `update_daemon_state()` call; only the proxy's own `release_proxy_claim()` should clear it. Without this guard, the daemon clears the sentinel every 5s poll cycle, allowing multiple concurrent proxy requests that leave jobs permanently stuck in `status='running'`. Fix: `daemon.py` guard at every `update_daemon_state(state='idle', current_job_id=None)` call site. (#67)
+- **`poll_once()` must not clobber the proxy sentinel** — the daemon's "set idle" transitions (`job is None`, `cannot admit`) must guard against `current_job_id == -1`. If a proxy is in-flight, omit `current_job_id` from the `update_daemon_state()` call; only the proxy's own `release_proxy_claim()` should clear it. Without this guard, the daemon clears the sentinel every 5s poll cycle, allowing multiple concurrent proxy requests that leave jobs permanently stuck in `status='running'`. Fix: `daemon/loop.py` guard at every `update_daemon_state(state='idle', current_job_id=None)` call site. (#67)
 - **`OllamaModels._list_local_cache` is class-level** — tests that mock `list_local()` must call `OllamaModels._invalidate_list_cache()` in teardown, or the 60s cached result bleeds into subsequent tests and causes false positives.
 - **`HealthMonitor` now has `__init__`** — if subclassing or constructing directly in tests, call `super().__init__()` to initialise `_vram_cache`. Missing this raises `AttributeError` on the first `get_vram_pct()` call.
 - **`_reload_systemd()` and `_restart_service()` return `bool`** — callers that previously ignored the return value should check it and log or raise on `False`. Silent failures from these calls were masking systemd and service restart errors.

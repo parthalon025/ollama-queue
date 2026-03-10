@@ -55,8 +55,8 @@ def test_poll_runs_job(daemon):
                 "ollama_model": None,
             },
         ),
-        patch("ollama_queue.daemon.subprocess") as mock_sub,
-        patch("ollama_queue.daemon._drain_pipes_with_tracking", return_value=(b"hello", b"")),
+        patch("ollama_queue.daemon.executor.subprocess") as mock_sub,
+        patch("ollama_queue.daemon.executor._drain_pipes_with_tracking", return_value=(b"hello", b"")),
     ):
         proc = MagicMock()
         proc.pid = 1234
@@ -86,8 +86,8 @@ def test_llm_job_does_not_use_communicate(daemon):
                 "ollama_model": None,
             },
         ),
-        patch("ollama_queue.daemon.subprocess") as mock_sub,
-        patch("ollama_queue.daemon._drain_pipes_with_tracking", return_value=(b"hello", b"")) as mock_drain,
+        patch("ollama_queue.daemon.executor.subprocess") as mock_sub,
+        patch("ollama_queue.daemon.executor._drain_pipes_with_tracking", return_value=(b"hello", b"")) as mock_drain,
     ):
         proc = MagicMock()
         proc.pid = 1234
@@ -162,7 +162,7 @@ def test_timeout_kills_job(daemon):
                 "ollama_model": None,
             },
         ),
-        patch("ollama_queue.daemon.subprocess") as mock_sub,
+        patch("ollama_queue.daemon.executor.subprocess") as mock_sub,
     ):
         import subprocess as _real_sub
 
@@ -207,8 +207,8 @@ def test_records_duration_on_success(daemon):
                 "ollama_model": None,
             },
         ),
-        patch("ollama_queue.daemon.subprocess") as mock_sub,
-        patch("ollama_queue.daemon._drain_pipes_with_tracking", return_value=(b"ok", b"")),
+        patch("ollama_queue.daemon.executor.subprocess") as mock_sub,
+        patch("ollama_queue.daemon.executor._drain_pipes_with_tracking", return_value=(b"ok", b"")),
     ):
         proc = MagicMock()
         proc.pid = 1234
@@ -240,8 +240,8 @@ class TestDaemonSchedulerIntegration:
                     "ollama_model": None,
                 },
             ),
-            patch("ollama_queue.daemon.subprocess") as mock_sub,
-            patch("ollama_queue.daemon._drain_pipes_with_tracking", return_value=(b"hi", b"")),
+            patch("ollama_queue.daemon.executor.subprocess") as mock_sub,
+            patch("ollama_queue.daemon.executor._drain_pipes_with_tracking", return_value=(b"hi", b"")),
         ):
             proc = MagicMock()
             proc.pid = 1234
@@ -303,8 +303,8 @@ def test_no_self_block_after_queue_job(daemon):
                 "ollama_model": None,
             },
         ),
-        patch("ollama_queue.daemon.subprocess") as mock_sub,
-        patch("ollama_queue.daemon._drain_pipes_with_tracking", return_value=(b"ok", b"")),
+        patch("ollama_queue.daemon.executor.subprocess") as mock_sub,
+        patch("ollama_queue.daemon.executor._drain_pipes_with_tracking", return_value=(b"ok", b"")),
     ):
         proc = MagicMock()
         proc.pid = 1234
@@ -331,8 +331,8 @@ def test_no_self_block_after_queue_job(daemon):
                 "ollama_model": "nomic-embed-text",
             },
         ),
-        patch("ollama_queue.daemon.subprocess") as mock_sub,
-        patch("ollama_queue.daemon._drain_pipes_with_tracking", return_value=(b"ok", b"")),
+        patch("ollama_queue.daemon.executor.subprocess") as mock_sub,
+        patch("ollama_queue.daemon.executor._drain_pipes_with_tracking", return_value=(b"ok", b"")),
     ):
         proc = MagicMock()
         proc.pid = 1234
@@ -617,8 +617,8 @@ class TestComputeMaxWorkers:
                     "ollama_model": None,
                 },
             ),
-            patch("ollama_queue.daemon.subprocess") as mock_sub,
-            patch("ollama_queue.daemon._drain_pipes_with_tracking", return_value=(b"hi", b"")),
+            patch("ollama_queue.daemon.executor.subprocess") as mock_sub,
+            patch("ollama_queue.daemon.executor._drain_pipes_with_tracking", return_value=(b"hi", b"")),
         ):
             proc = MagicMock()
             proc.pid = 1234
@@ -685,7 +685,7 @@ def test_stall_kill_action(daemon):
     with (
         patch.object(daemon.stall_detector, "compute_posterior", return_value=(0.95, {"posterior": 0.95})),
         patch.object(daemon.stall_detector, "get_ollama_ps_models", return_value=set()),
-        patch("ollama_queue.daemon.os.kill") as mock_kill,
+        patch("ollama_queue.daemon.executor.os.kill") as mock_kill,
     ):
         daemon._check_stalled_jobs(time.time())
 
@@ -711,7 +711,7 @@ def test_stall_no_kill_within_grace(daemon):
     with (
         patch.object(daemon.stall_detector, "compute_posterior", return_value=(0.95, {"posterior": 0.95})),
         patch.object(daemon.stall_detector, "get_ollama_ps_models", return_value=set()),
-        patch("ollama_queue.daemon.os.kill") as mock_kill,
+        patch("ollama_queue.daemon.executor.os.kill") as mock_kill,
     ):
         daemon._check_stalled_jobs(time.time())
 
@@ -750,13 +750,13 @@ def test_check_command_exit0_proceeds(daemon):
     _rj_id, job_id = _make_recurring_and_job(daemon.db, check_command="exit 0")
     job = daemon.db.get_job(job_id)
 
-    with patch("ollama_queue.daemon.subprocess") as mock_sub:
+    with patch("ollama_queue.daemon.executor.subprocess") as mock_sub:
         proc = MagicMock()
         proc.pid = 9999
         proc.returncode = 0
         mock_sub.Popen.return_value = proc
         mock_sub.run.return_value = MagicMock(returncode=0)
-        with patch("ollama_queue.daemon._drain_pipes_with_tracking", return_value=(b"ok", b"")):
+        with patch("ollama_queue.daemon.executor._drain_pipes_with_tracking", return_value=(b"ok", b"")):
             daemon._run_job(job)
 
     mock_sub.run.assert_called_once()
@@ -770,7 +770,7 @@ def test_check_command_exit1_skips(daemon):
     rj_id, job_id = _make_recurring_and_job(daemon.db, check_command="exit 1")
     job = daemon.db.get_job(job_id)
 
-    with patch("ollama_queue.daemon.subprocess") as mock_sub:
+    with patch("ollama_queue.daemon.executor.subprocess") as mock_sub:
         mock_sub.run.return_value = MagicMock(returncode=1)
         daemon._run_job(job)
 
@@ -787,7 +787,7 @@ def test_check_command_exit2_disables(daemon):
     rj_id, job_id = _make_recurring_and_job(daemon.db, check_command="exit 2")
     job = daemon.db.get_job(job_id)
 
-    with patch("ollama_queue.daemon.subprocess") as mock_sub:
+    with patch("ollama_queue.daemon.executor.subprocess") as mock_sub:
         mock_sub.run.return_value = MagicMock(returncode=2)
         daemon._run_job(job)
 
@@ -804,13 +804,13 @@ def test_check_command_unknown_exit_failopen(daemon):
     _rj_id, job_id = _make_recurring_and_job(daemon.db, check_command="exit 99")
     job = daemon.db.get_job(job_id)
 
-    with patch("ollama_queue.daemon.subprocess") as mock_sub:
+    with patch("ollama_queue.daemon.executor.subprocess") as mock_sub:
         proc = MagicMock()
         proc.pid = 9999
         proc.returncode = 0
         mock_sub.Popen.return_value = proc
         mock_sub.run.return_value = MagicMock(returncode=99)
-        with patch("ollama_queue.daemon._drain_pipes_with_tracking", return_value=(b"ok", b"")):
+        with patch("ollama_queue.daemon.executor._drain_pipes_with_tracking", return_value=(b"ok", b"")):
             daemon._run_job(job)
 
     mock_sub.Popen.assert_called_once()
@@ -823,13 +823,13 @@ def test_check_command_timeout_failopen(daemon):
     _rj_id, job_id = _make_recurring_and_job(daemon.db, check_command="sleep 999")
     job = daemon.db.get_job(job_id)
 
-    with patch("ollama_queue.daemon.subprocess") as mock_sub:
+    with patch("ollama_queue.daemon.executor.subprocess") as mock_sub:
         proc = MagicMock()
         proc.pid = 9999
         proc.returncode = 0
         mock_sub.run.side_effect = _subprocess_mod.TimeoutExpired("sleep 999", 30)
         mock_sub.Popen.return_value = proc
-        with patch("ollama_queue.daemon._drain_pipes_with_tracking", return_value=(b"ok", b"")):
+        with patch("ollama_queue.daemon.executor._drain_pipes_with_tracking", return_value=(b"ok", b"")):
             daemon._run_job(job)
 
     mock_sub.Popen.assert_called_once()
@@ -842,12 +842,12 @@ def test_no_check_command_skips_check(daemon):
     _rj_id, job_id = _make_recurring_and_job(daemon.db, check_command=None)
     job = daemon.db.get_job(job_id)
 
-    with patch("ollama_queue.daemon.subprocess") as mock_sub:
+    with patch("ollama_queue.daemon.executor.subprocess") as mock_sub:
         proc = MagicMock()
         proc.pid = 9999
         proc.returncode = 0
         mock_sub.Popen.return_value = proc
-        with patch("ollama_queue.daemon._drain_pipes_with_tracking", return_value=(b"ok", b"")):
+        with patch("ollama_queue.daemon.executor._drain_pipes_with_tracking", return_value=(b"ok", b"")):
             daemon._run_job(job)
 
     mock_sub.run.assert_not_called()
@@ -859,12 +859,12 @@ def test_max_runs_decrements_on_success(daemon):
     rj_id, job_id = _make_recurring_and_job(daemon.db, max_runs=3)
     job = daemon.db.get_job(job_id)
 
-    with patch("ollama_queue.daemon.subprocess") as mock_sub:
+    with patch("ollama_queue.daemon.executor.subprocess") as mock_sub:
         proc = MagicMock()
         proc.pid = 9999
         proc.returncode = 0
         mock_sub.Popen.return_value = proc
-        with patch("ollama_queue.daemon._drain_pipes_with_tracking", return_value=(b"ok", b"")):
+        with patch("ollama_queue.daemon.executor._drain_pipes_with_tracking", return_value=(b"ok", b"")):
             daemon._run_job(job)
 
     rj = daemon.db.get_recurring_job(rj_id)
@@ -876,12 +876,12 @@ def test_max_runs_no_decrement_on_failure(daemon):
     rj_id, job_id = _make_recurring_and_job(daemon.db, max_runs=3)
     job = daemon.db.get_job(job_id)
 
-    with patch("ollama_queue.daemon.subprocess") as mock_sub:
+    with patch("ollama_queue.daemon.executor.subprocess") as mock_sub:
         proc = MagicMock()
         proc.pid = 9999
         proc.returncode = 1  # failure
         mock_sub.Popen.return_value = proc
-        with patch("ollama_queue.daemon._drain_pipes_with_tracking", return_value=(b"", b"err")):
+        with patch("ollama_queue.daemon.executor._drain_pipes_with_tracking", return_value=(b"", b"err")):
             daemon._run_job(job)
 
     rj = daemon.db.get_recurring_job(rj_id)
@@ -893,12 +893,12 @@ def test_max_runs_zero_disables_job(daemon):
     rj_id, job_id = _make_recurring_and_job(daemon.db, max_runs=1)
     job = daemon.db.get_job(job_id)
 
-    with patch("ollama_queue.daemon.subprocess") as mock_sub:
+    with patch("ollama_queue.daemon.executor.subprocess") as mock_sub:
         proc = MagicMock()
         proc.pid = 9999
         proc.returncode = 0
         mock_sub.Popen.return_value = proc
-        with patch("ollama_queue.daemon._drain_pipes_with_tracking", return_value=(b"ok", b"")):
+        with patch("ollama_queue.daemon.executor._drain_pipes_with_tracking", return_value=(b"ok", b"")):
             daemon._run_job(job)
 
     rj = daemon.db.get_recurring_job(rj_id)
@@ -911,12 +911,12 @@ def test_no_max_runs_no_decrement(daemon):
     rj_id, job_id = _make_recurring_and_job(daemon.db, max_runs=None)
     job = daemon.db.get_job(job_id)
 
-    with patch("ollama_queue.daemon.subprocess") as mock_sub:
+    with patch("ollama_queue.daemon.executor.subprocess") as mock_sub:
         proc = MagicMock()
         proc.pid = 9999
         proc.returncode = 0
         mock_sub.Popen.return_value = proc
-        with patch("ollama_queue.daemon._drain_pipes_with_tracking", return_value=(b"ok", b"")):
+        with patch("ollama_queue.daemon.executor._drain_pipes_with_tracking", return_value=(b"ok", b"")):
             daemon._run_job(job)
 
     rj = daemon.db.get_recurring_job(rj_id)
@@ -1049,7 +1049,7 @@ class TestPreemption:
             conn = db._connect()
             conn.execute("UPDATE jobs SET pid=99999 WHERE id=?", (job_id,))
             conn.commit()
-        with patch("ollama_queue.daemon.os.kill", return_value=None):
+        with patch("ollama_queue.daemon.executor.os.kill", return_value=None):
             daemon._preempt_job(job_id)
         job = db.get_job(job_id)
         assert job["status"] == "pending", f"Expected pending, got {job['status']}"
@@ -1068,7 +1068,7 @@ class TestPreemption:
             conn = db._connect()
             conn.execute("UPDATE jobs SET pid=99999 WHERE id=?", (job_id,))
             conn.commit()
-        with patch("ollama_queue.daemon.os.kill", return_value=None):
+        with patch("ollama_queue.daemon.executor.os.kill", return_value=None):
             daemon._preempt_job(job_id)
         job = db.get_job(job_id)
         assert job["preemption_count"] == 1
@@ -1101,8 +1101,8 @@ class TestPreemption:
 
 def test_daemon_has_burst_detector(db):
     """Daemon initializes with a BurstDetector instance."""
-    from ollama_queue.burst import BurstDetector
     from ollama_queue.daemon import Daemon
+    from ollama_queue.sensing.burst import BurstDetector
 
     daemon = Daemon(db)
     assert hasattr(daemon, "_burst_detector")
@@ -1372,7 +1372,7 @@ class TestDrainPipesWithTracking:
         import subprocess as _sp
 
         from ollama_queue.daemon import _drain_pipes_with_tracking
-        from ollama_queue.stall import StallDetector
+        from ollama_queue.sensing.stall import StallDetector
 
         proc = _sp.Popen(
             ["bash", "-c", "echo hello; echo errout >&2"],
@@ -1391,7 +1391,7 @@ class TestDrainPipesWithTracking:
         import subprocess as _sp
 
         from ollama_queue.daemon import _MAX_STDOUT_BYTES, _drain_pipes_with_tracking
-        from ollama_queue.stall import StallDetector
+        from ollama_queue.sensing.stall import StallDetector
 
         # Generate more than 128KB of stdout via dd (fast, predictable)
         size = _MAX_STDOUT_BYTES + 50000
@@ -1410,7 +1410,7 @@ class TestDrainPipesWithTracking:
         import subprocess as _sp
 
         from ollama_queue.daemon import _drain_pipes_with_tracking
-        from ollama_queue.stall import StallDetector
+        from ollama_queue.sensing.stall import StallDetector
 
         proc = _sp.Popen(["true"], stdout=_sp.PIPE, stderr=_sp.PIPE)
         sd = StallDetector()
@@ -1423,7 +1423,7 @@ class TestDrainPipesWithTracking:
         import subprocess as _sp
 
         from ollama_queue.daemon import _drain_pipes_with_tracking
-        from ollama_queue.stall import StallDetector
+        from ollama_queue.sensing.stall import StallDetector
 
         proc = _sp.Popen(
             ["bash", "-c", "echo -n stdout_data; echo -n stderr_data >&2; exit 0"],
@@ -1440,7 +1440,7 @@ class TestDrainPipesWithTracking:
         import subprocess as _sp
 
         from ollama_queue.daemon import _drain_pipes_with_tracking
-        from ollama_queue.stall import StallDetector
+        from ollama_queue.sensing.stall import StallDetector
 
         proc = _sp.Popen(["echo", "hi"], stdout=_sp.PIPE, stderr=_sp.PIPE)
         proc.wait()  # let it finish
@@ -1455,7 +1455,7 @@ class TestDrainPipesWithTracking:
         import subprocess as _sp
 
         from ollama_queue.daemon import _drain_pipes_with_tracking
-        from ollama_queue.stall import StallDetector
+        from ollama_queue.sensing.stall import StallDetector
 
         proc = _sp.Popen(["echo", "test"], stdout=_sp.PIPE, stderr=_sp.PIPE)
         sd = StallDetector()
@@ -1518,7 +1518,7 @@ def test_compute_max_workers_zero_min_model_vram(db, monkeypatch):
 def test_free_vram_mb_oserror(db):
     """_free_vram_mb returns None when nvidia-smi raises OSError."""
     d = Daemon(db)
-    with patch("ollama_queue.daemon._subprocess.run", side_effect=OSError("not found")):
+    with patch("ollama_queue.daemon.executor._subprocess.run", side_effect=OSError("not found")):
         result = d._free_vram_mb()
     assert result is None
 
@@ -1528,7 +1528,7 @@ def test_free_vram_mb_timeout(db):
     import subprocess as sp
 
     d = Daemon(db)
-    with patch("ollama_queue.daemon._subprocess.run", side_effect=sp.TimeoutExpired("nvidia-smi", 5)):
+    with patch("ollama_queue.daemon.executor._subprocess.run", side_effect=sp.TimeoutExpired("nvidia-smi", 5)):
         result = d._free_vram_mb()
     assert result is None
 
@@ -1536,7 +1536,7 @@ def test_free_vram_mb_timeout(db):
 def test_free_vram_mb_unexpected_exception(db):
     """_free_vram_mb returns None on unexpected exception."""
     d = Daemon(db)
-    with patch("ollama_queue.daemon._subprocess.run", side_effect=RuntimeError("unexpected")):
+    with patch("ollama_queue.daemon.executor._subprocess.run", side_effect=RuntimeError("unexpected")):
         result = d._free_vram_mb()
     assert result is None
 
@@ -1546,7 +1546,7 @@ def test_free_vram_mb_nonzero_returncode(db):
     d = Daemon(db)
     mock_result = MagicMock()
     mock_result.returncode = 1
-    with patch("ollama_queue.daemon._subprocess.run", return_value=mock_result):
+    with patch("ollama_queue.daemon.executor._subprocess.run", return_value=mock_result):
         result = d._free_vram_mb()
     assert result is None
 
@@ -1803,7 +1803,7 @@ def test_recover_orphans_sigterm_orphaned_pid(db):
         conn = db._connect()
         conn.execute("UPDATE jobs SET pid = 999999 WHERE id = ?", (job_id,))
         conn.commit()
-    with patch("ollama_queue.daemon.os.kill") as mock_kill:
+    with patch("ollama_queue.daemon.loop.os.kill") as mock_kill:
         mock_kill.side_effect = ProcessLookupError  # process doesn't exist
         d._recover_orphans()
     mock_kill.assert_called_once_with(999999, _signal.SIGTERM)
@@ -2155,8 +2155,8 @@ def test_poll_once_logs_resume_from_pause(db, caplog):
             },
         ),
         patch.object(d, "_can_admit", return_value=True),
-        patch("ollama_queue.daemon.subprocess") as mock_sub,
-        patch("ollama_queue.daemon._drain_pipes_with_tracking", return_value=(b"ok", b"")),
+        patch("ollama_queue.daemon.executor.subprocess") as mock_sub,
+        patch("ollama_queue.daemon.executor._drain_pipes_with_tracking", return_value=(b"ok", b"")),
         caplog.at_level(logging.INFO),
     ):
         proc = MagicMock()
@@ -2207,8 +2207,8 @@ def test_poll_once_preemption_fires(db, caplog):
         patch.object(d, "_can_admit", return_value=True),
         patch.object(d, "_check_preemption", return_value=low_id),
         patch.object(d, "_preempt_job") as mock_preempt,
-        patch("ollama_queue.daemon.subprocess") as mock_sub,
-        patch("ollama_queue.daemon._drain_pipes_with_tracking", return_value=(b"ok", b"")),
+        patch("ollama_queue.daemon.executor.subprocess") as mock_sub,
+        patch("ollama_queue.daemon.executor._drain_pipes_with_tracking", return_value=(b"ok", b"")),
     ):
         proc = MagicMock()
         proc.pid = 1234
@@ -2231,7 +2231,7 @@ def test_run_job_timeout_double_timeout(db):
     db.start_job(job_id)
     job = db.get_job(job_id)
 
-    with patch("ollama_queue.daemon.subprocess") as mock_sub:
+    with patch("ollama_queue.daemon.executor.subprocess") as mock_sub:
         proc = MagicMock()
         proc.pid = 1234
         proc.kill.return_value = None
@@ -2261,7 +2261,7 @@ def test_run_job_timeout_dlq_exception(db, caplog):
     job = db.get_job(job_id)
 
     with (
-        patch("ollama_queue.daemon.subprocess") as mock_sub,
+        patch("ollama_queue.daemon.executor.subprocess") as mock_sub,
         patch.object(d.dlq, "handle_failure", side_effect=Exception("dlq boom")),
         caplog.at_level(logging.ERROR),
     ):
@@ -2290,8 +2290,8 @@ def test_run_job_failed_dlq_exception(db, caplog):
     job = db.get_job(job_id)
 
     with (
-        patch("ollama_queue.daemon.subprocess") as mock_sub,
-        patch("ollama_queue.daemon._drain_pipes_with_tracking", return_value=(b"", b"error")),
+        patch("ollama_queue.daemon.executor.subprocess") as mock_sub,
+        patch("ollama_queue.daemon.executor._drain_pipes_with_tracking", return_value=(b"", b"error")),
         patch.object(d.dlq, "handle_failure", side_effect=Exception("dlq boom")),
         caplog.at_level(logging.ERROR),
     ):
@@ -2317,8 +2317,8 @@ def test_run_job_stores_metrics(db):
     # parse_ollama_metrics requires {"done": true, ...}
     metrics_json = b'{"done": true, "eval_count": 100, "eval_duration": 5000000000}'
     with (
-        patch("ollama_queue.daemon.subprocess") as mock_sub,
-        patch("ollama_queue.daemon._drain_pipes_with_tracking", return_value=(metrics_json, b"")),
+        patch("ollama_queue.daemon.executor.subprocess") as mock_sub,
+        patch("ollama_queue.daemon.executor._drain_pipes_with_tracking", return_value=(metrics_json, b"")),
     ):
         proc = MagicMock()
         proc.pid = 1234
@@ -2341,8 +2341,8 @@ def test_run_job_store_metrics_exception(db, caplog):
     # parse_ollama_metrics requires {"done": true, ...} in stdout
     metrics_json = b'{"done": true, "eval_count": 100, "eval_duration": 5000000000}'
     with (
-        patch("ollama_queue.daemon.subprocess") as mock_sub,
-        patch("ollama_queue.daemon._drain_pipes_with_tracking", return_value=(metrics_json, b"")),
+        patch("ollama_queue.daemon.executor.subprocess") as mock_sub,
+        patch("ollama_queue.daemon.executor._drain_pipes_with_tracking", return_value=(metrics_json, b"")),
         patch.object(db, "store_job_metrics", side_effect=Exception("store boom")),
         caplog.at_level(logging.ERROR),
     ):
@@ -2378,8 +2378,8 @@ def test_run_job_records_observed_vram(db, monkeypatch):
     monkeypatch.setattr(d._ollama_models, "record_observed_vram", lambda m, d, db: record_calls.append((m, d)))
 
     with (
-        patch("ollama_queue.daemon.subprocess") as mock_sub,
-        patch("ollama_queue.daemon._drain_pipes_with_tracking", return_value=(b"ok", b"")),
+        patch("ollama_queue.daemon.executor.subprocess") as mock_sub,
+        patch("ollama_queue.daemon.executor._drain_pipes_with_tracking", return_value=(b"ok", b"")),
     ):
         proc = MagicMock()
         proc.pid = 1234
@@ -2402,8 +2402,8 @@ def test_run_job_scheduler_exception(db, caplog):
     job = db.get_job(job_id)
 
     with (
-        patch("ollama_queue.daemon.subprocess") as mock_sub,
-        patch("ollama_queue.daemon._drain_pipes_with_tracking", return_value=(b"ok", b"")),
+        patch("ollama_queue.daemon.executor.subprocess") as mock_sub,
+        patch("ollama_queue.daemon.executor._drain_pipes_with_tracking", return_value=(b"ok", b"")),
         patch.object(d.scheduler, "update_next_run", side_effect=Exception("scheduler boom")),
         caplog.at_level(logging.ERROR),
     ):
@@ -2427,7 +2427,7 @@ def test_run_job_unhandled_exception(db, caplog):
     job = db.get_job(job_id)
 
     with (
-        patch("ollama_queue.daemon.subprocess") as mock_sub,
+        patch("ollama_queue.daemon.executor.subprocess") as mock_sub,
         caplog.at_level(logging.ERROR),
     ):
         mock_sub.Popen.side_effect = RuntimeError("Popen exploded")
@@ -2446,8 +2446,8 @@ def test_run_job_unhandled_exception_with_partial_output(db, caplog):
     job = db.get_job(job_id)
 
     with (
-        patch("ollama_queue.daemon.subprocess") as mock_sub,
-        patch("ollama_queue.daemon._drain_pipes_with_tracking") as mock_drain,
+        patch("ollama_queue.daemon.executor.subprocess") as mock_sub,
+        patch("ollama_queue.daemon.executor._drain_pipes_with_tracking") as mock_drain,
         caplog.at_level(logging.ERROR),
     ):
         proc = MagicMock()
@@ -2479,7 +2479,7 @@ def test_run_job_unhandled_exception_complete_job_fails(db, caplog):
         return original_complete(*args, **kwargs)
 
     with (
-        patch("ollama_queue.daemon.subprocess") as mock_sub,
+        patch("ollama_queue.daemon.executor.subprocess") as mock_sub,
         patch.object(db, "complete_job", side_effect=failing_complete),
         caplog.at_level(logging.ERROR),
     ):
@@ -2497,7 +2497,7 @@ def test_run_job_unhandled_exception_dlq_fails(db, caplog):
     job = db.get_job(job_id)
 
     with (
-        patch("ollama_queue.daemon.subprocess") as mock_sub,
+        patch("ollama_queue.daemon.executor.subprocess") as mock_sub,
         patch.object(d.dlq, "handle_failure", side_effect=Exception("dlq boom")),
         caplog.at_level(logging.ERROR),
     ):
@@ -2679,7 +2679,7 @@ def test_check_command_generic_exception_failopen(db, caplog):
     job = db.get_job(job_id)
 
     with (
-        patch("ollama_queue.daemon.subprocess") as mock_sub,
+        patch("ollama_queue.daemon.executor.subprocess") as mock_sub,
         caplog.at_level(logging.WARNING),
     ):
         mock_sub.run.side_effect = Exception("generic exception")
@@ -2687,7 +2687,7 @@ def test_check_command_generic_exception_failopen(db, caplog):
         proc.pid = 1234
         proc.returncode = 0
         mock_sub.Popen.return_value = proc
-        with patch("ollama_queue.daemon._drain_pipes_with_tracking", return_value=(b"ok", b"")):
+        with patch("ollama_queue.daemon.executor._drain_pipes_with_tracking", return_value=(b"ok", b"")):
             d._run_job(dict(job))
     # Job should still run (fail-open)
     mock_sub.Popen.assert_called_once()
@@ -2703,7 +2703,7 @@ def test_check_command_exit1_scheduler_exception(db, caplog):
     job = db.get_job(job_id)
 
     with (
-        patch("ollama_queue.daemon.subprocess") as mock_sub,
+        patch("ollama_queue.daemon.executor.subprocess") as mock_sub,
         patch.object(d.scheduler, "update_next_run", side_effect=Exception("scheduler boom")),
         caplog.at_level(logging.ERROR),
     ):
@@ -2729,7 +2729,7 @@ def test_run_loop_basic(db):
     with (
         patch.object(d, "poll_once", side_effect=counting_poll),
         patch.object(d, "_recover_orphans"),
-        patch("ollama_queue.daemon.time.sleep"),
+        patch("ollama_queue.daemon.loop.time.sleep"),
         pytest.raises(KeyboardInterrupt),
     ):
         d.run(poll_interval=1)
@@ -2754,7 +2754,7 @@ def test_run_loop_poll_interval_from_db(db):
     with (
         patch.object(d, "poll_once"),
         patch.object(d, "_recover_orphans"),
-        patch("ollama_queue.daemon.time.sleep", side_effect=crash_on_sleep) as mock_sleep,
+        patch("ollama_queue.daemon.loop.time.sleep", side_effect=crash_on_sleep) as mock_sleep,
         pytest.raises(KeyboardInterrupt),
     ):
         d.run()
@@ -2776,7 +2776,7 @@ def test_run_loop_poll_interval_default(db):
     with (
         patch.object(d, "poll_once"),
         patch.object(d, "_recover_orphans"),
-        patch("ollama_queue.daemon.time.sleep", side_effect=crash_on_sleep) as mock_sleep,
+        patch("ollama_queue.daemon.loop.time.sleep", side_effect=crash_on_sleep) as mock_sleep,
         pytest.raises(KeyboardInterrupt),
     ):
         d.run()
@@ -2804,7 +2804,7 @@ def test_run_loop_poll_exception_recovery(db, caplog):
     with (
         patch.object(d, "poll_once", side_effect=failing_poll),
         patch.object(d, "_recover_orphans"),
-        patch("ollama_queue.daemon.time.sleep", side_effect=crash_on_second_sleep),
+        patch("ollama_queue.daemon.loop.time.sleep", side_effect=crash_on_second_sleep),
         caplog.at_level(logging.ERROR),
         pytest.raises(KeyboardInterrupt),
     ):
@@ -2844,7 +2844,7 @@ def test_run_loop_state_recovery_also_fails(db, caplog):
         patch.object(d, "poll_once", side_effect=failing_poll),
         patch.object(d, "_recover_orphans"),
         patch.object(db, "update_daemon_state", side_effect=failing_update),
-        patch("ollama_queue.daemon.time.sleep", side_effect=crash_on_second_sleep),
+        patch("ollama_queue.daemon.loop.time.sleep", side_effect=crash_on_second_sleep),
         caplog.at_level(logging.ERROR),
         pytest.raises(KeyboardInterrupt),
     ):
@@ -2869,7 +2869,7 @@ def test_run_loop_prune(db):
         patch.object(d, "poll_once"),
         patch.object(d, "_recover_orphans"),
         patch.object(db, "prune_old_data") as mock_prune,
-        patch("ollama_queue.daemon.time.sleep", side_effect=crash_on_sleep),
+        patch("ollama_queue.daemon.loop.time.sleep", side_effect=crash_on_sleep),
         pytest.raises(KeyboardInterrupt),
     ):
         d.run(poll_interval=1)
@@ -2894,7 +2894,7 @@ def test_run_loop_prune_exception(db, caplog):
         patch.object(d, "poll_once"),
         patch.object(d, "_recover_orphans"),
         patch.object(db, "prune_old_data", side_effect=Exception("prune boom")),
-        patch("ollama_queue.daemon.time.sleep", side_effect=crash_on_second_sleep),
+        patch("ollama_queue.daemon.loop.time.sleep", side_effect=crash_on_second_sleep),
         caplog.at_level(logging.ERROR),
         pytest.raises(KeyboardInterrupt),
     ):
@@ -2959,7 +2959,7 @@ def test_drain_process_exits_during_select_timeout():
     import subprocess as _sp
 
     from ollama_queue.daemon import _drain_pipes_with_tracking
-    from ollama_queue.stall import StallDetector
+    from ollama_queue.sensing.stall import StallDetector
 
     proc = _sp.Popen(
         ["bash", "-c", "echo -n STDOUT_BUF; echo -n STDERR_BUF >&2"],
@@ -2992,7 +2992,7 @@ def test_drain_read_raises_blocking_io_error():
     import subprocess as _sp
 
     from ollama_queue.daemon import _drain_pipes_with_tracking
-    from ollama_queue.stall import StallDetector
+    from ollama_queue.sensing.stall import StallDetector
 
     proc = _sp.Popen(["echo", "data"], stdout=_sp.PIPE, stderr=_sp.PIPE)
     sd = StallDetector()
@@ -3019,7 +3019,7 @@ def test_drain_post_exit_read_oserror():
     import subprocess as _sp
 
     from ollama_queue.daemon import _drain_pipes_with_tracking
-    from ollama_queue.stall import StallDetector
+    from ollama_queue.sensing.stall import StallDetector
 
     proc = _sp.Popen(
         ["bash", "-c", "echo -n X; exit 0"],
@@ -3057,7 +3057,7 @@ def test_drain_select_timeout_process_still_running():
     import subprocess as _sp
 
     from ollama_queue.daemon import _drain_pipes_with_tracking
-    from ollama_queue.stall import StallDetector
+    from ollama_queue.sensing.stall import StallDetector
 
     # Process that runs briefly then exits with output
     proc = _sp.Popen(
@@ -3106,7 +3106,7 @@ def test_recover_orphans_sigterm_success(db):
         conn = db._connect()
         conn.execute("UPDATE jobs SET pid = 999999 WHERE id = ?", (job_id,))
         conn.commit()
-    with patch("ollama_queue.daemon.os.kill") as mock_kill:
+    with patch("ollama_queue.daemon.loop.os.kill") as mock_kill:
         # Don't raise — simulate successful SIGTERM
         mock_kill.return_value = None
         d._recover_orphans()
@@ -3152,8 +3152,8 @@ def test_run_job_unhandled_exception_partial_metrics_captured(db, caplog):
     ollama_output = b'{"done": true, "eval_count": 42, "eval_duration": 2000000000}'
 
     with (
-        patch("ollama_queue.daemon.subprocess") as mock_sub,
-        patch("ollama_queue.daemon._drain_pipes_with_tracking") as mock_drain,
+        patch("ollama_queue.daemon.executor.subprocess") as mock_sub,
+        patch("ollama_queue.daemon.executor._drain_pipes_with_tracking") as mock_drain,
         caplog.at_level(logging.DEBUG),
     ):
         proc = MagicMock()
@@ -3181,8 +3181,8 @@ def test_run_job_unhandled_exception_partial_metrics_store_fails(db, caplog):
     ollama_output = b'{"done": true, "eval_count": 42, "eval_duration": 2000000000}'
 
     with (
-        patch("ollama_queue.daemon.subprocess") as mock_sub,
-        patch("ollama_queue.daemon._drain_pipes_with_tracking") as mock_drain,
+        patch("ollama_queue.daemon.executor.subprocess") as mock_sub,
+        patch("ollama_queue.daemon.executor._drain_pipes_with_tracking") as mock_drain,
         patch.object(db, "store_job_metrics", side_effect=Exception("store failed")),
         caplog.at_level(logging.DEBUG),
     ):

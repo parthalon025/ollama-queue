@@ -6,7 +6,7 @@
 import { h } from 'preact';
 import { useState } from 'preact/hooks';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
-import { includeConsumer, ignoreConsumer, revertConsumer } from '../../store.js';
+import { includeConsumer, ignoreConsumer, revertConsumer } from '../../stores';
 
 const STATUS_BADGE = {
   discovered:      { cls: 'badge--neutral',  label: 'Discovered' },

@@ -1,0 +1,324 @@
+"""Schedule (recurring job) endpoints."""
+
+from __future__ import annotations
+
+import logging
+
+import httpx
+from fastapi import APIRouter, Body, HTTPException
+from pydantic import BaseModel
+
+import ollama_queue.api as _api
+from ollama_queue.db import Database
+from ollama_queue.models.client import OllamaModels
+from ollama_queue.models.estimator import DurationEstimator
+
+_log = logging.getLogger(__name__)
+
+router = APIRouter()
+
+
+class RecurringJobCreate(BaseModel):
+    name: str
+    command: str
+    interval_seconds: int | None = None
+    cron_expression: str | None = None
+    model: str | None = None
+    priority: int = 5
+    timeout: int = 600
+    source: str | None = None
+    tag: str | None = None
+    max_retries: int = 0
+    resource_profile: str = "ollama"
+    pinned: bool = False
+    check_command: str | None = None
+    max_runs: int | None = None
+    description: str | None = None
+
+
+class RecurringJobUpdate(BaseModel):
+    enabled: bool | None = None
+    priority: int | None = None
+    interval_seconds: int | None = None
+    cron_expression: str | None = None
+    tag: str | None = None
+    command: str | None = None
+    name: str | None = None
+    model: str | None = None
+    timeout: int | None = None
+    max_retries: int | None = None
+    pinned: bool | None = None
+    check_command: str | None = None
+    max_runs: int | None = None
+    description: str | None = None
+
+
+_JOB_DESCRIPTION_CONTEXT = (
+    "You are describing scheduled jobs in a personal AI + home automation system owned by one person.\n\n"
+    "System context:\n"
+    "- 'aria' tag = ARIA, a Home Assistant intelligence system that runs ML predictions, detects behavioral patterns,\n"
+    "  correlates entities, and learns from logbook history\n"
+    "- 'embeddings' tag = nightly vector index generation for semantic search across project codebases and documents\n"
+    "- 'lessons' tag = a personal engineering lessons database with spaced repetition (FSRS) that schedules review of past mistakes\n"  # noqa: E501
+    "- 'telegram' tag = sends AI-generated daily briefings (morning/midday/evening) to the owner via Telegram\n"
+    "  using summarized data from Notion and Home Assistant\n"
+    "- 'notion' tag = syncs and re-indexes the owner's personal Notion workspace (7,800+ pages) for local semantic search\n"  # noqa: E501
+    "- Commands like 'aria run --mode X' run a specific ARIA analysis mode.\n"
+    "  Modes: learn=update behavioral patterns from HA logbook, predict=generate activity predictions,\n"
+    "  embeddings=generate vector index, snapshot=save model state, meta-learn=meta-learning pass\n"
+    "- Commands like 'telegram-brief --time X' send a scheduled Telegram message summarizing the day\n"
+    "- 'lessons-db' = the personal engineering lessons database CLI\n"
+    "- 'notion-sync' = syncs the local Notion replica from the cloud workspace"
+)
+
+
+def _call_generate_description(rj_id: int, name: str, tag: str | None, command: str, db_ref: Database) -> None:
+    """Call local Ollama to generate a layman description for a recurring job, then persist it.
+
+    Plain English: Asks the local AI model to write 2 sentences explaining what this scheduled
+    job does and why it runs regularly, then saves the result to the database.
+    Decision it drives: Shows job owners what each scheduled task is actually for in plain terms.
+    """
+    prompt = (
+        f"{_JOB_DESCRIPTION_CONTEXT}\n\n"
+        f"Job name: {name}\n"
+        f"Tag: {tag or 'none'}\n"
+        f"Command: {command}\n\n"
+        "In 2 plain-English sentences, explain what this job does and why it runs regularly. "
+        "Write for the technical owner who built this system — be specific about what data or "
+        "action is involved, not generic. Do not start with 'This job'."
+    )
+    payload = {
+        "model": "qwen3.5:9b",
+        "prompt": prompt,
+        "temperature": 0.2,
+        "stream": False,
+        "think": False,
+        "_source": "description-gen",
+        "_timeout": 120,
+    }
+    try:
+        # Route through queue proxy (port 7683) to respect Ollama concurrency limits
+        with httpx.Client(timeout=150.0) as client:
+            resp = client.post("http://127.0.0.1:7683/api/generate", json=payload)
+        resp.raise_for_status()
+        description = (resp.json().get("response") or "").strip()
+        if description:
+            db_ref.update_recurring_job(rj_id, description=description)
+        else:
+            _log.warning("generate-description: empty response from model for job %d", rj_id)
+    except Exception:
+        _log.exception("generate-description failed for recurring job %s", rj_id)
+
+
+# NOTE: fixed routes (/rebalance, /events) must come before parameterized /{rj_id}
+
+
+@router.get("/api/schedule")
+def list_schedule():
+    db = _api.db
+    jobs = db.list_recurring_jobs()
+    est = DurationEstimator(db)
+    om = OllamaModels()
+    for rj in jobs:
+        rj["estimated_duration"] = est.estimate(
+            rj.get("name") or rj.get("source") or "",
+            model=rj.get("model"),
+        )
+        if rj.get("model"):
+            classification = om.classify(rj["model"])
+            rj["model_profile"] = classification["resource_profile"]
+            rj["model_type"] = classification["type_tag"]
+            rj["model_vram_mb"] = round(om.estimate_vram_mb(rj["model"], db), 1)
+        else:
+            rj["model_profile"] = "ollama"
+            rj["model_type"] = "general"
+            rj["model_vram_mb"] = None
+    return jobs
+
+
+@router.post("/api/schedule/rebalance")
+def trigger_rebalance():
+    db = _api.db
+    from ollama_queue.scheduling.scheduler import Scheduler
+
+    changes = Scheduler(db).rebalance()
+    return {"rebalanced": len(changes), "changes": changes}
+
+
+@router.get("/api/schedule/events")
+def get_schedule_events(limit: int = 100):
+    db = _api.db
+    return db.get_schedule_events(limit=limit)
+
+
+@router.get("/api/schedule/load-map")
+def get_load_map():
+    db = _api.db
+    from ollama_queue.scheduling.scheduler import Scheduler
+
+    slots = Scheduler(db).load_map()
+    return {"slots": slots, "slot_minutes": 30, "count": len(slots)}
+
+
+@router.get("/api/schedule/suggest")
+def suggest_schedule_time(priority: int = 5, top_n: int = 3):
+    db = _api.db
+    from ollama_queue.scheduling.scheduler import Scheduler
+
+    suggestions = Scheduler(db).suggest_time(priority=priority, top_n=top_n)
+    results = []
+    for cron_expr, score in suggestions:
+        parts = cron_expr.split()
+        minute, hour = int(parts[0]), int(parts[1])
+        slot = (hour * 60 + minute) // 30
+        results.append({"cron": cron_expr, "score": score, "slot": slot})
+    return {"suggestions": results}
+
+
+@router.post("/api/schedule/batch-toggle")
+def batch_toggle_schedule(body: dict = Body(...)):
+    db = _api.db
+    tag = body.get("tag")
+    enabled = body.get("enabled")
+    if not tag or enabled is None:
+        raise HTTPException(status_code=400, detail="tag and enabled are required")
+    jobs = db.list_recurring_jobs()
+    matched = [rj for rj in jobs if rj.get("tag") == tag]
+    for rj in matched:
+        db.update_recurring_job(rj["id"], enabled=bool(enabled))
+    return {"updated": len(matched)}
+
+
+@router.post("/api/schedule/batch-run")
+def batch_run_schedule(body: dict = Body(...)):
+    db = _api.db
+    tag = body.get("tag")
+    if not tag:
+        raise HTTPException(status_code=400, detail="tag is required")
+    jobs = db.list_recurring_jobs()
+    matched = [rj for rj in jobs if rj.get("tag") == tag and rj.get("enabled")]
+    job_ids = []
+    for rj in matched:
+        job_id = db.submit_job(
+            command=rj["command"],
+            model=rj.get("model") or "",
+            priority=rj.get("priority", 5),
+            timeout=rj.get("timeout", 600),
+            source=rj["name"],
+            tag=rj.get("tag"),
+            recurring_job_id=rj["id"],
+            max_retries=rj.get("max_retries", 0),
+            resource_profile=rj.get("resource_profile", "ollama"),
+        )
+        job_ids.append(job_id)
+    return {"submitted": len(job_ids), "job_ids": job_ids}
+
+
+@router.post("/api/schedule")
+def add_schedule(body: RecurringJobCreate):
+    db = _api.db
+    import threading as _threading
+
+    from ollama_queue.scheduling.scheduler import Scheduler
+
+    rj_id = db.add_recurring_job(**body.model_dump())
+    Scheduler(db).rebalance()
+    rj = db.get_recurring_job(rj_id)
+    # Auto-generate description in background if not already provided
+    if rj and not rj.get("description"):
+        _threading.Thread(
+            target=_call_generate_description,
+            args=(rj_id, rj["name"], rj.get("tag"), rj["command"], db),
+            daemon=True,
+        ).start()
+    return rj
+
+
+@router.put("/api/schedule/{rj_id}")
+def update_schedule(rj_id: int, body: RecurringJobUpdate):
+    db = _api.db
+    updated = db.update_recurring_job(rj_id, **body.model_dump(exclude_unset=True))
+    if not updated:
+        raise HTTPException(status_code=404, detail="Recurring job not found")
+    # Rebalance next_run after edit
+    try:
+        from ollama_queue.scheduling.scheduler import Scheduler
+
+        Scheduler(db).rebalance()
+    except Exception:
+        _log.exception("rebalance after update_schedule failed")
+    return {"ok": True}
+
+
+@router.post("/api/schedule/jobs/{name}/enable")
+def enable_schedule_by_name(name: str):
+    """Re-enable a recurring job that was auto-disabled, clearing outcome_reason."""
+    db = _api.db
+    if not db.set_recurring_job_enabled(name, True):
+        raise HTTPException(status_code=404, detail="Recurring job not found")
+    return {"ok": True}
+
+
+@router.post("/api/schedule/{rj_id}/run-now")
+def run_schedule_now(rj_id: int):
+    db = _api.db
+    rj = db.get_recurring_job(rj_id)
+    if not rj:
+        raise HTTPException(status_code=404, detail="Recurring job not found")
+    job_id = db.submit_job(
+        command=rj["command"],
+        model=rj.get("model") or "",
+        priority=rj.get("priority", 5),
+        timeout=rj.get("timeout", 600),
+        source=rj["name"],
+        tag=rj.get("tag"),
+        recurring_job_id=rj["id"],
+        max_retries=rj.get("max_retries", 0),
+        resource_profile=rj.get("resource_profile", "ollama"),
+    )
+    return {"job_id": job_id}
+
+
+@router.post("/api/schedule/{rj_id}/generate-description")
+def generate_description(rj_id: int):
+    """Ask local Ollama (qwen3.5:9b) to write a layman description for this recurring job.
+
+    Plain English: The caller waits while the AI model writes 2 plain-English sentences
+    about what the job does. The description is saved to the DB and returned so the UI
+    can update immediately without a second fetch.
+    Decision it drives: Lets the owner understand any job's purpose without reading its command.
+    """
+    db = _api.db
+    rj = db.get_recurring_job(rj_id)
+    if not rj:
+        raise HTTPException(status_code=404, detail="Recurring job not found")
+    _call_generate_description(rj_id, rj["name"], rj.get("tag"), rj["command"], db)
+    updated = db.get_recurring_job(rj_id)
+    return {"ok": True, "description": updated.get("description") if updated else None}
+
+
+@router.get("/api/schedule/{rj_id}/runs")
+def get_schedule_runs(rj_id: int, limit: int = 5):
+    db = _api.db
+    with db._lock:
+        conn = db._connect()
+        rows = conn.execute(
+            """SELECT id, status, started_at, completed_at,
+                      CASE WHEN started_at IS NOT NULL AND completed_at IS NOT NULL
+                           THEN completed_at - started_at ELSE NULL END as duration,
+                      exit_code
+               FROM jobs WHERE recurring_job_id = ?
+               ORDER BY id DESC LIMIT ?""",
+            (rj_id, limit),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+@router.delete("/api/schedule/{rj_id}")
+def delete_schedule(rj_id: int):
+    db = _api.db
+    deleted = db.delete_recurring_job_by_id(rj_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Recurring job not found")
+    return {"ok": True}

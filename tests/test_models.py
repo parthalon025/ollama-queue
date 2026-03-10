@@ -213,7 +213,7 @@ def test_list_local_cached(monkeypatch):
         call_count += 1
         return type("R", (), {"returncode": 0, "stdout": "NAME\nqwen2.5:7b\n"})()
 
-    monkeypatch.setattr("ollama_queue.models.subprocess.run", fake_run)
+    monkeypatch.setattr("ollama_queue.models.client.subprocess.run", fake_run)
     om = OllamaModels()
     om.list_local()
     om.list_local()
@@ -237,7 +237,7 @@ def test_invalidate_list_cache_forces_refetch(monkeypatch):
         call_count += 1
         return type("R", (), {"returncode": 0, "stdout": "NAME\nqwen2.5:7b\n"})()
 
-    monkeypatch.setattr("ollama_queue.models.subprocess.run", fake_run)
+    monkeypatch.setattr("ollama_queue.models.client.subprocess.run", fake_run)
     om = OllamaModels()
     om.list_local()
     assert call_count == 1
@@ -324,20 +324,20 @@ class TestParseSizeBytes:
 
     def test_single_part_returns_zero(self):
         """len(parts) < 2 — line 48."""
-        from ollama_queue.models import _parse_size_bytes
+        from ollama_queue.models.client import _parse_size_bytes
 
         assert _parse_size_bytes("4.7") == 0
         assert _parse_size_bytes("") == 0
 
     def test_invalid_value_returns_zero(self):
         """ValueError from float() — lines 54-55."""
-        from ollama_queue.models import _parse_size_bytes
+        from ollama_queue.models.client import _parse_size_bytes
 
         assert _parse_size_bytes("abc GB") == 0
 
     def test_unknown_unit_uses_multiplier_1(self):
         """Unknown unit falls through to multiplier 1 — line 53."""
-        from ollama_queue.models import _parse_size_bytes
+        from ollama_queue.models.client import _parse_size_bytes
 
         assert _parse_size_bytes("100 XB") == 100
 
@@ -473,7 +473,7 @@ class TestGetLoaded:
         """Line with fewer than 3 parts — skipped (line 141)."""
         from ollama_queue.models import OllamaModels
 
-        ps_output = "NAME                ID            SIZE      PROCESSOR    UNTIL\n" "ab cd\n"
+        ps_output = "NAME                ID            SIZE      PROCESSOR    UNTIL\nab cd\n"
         mock = MagicMock()
         mock.returncode = 0
         mock.stdout = ps_output
@@ -500,7 +500,7 @@ class TestGetLoaded:
         """Line with exactly 3 parts — size_str uses 'B' suffix (line 143)."""
         from ollama_queue.models import OllamaModels
 
-        ps_output = "NAME  ID  SIZE\n" "model abc 1234\n"
+        ps_output = "NAME  ID  SIZE\nmodel abc 1234\n"
         mock = MagicMock()
         mock.returncode = 0
         mock.stdout = ps_output

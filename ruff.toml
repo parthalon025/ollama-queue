@@ -31,23 +31,23 @@ ignore = [
 [lint.per-file-ignores]
 "tests/**/*.py" = ["S101", "S106", "PLR2004", "E501", "SIM115", "B017", "F841", "S603", "S607"]
 # FastAPI route registration is inherently large/complex; Body() default is the FastAPI idiom
-"ollama_queue/api.py" = ["B008", "B904", "C901", "PLR0912", "PLR0915"]
+"ollama_queue/api/*.py" = ["B008", "B904", "C901", "PLR0912", "PLR0915"]
 # Eval engine orchestrator is a multi-phase state machine with mode dispatch — complexity by design
-"ollama_queue/eval_engine.py" = ["C901", "PLR0912", "PLR0915"]
+"ollama_queue/eval/*.py" = ["C901", "PLR0912", "PLR0915"]
 # Daemon poll loop is a single long method by design; shell=True is intentional for user commands
-"ollama_queue/daemon.py" = ["C901", "PLR0911", "PLR0912", "PLR0915", "S602", "S603", "S607"]
+"ollama_queue/daemon/*.py" = ["C901", "PLR0911", "PLR0912", "PLR0915", "S602", "S603", "S607"]
 # Health checks run known system binaries (nvidia-smi, ollama) — not user input
-"ollama_queue/health.py" = ["S603", "S607", "C901", "SIM105", "S110"]
+"ollama_queue/sensing/health.py" = ["S603", "S607", "C901", "SIM105", "S110"]
 # Model registry runs known ollama binary — not user input; SIM105/RUF002 are stylistic
-"ollama_queue/models.py" = ["S603", "S607", "SIM105", "RUF002"]
+"ollama_queue/models/client.py" = ["S603", "S607", "SIM105", "RUF002"]
 # Admin migration script — subprocess calls use known binary paths, not user input
 "scripts/*.py" = ["S603", "S607"]
 # iptables intercept — subprocess calls use known system binaries, not user input
-"ollama_queue/intercept.py" = ["S603", "S607", "RUF005"]
+"ollama_queue/config/intercept.py" = ["S603", "S607", "RUF005"]
 # Consumer scanner — runs ss/lsof/netstat with hardcoded args, not user input
-"ollama_queue/scanner.py" = ["S603", "S607"]
+"ollama_queue/config/scanner.py" = ["S603", "S607"]
 # Consumer patcher — runs systemctl with service name from DB, not user input
-"ollama_queue/patcher.py" = ["S603", "S607"]
+"ollama_queue/config/patcher.py" = ["S603", "S607"]
 
 [lint.mccabe]
 max-complexity = 10

@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from ollama_queue.api import create_app
+from ollama_queue.app import create_app
 from ollama_queue.db import Database
 
 
@@ -85,7 +85,7 @@ def test_catalog_search_live_fetch(client):
 
     Covers lines 1047-1060.
     """
-    from ollama_queue import api as api_module
+    from ollama_queue.api import models as api_module
 
     # Clear cache to force a live fetch
     api_module._catalog_cache.clear()
@@ -113,7 +113,7 @@ def test_catalog_search_uses_cache(client):
 
     Covers lines 1052-1054.
     """
-    from ollama_queue import api as api_module
+    from ollama_queue.api import models as api_module
 
     cached_results = [{"name": "cached-model"}]
     api_module._catalog_cache["cached-query"] = (cached_results, time.time() + 3600)
@@ -131,7 +131,7 @@ def test_catalog_search_error_logged(client):
 
     Covers lines 1061-1062.
     """
-    from ollama_queue import api as api_module
+    from ollama_queue.api import models as api_module
 
     api_module._catalog_cache.clear()
 
@@ -180,7 +180,7 @@ def test_get_pull_status_success(client):
     Covers lines 1075-1076 (happy path).
     """
     fake_status = {"id": 1, "model": "test-model", "status": "pulling", "progress_pct": 50.0}
-    with patch("ollama_queue.api.OllamaModels") as mock_om:
+    with patch("ollama_queue.api.models.OllamaModels") as mock_om:
         mock_om.return_value.get_pull_status.return_value = fake_status
         resp = client.get("/api/models/pull/1")
     assert resp.status_code == 200
@@ -194,7 +194,7 @@ def test_get_pull_status_not_found(client):
 
     Covers lines 1076-1078.
     """
-    with patch("ollama_queue.api.OllamaModels") as mock_om:
+    with patch("ollama_queue.api.models.OllamaModels") as mock_om:
         mock_om.return_value.get_pull_status.return_value = {"error": "not found"}
         resp = client.get("/api/models/pull/999999")
     assert resp.status_code == 404
@@ -720,7 +720,7 @@ def test_trends_stability_statistics_error(client_and_db):
             {
                 "id": i + 1,
                 "metrics": json.dumps({"A": {"f1": f1}}),
-                "started_at": f"2026-01-0{i+1}T00:00:00",
+                "started_at": f"2026-01-0{i + 1}T00:00:00",
             }
         )
     _seed_trend_runs(db, runs)
@@ -744,7 +744,7 @@ def test_trends_stability_with_enough_runs(client_and_db):
             {
                 "id": i + 1,
                 "metrics": json.dumps({"A": {"f1": f1}}),
-                "started_at": f"2026-01-0{i+1}T00:00:00",
+                "started_at": f"2026-01-0{i + 1}T00:00:00",
             }
         )
     _seed_trend_runs(db, runs)
@@ -793,7 +793,7 @@ def test_trends_improving_direction(client_and_db):
             {
                 "id": i + 1,
                 "metrics": json.dumps({"A": {"f1": f1}}),
-                "started_at": f"2026-01-0{i+1}T00:00:00",
+                "started_at": f"2026-01-0{i + 1}T00:00:00",
             }
         )
     _seed_trend_runs(db, runs)
@@ -815,7 +815,7 @@ def test_trends_regressing_direction(client_and_db):
             {
                 "id": i + 1,
                 "metrics": json.dumps({"A": {"f1": f1}}),
-                "started_at": f"2026-01-0{i+1}T00:00:00",
+                "started_at": f"2026-01-0{i + 1}T00:00:00",
             }
         )
     _seed_trend_runs(db, runs)
@@ -837,7 +837,7 @@ def test_trends_stable_direction(client_and_db):
             {
                 "id": i + 1,
                 "metrics": json.dumps({"A": {"f1": f1}}),
-                "started_at": f"2026-01-0{i+1}T00:00:00",
+                "started_at": f"2026-01-0{i + 1}T00:00:00",
             }
         )
     _seed_trend_runs(db, runs)
@@ -886,7 +886,7 @@ def test_trends_uses_auc_for_bayesian(client_and_db):
             {
                 "id": i + 1,
                 "metrics": json.dumps({"A": {"auc": auc, "f1": 0.1}}),
-                "started_at": f"2026-01-0{i+1}T00:00:00",
+                "started_at": f"2026-01-0{i + 1}T00:00:00",
                 "judge_mode": "bayesian",
             }
         )

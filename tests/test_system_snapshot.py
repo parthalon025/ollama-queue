@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from ollama_queue.system_snapshot import SystemSnapshot, classify_failure
+from ollama_queue.sensing.system_snapshot import SystemSnapshot, classify_failure
 
 
 class TestSnapshotDefaults:

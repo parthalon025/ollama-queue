@@ -789,7 +789,7 @@ class TestAutoSuggestSlotCoverage:
         from unittest.mock import patch
 
         db_path = str(tmp_path / "test.db")
-        with patch("ollama_queue.scheduler.Scheduler.suggest_time", return_value=[]):
+        with patch("ollama_queue.scheduling.scheduler.Scheduler.suggest_time", return_value=[]):
             result = runner.invoke(
                 main,
                 ["--db", db_path, "schedule", "add", "--name", "x", "--at", "auto", "--", "echo"],
@@ -868,7 +868,7 @@ class TestScheduleSuggestCoverage:
         from unittest.mock import patch
 
         db_path = str(tmp_path / "test.db")
-        with patch("ollama_queue.scheduler.Scheduler.suggest_time", return_value=[]):
+        with patch("ollama_queue.scheduling.scheduler.Scheduler.suggest_time", return_value=[]):
             result = runner.invoke(main, ["--db", db_path, "schedule", "suggest"])
         assert result.exit_code == 0
         assert "No available slots" in result.output
@@ -1135,7 +1135,7 @@ class TestDlqSchedulePreviewCoverage:
         db.complete_job(jid, exit_code=1, stdout_tail="", stderr_tail="")
         db.move_to_dlq(jid, failure_reason="permanent error")
 
-        with patch("ollama_queue.system_snapshot.classify_failure", return_value="permanent"):
+        with patch("ollama_queue.sensing.system_snapshot.classify_failure", return_value="permanent"):
             result = runner.invoke(main, ["--db", db_path, "dlq", "schedule-preview"])
         assert result.exit_code == 0
         assert "No unscheduled DLQ entries eligible" in result.output
@@ -1305,9 +1305,9 @@ class TestMetricsCurveCoverage:
         }
         with (
             patch("ollama_queue.db.Database.get_model_stats", return_value=mock_stats),
-            patch("ollama_queue.performance_curve.PerformanceCurve.fit"),
+            patch("ollama_queue.models.performance_curve.PerformanceCurve.fit"),
             patch(
-                "ollama_queue.performance_curve.PerformanceCurve.get_curve_data",
+                "ollama_queue.models.performance_curve.PerformanceCurve.get_curve_data",
                 return_value={"fitted": False, "n_points": 2},
             ),
         ):
@@ -1335,8 +1335,8 @@ class TestMetricsCurveCoverage:
         }
         with (
             patch("ollama_queue.db.Database.get_model_stats", return_value=mock_stats),
-            patch("ollama_queue.performance_curve.PerformanceCurve.fit"),
-            patch("ollama_queue.performance_curve.PerformanceCurve.get_curve_data", return_value=curve_data),
+            patch("ollama_queue.models.performance_curve.PerformanceCurve.fit"),
+            patch("ollama_queue.models.performance_curve.PerformanceCurve.get_curve_data", return_value=curve_data),
         ):
             result = runner.invoke(main, ["--db", db_path, "metrics", "curve"])
         assert result.exit_code == 0
@@ -1364,8 +1364,8 @@ class TestMetricsCurveCoverage:
         }
         with (
             patch("ollama_queue.db.Database.get_model_stats", return_value=mock_stats),
-            patch("ollama_queue.performance_curve.PerformanceCurve.fit"),
-            patch("ollama_queue.performance_curve.PerformanceCurve.get_curve_data", return_value=curve_data),
+            patch("ollama_queue.models.performance_curve.PerformanceCurve.fit"),
+            patch("ollama_queue.models.performance_curve.PerformanceCurve.get_curve_data", return_value=curve_data),
         ):
             result = runner.invoke(main, ["--db", db_path, "metrics", "curve"])
         assert result.exit_code == 0

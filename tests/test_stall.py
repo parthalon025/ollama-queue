@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ollama_queue.stall import PRIOR_LOG_ODDS, StallDetector, _sigmoid
+from ollama_queue.sensing.stall import PRIOR_LOG_ODDS, StallDetector, _sigmoid
 
 
 @pytest.fixture

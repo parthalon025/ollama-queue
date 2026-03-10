@@ -1,6 +1,6 @@
 import { h } from 'preact';
 import { useState, useMemo } from 'preact/hooks';
-import { queue, API, refreshQueue } from '../store';
+import { queue, API, refreshQueue } from '../stores';
 
 /**
  * What it shows: Every job waiting to run, priority-ordered, with estimated duration.

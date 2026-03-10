@@ -1,6 +1,6 @@
 import { h } from 'preact';
 import { useEffect } from 'preact/hooks';
-import { fetchEvalVariants, fetchEvalTemplates } from '../store.js';
+import { fetchEvalVariants, fetchEvalTemplates } from '../stores';
 import VariantToolbar from '../components/eval/VariantToolbar.jsx';
 import VariantTable from '../components/eval/VariantTable.jsx';
 import TemplateSection from '../components/eval/TemplateSection.jsx';

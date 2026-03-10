@@ -1,6 +1,6 @@
 import { h } from 'preact';
 import { useState } from 'preact/hooks';
-import { evalTemplates } from '../../store.js';
+import { evalTemplates } from '../../stores';
 import TemplateRow from './TemplateRow.jsx';
 // What it shows: Collapsible section listing all prompt templates — the instructions
 //   that tell the AI how to extract principles from lessons.

@@ -1,26 +1,26 @@
 from unittest.mock import MagicMock, patch
 
-from ollama_queue.scanner import detect_platform, live_scan
+from ollama_queue.config.scanner import detect_platform, live_scan
 
 
 def test_detect_platform_linux():
-    with patch("ollama_queue.scanner.platform.system", return_value="Linux"):
+    with patch("ollama_queue.config.scanner.platform.system", return_value="Linux"):
         assert detect_platform() == "linux"
 
 
 def test_detect_platform_macos():
-    with patch("ollama_queue.scanner.platform.system", return_value="Darwin"):
+    with patch("ollama_queue.config.scanner.platform.system", return_value="Darwin"):
         assert detect_platform() == "macos"
 
 
 def test_detect_platform_windows():
-    with patch("ollama_queue.scanner.platform.system", return_value="Windows"):
+    with patch("ollama_queue.config.scanner.platform.system", return_value="Windows"):
         assert detect_platform() == "windows"
 
 
 def test_live_scan_linux_parses_ss_output():
     ss_output = 'tcp   ESTAB  0  0  127.0.0.1:52340  127.0.0.1:11434  users:(("aria",pid=1234,fd=7))\n'
-    with patch("ollama_queue.scanner.subprocess.run") as mock_run:
+    with patch("ollama_queue.config.scanner.subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=0, stdout=ss_output, stderr="")
         results = live_scan("linux")
     assert len(results) == 1
@@ -30,7 +30,7 @@ def test_live_scan_linux_parses_ss_output():
 
 
 def test_live_scan_returns_empty_on_failure():
-    with patch("ollama_queue.scanner.subprocess.run", side_effect=OSError("no ss")):
+    with patch("ollama_queue.config.scanner.subprocess.run", side_effect=OSError("no ss")):
         results = live_scan("linux")
     assert results == []
 
@@ -40,7 +40,7 @@ def test_live_scan_macos_parses_lsof_output():
         "COMMAND  PID  USER  FD  TYPE  DEVICE  SIZE/OFF  NODE  NAME\n"
         "python3  5678 user  10u IPv4  0x1234  0t0  TCP 127.0.0.1:52000->127.0.0.1:11434 (ESTABLISHED)\n"
     )
-    with patch("ollama_queue.scanner.subprocess.run") as mock_run:
+    with patch("ollama_queue.config.scanner.subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=0, stdout=lsof_output, stderr="")
         results = live_scan("macos")
     assert len(results) == 1
@@ -49,7 +49,7 @@ def test_live_scan_macos_parses_lsof_output():
 
 
 # ── Static scan tests ──────────────────────────────────────────────────────
-from ollama_queue.scanner import static_scan
+from ollama_queue.config.scanner import static_scan
 
 
 def test_static_scan_finds_systemd_unit(tmp_path):
@@ -84,7 +84,7 @@ def test_static_scan_deduplicates(tmp_path):
 
 
 # ── Phases 3+4 and run_scan ────────────────────────────────────────────────
-from ollama_queue.scanner import deadlock_check, run_scan, stream_check
+from ollama_queue.config.scanner import deadlock_check, run_scan, stream_check
 
 
 def test_stream_check_confirmed(tmp_path):
@@ -144,7 +144,7 @@ def test_run_scan_returns_merged_consumers(tmp_path):
     env.parent.mkdir()
     env.write_text("OLLAMA_HOST=localhost:11434\n")
 
-    with patch("ollama_queue.scanner.live_scan", return_value=[]):
+    with patch("ollama_queue.config.scanner.live_scan", return_value=[]):
         results = run_scan(db, search_dirs=[str(tmp_path)])
 
     assert len(results) == 1
@@ -163,7 +163,7 @@ def test_run_scan_persists_to_db(tmp_path):
     env = tmp_path / ".env"
     env.write_text("OLLAMA_HOST=localhost:11434\n")
 
-    with patch("ollama_queue.scanner.live_scan", return_value=[]):
+    with patch("ollama_queue.config.scanner.live_scan", return_value=[]):
         run_scan(db, search_dirs=[str(tmp_path)])
 
     consumers = db.list_consumers()
@@ -175,7 +175,7 @@ def test_run_scan_persists_to_db(tmp_path):
 
 import pathlib
 
-from ollama_queue.scanner import (
+from ollama_queue.config.scanner import (
     _check_config_file,
     _live_scan_linux,
     _live_scan_macos,
@@ -185,7 +185,7 @@ from ollama_queue.scanner import (
 
 def test_live_scan_windows_dispatches():
     """Line 65: live_scan('windows') dispatches to _live_scan_windows."""
-    with patch("ollama_queue.scanner._live_scan_windows", return_value=[]) as mock_win:
+    with patch("ollama_queue.config.scanner._live_scan_windows", return_value=[]) as mock_win:
         results = live_scan("windows")
     mock_win.assert_called_once()
     assert results == []
@@ -194,7 +194,7 @@ def test_live_scan_windows_dispatches():
 def test_live_scan_linux_nonzero_returncode():
     """Lines 79-80: ss non-zero returncode returns empty list."""
     mock_result = MagicMock(returncode=1, stdout="", stderr="error")
-    with patch("ollama_queue.scanner.subprocess.run", return_value=mock_result):
+    with patch("ollama_queue.config.scanner.subprocess.run", return_value=mock_result):
         results = _live_scan_linux()
     assert results == []
 
@@ -202,7 +202,7 @@ def test_live_scan_linux_nonzero_returncode():
 def test_live_scan_macos_nonzero_returncode():
     """Lines 107-108: lsof non-zero returncode returns empty list."""
     mock_result = MagicMock(returncode=1, stdout="", stderr="error")
-    with patch("ollama_queue.scanner.subprocess.run", return_value=mock_result):
+    with patch("ollama_queue.config.scanner.subprocess.run", return_value=mock_result):
         results = _live_scan_macos()
     assert results == []
 
@@ -211,7 +211,7 @@ def test_live_scan_macos_short_line():
     """Line 113: lsof line with < 2 parts is skipped."""
     lsof_output = "HEADER\nshort\n"
     mock_result = MagicMock(returncode=0, stdout=lsof_output, stderr="")
-    with patch("ollama_queue.scanner.subprocess.run", return_value=mock_result):
+    with patch("ollama_queue.config.scanner.subprocess.run", return_value=mock_result):
         results = _live_scan_macos()
     assert results == []
 
@@ -223,7 +223,7 @@ def test_live_scan_windows_parses_netstat():
         "  TCP    127.0.0.1:52000        127.0.0.1:11434        ESTABLISHED     4567\n"
     )
     mock_result = MagicMock(returncode=0, stdout=netstat_output, stderr="")
-    with patch("ollama_queue.scanner.subprocess.run", return_value=mock_result):
+    with patch("ollama_queue.config.scanner.subprocess.run", return_value=mock_result):
         results = _live_scan_windows()
     assert len(results) == 1
     assert results[0]["name"] == "pid:4567"
@@ -233,7 +233,7 @@ def test_live_scan_windows_parses_netstat():
 def test_live_scan_windows_nonzero_returncode():
     """Lines 133-134: netstat non-zero returncode returns empty list."""
     mock_result = MagicMock(returncode=1, stdout="", stderr="error")
-    with patch("ollama_queue.scanner.subprocess.run", return_value=mock_result):
+    with patch("ollama_queue.config.scanner.subprocess.run", return_value=mock_result):
         results = _live_scan_windows()
     assert results == []
 
@@ -292,7 +292,7 @@ def test_live_scan_linux_skips_non_ollama_and_non_matching_lines():
         "tcp   ESTAB  0  0  127.0.0.1:52340  127.0.0.1:11434  no-match-here  \n"  # no users:
         'tcp   ESTAB  0  0  127.0.0.1:52341  127.0.0.1:11434  users:(("real",pid=999,fd=3))\n'
     )
-    with patch("ollama_queue.scanner.subprocess.run") as mock_run:
+    with patch("ollama_queue.config.scanner.subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=0, stdout=ss_output, stderr="")
         results = _live_scan_linux()
     assert len(results) == 1
@@ -332,8 +332,8 @@ def test_run_scan_merges_live_consumer_not_in_static(tmp_path):
         "last_live_seen": 1000000,
     }
     with (
-        patch("ollama_queue.scanner.live_scan", return_value=[live_consumer]),
-        patch("ollama_queue.scanner.static_scan", return_value=[]),
+        patch("ollama_queue.config.scanner.live_scan", return_value=[live_consumer]),
+        patch("ollama_queue.config.scanner.static_scan", return_value=[]),
     ):
         results = run_scan(db, search_dirs=[str(tmp_path)])
     assert len(results) == 1

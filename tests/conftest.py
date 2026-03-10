@@ -22,7 +22,7 @@ def reset_burst_detector_singleton():
     Without this fixture, submit calls in one test contaminate regime() results
     in later tests (state bleeds once sample count exceeds 10).
     """
-    from ollama_queue.burst import _default_detector
+    from ollama_queue.sensing.burst import _default_detector
 
     _default_detector._ewma = None
     _default_detector._baseline_samples.clear()

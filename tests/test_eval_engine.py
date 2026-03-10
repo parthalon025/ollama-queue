@@ -1,4 +1,4 @@
-"""Tests for ollama_queue.eval_engine."""
+"""Tests for ollama_queue.eval subpackage."""
 
 from __future__ import annotations
 
@@ -9,25 +9,31 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
-from ollama_queue.eval_engine import (
+from ollama_queue.eval.engine import (
     _call_proxy,
     _ProxyDownError,
     _should_throttle,
-    build_analysis_prompt,
-    build_generation_prompt,
-    build_judge_prompt,
-    check_auto_promote,
     compute_metrics,
     create_eval_run,
-    generate_eval_analysis,
     get_eval_run,
     insert_eval_result,
-    parse_judge_response,
     render_report,
-    run_eval_generate,
-    run_eval_judge,
     update_eval_run,
     update_eval_variant,
+)
+from ollama_queue.eval.generate import (
+    build_generation_prompt,
+    run_eval_generate,
+)
+from ollama_queue.eval.judge import (
+    build_analysis_prompt,
+    build_judge_prompt,
+    parse_judge_response,
+    run_eval_judge,
+)
+from ollama_queue.eval.promote import (
+    check_auto_promote,
+    generate_eval_analysis,
 )
 
 # ---------------------------------------------------------------------------
@@ -747,14 +753,16 @@ class TestRunEvalGenerateFillOpenSlots:
         submitted_count = []
 
         with (
-            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
-            patch("ollama_queue.eval_engine.get_eval_variant", return_value=_make_variant()),
-            patch("ollama_queue.eval_engine.get_eval_template", return_value=_make_template()),
-            patch("ollama_queue.eval_engine._fetch_items", return_value=items),
-            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
-            patch("ollama_queue.eval_engine._generate_one", side_effect=lambda **kw: submitted_count.append(1) or True),
-            patch("ollama_queue.eval_engine.update_eval_run") as mock_update,
-            patch("ollama_queue.eval_engine.insert_eval_result"),
+            patch("ollama_queue.eval.engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval.engine.get_eval_variant", return_value=_make_variant()),
+            patch("ollama_queue.eval.engine.get_eval_template", return_value=_make_template()),
+            patch("ollama_queue.eval.engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval.engine._get_eval_setting", return_value=""),
+            patch(
+                "ollama_queue.eval.generate._generate_one", side_effect=lambda **kw: submitted_count.append(1) or True
+            ),
+            patch("ollama_queue.eval.engine.update_eval_run") as mock_update,
+            patch("ollama_queue.eval.engine.insert_eval_result"),
         ):
             run_eval_generate(1, MagicMock(), _sleep=lambda s: None)
 
@@ -773,14 +781,16 @@ class TestRunEvalGenerateFillOpenSlots:
         submitted_count = []
 
         with (
-            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
-            patch("ollama_queue.eval_engine.get_eval_variant", return_value=_make_variant()),
-            patch("ollama_queue.eval_engine.get_eval_template", return_value=_make_template()),
-            patch("ollama_queue.eval_engine._fetch_items", return_value=items),
-            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
-            patch("ollama_queue.eval_engine._generate_one", side_effect=lambda **kw: submitted_count.append(1) or True),
-            patch("ollama_queue.eval_engine.update_eval_run") as mock_update,
-            patch("ollama_queue.eval_engine.insert_eval_result"),
+            patch("ollama_queue.eval.engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval.engine.get_eval_variant", return_value=_make_variant()),
+            patch("ollama_queue.eval.engine.get_eval_template", return_value=_make_template()),
+            patch("ollama_queue.eval.engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval.engine._get_eval_setting", return_value=""),
+            patch(
+                "ollama_queue.eval.generate._generate_one", side_effect=lambda **kw: submitted_count.append(1) or True
+            ),
+            patch("ollama_queue.eval.engine.update_eval_run") as mock_update,
+            patch("ollama_queue.eval.engine.insert_eval_result"),
         ):
             run_eval_generate(1, MagicMock(), _sleep=lambda s: None)
 
@@ -797,14 +807,16 @@ class TestRunEvalGenerateFillOpenSlots:
         submitted_count = []
 
         with (
-            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
-            patch("ollama_queue.eval_engine.get_eval_variant", return_value=_make_variant()),
-            patch("ollama_queue.eval_engine.get_eval_template", return_value=_make_template()),
-            patch("ollama_queue.eval_engine._fetch_items", return_value=items),
-            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
-            patch("ollama_queue.eval_engine._generate_one", side_effect=lambda **kw: submitted_count.append(1) or True),
-            patch("ollama_queue.eval_engine.update_eval_run"),
-            patch("ollama_queue.eval_engine.insert_eval_result"),
+            patch("ollama_queue.eval.engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval.engine.get_eval_variant", return_value=_make_variant()),
+            patch("ollama_queue.eval.engine.get_eval_template", return_value=_make_template()),
+            patch("ollama_queue.eval.engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval.engine._get_eval_setting", return_value=""),
+            patch(
+                "ollama_queue.eval.generate._generate_one", side_effect=lambda **kw: submitted_count.append(1) or True
+            ),
+            patch("ollama_queue.eval.engine.update_eval_run"),
+            patch("ollama_queue.eval.engine.insert_eval_result"),
         ):
             run_eval_generate(1, MagicMock(), _sleep=lambda s: None)
 
@@ -818,14 +830,16 @@ class TestRunEvalGenerateFillOpenSlots:
         submitted_count = []
 
         with (
-            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
-            patch("ollama_queue.eval_engine.get_eval_variant", return_value=_make_variant()),
-            patch("ollama_queue.eval_engine.get_eval_template", return_value=_make_template()),
-            patch("ollama_queue.eval_engine._fetch_items", return_value=items),
-            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
-            patch("ollama_queue.eval_engine._generate_one", side_effect=lambda **kw: submitted_count.append(1) or True),
-            patch("ollama_queue.eval_engine.update_eval_run"),
-            patch("ollama_queue.eval_engine.insert_eval_result"),
+            patch("ollama_queue.eval.engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval.engine.get_eval_variant", return_value=_make_variant()),
+            patch("ollama_queue.eval.engine.get_eval_template", return_value=_make_template()),
+            patch("ollama_queue.eval.engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval.engine._get_eval_setting", return_value=""),
+            patch(
+                "ollama_queue.eval.generate._generate_one", side_effect=lambda **kw: submitted_count.append(1) or True
+            ),
+            patch("ollama_queue.eval.engine.update_eval_run"),
+            patch("ollama_queue.eval.engine.insert_eval_result"),
         ):
             run_eval_generate(1, MagicMock(), _sleep=lambda s: None)
 
@@ -842,15 +856,15 @@ class TestRunEvalGenerateOpportunistic:
         sleep_calls: list = []
 
         with (
-            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
-            patch("ollama_queue.eval_engine.get_eval_variant", return_value=_make_variant()),
-            patch("ollama_queue.eval_engine.get_eval_template", return_value=_make_template()),
-            patch("ollama_queue.eval_engine._fetch_items", return_value=items),
-            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
-            patch("ollama_queue.eval_engine._generate_one", return_value=True),
-            patch("ollama_queue.eval_engine._should_throttle", return_value=True),
-            patch("ollama_queue.eval_engine.update_eval_run"),
-            patch("ollama_queue.eval_engine.insert_eval_result"),
+            patch("ollama_queue.eval.engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval.engine.get_eval_variant", return_value=_make_variant()),
+            patch("ollama_queue.eval.engine.get_eval_template", return_value=_make_template()),
+            patch("ollama_queue.eval.engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval.engine._get_eval_setting", return_value=""),
+            patch("ollama_queue.eval.generate._generate_one", return_value=True),
+            patch("ollama_queue.eval.engine._should_throttle", return_value=True),
+            patch("ollama_queue.eval.engine.update_eval_run"),
+            patch("ollama_queue.eval.engine.insert_eval_result"),
         ):
             run_eval_generate(1, MagicMock(), _sleep=lambda s: sleep_calls.append(s))
 
@@ -865,15 +879,15 @@ class TestRunEvalGenerateOpportunistic:
         sleep_calls: list = []
 
         with (
-            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
-            patch("ollama_queue.eval_engine.get_eval_variant", return_value=_make_variant()),
-            patch("ollama_queue.eval_engine.get_eval_template", return_value=_make_template()),
-            patch("ollama_queue.eval_engine._fetch_items", return_value=items),
-            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
-            patch("ollama_queue.eval_engine._generate_one", return_value=True),
-            patch("ollama_queue.eval_engine._should_throttle", return_value=False),
-            patch("ollama_queue.eval_engine.update_eval_run"),
-            patch("ollama_queue.eval_engine.insert_eval_result"),
+            patch("ollama_queue.eval.engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval.engine.get_eval_variant", return_value=_make_variant()),
+            patch("ollama_queue.eval.engine.get_eval_template", return_value=_make_template()),
+            patch("ollama_queue.eval.engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval.engine._get_eval_setting", return_value=""),
+            patch("ollama_queue.eval.generate._generate_one", return_value=True),
+            patch("ollama_queue.eval.engine._should_throttle", return_value=False),
+            patch("ollama_queue.eval.engine.update_eval_run"),
+            patch("ollama_queue.eval.engine.insert_eval_result"),
         ):
             run_eval_generate(1, MagicMock(), _sleep=lambda s: sleep_calls.append(s))
 
@@ -889,14 +903,14 @@ class TestRunEvalGenerateScheduled:
         items = _make_items(2)
 
         with (
-            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
-            patch("ollama_queue.eval_engine.get_eval_variant", return_value=_make_variant()),
-            patch("ollama_queue.eval_engine.get_eval_template", return_value=_make_template()),
-            patch("ollama_queue.eval_engine._fetch_items", return_value=items),
-            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
-            patch("ollama_queue.eval_engine._generate_one", return_value=True),
-            patch("ollama_queue.eval_engine.update_eval_run") as mock_update,
-            patch("ollama_queue.eval_engine.insert_eval_result"),
+            patch("ollama_queue.eval.engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval.engine.get_eval_variant", return_value=_make_variant()),
+            patch("ollama_queue.eval.engine.get_eval_template", return_value=_make_template()),
+            patch("ollama_queue.eval.engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval.engine._get_eval_setting", return_value=""),
+            patch("ollama_queue.eval.generate._generate_one", return_value=True),
+            patch("ollama_queue.eval.engine.update_eval_run") as mock_update,
+            patch("ollama_queue.eval.engine.insert_eval_result"),
         ):
             run_eval_generate(1, MagicMock(), _sleep=lambda s: None)
 
@@ -910,14 +924,14 @@ class TestRunEvalGenerateScheduled:
         sleep_calls: list = []
 
         with (
-            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
-            patch("ollama_queue.eval_engine.get_eval_variant", return_value=_make_variant()),
-            patch("ollama_queue.eval_engine.get_eval_template", return_value=_make_template()),
-            patch("ollama_queue.eval_engine._fetch_items", return_value=items),
-            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
-            patch("ollama_queue.eval_engine._generate_one", return_value=True),
-            patch("ollama_queue.eval_engine.update_eval_run"),
-            patch("ollama_queue.eval_engine.insert_eval_result"),
+            patch("ollama_queue.eval.engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval.engine.get_eval_variant", return_value=_make_variant()),
+            patch("ollama_queue.eval.engine.get_eval_template", return_value=_make_template()),
+            patch("ollama_queue.eval.engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval.engine._get_eval_setting", return_value=""),
+            patch("ollama_queue.eval.generate._generate_one", return_value=True),
+            patch("ollama_queue.eval.engine.update_eval_run"),
+            patch("ollama_queue.eval.engine.insert_eval_result"),
         ):
             run_eval_generate(1, MagicMock(), _sleep=lambda s: sleep_calls.append(s))
 
@@ -934,14 +948,16 @@ class TestRunEvalGenerateBatchDefault:
         submitted_count = []
 
         with (
-            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
-            patch("ollama_queue.eval_engine.get_eval_variant", return_value=_make_variant()),
-            patch("ollama_queue.eval_engine.get_eval_template", return_value=_make_template()),
-            patch("ollama_queue.eval_engine._fetch_items", return_value=items),
-            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
-            patch("ollama_queue.eval_engine._generate_one", side_effect=lambda **kw: submitted_count.append(1) or True),
-            patch("ollama_queue.eval_engine.update_eval_run"),
-            patch("ollama_queue.eval_engine.insert_eval_result"),
+            patch("ollama_queue.eval.engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval.engine.get_eval_variant", return_value=_make_variant()),
+            patch("ollama_queue.eval.engine.get_eval_template", return_value=_make_template()),
+            patch("ollama_queue.eval.engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval.engine._get_eval_setting", return_value=""),
+            patch(
+                "ollama_queue.eval.generate._generate_one", side_effect=lambda **kw: submitted_count.append(1) or True
+            ),
+            patch("ollama_queue.eval.engine.update_eval_run"),
+            patch("ollama_queue.eval.engine.insert_eval_result"),
         ):
             run_eval_generate(1, MagicMock(), _sleep=lambda s: None)
 
@@ -955,14 +971,16 @@ class TestRunEvalGenerateBatchDefault:
         submitted_count = []
 
         with (
-            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
-            patch("ollama_queue.eval_engine.get_eval_variant", return_value=_make_variant()),
-            patch("ollama_queue.eval_engine.get_eval_template", return_value=_make_template()),
-            patch("ollama_queue.eval_engine._fetch_items", return_value=items),
-            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
-            patch("ollama_queue.eval_engine._generate_one", side_effect=lambda **kw: submitted_count.append(1) or True),
-            patch("ollama_queue.eval_engine.update_eval_run"),
-            patch("ollama_queue.eval_engine.insert_eval_result"),
+            patch("ollama_queue.eval.engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval.engine.get_eval_variant", return_value=_make_variant()),
+            patch("ollama_queue.eval.engine.get_eval_template", return_value=_make_template()),
+            patch("ollama_queue.eval.engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval.engine._get_eval_setting", return_value=""),
+            patch(
+                "ollama_queue.eval.generate._generate_one", side_effect=lambda **kw: submitted_count.append(1) or True
+            ),
+            patch("ollama_queue.eval.engine.update_eval_run"),
+            patch("ollama_queue.eval.engine.insert_eval_result"),
         ):
             run_eval_generate(1, MagicMock(), _sleep=lambda s: None)
 
@@ -1011,15 +1029,15 @@ class TestProxyDown:
         items = _make_items(5)  # 5 items — would need 10+ failures to trip breaker
 
         with (
-            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
-            patch("ollama_queue.eval_engine.get_eval_variant", return_value=_make_variant()),
-            patch("ollama_queue.eval_engine.get_eval_template", return_value=_make_template()),
-            patch("ollama_queue.eval_engine._fetch_items", return_value=items),
-            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
+            patch("ollama_queue.eval.engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval.engine.get_eval_variant", return_value=_make_variant()),
+            patch("ollama_queue.eval.engine.get_eval_template", return_value=_make_template()),
+            patch("ollama_queue.eval.engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval.engine._get_eval_setting", return_value=""),
             # First call raises _ProxyDownError — simulates service restart mid-run
-            patch("ollama_queue.eval_engine._generate_one", side_effect=_ProxyDownError("conn refused")),
-            patch("ollama_queue.eval_engine.update_eval_run") as mock_update,
-            patch("ollama_queue.eval_engine.insert_eval_result"),
+            patch("ollama_queue.eval.generate._generate_one", side_effect=_ProxyDownError("conn refused")),
+            patch("ollama_queue.eval.engine.update_eval_run") as mock_update,
+            patch("ollama_queue.eval.engine.insert_eval_result"),
         ):
             run_eval_generate(1, MagicMock(), _sleep=lambda s: None)
 
@@ -1061,11 +1079,11 @@ class TestProxyDown:
         mock_db._connect.return_value = mock_conn
 
         with (
-            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
-            patch("ollama_queue.eval_engine._fetch_items", return_value=items),
-            patch("ollama_queue.eval_engine._get_eval_setting", side_effect=lambda db, key, default="": str(default)),
-            patch("ollama_queue.eval_engine._judge_one_target", side_effect=_ProxyDownError("conn refused")),
-            patch("ollama_queue.eval_engine.update_eval_run") as mock_update,
+            patch("ollama_queue.eval.engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval.engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval.engine._get_eval_setting", side_effect=lambda db, key, default="": str(default)),
+            patch("ollama_queue.eval.judge._judge_one_target", side_effect=_ProxyDownError("conn refused")),
+            patch("ollama_queue.eval.engine.update_eval_run") as mock_update,
         ):
             run_eval_judge(1, mock_db)
 
@@ -1199,14 +1217,14 @@ class TestGenerateEvalAnalysis:
         run = self._complete_run()
         mock_db = self._mock_db_with_run(run)
         with (
-            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
-            patch("ollama_queue.eval_engine._fetch_analysis_samples", return_value=([], [])),
-            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
+            patch("ollama_queue.eval.engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval.engine._fetch_analysis_samples", return_value=([], [])),
+            patch("ollama_queue.eval.engine._get_eval_setting", return_value=""),
             patch(
-                "ollama_queue.eval_engine._call_proxy",
+                "ollama_queue.eval.engine._call_proxy",
                 return_value=("SUMMARY: Good.\nWHY: High F1.\nRECOMMENDATIONS:\n1. Use E.", None),
             ),
-            patch("ollama_queue.eval_engine.update_eval_run") as mock_update,
+            patch("ollama_queue.eval.engine.update_eval_run") as mock_update,
         ):
             generate_eval_analysis(mock_db, 1)
         stored_calls = [c for c in mock_update.call_args_list if "analysis_md" in c.kwargs]
@@ -1217,8 +1235,8 @@ class TestGenerateEvalAnalysis:
         run = self._complete_run(status="generating")
         mock_db = self._mock_db_with_run(run)
         with (
-            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
-            patch("ollama_queue.eval_engine.update_eval_run") as mock_update,
+            patch("ollama_queue.eval.engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval.engine.update_eval_run") as mock_update,
         ):
             generate_eval_analysis(mock_db, 1)
         assert all("analysis_md" not in c.kwargs for c in mock_update.call_args_list)
@@ -1227,8 +1245,8 @@ class TestGenerateEvalAnalysis:
         run = self._complete_run(metrics=None)
         mock_db = self._mock_db_with_run(run)
         with (
-            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
-            patch("ollama_queue.eval_engine.update_eval_run") as mock_update,
+            patch("ollama_queue.eval.engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval.engine.update_eval_run") as mock_update,
         ):
             generate_eval_analysis(mock_db, 1)
         assert all("analysis_md" not in c.kwargs for c in mock_update.call_args_list)
@@ -1237,11 +1255,11 @@ class TestGenerateEvalAnalysis:
         run = self._complete_run()
         mock_db = self._mock_db_with_run(run)
         with (
-            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
-            patch("ollama_queue.eval_engine._fetch_analysis_samples", return_value=([], [])),
-            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
-            patch("ollama_queue.eval_engine._call_proxy", return_value=(None, None)),
-            patch("ollama_queue.eval_engine.update_eval_run") as mock_update,
+            patch("ollama_queue.eval.engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval.engine._fetch_analysis_samples", return_value=([], [])),
+            patch("ollama_queue.eval.engine._get_eval_setting", return_value=""),
+            patch("ollama_queue.eval.engine._call_proxy", return_value=(None, None)),
+            patch("ollama_queue.eval.engine.update_eval_run") as mock_update,
         ):
             generate_eval_analysis(mock_db, 1)  # must not raise
         assert all("analysis_md" not in c.kwargs for c in mock_update.call_args_list)
@@ -1250,11 +1268,11 @@ class TestGenerateEvalAnalysis:
         run = self._complete_run()
         mock_db = self._mock_db_with_run(run)
         with (
-            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
-            patch("ollama_queue.eval_engine._fetch_analysis_samples", return_value=([], [])),
-            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
-            patch("ollama_queue.eval_engine._call_proxy", side_effect=_ProxyDownError("down")),
-            patch("ollama_queue.eval_engine.update_eval_run") as mock_update,
+            patch("ollama_queue.eval.engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval.engine._fetch_analysis_samples", return_value=([], [])),
+            patch("ollama_queue.eval.engine._get_eval_setting", return_value=""),
+            patch("ollama_queue.eval.engine._call_proxy", side_effect=_ProxyDownError("down")),
+            patch("ollama_queue.eval.engine.update_eval_run") as mock_update,
         ):
             generate_eval_analysis(mock_db, 1)  # must not raise
         assert all("analysis_md" not in c.kwargs for c in mock_update.call_args_list)
@@ -1263,14 +1281,14 @@ class TestGenerateEvalAnalysis:
         run = self._complete_run()
         mock_db = self._mock_db_with_run(run)
         with (
-            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
-            patch("ollama_queue.eval_engine._fetch_analysis_samples", return_value=([], [])),
+            patch("ollama_queue.eval.engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval.engine._fetch_analysis_samples", return_value=([], [])),
             patch(
-                "ollama_queue.eval_engine._get_eval_setting",
+                "ollama_queue.eval.engine._get_eval_setting",
                 side_effect=lambda db, key, default="": "custom-model" if key == "eval.analysis_model" else default,
             ),
-            patch("ollama_queue.eval_engine._call_proxy", return_value=("analysis text", None)) as mock_proxy,
-            patch("ollama_queue.eval_engine.update_eval_run"),
+            patch("ollama_queue.eval.engine._call_proxy", return_value=("analysis text", None)) as mock_proxy,
+            patch("ollama_queue.eval.engine.update_eval_run"),
         ):
             generate_eval_analysis(mock_db, 1)
         called_model = mock_proxy.call_args.kwargs["model"]
@@ -1280,11 +1298,11 @@ class TestGenerateEvalAnalysis:
         run = self._complete_run(judge_model="run-judge-model")
         mock_db = self._mock_db_with_run(run)
         with (
-            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
-            patch("ollama_queue.eval_engine._fetch_analysis_samples", return_value=([], [])),
-            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
-            patch("ollama_queue.eval_engine._call_proxy", return_value=("analysis text", None)) as mock_proxy,
-            patch("ollama_queue.eval_engine.update_eval_run"),
+            patch("ollama_queue.eval.engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval.engine._fetch_analysis_samples", return_value=([], [])),
+            patch("ollama_queue.eval.engine._get_eval_setting", return_value=""),
+            patch("ollama_queue.eval.engine._call_proxy", return_value=("analysis text", None)) as mock_proxy,
+            patch("ollama_queue.eval.engine.update_eval_run"),
         ):
             generate_eval_analysis(mock_db, 1)
         called_model = mock_proxy.call_args.kwargs["model"]
@@ -1295,14 +1313,14 @@ class TestGenerateEvalAnalysis:
         run = self._complete_run(judge_model=None)
         mock_db = self._mock_db_with_run(run)
         with (
-            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
-            patch("ollama_queue.eval_engine._fetch_analysis_samples", return_value=([], [])),
+            patch("ollama_queue.eval.engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval.engine._fetch_analysis_samples", return_value=([], [])),
             patch(
-                "ollama_queue.eval_engine._get_eval_setting",
+                "ollama_queue.eval.engine._get_eval_setting",
                 side_effect=lambda db, key, default="": "global-judge" if key == "eval.judge_model" else "",
             ),
-            patch("ollama_queue.eval_engine._call_proxy", return_value=("analysis text", None)) as mock_proxy,
-            patch("ollama_queue.eval_engine.update_eval_run"),
+            patch("ollama_queue.eval.engine._call_proxy", return_value=("analysis text", None)) as mock_proxy,
+            patch("ollama_queue.eval.engine.update_eval_run"),
         ):
             generate_eval_analysis(mock_db, 1)
         called_model = mock_proxy.call_args.kwargs["model"]
@@ -1310,7 +1328,7 @@ class TestGenerateEvalAnalysis:
 
     def test_not_found_run_returns_gracefully(self):
         mock_db = MagicMock()
-        with patch("ollama_queue.eval_engine.get_eval_run", return_value=None):
+        with patch("ollama_queue.eval.engine.get_eval_run", return_value=None):
             generate_eval_analysis(mock_db, 999)  # must not raise
 
 
@@ -1376,14 +1394,14 @@ class TestCheckAutoPromote:
     def test_skips_if_auto_promote_disabled(self, db_with_complete_run):
         db, run_id = db_with_complete_run
         db.set_setting("eval.auto_promote", False)
-        with patch("ollama_queue.eval_engine.do_promote_eval_run") as mock_promote:
+        with patch("ollama_queue.eval.promote.do_promote_eval_run") as mock_promote:
             check_auto_promote(db, run_id, "http://localhost:7683")
         mock_promote.assert_not_called()
 
     def test_skips_if_f1_below_threshold(self, db_with_complete_run):
         db, run_id = db_with_complete_run
         db.set_setting("eval.f1_threshold", 0.90)  # raise bar above winner F1=0.85
-        with patch("ollama_queue.eval_engine.do_promote_eval_run") as mock_promote:
+        with patch("ollama_queue.eval.promote.do_promote_eval_run") as mock_promote:
             check_auto_promote(db, run_id, "http://localhost:7683")
         mock_promote.assert_not_called()
 
@@ -1400,14 +1418,14 @@ class TestCheckAutoPromote:
         old_run_id = create_eval_run(db, variant_id="B")
         old_metrics = json.dumps({"B": {"f1": 0.82, "precision": 0.85, "recall": 0.80, "actionability": 0.75}})
         update_eval_run(db, old_run_id, status="complete", winner_variant="B", metrics=old_metrics)
-        with patch("ollama_queue.eval_engine.do_promote_eval_run") as mock_promote:
+        with patch("ollama_queue.eval.promote.do_promote_eval_run") as mock_promote:
             check_auto_promote(db, run_id, "http://localhost:7683")
         mock_promote.assert_not_called()
 
     def test_promotes_when_all_gates_pass(self, db_with_complete_run):
         """Auto-promotes when F1 >= threshold AND delta >= min_improvement AND error_budget ok."""
         db, run_id = db_with_complete_run
-        with patch("ollama_queue.eval_engine.do_promote_eval_run") as mock_promote:
+        with patch("ollama_queue.eval.promote.do_promote_eval_run") as mock_promote:
             mock_promote.return_value = {"ok": True, "run_id": run_id, "variant_id": "A", "label": "Config A"}
             check_auto_promote(db, run_id, "http://localhost:7683")
         mock_promote.assert_called_once_with(db, run_id)
@@ -1427,7 +1445,7 @@ class TestCheckAutoPromote:
                 is_same_cluster=0,
                 row_type="judge",
             )
-        with patch("ollama_queue.eval_engine.do_promote_eval_run") as mock_promote:
+        with patch("ollama_queue.eval.promote.do_promote_eval_run") as mock_promote:
             check_auto_promote(db, run_id, "http://localhost:7683")
         mock_promote.assert_not_called()
 
@@ -1487,7 +1505,7 @@ class TestCheckAutoPromoteBayesian:
     def test_bayesian_promotes_when_auc_and_separation_pass(self, db_with_bayesian_run):
         """Bayesian auto-promote succeeds when AUC >= threshold AND separation >= min."""
         db, run_id = db_with_bayesian_run
-        with patch("ollama_queue.eval_engine.do_promote_eval_run") as mock_promote:
+        with patch("ollama_queue.eval.promote.do_promote_eval_run") as mock_promote:
             mock_promote.return_value = {"ok": True, "run_id": run_id, "variant_id": "A", "label": "Config A"}
             check_auto_promote(db, run_id, "http://localhost:7683")
         mock_promote.assert_called_once_with(db, run_id)
@@ -1496,7 +1514,7 @@ class TestCheckAutoPromoteBayesian:
         """Bayesian auto-promote fails when AUC < threshold."""
         db, run_id = db_with_bayesian_run
         db.set_setting("eval.auc_threshold", 0.95)  # raise bar above AUC=0.90
-        with patch("ollama_queue.eval_engine.do_promote_eval_run") as mock_promote:
+        with patch("ollama_queue.eval.promote.do_promote_eval_run") as mock_promote:
             check_auto_promote(db, run_id, "http://localhost:7683")
         mock_promote.assert_not_called()
 
@@ -1504,7 +1522,7 @@ class TestCheckAutoPromoteBayesian:
         """Bayesian auto-promote fails when separation < min_posterior_separation."""
         db, run_id = db_with_bayesian_run
         db.set_setting("eval.min_posterior_separation", 0.6)  # raise bar above separation=0.50
-        with patch("ollama_queue.eval_engine.do_promote_eval_run") as mock_promote:
+        with patch("ollama_queue.eval.promote.do_promote_eval_run") as mock_promote:
             check_auto_promote(db, run_id, "http://localhost:7683")
         mock_promote.assert_not_called()
 
@@ -1540,7 +1558,7 @@ class TestCheckAutoPromoteBayesian:
                 judge_mode="bayesian",
             )
 
-        with patch("ollama_queue.eval_engine.do_promote_eval_run") as mock_promote:
+        with patch("ollama_queue.eval.promote.do_promote_eval_run") as mock_promote:
             mock_promote.return_value = {"ok": True, "run_id": rid, "variant_id": "A", "label": "Config A"}
             check_auto_promote(db, rid, "http://localhost:7683")
         mock_promote.assert_called_once_with(db, rid)
@@ -1575,7 +1593,7 @@ class TestCheckAutoPromoteBayesian:
             judge_mode="bayesian",
         )
 
-        with patch("ollama_queue.eval_engine.do_promote_eval_run") as mock_promote:
+        with patch("ollama_queue.eval.promote.do_promote_eval_run") as mock_promote:
             check_auto_promote(db, run_id, "http://localhost:7683")
         mock_promote.assert_not_called()
 
@@ -1605,7 +1623,7 @@ class TestCheckAutoPromoteBayesian:
             error_budget=0.30,
             # No judge_mode set — defaults to 'rubric'
         )
-        with patch("ollama_queue.eval_engine.do_promote_eval_run") as mock_promote:
+        with patch("ollama_queue.eval.promote.do_promote_eval_run") as mock_promote:
             mock_promote.return_value = {"ok": True, "run_id": run_id, "variant_id": "A", "label": "Config A"}
             check_auto_promote(db, run_id, "http://localhost:7683")
         mock_promote.assert_called_once_with(db, run_id)
@@ -1621,7 +1639,7 @@ class TestBuildPairedJudgePrompt:
 
     def test_contains_both_targets(self):
         """Prompt must contain content from both same-group and diff-group targets."""
-        from ollama_queue.eval_engine import build_paired_judge_prompt
+        from ollama_queue.eval.judge import build_paired_judge_prompt
 
         same = {"title": "Resource cleanup failure", "one_liner": "Handles not closed", "description": "..."}
         diff = {"title": "Naming convention bug", "one_liner": "Wrong label", "description": "..."}
@@ -1634,7 +1652,7 @@ class TestBuildPairedJudgePrompt:
 
     def test_position_randomization(self):
         """Different position seeds produce different A/B orderings."""
-        from ollama_queue.eval_engine import build_paired_judge_prompt
+        from ollama_queue.eval.judge import build_paired_judge_prompt
 
         same = {"title": "Same", "one_liner": "s", "description": ""}
         diff = {"title": "Diff", "one_liner": "d", "description": ""}
@@ -1645,7 +1663,7 @@ class TestBuildPairedJudgePrompt:
 
     def test_returns_tuple(self):
         """Returns (str, bool) tuple."""
-        from ollama_queue.eval_engine import build_paired_judge_prompt
+        from ollama_queue.eval.judge import build_paired_judge_prompt
 
         same = {"title": "T", "one_liner": "O", "description": "D"}
         diff = {"title": "T2", "one_liner": "O2", "description": "D2"}
@@ -1661,7 +1679,7 @@ class TestParsePairedJudge:
 
     def test_valid_answers(self):
         """Parses A, B, NEITHER correctly."""
-        from ollama_queue.eval_engine import parse_paired_judge
+        from ollama_queue.eval.judge import parse_paired_judge
 
         assert parse_paired_judge("A") == "A"
         assert parse_paired_judge("B") == "B"
@@ -1669,13 +1687,13 @@ class TestParsePairedJudge:
 
     def test_strips_think_tags(self):
         """Think tags are removed before parsing."""
-        from ollama_queue.eval_engine import parse_paired_judge
+        from ollama_queue.eval.judge import parse_paired_judge
 
         assert parse_paired_judge("<THINK>reasoning here</THINK>A") == "A"
 
     def test_case_insensitive(self):
         """Handles lowercase and mixed case."""
-        from ollama_queue.eval_engine import parse_paired_judge
+        from ollama_queue.eval.judge import parse_paired_judge
 
         assert parse_paired_judge("a") == "A"
         assert parse_paired_judge("b - because it matches") == "B"
@@ -1683,7 +1701,7 @@ class TestParsePairedJudge:
 
     def test_none_on_empty(self):
         """Returns None on empty or unparseable input."""
-        from ollama_queue.eval_engine import parse_paired_judge
+        from ollama_queue.eval.judge import parse_paired_judge
 
         assert parse_paired_judge("") is None
         assert parse_paired_judge(None) is None
@@ -1694,7 +1712,7 @@ class TestMechanismExtraction:
 
     def test_prompt_contains_both_lessons(self):
         """Mechanism prompt includes content from both lessons."""
-        from ollama_queue.eval_engine import build_mechanism_extraction_prompt
+        from ollama_queue.eval.judge import build_mechanism_extraction_prompt
 
         a = {"title": "Lesson A", "one_liner": "Bug A", "description": "Details A"}
         b = {"title": "Lesson B", "one_liner": "Bug B", "description": "Details B"}
@@ -1707,7 +1725,7 @@ class TestMechanismExtraction:
 
     def test_parse_valid_triplet(self):
         """Parses a valid TRIGGER/TARGET/FIX response."""
-        from ollama_queue.eval_engine import parse_mechanism_triplet
+        from ollama_queue.eval.judge import parse_mechanism_triplet
 
         response = "TRIGGER: uncaught exception\nTARGET: cleanup handler\nFIX: symmetric teardown"
         result = parse_mechanism_triplet(response)
@@ -1718,7 +1736,7 @@ class TestMechanismExtraction:
 
     def test_parse_none_response(self):
         """Returns None for NONE or empty responses."""
-        from ollama_queue.eval_engine import parse_mechanism_triplet
+        from ollama_queue.eval.judge import parse_mechanism_triplet
 
         assert parse_mechanism_triplet("NONE") is None
         assert parse_mechanism_triplet("") is None
@@ -1730,7 +1748,7 @@ class TestSignalExtractors:
 
     def test_paired_signal_signs(self):
         """Same -> positive, diff -> negative, neither -> zero."""
-        from ollama_queue.eval_engine import compute_paired_signal
+        from ollama_queue.eval.judge import compute_paired_signal
 
         assert compute_paired_signal("same") > 0
         assert compute_paired_signal("diff") < 0
@@ -1738,14 +1756,14 @@ class TestSignalExtractors:
 
     def test_embedding_signal_signs(self):
         """High similarity -> positive, low -> negative."""
-        from ollama_queue.eval_engine import compute_embedding_signal
+        from ollama_queue.eval.judge import compute_embedding_signal
 
         assert compute_embedding_signal(0.8) > 0
         assert compute_embedding_signal(0.1) < 0
 
     def test_scope_signal_signs(self):
         """High overlap -> positive, zero overlap -> negative, empty -> uninformative."""
-        from ollama_queue.eval_engine import compute_scope_signal
+        from ollama_queue.eval.judge import compute_scope_signal
 
         assert compute_scope_signal({"python", "web"}, {"python", "web"}) > 0
         assert compute_scope_signal({"python"}, {"java"}) < 0
@@ -1753,7 +1771,7 @@ class TestSignalExtractors:
 
     def test_mechanism_signal_signs(self):
         """Match -> positive, no match -> negative, None -> uninformative."""
-        from ollama_queue.eval_engine import compute_mechanism_signal
+        from ollama_queue.eval.judge import compute_mechanism_signal
 
         assert compute_mechanism_signal(True) > 0
         assert compute_mechanism_signal(False) < 0
@@ -1765,28 +1783,28 @@ class TestComputeTransferPosterior:
 
     def test_prior_with_no_evidence(self):
         """All-zero signals should produce the prior probability (0.25)."""
-        from ollama_queue.eval_engine import compute_transfer_posterior
+        from ollama_queue.eval.judge import compute_transfer_posterior
 
         posterior = compute_transfer_posterior(0.0, 0.0, 0.0, 0.0)
         assert abs(posterior - 0.25) < 0.01
 
     def test_strong_positive_evidence(self):
         """Strong same-group paired signal should push posterior above 0.5."""
-        from ollama_queue.eval_engine import compute_transfer_posterior
+        from ollama_queue.eval.judge import compute_transfer_posterior
 
         posterior = compute_transfer_posterior(2.5, 0.0, 0.0, 0.0)
         assert posterior > 0.5
 
     def test_strong_negative_evidence(self):
         """Strong diff-group paired signal should push posterior well below 0.25."""
-        from ollama_queue.eval_engine import compute_transfer_posterior
+        from ollama_queue.eval.judge import compute_transfer_posterior
 
         posterior = compute_transfer_posterior(-2.5, 0.0, 0.0, 0.0)
         assert posterior < 0.1
 
     def test_bounded_zero_to_one(self):
         """Posterior is always in [0, 1]."""
-        from ollama_queue.eval_engine import compute_transfer_posterior
+        from ollama_queue.eval.judge import compute_transfer_posterior
 
         # Maximum positive evidence
         p = compute_transfer_posterior(2.5, 1.5, 1.0, 2.0)
@@ -1801,7 +1819,7 @@ class TestComputeBayesianMetrics:
 
     def test_separation_positive_with_discriminating_posteriors(self):
         """Same-group posteriors higher than diff-group -> positive separation."""
-        from ollama_queue.eval_engine import compute_bayesian_metrics
+        from ollama_queue.eval.engine import compute_bayesian_metrics
 
         scored = [
             {"variant": "A", "is_same_group": True, "posterior": 0.8},
@@ -1816,7 +1834,7 @@ class TestComputeBayesianMetrics:
 
     def test_indistinguishable_posteriors(self):
         """Equal posteriors for same/diff -> no separation, AUC near 0.5."""
-        from ollama_queue.eval_engine import compute_bayesian_metrics
+        from ollama_queue.eval.engine import compute_bayesian_metrics
 
         scored = [
             {"variant": "B", "is_same_group": True, "posterior": 0.5},
@@ -1828,7 +1846,7 @@ class TestComputeBayesianMetrics:
 
     def test_per_variant_grouping(self):
         """Metrics computed independently per variant."""
-        from ollama_queue.eval_engine import compute_bayesian_metrics
+        from ollama_queue.eval.engine import compute_bayesian_metrics
 
         scored = [
             {"variant": "A", "is_same_group": True, "posterior": 0.9},
@@ -1853,7 +1871,8 @@ class TestJudgeModeParameter:
     def test_rubric_mode_accepted(self, tmp_path):
         """_judge_one_target accepts judge_mode='rubric' without error."""
         from ollama_queue.db import Database
-        from ollama_queue.eval_engine import _judge_one_target, create_eval_run
+        from ollama_queue.eval.engine import create_eval_run
+        from ollama_queue.eval.judge import _judge_one_target
 
         db = Database(str(tmp_path / "test.db"))
         db.initialize()
@@ -1861,7 +1880,7 @@ class TestJudgeModeParameter:
 
         target = {"id": "42", "title": "Test", "one_liner": "Bug", "description": "Details"}
 
-        with patch("ollama_queue.eval_engine._call_proxy") as mock_proxy:
+        with patch("ollama_queue.eval.engine._call_proxy") as mock_proxy:
             mock_proxy.return_value = (
                 '{"transfer": 4, "precision": 3, "actionability": 3, "reasoning": "ok"}',
                 0.5,
@@ -1890,7 +1909,8 @@ class TestJudgeModeParameter:
     def test_bayesian_mode_stores_posterior(self, tmp_path):
         """_judge_one_target with judge_mode='bayesian' stores score_posterior."""
         from ollama_queue.db import Database
-        from ollama_queue.eval_engine import _judge_one_target, create_eval_run
+        from ollama_queue.eval.engine import create_eval_run
+        from ollama_queue.eval.judge import _judge_one_target
 
         db = Database(str(tmp_path / "test.db"))
         db.initialize()
@@ -1899,7 +1919,7 @@ class TestJudgeModeParameter:
         same = {"id": "42", "title": "Same", "one_liner": "S", "description": ""}
         diff = {"id": "99", "title": "Diff", "one_liner": "D", "description": ""}
 
-        with patch("ollama_queue.eval_engine._call_proxy") as mock_proxy:
+        with patch("ollama_queue.eval.engine._call_proxy") as mock_proxy:
             mock_proxy.return_value = ("A", 0.3)
             _judge_one_target(
                 db=db,
@@ -1930,7 +1950,8 @@ class TestJudgeModeParameter:
     def test_tournament_mode_stores_winner(self, tmp_path):
         """_judge_one_target with judge_mode='tournament' stores paired winner but no posterior."""
         from ollama_queue.db import Database
-        from ollama_queue.eval_engine import _judge_one_target, create_eval_run
+        from ollama_queue.eval.engine import create_eval_run
+        from ollama_queue.eval.judge import _judge_one_target
 
         db = Database(str(tmp_path / "test.db"))
         db.initialize()
@@ -1939,7 +1960,7 @@ class TestJudgeModeParameter:
         same = {"id": "42", "title": "Same", "one_liner": "S", "description": ""}
         diff = {"id": "99", "title": "Diff", "one_liner": "D", "description": ""}
 
-        with patch("ollama_queue.eval_engine._call_proxy") as mock_proxy:
+        with patch("ollama_queue.eval.engine._call_proxy") as mock_proxy:
             mock_proxy.return_value = ("B", 0.3)
             _judge_one_target(
                 db=db,
@@ -2072,8 +2093,8 @@ class TestVerticalIntegrationV2:
                 )
 
         with (
-            patch("ollama_queue.eval_engine._fetch_items", return_value=items),
-            patch("ollama_queue.eval_engine._call_proxy", side_effect=mock_proxy_side_effect),
+            patch("ollama_queue.eval.engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval.engine._call_proxy", side_effect=mock_proxy_side_effect),
         ):
             # --- Step 2: Run generation phase ---
             run_eval_generate(run_id, db, _sleep=lambda s: None)
@@ -2183,8 +2204,8 @@ class TestVerticalIntegrationV2:
                 return ("Structural principle about error handling.", None)
 
         with (
-            patch("ollama_queue.eval_engine._fetch_items", return_value=items),
-            patch("ollama_queue.eval_engine._call_proxy", side_effect=mock_proxy_side_effect),
+            patch("ollama_queue.eval.engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval.engine._call_proxy", side_effect=mock_proxy_side_effect),
         ):
             run_eval_generate(run_id, db, _sleep=lambda s: None)
             run = get_eval_run(db, run_id)
@@ -2228,8 +2249,8 @@ class TestVerticalIntegrationV2:
             return ("Silent error handling failures mask bugs.", None)
 
         with (
-            patch("ollama_queue.eval_engine._fetch_items", return_value=items),
-            patch("ollama_queue.eval_engine._call_proxy", side_effect=mock_proxy_same_always_wins),
+            patch("ollama_queue.eval.engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval.engine._call_proxy", side_effect=mock_proxy_same_always_wins),
         ):
             run_eval_generate(run_id, db, _sleep=lambda s: None)
             run_eval_judge(run_id, db)
@@ -2268,8 +2289,8 @@ class TestVerticalIntegrationV2:
             return ("Principle about error handling.", None)
 
         with (
-            patch("ollama_queue.eval_engine._fetch_items", return_value=items),
-            patch("ollama_queue.eval_engine._call_proxy", side_effect=mock_proxy),
+            patch("ollama_queue.eval.engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval.engine._call_proxy", side_effect=mock_proxy),
         ):
             run_eval_generate(run_id, db, _sleep=lambda s: None)
             run_eval_judge(run_id, db)
@@ -2298,8 +2319,8 @@ class TestVerticalIntegrationV2:
             return ("Error handling principle.", None)
 
         with (
-            patch("ollama_queue.eval_engine._fetch_items", return_value=items),
-            patch("ollama_queue.eval_engine._call_proxy", side_effect=mock_proxy),
+            patch("ollama_queue.eval.engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval.engine._call_proxy", side_effect=mock_proxy),
         ):
             run_eval_generate(run_id, db, _sleep=lambda s: None)
             run_eval_judge(run_id, db)
@@ -2361,7 +2382,7 @@ class TestComputeRunAnalysis:
 
     def test_stores_analysis_json(self, tmp_path):
         from ollama_queue.db import Database
-        from ollama_queue.eval_engine import compute_run_analysis
+        from ollama_queue.eval.engine import compute_run_analysis
 
         db = Database(tmp_path / "q.db")
         db.initialize()
@@ -2411,7 +2432,7 @@ class TestComputeRunAnalysis:
 
     def test_failure_does_not_raise(self, tmp_path):
         from ollama_queue.db import Database
-        from ollama_queue.eval_engine import compute_run_analysis
+        from ollama_queue.eval.engine import compute_run_analysis
 
         db = Database(tmp_path / "q.db")
         db.initialize()
@@ -2444,12 +2465,12 @@ class TestUpdateEvalResultFunction:
     """update_eval_result with empty and non-empty kwargs (lines 452-459)."""
 
     def test_no_kwargs_is_noop(self, db):
-        from ollama_queue.eval_engine import update_eval_result
+        from ollama_queue.eval.engine import update_eval_result
 
         update_eval_result(db, 999)  # no-op, should not raise
 
     def test_updates_fields(self, db):
-        from ollama_queue.eval_engine import update_eval_result
+        from ollama_queue.eval.engine import update_eval_result
 
         run_id = create_eval_run(db, variant_id="A")
         result_id = insert_eval_result(
@@ -2492,13 +2513,13 @@ class TestDoPromoteEvalRun:
     """do_promote_eval_run — all paths (lines 165-211)."""
 
     def test_run_not_found(self, db):
-        from ollama_queue.eval_engine import do_promote_eval_run
+        from ollama_queue.eval.promote import do_promote_eval_run
 
         with pytest.raises(ValueError, match="not found"):
             do_promote_eval_run(db, 9999)
 
     def test_run_not_complete(self, db):
-        from ollama_queue.eval_engine import do_promote_eval_run
+        from ollama_queue.eval.promote import do_promote_eval_run
 
         run_id = create_eval_run(db, variant_id="A")
         update_eval_run(db, run_id, status="generating")
@@ -2506,7 +2527,7 @@ class TestDoPromoteEvalRun:
             do_promote_eval_run(db, run_id)
 
     def test_no_winner_variant(self, db):
-        from ollama_queue.eval_engine import do_promote_eval_run
+        from ollama_queue.eval.promote import do_promote_eval_run
 
         run_id = create_eval_run(db, variant_id="A")
         update_eval_run(db, run_id, status="complete")
@@ -2514,7 +2535,7 @@ class TestDoPromoteEvalRun:
             do_promote_eval_run(db, run_id)
 
     def test_variant_not_in_db(self, db):
-        from ollama_queue.eval_engine import do_promote_eval_run
+        from ollama_queue.eval.promote import do_promote_eval_run
 
         run_id = create_eval_run(db, variant_id="A")
         update_eval_run(db, run_id, status="complete", winner_variant="NONEXISTENT")
@@ -2522,7 +2543,7 @@ class TestDoPromoteEvalRun:
             do_promote_eval_run(db, run_id)
 
     def test_lessons_db_non_2xx(self, db):
-        from ollama_queue.eval_engine import do_promote_eval_run
+        from ollama_queue.eval.promote import do_promote_eval_run
 
         run_id = create_eval_run(db, variant_id="A")
         update_eval_run(db, run_id, status="complete", winner_variant="A")
@@ -2533,7 +2554,8 @@ class TestDoPromoteEvalRun:
             do_promote_eval_run(db, run_id)
 
     def test_success_sets_production(self, db):
-        from ollama_queue.eval_engine import do_promote_eval_run, get_eval_variant
+        from ollama_queue.eval.engine import get_eval_variant
+        from ollama_queue.eval.promote import do_promote_eval_run
 
         run_id = create_eval_run(db, variant_id="A")
         update_eval_run(db, run_id, status="complete", winner_variant="A")
@@ -2572,7 +2594,7 @@ class TestCheckAutoPromoteNoWinnerVariant:
         db.set_setting("eval.auto_promote", True)
         run_id = create_eval_run(db, variant_id="A")
         update_eval_run(db, run_id, status="complete")
-        with patch("ollama_queue.eval_engine.do_promote_eval_run") as mock_p:
+        with patch("ollama_queue.eval.promote.do_promote_eval_run") as mock_p:
             check_auto_promote(db, run_id, "http://localhost:7683")
         mock_p.assert_not_called()
 
@@ -2584,7 +2606,7 @@ class TestCheckAutoPromoteMetricsUnparseable:
         db.set_setting("eval.auto_promote", True)
         run_id = create_eval_run(db, variant_id="A")
         update_eval_run(db, run_id, status="complete", winner_variant="A", metrics="not-json")
-        with patch("ollama_queue.eval_engine.do_promote_eval_run") as mock_p:
+        with patch("ollama_queue.eval.promote.do_promote_eval_run") as mock_p:
             check_auto_promote(db, run_id, "http://localhost:7683")
         mock_p.assert_not_called()
 
@@ -2597,7 +2619,7 @@ class TestCheckAutoPromoteWinnerQualityNone:
         run_id = create_eval_run(db, variant_id="A")
         # Metrics present but winner variant has no f1
         update_eval_run(db, run_id, status="complete", winner_variant="A", metrics=json.dumps({"A": {"recall": 0.8}}))
-        with patch("ollama_queue.eval_engine.do_promote_eval_run") as mock_p:
+        with patch("ollama_queue.eval.promote.do_promote_eval_run") as mock_p:
             check_auto_promote(db, run_id, "http://localhost:7683")
         mock_p.assert_not_called()
 
@@ -2624,7 +2646,7 @@ class TestCheckAutoPromoteProductionMetricsUnparseable:
             conn.commit()
         old_run = create_eval_run(db, variant_id="B")
         update_eval_run(db, old_run, status="complete", winner_variant="B", metrics="<<<BAD>>>")
-        with patch("ollama_queue.eval_engine.do_promote_eval_run") as mock_p:
+        with patch("ollama_queue.eval.promote.do_promote_eval_run") as mock_p:
             check_auto_promote(db, run_id, "http://localhost:7683")
         mock_p.assert_not_called()
 
@@ -2648,7 +2670,7 @@ class TestCheckAutoPromoteStabilityWindow:
         update_eval_run(
             db, r2, status="complete", winner_variant="A", metrics=json.dumps({"A": {"f1": 0.30}}), item_count=10
         )
-        with patch("ollama_queue.eval_engine.do_promote_eval_run") as mock_p:
+        with patch("ollama_queue.eval.promote.do_promote_eval_run") as mock_p:
             check_auto_promote(db, r2, "http://localhost:7683")
         mock_p.assert_not_called()
 
@@ -2666,7 +2688,7 @@ class TestCheckAutoPromoteStabilityWindow:
         # Run 2: bad metrics
         r2 = create_eval_run(db, variant_id="A")
         update_eval_run(db, r2, status="complete", winner_variant="A", metrics="BAD", item_count=10)
-        with patch("ollama_queue.eval_engine.do_promote_eval_run") as mock_p:
+        with patch("ollama_queue.eval.promote.do_promote_eval_run") as mock_p:
             check_auto_promote(db, r2, "http://localhost:7683")
         mock_p.assert_not_called()
 
@@ -2675,7 +2697,7 @@ class TestBuildContrastivePrompt:
     """Lines 628-643: contrastive prompt building."""
 
     def test_contrastive_prompt_contains_both_groups(self, source_item, cluster_items):
-        from ollama_queue.eval_engine import build_generation_prompt
+        from ollama_queue.eval.generate import build_generation_prompt
 
         template = {
             "id": "contrastive",
@@ -2700,7 +2722,7 @@ class TestBuildSelfCritiquePrompt:
     """Lines 669-676: self-critique prompt building."""
 
     def test_self_critique_prompt_content(self):
-        from ollama_queue.eval_engine import _build_self_critique_prompt
+        from ollama_queue.eval.generate import _build_self_critique_prompt
 
         diff_items = [
             {"id": "d1", "title": "Cache Bug", "one_liner": "stale cache"},
@@ -2715,7 +2737,7 @@ class TestSelfCritique:
     """Lines 703-720: _self_critique function."""
 
     def test_returns_original_when_no_diff_items(self):
-        from ollama_queue.eval_engine import _self_critique
+        from ollama_queue.eval.generate import _self_critique
 
         result = _self_critique(
             principle="Original principle",
@@ -2729,9 +2751,9 @@ class TestSelfCritique:
         assert result == "Original principle"
 
     def test_returns_refined_when_proxy_returns_good_text(self):
-        from ollama_queue.eval_engine import _self_critique
+        from ollama_queue.eval.generate import _self_critique
 
-        with patch("ollama_queue.eval_engine._call_proxy", return_value=("Refined principle text here.", None)):
+        with patch("ollama_queue.eval.engine._call_proxy", return_value=("Refined principle text here.", None)):
             result = _self_critique(
                 principle="Original",
                 diff_cluster_items=[{"id": "1", "title": "T", "one_liner": "O"}],
@@ -2744,9 +2766,9 @@ class TestSelfCritique:
         assert result == "Refined principle text here."
 
     def test_returns_original_when_proxy_returns_short_text(self):
-        from ollama_queue.eval_engine import _self_critique
+        from ollama_queue.eval.generate import _self_critique
 
-        with patch("ollama_queue.eval_engine._call_proxy", return_value=("short", None)):
+        with patch("ollama_queue.eval.engine._call_proxy", return_value=("short", None)):
             result = _self_critique(
                 principle="Original principle",
                 diff_cluster_items=[{"id": "1", "title": "T", "one_liner": "O"}],
@@ -2759,9 +2781,9 @@ class TestSelfCritique:
         assert result == "Original principle"
 
     def test_returns_original_when_proxy_returns_none(self):
-        from ollama_queue.eval_engine import _self_critique
+        from ollama_queue.eval.generate import _self_critique
 
-        with patch("ollama_queue.eval_engine._call_proxy", return_value=(None, None)):
+        with patch("ollama_queue.eval.engine._call_proxy", return_value=(None, None)):
             result = _self_critique(
                 principle="Original principle",
                 diff_cluster_items=[{"id": "1", "title": "T", "one_liner": "O"}],
@@ -2778,41 +2800,41 @@ class TestCleanPrinciple:
     """Lines 736, 747-753, 762, 766: _clean_principle edge cases."""
 
     def test_empty_text(self):
-        from ollama_queue.eval_engine import _clean_principle
+        from ollama_queue.eval.judge import _clean_principle
 
         assert _clean_principle("") == ""
         assert _clean_principle(None) is None
 
     def test_strips_cot_preamble(self):
-        from ollama_queue.eval_engine import _clean_principle
+        from ollama_queue.eval.judge import _clean_principle
 
         text = "Okay let me analyze.\n\n* bullet\n\nActual principle statement here."
         result = _clean_principle(text)
         assert "Actual principle statement here." in result
 
     def test_extracts_principle_marker(self):
-        from ollama_queue.eval_engine import _clean_principle
+        from ollama_queue.eval.judge import _clean_principle
 
         text = "Some preamble.\n\n**Principle:** Real principle here.\n\nMore text."
         result = _clean_principle(text)
         assert "Real principle here." in result
 
     def test_strips_trailing_paragraphs(self):
-        from ollama_queue.eval_engine import _clean_principle
+        from ollama_queue.eval.judge import _clean_principle
 
         text = "First paragraph.\n\nSecond paragraph."
         result = _clean_principle(text)
         assert result == "First paragraph."
 
     def test_strips_bold_markers(self):
-        from ollama_queue.eval_engine import _clean_principle
+        from ollama_queue.eval.judge import _clean_principle
 
         text = "**Bold principle**"
         result = _clean_principle(text)
         assert result == "Bold principle"
 
     def test_strips_parenthetical_explanation(self):
-        from ollama_queue.eval_engine import _clean_principle
+        from ollama_queue.eval.judge import _clean_principle
 
         text = "Good principle *(This principle applies...)"
         result = _clean_principle(text)
@@ -2820,7 +2842,7 @@ class TestCleanPrinciple:
         assert "Good principle" in result
 
     def test_cot_preamble_bullet_skipped(self):
-        from ollama_queue.eval_engine import _clean_principle
+        from ollama_queue.eval.judge import _clean_principle
 
         # CoT preamble with only bullet paragraphs — stays as-is since no suitable para found
         text = "Let me think.\n\n* bullet1\n\n- bullet2"
@@ -2850,17 +2872,17 @@ class TestParsePairedJudgeFallback:
     """Lines 1104-1107: fallback matching for short strings with A or B."""
 
     def test_short_string_with_a(self):
-        from ollama_queue.eval_engine import parse_paired_judge
+        from ollama_queue.eval.judge import parse_paired_judge
 
         assert parse_paired_judge("I think A is better") == "A"
 
     def test_short_string_with_b(self):
-        from ollama_queue.eval_engine import parse_paired_judge
+        from ollama_queue.eval.judge import parse_paired_judge
 
         assert parse_paired_judge("option B wins") == "B"
 
     def test_long_string_returns_none(self):
-        from ollama_queue.eval_engine import parse_paired_judge
+        from ollama_queue.eval.judge import parse_paired_judge
 
         # Long unparseable string (> 30 chars) — should return None
         assert parse_paired_judge("x" * 50 + " A") is None
@@ -2870,7 +2892,7 @@ class TestParseMechanismTripletPartial:
     """Line 1154: partial match (missing one field)."""
 
     def test_missing_fix_returns_none(self):
-        from ollama_queue.eval_engine import parse_mechanism_triplet
+        from ollama_queue.eval.judge import parse_mechanism_triplet
 
         response = "TRIGGER: something\nTARGET: something"
         assert parse_mechanism_triplet(response) is None
@@ -2880,12 +2902,12 @@ class TestComputeEmbeddingSignalRanges:
     """Lines 1186, 1188: middle ranges."""
 
     def test_mid_range_positive(self):
-        from ollama_queue.eval_engine import compute_embedding_signal
+        from ollama_queue.eval.judge import compute_embedding_signal
 
         assert compute_embedding_signal(0.6) == 0.5
 
     def test_mid_range_negative(self):
-        from ollama_queue.eval_engine import compute_embedding_signal
+        from ollama_queue.eval.judge import compute_embedding_signal
 
         assert compute_embedding_signal(0.4) == -0.5
 
@@ -2894,7 +2916,7 @@ class TestComputeScopeSignalPartialOverlap:
     """Line 1204: partial overlap path."""
 
     def test_partial_overlap(self):
-        from ollama_queue.eval_engine import compute_scope_signal
+        from ollama_queue.eval.judge import compute_scope_signal
 
         # Jaccard of {a,b} and {b,c} = 1/3 → > 0 but < 0.5
         result = compute_scope_signal({"a", "b"}, {"b", "c"})
@@ -2905,7 +2927,7 @@ class TestComputeTournamentMetrics:
     """Lines 1261-1285: compute_tournament_metrics."""
 
     def test_basic_tournament_metrics(self):
-        from ollama_queue.eval_engine import compute_tournament_metrics
+        from ollama_queue.eval.engine import compute_tournament_metrics
 
         results = [
             {"variant": "A", "win_rate": 0.8, "comparisons": 10, "wins": 8, "losses": 1, "neithers": 1},
@@ -2950,7 +2972,7 @@ class TestComputeRunAnalysisNoScoredRows:
     """Lines 1488-1489: no scored rows path."""
 
     def test_no_scored_rows_returns_early(self, db):
-        from ollama_queue.eval_engine import compute_run_analysis
+        from ollama_queue.eval.engine import compute_run_analysis
 
         run_id = create_eval_run(db, variant_id="A")
         update_eval_run(db, run_id, status="complete")
@@ -2966,7 +2988,7 @@ class TestComputeRunAnalysisPositiveThreshold:
     """Lines 1501-1502, 1508-1509: positive threshold reading and variant parsing."""
 
     def test_custom_positive_threshold(self, db):
-        from ollama_queue.eval_engine import compute_run_analysis
+        from ollama_queue.eval.engine import compute_run_analysis
 
         db.set_setting("eval.positive_threshold", json.dumps(4))
         run_id = create_eval_run(db, variant_id="A")
@@ -2993,7 +3015,7 @@ class TestComputeRunAnalysisPositiveThreshold:
         assert analysis["positive_threshold"] == 4
 
     def test_bad_positive_threshold_falls_back(self, db):
-        from ollama_queue.eval_engine import compute_run_analysis
+        from ollama_queue.eval.engine import compute_run_analysis
 
         db.set_setting("eval.positive_threshold", "not-a-number")
         run_id = create_eval_run(db, variant_id="A")
@@ -3019,7 +3041,7 @@ class TestComputeRunAnalysisPositiveThreshold:
 
     def test_variant_ids_not_json_list(self, db):
         """Variants column that is not a JSON array should degrade to empty list."""
-        from ollama_queue.eval_engine import compute_run_analysis
+        from ollama_queue.eval.engine import compute_run_analysis
 
         run_id = create_eval_run(db, variant_id="A")
         update_eval_run(db, run_id, status="complete", variants="A")  # plain string, not JSON
@@ -3042,12 +3064,12 @@ class TestComputeRunAnalysisInnerException:
     """Lines 1463-1464: exception in _compute_run_analysis_inner."""
 
     def test_exception_in_inner_does_not_propagate(self, db):
-        from ollama_queue.eval_engine import compute_run_analysis
+        from ollama_queue.eval.engine import compute_run_analysis
 
         run_id = create_eval_run(db, variant_id="A")
         update_eval_run(db, run_id, status="complete")
         # Mock _compute_run_analysis_inner to raise
-        with patch("ollama_queue.eval_engine._compute_run_analysis_inner", side_effect=RuntimeError("boom")):
+        with patch("ollama_queue.eval.engine._compute_run_analysis_inner", side_effect=RuntimeError("boom")):
             compute_run_analysis(run_id, db)  # must not raise
 
 
@@ -3067,11 +3089,11 @@ class TestGenerateEvalAnalysisVariantParsingError:
         }
         mock_db = MagicMock()
         with (
-            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
-            patch("ollama_queue.eval_engine._fetch_analysis_samples", return_value=([], [])),
-            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
-            patch("ollama_queue.eval_engine._call_proxy", return_value=("Analysis text", None)),
-            patch("ollama_queue.eval_engine.update_eval_run"),
+            patch("ollama_queue.eval.engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval.engine._fetch_analysis_samples", return_value=([], [])),
+            patch("ollama_queue.eval.engine._get_eval_setting", return_value=""),
+            patch("ollama_queue.eval.engine._call_proxy", return_value=("Analysis text", None)),
+            patch("ollama_queue.eval.engine.update_eval_run"),
         ):
             generate_eval_analysis(mock_db, 1)  # should not raise
 
@@ -3088,11 +3110,11 @@ class TestGenerateEvalAnalysisVariantParsingError:
         }
         mock_db = MagicMock()
         with (
-            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
-            patch("ollama_queue.eval_engine._fetch_analysis_samples", return_value=([], [])),
-            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
-            patch("ollama_queue.eval_engine._call_proxy", return_value=("Analysis text", None)),
-            patch("ollama_queue.eval_engine.update_eval_run"),
+            patch("ollama_queue.eval.engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval.engine._fetch_analysis_samples", return_value=([], [])),
+            patch("ollama_queue.eval.engine._get_eval_setting", return_value=""),
+            patch("ollama_queue.eval.engine._call_proxy", return_value=("Analysis text", None)),
+            patch("ollama_queue.eval.engine.update_eval_run"),
         ):
             generate_eval_analysis(mock_db, 1)  # should not raise
 
@@ -3112,9 +3134,9 @@ class TestGenerateEvalAnalysisFetchSamplesError:
         }
         mock_db = MagicMock()
         with (
-            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
-            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
-            patch("ollama_queue.eval_engine._fetch_analysis_samples", side_effect=RuntimeError("DB error")),
+            patch("ollama_queue.eval.engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval.engine._get_eval_setting", return_value=""),
+            patch("ollama_queue.eval.engine._fetch_analysis_samples", side_effect=RuntimeError("DB error")),
         ):
             generate_eval_analysis(mock_db, 1)  # should not raise
 
@@ -3134,9 +3156,9 @@ class TestGenerateEvalAnalysisBuildPromptError:
         }
         mock_db = MagicMock()
         with (
-            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
-            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
-            patch("ollama_queue.eval_engine._fetch_analysis_samples", return_value=([], [])),
+            patch("ollama_queue.eval.engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval.engine._get_eval_setting", return_value=""),
+            patch("ollama_queue.eval.engine._fetch_analysis_samples", return_value=([], [])),
         ):
             generate_eval_analysis(mock_db, 1)  # should not raise
 
@@ -3156,11 +3178,11 @@ class TestGenerateEvalAnalysisStoreError:
         }
         mock_db = MagicMock()
         with (
-            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
-            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
-            patch("ollama_queue.eval_engine._fetch_analysis_samples", return_value=([], [])),
-            patch("ollama_queue.eval_engine._call_proxy", return_value=("Analysis", None)),
-            patch("ollama_queue.eval_engine.update_eval_run", side_effect=RuntimeError("DB write failed")),
+            patch("ollama_queue.eval.engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval.engine._get_eval_setting", return_value=""),
+            patch("ollama_queue.eval.engine._fetch_analysis_samples", return_value=([], [])),
+            patch("ollama_queue.eval.engine._call_proxy", return_value=("Analysis", None)),
+            patch("ollama_queue.eval.engine.update_eval_run", side_effect=RuntimeError("DB write failed")),
         ):
             generate_eval_analysis(mock_db, 1)  # should not raise
 
@@ -3327,7 +3349,7 @@ class TestFetchItems:
     """Lines 1753-1761: _fetch_items."""
 
     def test_success(self):
-        from ollama_queue.eval_engine import _fetch_items
+        from ollama_queue.eval.engine import _fetch_items
 
         mock_resp = MagicMock()
         mock_resp.raise_for_status = MagicMock()
@@ -3342,7 +3364,7 @@ class TestFetchItems:
         assert result == [{"id": "1"}]
 
     def test_error_returns_empty(self):
-        from ollama_queue.eval_engine import _fetch_items
+        from ollama_queue.eval.engine import _fetch_items
 
         with patch("httpx.Client") as mock_cls:
             mock_client = MagicMock()
@@ -3358,7 +3380,7 @@ class TestFetchClusters:
     """Lines 1766-1774: _fetch_clusters."""
 
     def test_success(self):
-        from ollama_queue.eval_engine import _fetch_clusters
+        from ollama_queue.eval.engine import _fetch_clusters
 
         mock_resp = MagicMock()
         mock_resp.raise_for_status = MagicMock()
@@ -3373,7 +3395,7 @@ class TestFetchClusters:
         assert result == [{"id": "c1"}]
 
     def test_error_returns_empty(self):
-        from ollama_queue.eval_engine import _fetch_clusters
+        from ollama_queue.eval.engine import _fetch_clusters
 
         with patch("httpx.Client") as mock_cls:
             mock_client = MagicMock()
@@ -3389,14 +3411,14 @@ class TestGetEvalSetting:
     """Lines 1783, 1786-1787: _get_eval_setting JSON decode and fallback."""
 
     def test_returns_json_decoded_value(self, db):
-        from ollama_queue.eval_engine import _get_eval_setting
+        from ollama_queue.eval.engine import _get_eval_setting
 
         db.set_setting("eval.test_key", 42)  # set_setting json.dumps internally
         result = _get_eval_setting(db, "eval.test_key")
         assert result == 42
 
     def test_returns_raw_string_on_json_error(self, db):
-        from ollama_queue.eval_engine import _get_eval_setting
+        from ollama_queue.eval.engine import _get_eval_setting
 
         # Write a raw string that isn't valid JSON directly into the DB
         with db._lock:
@@ -3410,7 +3432,7 @@ class TestGetEvalSetting:
         assert result == "not-json-{}"
 
     def test_returns_default_when_not_found(self, db):
-        from ollama_queue.eval_engine import _get_eval_setting
+        from ollama_queue.eval.engine import _get_eval_setting
 
         result = _get_eval_setting(db, "eval.nonexistent", "fallback")
         assert result == "fallback"
@@ -3421,8 +3443,8 @@ class TestRunEvalGenerateRunNotFound:
 
     def test_run_not_found(self):
         with (
-            patch("ollama_queue.eval_engine.get_eval_run", return_value=None),
-            patch("ollama_queue.eval_engine.update_eval_run") as mock_update,
+            patch("ollama_queue.eval.engine.get_eval_run", return_value=None),
+            patch("ollama_queue.eval.engine.update_eval_run") as mock_update,
         ):
             run_eval_generate(999, MagicMock(), _sleep=lambda s: None)
         mock_update.assert_not_called()
@@ -3437,14 +3459,14 @@ class TestRunEvalGenerateSingleVariant:
         submitted = []
 
         with (
-            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
-            patch("ollama_queue.eval_engine.get_eval_variant", return_value=_make_variant()),
-            patch("ollama_queue.eval_engine.get_eval_template", return_value=_make_template()),
-            patch("ollama_queue.eval_engine._fetch_items", return_value=items),
-            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
-            patch("ollama_queue.eval_engine._generate_one", side_effect=lambda **kw: submitted.append(1) or True),
-            patch("ollama_queue.eval_engine.update_eval_run"),
-            patch("ollama_queue.eval_engine.insert_eval_result"),
+            patch("ollama_queue.eval.engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval.engine.get_eval_variant", return_value=_make_variant()),
+            patch("ollama_queue.eval.engine.get_eval_template", return_value=_make_template()),
+            patch("ollama_queue.eval.engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval.engine._get_eval_setting", return_value=""),
+            patch("ollama_queue.eval.generate._generate_one", side_effect=lambda **kw: submitted.append(1) or True),
+            patch("ollama_queue.eval.engine.update_eval_run"),
+            patch("ollama_queue.eval.engine.insert_eval_result"),
         ):
             run_eval_generate(1, MagicMock(), _sleep=lambda s: None)
         assert len(submitted) == 2
@@ -3456,10 +3478,10 @@ class TestRunEvalGenerateNoItems:
     def test_no_items_sets_failed(self):
         run = _make_run_record()
         with (
-            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
-            patch("ollama_queue.eval_engine._fetch_items", return_value=[]),
-            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
-            patch("ollama_queue.eval_engine.update_eval_run") as mock_update,
+            patch("ollama_queue.eval.engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval.engine._fetch_items", return_value=[]),
+            patch("ollama_queue.eval.engine._get_eval_setting", return_value=""),
+            patch("ollama_queue.eval.engine.update_eval_run") as mock_update,
         ):
             run_eval_generate(1, MagicMock(), _sleep=lambda s: None)
         failed_calls = [c for c in mock_update.call_args_list if c.kwargs.get("status") == "failed"]
@@ -3474,12 +3496,12 @@ class TestRunEvalGenerateVariantNotFound:
         run = _make_run_record()
         items = _make_items(2)
         with (
-            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
-            patch("ollama_queue.eval_engine.get_eval_variant", return_value=None),
-            patch("ollama_queue.eval_engine._fetch_items", return_value=items),
-            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
-            patch("ollama_queue.eval_engine.update_eval_run") as mock_update,
-            patch("ollama_queue.eval_engine.insert_eval_result"),
+            patch("ollama_queue.eval.engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval.engine.get_eval_variant", return_value=None),
+            patch("ollama_queue.eval.engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval.engine._get_eval_setting", return_value=""),
+            patch("ollama_queue.eval.engine.update_eval_run") as mock_update,
+            patch("ollama_queue.eval.engine.insert_eval_result"),
         ):
             run_eval_generate(1, MagicMock(), _sleep=lambda s: None)
         # Should still transition to judging (no items submitted)
@@ -3491,13 +3513,13 @@ class TestRunEvalGenerateVariantNotFound:
         items = _make_items(2)
         variant = _make_variant()
         with (
-            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
-            patch("ollama_queue.eval_engine.get_eval_variant", return_value=variant),
-            patch("ollama_queue.eval_engine.get_eval_template", return_value=None),
-            patch("ollama_queue.eval_engine._fetch_items", return_value=items),
-            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
-            patch("ollama_queue.eval_engine.update_eval_run") as mock_update,
-            patch("ollama_queue.eval_engine.insert_eval_result"),
+            patch("ollama_queue.eval.engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval.engine.get_eval_variant", return_value=variant),
+            patch("ollama_queue.eval.engine.get_eval_template", return_value=None),
+            patch("ollama_queue.eval.engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval.engine._get_eval_setting", return_value=""),
+            patch("ollama_queue.eval.engine.update_eval_run") as mock_update,
+            patch("ollama_queue.eval.engine.insert_eval_result"),
         ):
             run_eval_generate(1, MagicMock(), _sleep=lambda s: None)
         status_calls = [c for c in mock_update.call_args_list if c.kwargs.get("status") == "judging"]
@@ -3520,14 +3542,14 @@ class TestRunEvalGenerateCooperativeCancellation:
             return {**run, "status": "cancelled"}
 
         with (
-            patch("ollama_queue.eval_engine.get_eval_run", side_effect=get_run_with_cancel),
-            patch("ollama_queue.eval_engine.get_eval_variant", return_value=_make_variant()),
-            patch("ollama_queue.eval_engine.get_eval_template", return_value=_make_template()),
-            patch("ollama_queue.eval_engine._fetch_items", return_value=items),
-            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
-            patch("ollama_queue.eval_engine._generate_one", return_value=True),
-            patch("ollama_queue.eval_engine.update_eval_run"),
-            patch("ollama_queue.eval_engine.insert_eval_result"),
+            patch("ollama_queue.eval.engine.get_eval_run", side_effect=get_run_with_cancel),
+            patch("ollama_queue.eval.engine.get_eval_variant", return_value=_make_variant()),
+            patch("ollama_queue.eval.engine.get_eval_template", return_value=_make_template()),
+            patch("ollama_queue.eval.engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval.engine._get_eval_setting", return_value=""),
+            patch("ollama_queue.eval.generate._generate_one", return_value=True),
+            patch("ollama_queue.eval.engine.update_eval_run"),
+            patch("ollama_queue.eval.engine.insert_eval_result"),
         ):
             run_eval_generate(1, MagicMock(), _sleep=lambda s: None)
 
@@ -3545,14 +3567,14 @@ class TestRunEvalGenerateCircuitBreaker:
             return False
 
         with (
-            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
-            patch("ollama_queue.eval_engine.get_eval_variant", return_value=_make_variant()),
-            patch("ollama_queue.eval_engine.get_eval_template", return_value=_make_template()),
-            patch("ollama_queue.eval_engine._fetch_items", return_value=items),
-            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
-            patch("ollama_queue.eval_engine._generate_one", side_effect=always_fail),
-            patch("ollama_queue.eval_engine.update_eval_run") as mock_update,
-            patch("ollama_queue.eval_engine.insert_eval_result"),
+            patch("ollama_queue.eval.engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval.engine.get_eval_variant", return_value=_make_variant()),
+            patch("ollama_queue.eval.engine.get_eval_template", return_value=_make_template()),
+            patch("ollama_queue.eval.engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval.engine._get_eval_setting", return_value=""),
+            patch("ollama_queue.eval.generate._generate_one", side_effect=always_fail),
+            patch("ollama_queue.eval.engine.update_eval_run") as mock_update,
+            patch("ollama_queue.eval.engine.insert_eval_result"),
         ):
             run_eval_generate(1, MagicMock(), _sleep=lambda s: None)
         cb_calls = [c for c in mock_update.call_args_list if "circuit_breaker" in str(c.kwargs.get("error", ""))]
@@ -3575,15 +3597,15 @@ class TestRunEvalGenerateCancelDuringThrottle:
             return run
 
         with (
-            patch("ollama_queue.eval_engine.get_eval_run", side_effect=get_run_effect),
-            patch("ollama_queue.eval_engine.get_eval_variant", return_value=_make_variant()),
-            patch("ollama_queue.eval_engine.get_eval_template", return_value=_make_template()),
-            patch("ollama_queue.eval_engine._fetch_items", return_value=items),
-            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
-            patch("ollama_queue.eval_engine._generate_one", return_value=True),
-            patch("ollama_queue.eval_engine._should_throttle", return_value=True),
-            patch("ollama_queue.eval_engine.update_eval_run"),
-            patch("ollama_queue.eval_engine.insert_eval_result"),
+            patch("ollama_queue.eval.engine.get_eval_run", side_effect=get_run_effect),
+            patch("ollama_queue.eval.engine.get_eval_variant", return_value=_make_variant()),
+            patch("ollama_queue.eval.engine.get_eval_template", return_value=_make_template()),
+            patch("ollama_queue.eval.engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval.engine._get_eval_setting", return_value=""),
+            patch("ollama_queue.eval.generate._generate_one", return_value=True),
+            patch("ollama_queue.eval.engine._should_throttle", return_value=True),
+            patch("ollama_queue.eval.engine.update_eval_run"),
+            patch("ollama_queue.eval.engine.insert_eval_result"),
         ):
             run_eval_generate(1, MagicMock(), _sleep=lambda s: None)
 
@@ -3604,14 +3626,14 @@ class TestRunEvalGenerateFinalStatusGuard:
             return run
 
         with (
-            patch("ollama_queue.eval_engine.get_eval_run", side_effect=get_run_effect),
-            patch("ollama_queue.eval_engine.get_eval_variant", return_value=_make_variant()),
-            patch("ollama_queue.eval_engine.get_eval_template", return_value=_make_template()),
-            patch("ollama_queue.eval_engine._fetch_items", return_value=items),
-            patch("ollama_queue.eval_engine._get_eval_setting", return_value=""),
-            patch("ollama_queue.eval_engine._generate_one", return_value=True),
-            patch("ollama_queue.eval_engine.update_eval_run") as mock_update,
-            patch("ollama_queue.eval_engine.insert_eval_result"),
+            patch("ollama_queue.eval.engine.get_eval_run", side_effect=get_run_effect),
+            patch("ollama_queue.eval.engine.get_eval_variant", return_value=_make_variant()),
+            patch("ollama_queue.eval.engine.get_eval_template", return_value=_make_template()),
+            patch("ollama_queue.eval.engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval.engine._get_eval_setting", return_value=""),
+            patch("ollama_queue.eval.generate._generate_one", return_value=True),
+            patch("ollama_queue.eval.engine.update_eval_run") as mock_update,
+            patch("ollama_queue.eval.engine.insert_eval_result"),
         ):
             run_eval_generate(1, MagicMock(), _sleep=lambda s: None)
         # Should NOT have a judging status call
@@ -3624,8 +3646,8 @@ class TestRunEvalJudgeRunNotFound:
 
     def test_run_not_found(self):
         with (
-            patch("ollama_queue.eval_engine.get_eval_run", return_value=None),
-            patch("ollama_queue.eval_engine.update_eval_run") as mock_update,
+            patch("ollama_queue.eval.engine.get_eval_run", return_value=None),
+            patch("ollama_queue.eval.engine.update_eval_run") as mock_update,
         ):
             run_eval_judge(999, MagicMock())
         mock_update.assert_not_called()
@@ -3643,10 +3665,10 @@ class TestRunEvalJudgeNoItems:
             "item_ids": None,
         }
         with (
-            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
-            patch("ollama_queue.eval_engine._fetch_items", return_value=[]),
-            patch("ollama_queue.eval_engine._get_eval_setting", side_effect=lambda db, key, default="": default),
-            patch("ollama_queue.eval_engine.update_eval_run") as mock_update,
+            patch("ollama_queue.eval.engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval.engine._fetch_items", return_value=[]),
+            patch("ollama_queue.eval.engine._get_eval_setting", side_effect=lambda db, key, default="": default),
+            patch("ollama_queue.eval.engine.update_eval_run") as mock_update,
         ):
             run_eval_judge(1, MagicMock())
         failed_calls = [c for c in mock_update.call_args_list if c.kwargs.get("status") == "failed"]
@@ -3687,11 +3709,11 @@ class TestRunEvalJudgeCooperativeCancellation:
             return run
 
         with (
-            patch("ollama_queue.eval_engine.get_eval_run", side_effect=get_run_cancel),
-            patch("ollama_queue.eval_engine._fetch_items", return_value=items),
-            patch("ollama_queue.eval_engine._get_eval_setting", side_effect=lambda db, key, default="": default),
-            patch("ollama_queue.eval_engine._judge_one_target"),
-            patch("ollama_queue.eval_engine.update_eval_run"),
+            patch("ollama_queue.eval.engine.get_eval_run", side_effect=get_run_cancel),
+            patch("ollama_queue.eval.engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval.engine._get_eval_setting", side_effect=lambda db, key, default="": default),
+            patch("ollama_queue.eval.judge._judge_one_target"),
+            patch("ollama_queue.eval.engine.update_eval_run"),
         ):
             run_eval_judge(1, mock_db)
 
@@ -3720,12 +3742,12 @@ class TestRunEvalJudgeSourceItemNotFound:
         mock_db._connect.return_value = mock_conn
 
         with (
-            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
-            patch("ollama_queue.eval_engine._fetch_items", return_value=items),
-            patch("ollama_queue.eval_engine._get_eval_setting", side_effect=lambda db, key, default="": str(default)),
-            patch("ollama_queue.eval_engine.update_eval_run"),
-            patch("ollama_queue.eval_engine.compute_metrics", return_value={}),
-            patch("ollama_queue.eval_engine.render_report", return_value="report"),
+            patch("ollama_queue.eval.engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval.engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval.engine._get_eval_setting", side_effect=lambda db, key, default="": str(default)),
+            patch("ollama_queue.eval.engine.update_eval_run"),
+            patch("ollama_queue.eval.engine.compute_metrics", return_value={}),
+            patch("ollama_queue.eval.engine.render_report", return_value="report"),
         ):
             run_eval_judge(1, mock_db)
 
@@ -3759,11 +3781,11 @@ class TestRunEvalJudgeProxyDownTournament:
         mock_db._connect.return_value = mock_conn
 
         with (
-            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
-            patch("ollama_queue.eval_engine._fetch_items", return_value=items),
-            patch("ollama_queue.eval_engine._get_eval_setting", side_effect=lambda db, key, default="": str(default)),
-            patch("ollama_queue.eval_engine._judge_one_target", side_effect=_ProxyDownError("down")),
-            patch("ollama_queue.eval_engine.update_eval_run") as mock_update,
+            patch("ollama_queue.eval.engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval.engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval.engine._get_eval_setting", side_effect=lambda db, key, default="": str(default)),
+            patch("ollama_queue.eval.judge._judge_one_target", side_effect=_ProxyDownError("down")),
+            patch("ollama_queue.eval.engine.update_eval_run") as mock_update,
         ):
             run_eval_judge(1, mock_db)
         failed_calls = [
@@ -3778,7 +3800,7 @@ class TestFetchAnalysisSamples:
     """Lines 2362-2388: _fetch_analysis_samples."""
 
     def test_returns_top_and_bottom(self, db):
-        from ollama_queue.eval_engine import _fetch_analysis_samples
+        from ollama_queue.eval.engine import _fetch_analysis_samples
 
         run_id = create_eval_run(db, variant_id="A")
         for i in range(6):
@@ -3806,7 +3828,7 @@ class TestRunEvalSession:
     """Lines 2601-2620: run_eval_session orchestrator."""
 
     def test_session_calls_generate_and_judge(self):
-        from ollama_queue.eval_engine import run_eval_session
+        from ollama_queue.eval.engine import run_eval_session
 
         run_generating = {"id": 1, "status": "judging"}
         run_complete = {"id": 1, "status": "complete"}
@@ -3828,47 +3850,47 @@ class TestRunEvalSession:
             return run_complete
 
         with (
-            patch("ollama_queue.eval_engine.run_eval_generate", side_effect=mock_generate),
-            patch("ollama_queue.eval_engine.run_eval_judge", side_effect=mock_judge),
-            patch("ollama_queue.eval_engine.get_eval_run", side_effect=mock_get_run),
-            patch("ollama_queue.eval_engine.compute_run_analysis"),
-            patch("ollama_queue.eval_engine.generate_eval_analysis"),
-            patch("ollama_queue.eval_engine.check_auto_promote"),
+            patch("ollama_queue.eval.generate.run_eval_generate", side_effect=mock_generate),
+            patch("ollama_queue.eval.judge.run_eval_judge", side_effect=mock_judge),
+            patch("ollama_queue.eval.engine.get_eval_run", side_effect=mock_get_run),
+            patch("ollama_queue.eval.engine.compute_run_analysis"),
+            patch("ollama_queue.eval.promote.generate_eval_analysis"),
+            patch("ollama_queue.eval.promote.check_auto_promote"),
         ):
             run_eval_session(1, MagicMock())
         assert "generate" in call_order
         assert "judge" in call_order
 
     def test_session_stops_if_generate_fails(self):
-        from ollama_queue.eval_engine import run_eval_session
+        from ollama_queue.eval.engine import run_eval_session
 
         run_failed = {"id": 1, "status": "failed"}
 
         with (
-            patch("ollama_queue.eval_engine.run_eval_generate"),
-            patch("ollama_queue.eval_engine.get_eval_run", return_value=run_failed),
-            patch("ollama_queue.eval_engine.run_eval_judge") as mock_judge,
+            patch("ollama_queue.eval.generate.run_eval_generate"),
+            patch("ollama_queue.eval.engine.get_eval_run", return_value=run_failed),
+            patch("ollama_queue.eval.judge.run_eval_judge") as mock_judge,
         ):
             run_eval_session(1, MagicMock())
         mock_judge.assert_not_called()
 
     def test_session_unhandled_exception_sets_failed(self):
-        from ollama_queue.eval_engine import run_eval_session
+        from ollama_queue.eval.engine import run_eval_session
 
         with (
-            patch("ollama_queue.eval_engine.run_eval_generate", side_effect=RuntimeError("boom")),
-            patch("ollama_queue.eval_engine.update_eval_run") as mock_update,
+            patch("ollama_queue.eval.generate.run_eval_generate", side_effect=RuntimeError("boom")),
+            patch("ollama_queue.eval.engine.update_eval_run") as mock_update,
         ):
             run_eval_session(1, MagicMock())
         failed_calls = [c for c in mock_update.call_args_list if c.kwargs.get("status") == "failed"]
         assert len(failed_calls) == 1
 
     def test_session_exception_in_update_also_caught(self):
-        from ollama_queue.eval_engine import run_eval_session
+        from ollama_queue.eval.engine import run_eval_session
 
         with (
-            patch("ollama_queue.eval_engine.run_eval_generate", side_effect=RuntimeError("boom")),
-            patch("ollama_queue.eval_engine.update_eval_run", side_effect=RuntimeError("db down")),
+            patch("ollama_queue.eval.generate.run_eval_generate", side_effect=RuntimeError("boom")),
+            patch("ollama_queue.eval.engine.update_eval_run", side_effect=RuntimeError("db down")),
         ):
             run_eval_session(1, MagicMock())  # must not raise
 
@@ -3877,7 +3899,7 @@ class TestGenerateOneMultiStageAndContrastive:
     """Lines 1824, 1827-1831, 1850: _generate_one with chunked/contrastive and self-critique."""
 
     def test_contrastive_generate(self, db):
-        from ollama_queue.eval_engine import _generate_one
+        from ollama_queue.eval.generate import _generate_one
 
         run_id = create_eval_run(db, variant_id="A")
         variant = _make_variant()
@@ -3887,11 +3909,11 @@ class TestGenerateOneMultiStageAndContrastive:
             {"id": "2", "title": "T2", "one_liner": "O2", "description": "", "cluster_id": "c1"},
             {"id": "3", "title": "T3", "one_liner": "O3", "description": "", "cluster_id": "c2"},
         ]
-        from ollama_queue.eval_engine import _build_items_by_cluster
+        from ollama_queue.eval.engine import _build_items_by_cluster
 
         items_by_cluster = _build_items_by_cluster(items)
 
-        with patch("ollama_queue.eval_engine._call_proxy", return_value=("Generated principle", 1)):
+        with patch("ollama_queue.eval.engine._call_proxy", return_value=("Generated principle", 1)):
             ok = _generate_one(
                 db=db,
                 run_id=run_id,
@@ -3905,7 +3927,7 @@ class TestGenerateOneMultiStageAndContrastive:
         assert ok is True
 
     def test_multi_stage_generate(self, db):
-        from ollama_queue.eval_engine import _generate_one
+        from ollama_queue.eval.generate import _generate_one
 
         run_id = create_eval_run(db, variant_id="A")
         variant = _make_variant()
@@ -3915,11 +3937,11 @@ class TestGenerateOneMultiStageAndContrastive:
             {"id": "2", "title": "T2", "one_liner": "O2", "description": "", "cluster_id": "c1"},
             {"id": "3", "title": "T3", "one_liner": "O3", "description": "", "cluster_id": "c2"},
         ]
-        from ollama_queue.eval_engine import _build_items_by_cluster
+        from ollama_queue.eval.engine import _build_items_by_cluster
 
         items_by_cluster = _build_items_by_cluster(items)
 
-        with patch("ollama_queue.eval_engine._call_proxy", return_value=("Generated principle that is good enough", 1)):
+        with patch("ollama_queue.eval.engine._call_proxy", return_value=("Generated principle that is good enough", 1)):
             ok = _generate_one(
                 db=db,
                 run_id=run_id,
@@ -3988,13 +4010,13 @@ class TestPairedJudgeWinnerInterpretation:
 
     def test_tournament_neither_answer(self, db):
         """NEITHER answer stores paired_winner='neither'."""
-        from ollama_queue.eval_engine import _judge_one_target
+        from ollama_queue.eval.judge import _judge_one_target
 
         run_id = create_eval_run(db, variant_id="A")
         same = {"id": "42", "title": "Same", "one_liner": "S", "description": ""}
         diff = {"id": "99", "title": "Diff", "one_liner": "D", "description": ""}
 
-        with patch("ollama_queue.eval_engine._call_proxy", return_value=("NEITHER", None)):
+        with patch("ollama_queue.eval.engine._call_proxy", return_value=("NEITHER", None)):
             _judge_one_target(
                 db=db,
                 run_id=run_id,
@@ -4017,13 +4039,13 @@ class TestPairedJudgeWinnerInterpretation:
 
     def test_tournament_none_answer(self, db):
         """None (unparseable) answer stores paired_winner='neither'."""
-        from ollama_queue.eval_engine import _judge_one_target
+        from ollama_queue.eval.judge import _judge_one_target
 
         run_id = create_eval_run(db, variant_id="A")
         same = {"id": "42", "title": "Same", "one_liner": "S", "description": ""}
         diff = {"id": "99", "title": "Diff", "one_liner": "D", "description": ""}
 
-        with patch("ollama_queue.eval_engine._call_proxy", return_value=(None, None)):
+        with patch("ollama_queue.eval.engine._call_proxy", return_value=(None, None)):
             _judge_one_target(
                 db=db,
                 run_id=run_id,
@@ -4083,7 +4105,7 @@ class TestCheckAutoPromoteExceptionSwallowingActual:
         update_eval_run(db, run_id, status="complete", winner_variant="A", metrics=json.dumps({"A": {"f1": 0.9}}))
         # Patch get_eval_run to return None AFTER the first call (auto_promote check)
         # but make _check_auto_promote_inner crash on an unexpected path
-        with patch("ollama_queue.eval_engine._check_auto_promote_inner", side_effect=RuntimeError("boom")):
+        with patch("ollama_queue.eval.promote._check_auto_promote_inner", side_effect=RuntimeError("boom")):
             # Must not raise — outer except swallows it
             check_auto_promote(db, run_id, "http://localhost:7683")
 
@@ -4111,7 +4133,7 @@ class TestCheckAutoPromoteStabilityWindowHit:
         update_eval_run(
             db, r2, status="complete", winner_variant="A", metrics=json.dumps({"A": {"f1": 0.80}}), item_count=10
         )
-        with patch("ollama_queue.eval_engine.do_promote_eval_run") as mock_p:
+        with patch("ollama_queue.eval.promote.do_promote_eval_run") as mock_p:
             check_auto_promote(db, r2, "http://localhost:7683")
         # Stability window has r2 (0.80, pass) and r1 (0.30, fail) → not promoted
         mock_p.assert_not_called()
@@ -4131,7 +4153,7 @@ class TestCheckAutoPromoteStabilityWindowHit:
         update_eval_run(
             db, r2, status="complete", winner_variant="A", metrics=json.dumps({"A": {"f1": 0.80}}), item_count=10
         )
-        with patch("ollama_queue.eval_engine.do_promote_eval_run") as mock_p:
+        with patch("ollama_queue.eval.promote.do_promote_eval_run") as mock_p:
             check_auto_promote(db, r2, "http://localhost:7683")
         mock_p.assert_not_called()
 
@@ -4198,7 +4220,7 @@ class TestParseExamplesBlockValid:
     """Lines 525-530: _parse_examples_block with valid examples."""
 
     def test_valid_examples_with_output_key(self):
-        from ollama_queue.eval_engine import _parse_examples_block
+        from ollama_queue.eval.generate import _parse_examples_block
 
         examples = [
             {"output": "First principle"},
@@ -4210,21 +4232,21 @@ class TestParseExamplesBlockValid:
         assert "- 'Second principle'" in result
 
     def test_valid_examples_with_principle_key(self):
-        from ollama_queue.eval_engine import _parse_examples_block
+        from ollama_queue.eval.generate import _parse_examples_block
 
         examples = [{"principle": "Test principle"}]
         result = _parse_examples_block(json.dumps(examples))
         assert "- 'Test principle'" in result
 
     def test_valid_examples_with_string_entries(self):
-        from ollama_queue.eval_engine import _parse_examples_block
+        from ollama_queue.eval.generate import _parse_examples_block
 
         examples = ["raw string example"]
         result = _parse_examples_block(json.dumps(examples))
         assert "- 'raw string example'" in result
 
     def test_valid_examples_with_empty_output(self):
-        from ollama_queue.eval_engine import _parse_examples_block
+        from ollama_queue.eval.generate import _parse_examples_block
 
         # Dict with empty output and no principle — should produce empty output, skipping it
         examples = [{"output": "", "principle": ""}, {"output": "valid"}]
@@ -4260,8 +4282,8 @@ class TestGenerateEvalAnalysisMetricsParsingError:
         }
         mock_db = MagicMock()
         with (
-            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
-            patch("ollama_queue.eval_engine.update_eval_run") as mock_update,
+            patch("ollama_queue.eval.engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval.engine.update_eval_run") as mock_update,
         ):
             generate_eval_analysis(mock_db, 1)
         # Should skip analysis entirely (no metrics) — no update_eval_run call with analysis_md
@@ -4327,7 +4349,7 @@ class TestCallProxyExhaustedRetriesAfterLoop:
     """
 
     def test_empty_loop_reaches_exhausted_retries(self):
-        with patch("ollama_queue.eval_engine._MAX_RETRIES", -1):
+        with patch("ollama_queue.eval.engine._MAX_RETRIES", -1):
             text, job_id = _call_proxy(
                 http_base="http://localhost:7683",
                 model="m",
@@ -4351,14 +4373,14 @@ class TestRunEvalGenerateVariantsNonList:
         submitted = []
 
         with (
-            patch("ollama_queue.eval_engine.get_eval_run", return_value=run),
-            patch("ollama_queue.eval_engine.get_eval_variant", return_value=_make_variant()),
-            patch("ollama_queue.eval_engine.get_eval_template", return_value=_make_template()),
-            patch("ollama_queue.eval_engine._fetch_items", return_value=items),
-            patch("ollama_queue.eval_engine._get_eval_setting", side_effect=lambda db, key, default="": default),
-            patch("ollama_queue.eval_engine._generate_one", side_effect=lambda **kw: submitted.append(1) or True),
-            patch("ollama_queue.eval_engine.update_eval_run"),
-            patch("ollama_queue.eval_engine.insert_eval_result"),
+            patch("ollama_queue.eval.engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval.engine.get_eval_variant", return_value=_make_variant()),
+            patch("ollama_queue.eval.engine.get_eval_template", return_value=_make_template()),
+            patch("ollama_queue.eval.engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval.engine._get_eval_setting", side_effect=lambda db, key, default="": default),
+            patch("ollama_queue.eval.generate._generate_one", side_effect=lambda **kw: submitted.append(1) or True),
+            patch("ollama_queue.eval.engine.update_eval_run"),
+            patch("ollama_queue.eval.engine.insert_eval_result"),
         ):
             run_eval_generate(1, MagicMock(), _sleep=lambda s: None)
         # Single variant "A" processed for 1 item

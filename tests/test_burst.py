@@ -2,7 +2,7 @@
 
 import time
 
-from ollama_queue.burst import BurstDetector
+from ollama_queue.sensing.burst import BurstDetector
 
 
 class TestBurstDetector:

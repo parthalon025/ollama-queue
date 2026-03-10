@@ -1,5 +1,5 @@
 import { h } from 'preact';
-import { deferredJobs, resumeDeferred } from '../store';
+import { deferredJobs, resumeDeferred } from '../stores';
 import { useActionFeedback } from '../hooks/useActionFeedback';
 
 // What it shows: Jobs that the system has paused because they can't run right now —

@@ -12,9 +12,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from ollama_queue.api import create_app
+from ollama_queue.app import create_app
 from ollama_queue.db import Database
-from ollama_queue.eval_engine import create_eval_run, do_promote_eval_run, insert_eval_result, update_eval_run
+from ollama_queue.eval.engine import create_eval_run, insert_eval_result, update_eval_run
+from ollama_queue.eval.promote import do_promote_eval_run
 
 
 @pytest.fixture
@@ -478,7 +479,7 @@ def test_judge_rerun_new_run_status_is_judging(client_and_db):
     def _blocked_judge(*args, **kwargs):
         gate.wait(timeout=5)  # Block until assertion is done
 
-    with patch("ollama_queue.eval_engine.run_eval_judge", side_effect=_blocked_judge):
+    with patch("ollama_queue.api.eval_runs.run_eval_judge", side_effect=_blocked_judge):
         resp = client.post(f"/api/eval/runs/{run_id}/judge-rerun")
         new_run_id = resp.json()["run_id"]
 
@@ -565,7 +566,7 @@ def test_repeat_run_returns_new_run_id(client_and_db):
     orig_id = _insert_reproducible_run(db, item_ids=pairs, seed=1234)
 
     resp = client.post(f"/api/eval/runs/{orig_id}/repeat")
-    assert resp.status_code == 200
+    assert resp.status_code == 201
     data = resp.json()
     assert "run_id" in data
     new_id = data["run_id"]
@@ -580,7 +581,7 @@ def test_repeat_run_copies_seed_and_item_ids(client_and_db):
     orig_id = _insert_reproducible_run(db, item_ids=pairs, seed=555)
 
     resp = client.post(f"/api/eval/runs/{orig_id}/repeat")
-    assert resp.status_code == 200
+    assert resp.status_code == 201
     new_id = resp.json()["run_id"]
 
     with db._lock:
@@ -693,7 +694,8 @@ def test_run_eval_generate_persists_seed_when_none(tmp_path):
     import datetime
     from unittest.mock import patch
 
-    from ollama_queue.eval_engine import get_eval_run, run_eval_generate
+    from ollama_queue.eval.engine import get_eval_run
+    from ollama_queue.eval.generate import run_eval_generate
 
     db = Database(str(tmp_path / "test.db"))
     db.initialize()
@@ -717,7 +719,7 @@ def test_run_eval_generate_persists_seed_when_none(tmp_path):
         run_id = cur.lastrowid
 
     # Patch _fetch_items to return empty so the function exits early after seeding
-    with patch("ollama_queue.eval_engine._fetch_items", return_value=[]):
+    with patch("ollama_queue.eval.engine._fetch_items", return_value=[]):
         run_eval_generate(run_id, db, http_base="http://127.0.0.1:7683")
 
     run = get_eval_run(db, run_id)
@@ -752,7 +754,7 @@ def test_analyze_eval_run_returns_ok_for_complete_run(client_and_db):
     with db._lock:
         conn = db._connect()
         run_id = conn.execute("SELECT id FROM eval_runs ORDER BY id DESC LIMIT 1").fetchone()["id"]
-    with patch("ollama_queue.eval_engine.generate_eval_analysis"):
+    with patch("ollama_queue.api.eval_runs.generate_eval_analysis"):
         resp = client.post(f"/api/eval/runs/{run_id}/analyze")
     assert resp.status_code == 200
     data = resp.json()
@@ -816,14 +818,14 @@ class TestDoPromoteEvalRun:
         _make_variant(db, "A")
         _make_variant(db, "B")
         # Pre-set B as production
-        from ollama_queue.eval_engine import update_eval_variant
+        from ollama_queue.eval.engine import update_eval_variant
 
         update_eval_variant(db, "B", is_production=1, is_recommended=1)
 
         run_id = create_eval_run(db, variant_id="A")
         update_eval_run(db, run_id, status="complete", winner_variant="A")
 
-        with patch("ollama_queue.eval_engine.httpx.post") as mock_post:
+        with patch("ollama_queue.eval.promote.httpx.post") as mock_post:
             mock_post.return_value = MagicMock(status_code=200)
             result = do_promote_eval_run(db, run_id)
 
@@ -850,7 +852,7 @@ class TestDoPromoteEvalRun:
         update_eval_run(db, run_id, status="complete", winner_variant="A")
 
         with (
-            patch("ollama_queue.eval_engine.httpx.post", side_effect=httpx.ConnectError("refused")),
+            patch("ollama_queue.eval.promote.httpx.post", side_effect=httpx.ConnectError("refused")),
             pytest.raises(httpx.HTTPError),
         ):
             do_promote_eval_run(db, run_id)
@@ -886,7 +888,7 @@ class TestPromoteEvalRunEndpoint:
         run_id = create_eval_run(db, variant_id="A")
         update_eval_run(db, run_id, status="complete", winner_variant="A")
 
-        with patch("ollama_queue.eval_engine.httpx.post") as mock_post:
+        with patch("ollama_queue.eval.promote.httpx.post") as mock_post:
             mock_post.return_value = MagicMock(status_code=200)
             resp = client.post(f"/api/eval/runs/{run_id}/promote", json={})
 
@@ -921,7 +923,7 @@ class TestPromoteEvalRunEndpoint:
         run_id = create_eval_run(db, variant_id="A")
         update_eval_run(db, run_id, status="complete", winner_variant="A")
 
-        with patch("ollama_queue.eval_engine.httpx.post", side_effect=httpx.ConnectError("refused")):
+        with patch("ollama_queue.eval.promote.httpx.post", side_effect=httpx.ConnectError("refused")):
             resp = client.post(f"/api/eval/runs/{run_id}/promote", json={})
         assert resp.status_code == 502
 
@@ -938,7 +940,7 @@ class TestJudgeModeAPI:
         """POST /api/eval/runs accepts judge_mode in body."""
         client, db = client_and_db
         _make_variant(db, "A")
-        with patch("ollama_queue.eval_engine.run_eval_session"):
+        with patch("ollama_queue.api.eval_runs.run_eval_session"):
             resp = client.post(
                 "/api/eval/runs",
                 json={"variant_id": "A", "judge_mode": "bayesian"},
@@ -947,7 +949,7 @@ class TestJudgeModeAPI:
         run_id = resp.json()["run_id"]
 
         # Verify stored in DB
-        from ollama_queue.eval_engine import get_eval_run
+        from ollama_queue.eval.engine import get_eval_run
 
         run = get_eval_run(db, run_id)
         assert run["judge_mode"] == "bayesian"
@@ -956,7 +958,7 @@ class TestJudgeModeAPI:
         """POST /api/eval/runs defaults to 'bayesian' when judge_mode not specified."""
         client, db = client_and_db
         _make_variant(db, "A")
-        with patch("ollama_queue.eval_engine.run_eval_session"):
+        with patch("ollama_queue.api.eval_runs.run_eval_session"):
             resp = client.post(
                 "/api/eval/runs",
                 json={"variant_id": "A"},
@@ -964,7 +966,7 @@ class TestJudgeModeAPI:
         assert resp.status_code == 201
         run_id = resp.json()["run_id"]
 
-        from ollama_queue.eval_engine import get_eval_run
+        from ollama_queue.eval.engine import get_eval_run
 
         run = get_eval_run(db, run_id)
         assert run["judge_mode"] == "bayesian"
@@ -1024,7 +1026,7 @@ class TestJudgeModeAPI:
         client, db = client_and_db
         _make_variant(db, "A")
         for mode in ("rubric", "binary", "tournament", "bayesian"):
-            with patch("ollama_queue.eval_engine.run_eval_session"):
+            with patch("ollama_queue.api.eval_runs.run_eval_session"):
                 resp = client.post(
                     "/api/eval/runs",
                     json={"variant_id": "A", "judge_mode": mode},
@@ -1367,7 +1369,7 @@ def test_get_eval_run_detail_bad_metrics_json(client_and_db):
 def test_post_eval_runs_variants_list_sets_variant_id(client_and_db):
     """POST /api/eval/runs with variants list sets variant_id to first element."""
     client, db = client_and_db
-    with patch("ollama_queue.eval_engine.run_eval_session"):
+    with patch("ollama_queue.api.eval_runs.run_eval_session"):
         resp = client.post(
             "/api/eval/runs",
             json={"variants": ["A", "B"], "run_mode": "batch"},
@@ -1381,14 +1383,14 @@ def test_post_eval_runs_variants_list_sets_variant_id(client_and_db):
 def test_post_eval_runs_with_judge_model(client_and_db):
     """POST /api/eval/runs with judge_model persists it."""
     client, db = client_and_db
-    with patch("ollama_queue.eval_engine.run_eval_session"):
+    with patch("ollama_queue.api.eval_runs.run_eval_session"):
         resp = client.post(
             "/api/eval/runs",
             json={"variant_id": "A", "judge_model": "deepseek-r1:8b"},
         )
     assert resp.status_code == 201
     run_id = resp.json()["run_id"]
-    from ollama_queue.eval_engine import get_eval_run
+    from ollama_queue.eval.engine import get_eval_run
 
     run = get_eval_run(db, run_id)
     assert run["judge_model"] == "deepseek-r1:8b"
@@ -1403,7 +1405,7 @@ def test_post_eval_runs_background_thread_exception(client_and_db):
     def _raise(*args, **kwargs):
         raise RuntimeError("boom")
 
-    with patch("ollama_queue.eval_engine.run_eval_session", side_effect=_raise):
+    with patch("ollama_queue.api.eval_runs.run_eval_session", side_effect=_raise):
         resp = client.post("/api/eval/runs", json={"variant_id": "A"})
     assert resp.status_code == 201
     time.sleep(0.1)  # let background thread run
@@ -1419,7 +1421,7 @@ def test_analyze_eval_run_exception_sets_failure_message(client_and_db):
     def _raise(*args, **kwargs):
         raise RuntimeError("analysis boom")
 
-    with patch("ollama_queue.eval_engine.generate_eval_analysis", side_effect=_raise):
+    with patch("ollama_queue.api.eval_runs.generate_eval_analysis", side_effect=_raise):
         resp = client.post(f"/api/eval/runs/{run_id}/analyze")
     assert resp.status_code == 200
     time.sleep(0.2)  # let background thread run
@@ -1439,8 +1441,8 @@ def test_analyze_eval_run_double_exception(client_and_db):
         raise RuntimeError("analysis boom")
 
     with (
-        patch("ollama_queue.eval_engine.generate_eval_analysis", side_effect=_raise),
-        patch("ollama_queue.eval_engine.update_eval_run", side_effect=Exception("db boom")),
+        patch("ollama_queue.api.eval_runs.generate_eval_analysis", side_effect=_raise),
+        patch("ollama_queue.api.eval_runs.update_eval_run", side_effect=Exception("db boom")),
     ):
         resp = client.post(f"/api/eval/runs/{run_id}/analyze")
     assert resp.status_code == 200
@@ -1455,9 +1457,9 @@ def test_repeat_run_background_thread_exception(client_and_db):
     pairs = [["101", "202"]]
     orig_id = _insert_reproducible_run(db, item_ids=pairs, seed=1234)
 
-    with patch("ollama_queue.eval_engine.run_eval_session", side_effect=RuntimeError("boom")):
+    with patch("ollama_queue.api.eval_runs.run_eval_session", side_effect=RuntimeError("boom")):
         resp = client.post(f"/api/eval/runs/{orig_id}/repeat")
-    assert resp.status_code == 200
+    assert resp.status_code == 201
     time.sleep(0.1)
 
 
@@ -1471,12 +1473,12 @@ def test_judge_rerun_background_thread_exception(client_and_db):
     def _raise(*args, **kwargs):
         raise RuntimeError("judge boom")
 
-    with patch("ollama_queue.eval_engine.run_eval_judge", side_effect=_raise):
+    with patch("ollama_queue.api.eval_runs.run_eval_judge", side_effect=_raise):
         resp = client.post(f"/api/eval/runs/{run_id}/judge-rerun")
     assert resp.status_code == 201
     new_id = resp.json()["run_id"]
     time.sleep(0.3)  # let background thread run
-    from ollama_queue.eval_engine import get_eval_run
+    from ollama_queue.eval.engine import get_eval_run
 
     run = get_eval_run(db, new_id)
     assert run["status"] == "failed"
@@ -1502,7 +1504,7 @@ def test_judge_rerun_bg_thread_double_exception(client_and_db):
         return orig_update(db_ref, rid, **kwargs)
 
     with (
-        patch("ollama_queue.eval_engine.run_eval_judge", side_effect=_raise_judge),
+        patch("ollama_queue.api.eval_runs.run_eval_judge", side_effect=_raise_judge),
     ):
         resp = client.post(f"/api/eval/runs/{run_id}/judge-rerun")
     assert resp.status_code == 201

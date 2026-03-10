@@ -1,6 +1,6 @@
 """Tests for cross-model performance curve regression."""
 
-from ollama_queue.performance_curve import PerformanceCurve
+from ollama_queue.models.performance_curve import PerformanceCurve
 
 
 def test_no_data():

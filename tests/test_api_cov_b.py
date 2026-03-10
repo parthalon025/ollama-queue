@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from ollama_queue.api import create_app
+from ollama_queue.app import create_app
 from ollama_queue.db import Database
 
 
@@ -84,7 +84,7 @@ def test_streaming_consumer_request_count_incremented(client, db):
 
     mock_client = _make_streaming_mock()
 
-    with patch("ollama_queue.api.httpx.AsyncClient", return_value=mock_client):
+    with patch("ollama_queue.api.proxy.httpx.AsyncClient", return_value=mock_client):
         resp = client.post(
             "/api/generate",
             json={"model": "test", "prompt": "hello", "stream": True},
@@ -105,7 +105,7 @@ def test_streaming_consumer_tracking_exception_handled(client, db):
     mock_client = _make_streaming_mock()
 
     with (
-        patch("ollama_queue.api.httpx.AsyncClient", return_value=mock_client),
+        patch("ollama_queue.api.proxy.httpx.AsyncClient", return_value=mock_client),
         patch.object(db, "list_consumers", side_effect=RuntimeError("db boom")),
     ):
         resp = client.post(
@@ -133,8 +133,8 @@ def test_streaming_generate_timeout_waiting_for_claim(client, db):
     db.update_daemon_state(state="running", current_job_id=job_id)
 
     with (
-        patch("ollama_queue.api.PROXY_WAIT_TIMEOUT", 0.3),
-        patch("ollama_queue.api.PROXY_POLL_INTERVAL", 0.1),
+        patch("ollama_queue.api.proxy.PROXY_WAIT_TIMEOUT", 0.3),
+        patch("ollama_queue.api.proxy.PROXY_POLL_INTERVAL", 0.1),
     ):
         resp = client.post(
             "/api/generate",
@@ -154,7 +154,7 @@ def test_streaming_generate_setup_failure(client, db):
     mock_client.send = AsyncMock(side_effect=ConnectionError("connection refused"))
     mock_client.aclose = AsyncMock()
 
-    with patch("ollama_queue.api.httpx.AsyncClient", return_value=mock_client):
+    with patch("ollama_queue.api.proxy.httpx.AsyncClient", return_value=mock_client):
         resp = client.post(
             "/api/generate",
             json={"model": "test", "prompt": "hello", "stream": True},
@@ -175,7 +175,7 @@ def test_streaming_release_complete_job_fails(client, db):
     mock_client = _make_streaming_mock()
 
     with (
-        patch("ollama_queue.api.httpx.AsyncClient", return_value=mock_client),
+        patch("ollama_queue.api.proxy.httpx.AsyncClient", return_value=mock_client),
         patch.object(db, "complete_job", side_effect=RuntimeError("complete boom")),
     ):
         resp = client.post(
@@ -194,7 +194,7 @@ def test_streaming_release_proxy_claim_fails(client, db):
     mock_client = _make_streaming_mock()
 
     with (
-        patch("ollama_queue.api.httpx.AsyncClient", return_value=mock_client),
+        patch("ollama_queue.api.proxy.httpx.AsyncClient", return_value=mock_client),
         patch.object(db, "release_proxy_claim", side_effect=RuntimeError("release boom")),
     ):
         resp = client.post(
@@ -252,7 +252,7 @@ def test_update_schedule_rebalance_fails(client, db):
     rj_id = jobs[0]["id"]
 
     with patch(
-        "ollama_queue.scheduler.Scheduler.rebalance",
+        "ollama_queue.scheduling.scheduler.Scheduler.rebalance",
         side_effect=RuntimeError("scheduler boom"),
     ):
         resp = client.put(f"/api/schedule/{rj_id}", json={"enabled": False})
@@ -313,7 +313,7 @@ def test_generate_description_success(client, db):
     def fake_gen(rj_id_arg, name, tag, command, db_ref):
         db_ref.update_recurring_job(rj_id_arg, description="A great job.")
 
-    with patch("ollama_queue.api._call_generate_description", side_effect=fake_gen):
+    with patch("ollama_queue.api.schedule._call_generate_description", side_effect=fake_gen):
         resp = client.post(f"/api/schedule/{rj_id}/generate-description")
 
     assert resp.status_code == 200
@@ -379,7 +379,7 @@ def test_reschedule_permanent_failure_rejected(client, db):
     assert len(dlq_entries) >= 1
     dlq_id = dlq_entries[0]["id"]
 
-    with patch("ollama_queue.system_snapshot.classify_failure", return_value="permanent"):
+    with patch("ollama_queue.sensing.system_snapshot.classify_failure", return_value="permanent"):
         resp = client.post(f"/api/dlq/{dlq_id}/reschedule")
     assert resp.status_code == 400
     assert "permanent" in resp.json()["detail"].lower()
