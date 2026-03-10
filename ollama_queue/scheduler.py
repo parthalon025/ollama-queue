@@ -327,36 +327,55 @@ class Scheduler:
         return scores
 
     def load_map_extended(self, now: float | None = None) -> list[dict]:
-        """Build a 48-slot load map with VRAM estimates per slot.
+        """Build a 48-slot load map with VRAM estimates and scheduling metadata.
 
-        Returns list of dicts with 'load' (priority-weighted score) and
-        'vram_committed_gb' (estimated VRAM commitment based on model sizes of scheduled jobs).
-        Uses per-job VRAM scoring alongside the standard load_map() logic.
+        Returns list of dicts with keys consumed by find_fitting_slot:
+        - load: priority-weighted score
+        - vram_committed_gb: estimated VRAM commitment
+        - is_pinned: True if slot is pinned (score >= PIN_SCORE)
+        - recurring_ids: list of recurring job IDs firing in this slot
+        - timestamp: wall-clock time for this slot (anchored to local midnight)
         """
+        import datetime as _dt
+
         if now is None:
             now = time.time()
 
         scores = self.load_map(now=now)
         vram: list[float] = [0.0] * self._SLOT_COUNT
+        slot_rj_ids: list[list[int]] = [[] for _ in range(self._SLOT_COUNT)]
+
+        local_midnight = _dt.datetime.combine(_dt.datetime.fromtimestamp(now).date(), _dt.time.min).timestamp()
 
         for rj in self._get_recurring_jobs():
             if not rj["enabled"]:
                 continue
             model = rj.get("model", "")
             model_vram = _estimate_model_vram(model)
-            if model_vram <= 0:
-                continue
+
             # Build a temporary score array to find which slots this job fires in
             tmp: list[float] = [0.0] * self._SLOT_COUNT
             if rj.get("cron_expression"):
                 self._score_cron_job(tmp, rj, 1.0, now)
             elif rj.get("interval_seconds"):
                 self._score_interval_job(tmp, rj, 1.0, now)
+
             for i in range(self._SLOT_COUNT):
                 if tmp[i] > 0:
-                    vram[i] += model_vram
+                    slot_rj_ids[i].append(rj["id"])
+                    if model_vram > 0:
+                        vram[i] += model_vram
 
-        return [{"load": scores[i], "vram_committed_gb": round(vram[i], 1)} for i in range(self._SLOT_COUNT)]
+        return [
+            {
+                "load": scores[i],
+                "vram_committed_gb": round(vram[i], 1),
+                "is_pinned": scores[i] >= self._PIN_SCORE,
+                "recurring_ids": slot_rj_ids[i],
+                "timestamp": local_midnight + i * self._SLOT_SECONDS,
+            }
+            for i in range(self._SLOT_COUNT)
+        ]
 
     def suggest_time(
         self,

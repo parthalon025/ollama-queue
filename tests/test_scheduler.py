@@ -217,6 +217,15 @@ class TestLoadMap:
         nonzero = [s for s in lm if s > 0]
         assert len(nonzero) >= 3  # at least 3 slots hit
 
+    def test_load_map_extended_has_all_scoring_keys(self, db, scheduler):
+        """load_map_extended must return all keys that find_fitting_slot consumes."""
+        required_keys = {"load", "vram_committed_gb", "is_pinned", "recurring_ids", "timestamp"}
+        result = scheduler.load_map_extended()
+        assert len(result) == 48
+        for entry in result:
+            for key in required_keys:
+                assert key in entry, f"Missing key: {key}"
+
 
 class TestSuggestTime:
     def test_returns_list_of_suggestions(self, db, scheduler):
