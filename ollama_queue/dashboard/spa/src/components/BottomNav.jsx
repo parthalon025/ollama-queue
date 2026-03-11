@@ -1,4 +1,4 @@
-import { h } from 'preact';
+import { h, Fragment } from 'preact';
 
 // NOTE: callback params use descriptive names — never 'h'
 const NAV_ITEMS = [
@@ -12,8 +12,13 @@ const NAV_ITEMS = [
     { id: 'performance', icon: '⊘', label: 'Perf', tooltip: 'Model performance stats and system health' },
 ];
 
-export default function BottomNav({ active, onNavigate, dlqCount }) {
+// What it shows: Mobile bottom tab bar for navigating between views, plus a floating action
+//   button (FAB) above the bar when onSubmitRequest is wired in.
+// Decision it drives: User can switch tabs and submit a new job with one tap on mobile
+//   without needing to know about the desktop Sidebar.
+export default function BottomNav({ active, onNavigate, dlqCount, onSubmitRequest }) {
     return (
+        <Fragment>
         <nav
             class="mobile-bottom-nav"
             style={{
@@ -69,5 +74,16 @@ export default function BottomNav({ active, onNavigate, dlqCount }) {
                 );
             })}
         </nav>
+        {onSubmitRequest && (
+            <button
+                class="t-btn"
+                onClick={onSubmitRequest}
+                aria-label="Submit job"
+                style="position:fixed;bottom:72px;right:16px;z-index:50;width:48px;height:48px;border-radius:50%;font-size:1.25rem;display:flex;align-items:center;justify-content:center;padding:0;"
+            >
+                +
+            </button>
+        )}
+        </Fragment>
     );
 }
