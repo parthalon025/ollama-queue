@@ -552,3 +552,13 @@ def test_set_valid_provider_accepted(client):
     """PUT with valid provider should succeed."""
     resp = client.put("/api/eval/settings", json={"eval.generator_provider": "claude"})
     assert resp.status_code == 200
+
+
+def test_short_api_key_fully_masked(client_and_db):
+    """API keys shorter than 6 chars should be fully masked."""
+    client, db = client_and_db
+    db.set_setting("eval.claude_api_key", "abc")
+    resp = client.get("/api/eval/settings")
+    data = resp.json()
+    assert data.get("eval.claude_api_key") == "***"
+    assert "abc" not in data.get("eval.claude_api_key", "")

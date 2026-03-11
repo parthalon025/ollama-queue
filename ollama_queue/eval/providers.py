@@ -59,7 +59,8 @@ def _call_proxy_raw(
             if attempt >= _MAX_RETRIES:
                 return None, {}, None
             time.sleep(_RETRY_BASE_DELAY * (2**attempt))
-    return None, {}, None
+    # unreachable: all loop paths return explicitly above
+    return None, {}, None  # pragma: no cover
 
 
 class EvalProvider(ABC):

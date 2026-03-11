@@ -117,6 +117,9 @@ def _mask_value(key: str, value: str) -> str:
         # Legacy: token was always fully masked as "***"
         return "***"
     # API keys: show first 6 chars so user can identify which key is configured
+    # Short values (≤6 chars) get a full mask to avoid exposing the entire key
+    if len(value) <= 6:
+        return "***"
     return value[:6] + "***"
 
 
