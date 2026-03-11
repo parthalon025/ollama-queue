@@ -1,11 +1,30 @@
+import { h } from 'preact';
+import { useEffect, useRef } from 'preact/hooks';
+import { glitchText } from 'superhot-ui';
+
 /**
  * Terminal-style status badge for queue job states.
  * Maps ollama-queue statuses to theme status classes.
+ * Fires a SUPERHOT glitch burst when the state transitions into an error state (failed, killed).
  *
  * @param {{ state: string }} props
  */
 export default function StatusBadge({ state }) {
   const s = (state || '').toLowerCase();
+  const isError = s === 'failed' || s === 'killed' || s === 'offline';
+
+  const spanRef = useRef(null);
+  const prevErrorRef = useRef(isError);
+
+  // Glitch burst: fire once when transitioning INTO an error state.
+  // The visual jolt signals "something just went wrong" — distinct from a static error badge.
+  useEffect(() => {
+    const wasError = prevErrorRef.current;
+    prevErrorRef.current = isError;
+    if (isError && !wasError && spanRef.current) {
+      glitchText(spanRef.current, { intensity: 'high' });
+    }
+  }, [isError]);
 
   let statusClass;
   const label = state;
@@ -47,7 +66,7 @@ export default function StatusBadge({ state }) {
   }
 
   return (
-    <span class={`t-status ${statusClass}`}>
+    <span ref={spanRef} class={`t-status ${statusClass}`}>
       <span style="display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: currentColor;" />
       {label}
     </span>

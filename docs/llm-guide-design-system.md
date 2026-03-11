@@ -3,8 +3,9 @@
 > **For LLMs:** Read this alongside the base ui-template design doc and the expedition33 theme guide before modifying any dashboard file. This document maps every queue concept to a specific design system component, mood, and metaphor.
 
 **Dashboard:** `ollama_queue/dashboard/spa/src/`
-**CSS entry:** `src/index.css` (imports `tailwindcss`, `expedition33-ui`, `uPlot`)
+**CSS entry:** `src/index.css` (imports `tailwindcss`, `superhot-ui`, `uPlot`)
 **Tech:** Preact 10, @preact/signals, Tailwind v4, esbuild, uPlot
+**Theme:** SUPERHOT terminal aesthetic — VT323 pixel font (Google Fonts), `.page-banner-sh` CRT headers, `superhot-ui` JS effects
 **Polling:** 5s status, 60s non-realtime (health, durations, heatmap, history)
 
 ---
@@ -14,30 +15,47 @@
 ### Pipeline Position
 
 ```
-ui-template (base)          -> CSS token system, component manifest, animation library
-  +-- expedition33-ui (theme) -> dark fantasy chroma, mood overlays, atmospheric layers
-        +-- ollama-queue (app)  -> domain-specific components, queue-aware compositions
+ui-template (base)        -> CSS token system, component manifest, animation library
+  +-- superhot-ui (theme) -> SUPERHOT terminal aesthetic, CRT effects, JS animation hooks
+        +-- ollama-queue (app) -> domain-specific components, queue-aware compositions
 ```
 
-**ui-template** provides the three-layer token architecture (primitives -> semantic -> component), the `data-chroma` cascade API, the `data-mood` atmosphere system, the `.is-*` state language, and the full animation library (PaintReveal, ChromaFlood, FractureExit, etc.).
+**ui-template** provides the three-layer token architecture (primitives → semantic → component), CSS custom properties, and the animation library.
 
-**expedition33-ui** provides the dark fantasy theme: near-black surfaces, gold accent, deep purple secondary, serif typography, tarot-card frames, atmospheric layers, and the character chroma system. Installed via `file:` dependency in `package.json`.
+**superhot-ui** provides the SUPERHOT terminal aesthetic: near-black terminal surfaces, red accent (`--accent`), VT323/monospace typography, and four JS effect hooks:
+- `applyFreshness(el, ts, thresholds)` — color-shifts element based on age (fresh → cooling → frozen → stale)
+- `shatterElement(el, opts)` — fragment animation on removal (cancel actions)
+- `glitchText(el, opts)` — digital glitch burst on error state transitions
+- `applyMantra(el) / removeMantra(el)` — repeating "SUPER HOT" scanline overlay on active state
+- `data-sh-effect="threat-pulse"` attribute — sustained red glow pulse for critical states (DLQ rows, resource threshold breach)
 
-**ollama-queue** is the application layer. It consumes both via `@import "expedition33-ui"` in `index.css` and adds app-specific layout tokens (`--sidebar-width`), domain components (ResourceGauges, GanttChart, ActivityHeatmap), and queue-specific CSS patterns (`.now-grid`, `.history-top-grid`, cursor system, tiered animations).
+Installed via `file:` dependency in `package.json`. Import JS effects from `'superhot-ui'` (not subpaths).
 
-### Five Tab Pages
+**ollama-queue** is the application layer. It consumes `superhot-ui` via `@import "../node_modules/superhot-ui/css/superhot.css"` in `index.css` and adds:
+- App-specific layout tokens (`--sidebar-width`, `--font-mono` override with VT323 first)
+- `PageBanner` component: `.page-banner-sh` CRT terminal headers with glow animation and scan beam
+- Light/dark mode toggle: `localStorage`-backed `data-theme` attribute on `<html>`; `[data-theme="light"]` token overrides in `index.css`
+- Domain components (ResourceGauges, GanttChart, ActivityHeatmap)
+- Queue-specific CSS patterns (`.now-grid`, `.history-top-grid`, cursor system, tiered animations)
+
+### Eight Tab Pages
 
 | Tab | Route ID | View Component | Purpose |
 |-----|----------|---------------|---------|
 | Now | `now` | `pages/Now.jsx` | Real-time command center: running job, queue, resource gauges, KPI cards, alert strip |
-| Plan | `plan` | `pages/Plan.jsx` | 24h Gantt timeline, recurring job table with inline editing, rebalance controls |
+| Plan | `plan` | `pages/Plan/index.jsx` | 24h Gantt timeline, recurring job table with inline editing, rebalance controls |
 | History | `history` | `pages/History.jsx` | DLQ entries, duration trend charts, activity heatmap, completed job list |
 | Models | `models` | `pages/ModelsTab.jsx` | Installed model table (sortable), model catalog search, download/pull progress |
+| Performance | `performance` | `pages/Performance.jsx` | Model benchmarks, performance curve chart, load heatmap, system health |
 | Settings | `settings` | `pages/Settings.jsx` | Health thresholds, defaults, retention, retry, stall detection, concurrency, daemon controls |
+| Eval | `eval` | `pages/Eval.jsx` | A/B prompt evaluation runs, variants, trends, and eval settings |
+| Consumers | `consumers` | `pages/Consumers.jsx` | Detected Ollama callers, config patching, iptables intercept mode |
 
 ### Layout System
 
-**Desktop (>=1024px):** Fixed 200px sidebar (`layout-sidebar`) + main content area (`layout-main`) offset by sidebar width. Sidebar contains daemon status chip at top + 5 nav buttons with DLQ badge on History.
+**Desktop (>=1024px):** Fixed 200px sidebar (`layout-sidebar`) + main content area (`layout-main`) offset by sidebar width. Sidebar contains: daemon status chip at top + 8 nav buttons (DLQ badge on History) + theme toggle button at bottom (`.theme-toggle` class).
+
+**Theme toggle:** `☀ Light` / `◗ Dark` button at the bottom of the sidebar. Reads/writes `localStorage('queue-theme')`, sets `document.documentElement.setAttribute('data-theme', ...)`. `[data-theme="light"]` overrides background/text/border tokens in `index.css` with warm cream paper aesthetic.
 
 **Tablet (768-1023px):** Collapsed 64px icon-only sidebar (`.sidebar-label` hidden).
 
@@ -62,6 +80,12 @@ ui-template (base)          -> CSS token system, component manifest, animation l
 | Hero metric card | `HeroCard` (`.t-frame` + `cursor-active/working`) | 2x2 KPI grid: Jobs/24h, Avg Wait, Pause Time, Success Rate |
 | Resource gauge bars | `ResourceGauges` (inline div bars) | Now page (standalone + inside CurrentJob) |
 | Cursor state indicators | `.cursor-active` (1s blink), `.cursor-working` (0.5s), `.cursor-idle` (2s) | HeroCard loading/active state |
+| CRT page banner | `PageBanner` component → `.page-banner-sh` | Top of every page — title in VT323 with phosphor glow, scan beam sweep, CRT scanlines |
+| SUPERHOT freshness | `applyFreshness()` via `FreshRow` wrapper | QueueList rows — color shift based on job age |
+| SUPERHOT shatter | `shatterElement()` in `cancelJob()` | Job cancel — fragment animation on FreshRow container |
+| SUPERHOT glitch | `glitchText()` in `StatusBadge` | Error state entry transition (failed/killed) |
+| SUPERHOT mantra | `applyMantra()` / `removeMantra()` in `CurrentJob` | Active running job — "SUPER HOT" scanline overlay |
+| ThreatPulse | `data-sh-effect="threat-pulse"` | DLQ rows (always on mount), ResourceGauges (at threshold), CurrentJob stall |
 | Model badge | `ModelBadge` (profile + typeTag pills) | Plan model column, Models installed table, catalog cards |
 | Sparkline | `TimeChart` (uPlot thin line) | HeroCard sparklines, History duration trends |
 | Heatmap | `ActivityHeatmap` (7x24 CSS grid) | History GPU activity |

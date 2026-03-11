@@ -13,6 +13,7 @@ import {
   enableIntercept, disableIntercept,
 } from '../stores';
 import { ConsumerRow } from '../components/consumers/ConsumerRow.jsx';
+import PageBanner from '../components/PageBanner.jsx';
 
 // What it shows: System-wide iptables intercept mode status + enable/disable toggle.
 // Decision it drives: Lets user activate comprehensive Ollama MITM that catches
@@ -70,6 +71,7 @@ export default function Consumers() {
 
   return (
     <div class="consumers-page">
+      <PageBanner title="Consumers" subtitle="ollama traffic routing and patching" />
       <InterceptBanner />
 
       <div class="consumers-header">

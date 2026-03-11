@@ -6,6 +6,7 @@ import {
     startModelPull, cancelModelPull,
 } from '../stores';
 import { ModelBadge } from '../components/ModelBadge';
+import PageBanner from '../components/PageBanner.jsx';
 
 function useDebounce(value, delay) {
     const [debounced, setDebounced] = useState(value);
@@ -125,10 +126,7 @@ export default function ModelsTab() {
 
     return (
         <div class="flex flex-col gap-4 animate-page-enter">
-            <h2 style={{ margin: 0, fontFamily: 'var(--font-mono)', fontWeight: 700,
-                         fontSize: 'var(--type-headline)', color: 'var(--text-primary)' }}>
-                AI Models
-            </h2>
+            <PageBanner title="Models" subtitle="installed AI models and downloads" />
 
             {pullError && (
                 <div style={{ padding: '0.5rem', background: 'var(--status-error)',

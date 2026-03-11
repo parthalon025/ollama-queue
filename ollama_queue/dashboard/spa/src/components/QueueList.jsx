@@ -1,5 +1,6 @@
 import { h } from 'preact';
-import { useState, useMemo } from 'preact/hooks';
+import { useState, useMemo, useEffect, useRef } from 'preact/hooks';
+import { applyFreshness, shatterElement } from 'superhot-ui';
 import { queue, API, refreshQueue } from '../stores';
 
 /**
@@ -28,8 +29,9 @@ function priorityColor(p) {
   return PRIORITY_COLORS.background;
 }
 
-async function cancelJob(id, isRunning, setError) {
+async function cancelJob(id, isRunning, setError, cardEl) {
   if (isRunning && !confirm('Cancel this running job? The process will be killed.')) return;
+  if (cardEl) shatterElement(cardEl, { fragments: 6 });
   try {
     const res = await fetch(`${API}/queue/cancel/${id}`, { method: 'POST' });
     if (!res.ok) { setError(`Cancel failed: HTTP ${res.status}`); return; }
@@ -37,6 +39,25 @@ async function cancelJob(id, isRunning, setError) {
   } catch (e) {
     setError(`Cancel failed: ${e.message}`);
   }
+}
+
+// What it shows: Visual freshness state on a queue row based on how long ago the job was submitted.
+// Decision it drives: Old jobs sitting in the queue stand out visually (cooling → frozen → stale),
+//   prompting the user to investigate why they haven't started.
+function FreshRow({ job, children }) {
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!ref.current || !job.submitted_at) return;
+    const ts = job.submitted_at * 1000; // convert seconds to ms
+    applyFreshness(ref.current, ts, { cooling: 300, frozen: 1800, stale: 3600 });
+    const interval = setInterval(() => {
+      if (ref.current) applyFreshness(ref.current, ts, { cooling: 300, frozen: 1800, stale: 3600 });
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [job.submitted_at]);
+
+  return <div ref={ref} data-fresh-row>{children}</div>;
 }
 
 export default function QueueList({ jobs, currentJob }) {
@@ -149,7 +170,7 @@ export default function QueueList({ jobs, currentJob }) {
           const dragIndex = job._isRunning ? null : (currentJob ? idx - 1 : idx);
 
           return (
-            <div key={job.id}>
+            <FreshRow key={job.id} job={job}>
               {/* Row */}
               <div
                 draggable={!job._isRunning}
@@ -236,7 +257,7 @@ export default function QueueList({ jobs, currentJob }) {
                   class="t-btn"
                   style="background: none; border: none; color: var(--status-error); font-size: 14px; cursor: pointer; padding: 2px 6px; line-height: 1; flex-shrink: 0;"
                   title="Remove this job from the queue — cannot be undone"
-                  onClick={(e) => { e.stopPropagation(); cancelJob(job.id, job._isRunning, setCancelError); }}
+                  onClick={(e) => { e.stopPropagation(); cancelJob(job.id, job._isRunning, setCancelError, e.currentTarget.closest('[data-fresh-row]')); }}
                 >
                   ×
                 </button>
@@ -251,7 +272,7 @@ export default function QueueList({ jobs, currentJob }) {
                   {job.timeout && <div style="margin-top: 4px; color: var(--text-tertiary);">time limit: {job.timeout}s  •  resource type: {job.resource_profile || 'ollama'}</div>}
                 </div>
               )}
-            </div>
+            </FreshRow>
           );
         })}
       </div>

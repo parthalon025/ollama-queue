@@ -13,6 +13,7 @@ import { ModelBadge } from '../../components/ModelBadge';
 import LoadMapStrip from '../../components/LoadMapStrip.jsx';
 import AddRecurringJobModal from '../../components/AddRecurringJobModal.jsx';
 import ScheduleHistory from './ScheduleHistory.jsx';
+import PageBanner from '../../components/PageBanner.jsx';
 import {
     formatCountdown, formatInterval, parseInterval, formatDuration,
     computeRho, rhoStatus, priorityCategory, groupJobsByTag, groupNextDue,
@@ -834,11 +835,8 @@ export default function Plan() {
 
     return (
         <div class="flex flex-col gap-4 animate-page-enter">
+            <PageBanner title="Schedule" subtitle="recurring jobs and upcoming run times" />
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h2 style={{ margin: 0, fontFamily: 'var(--font-mono)', fontWeight: 700,
-                             fontSize: 'var(--type-headline)', color: 'var(--text-primary)' }}>
-                    Schedule
-                </h2>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                     <AddRecurringJobModal onAdded={() => { fetchSchedule(); fetchLoadMap(); }} />
                     <div>

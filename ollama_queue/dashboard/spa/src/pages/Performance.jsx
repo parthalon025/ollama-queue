@@ -7,6 +7,7 @@ import {
 import { SystemHealth } from '../components/SystemHealth.jsx';
 import PerformanceCurveChart from '../components/PerformanceCurveChart.jsx';
 import LoadHeatmap from '../components/LoadHeatmap.jsx';
+import PageBanner from '../components/PageBanner.jsx';
 
 // What it shows: Model-level performance data — how fast each model generates tokens,
 //   how long each takes to warm up, how many times each has run — plus a fitted regression
@@ -32,6 +33,7 @@ export default function Performance() {
 
     return (
         <div class="flex flex-col gap-6 animate-page-enter">
+            <PageBanner title="Performance" subtitle="model benchmarks and system metrics" />
 
             {/* System Health — always visible at top */}
             <SystemHealth />

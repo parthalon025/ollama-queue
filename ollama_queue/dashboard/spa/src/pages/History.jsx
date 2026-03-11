@@ -3,11 +3,12 @@ import {
     dlqEntries, dlqCount, durationData, heatmapData, history,
     fetchDLQ, rescheduleDLQEntry, API,
 } from '../stores';
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { useActionFeedback } from '../hooks/useActionFeedback.js';
 import ActivityHeatmap from '../components/ActivityHeatmap.jsx';
 import HistoryList from '../components/HistoryList.jsx';
 import TimeChart from '../components/TimeChart.jsx';
+import PageBanner from '../components/PageBanner.jsx';
 
 // NOTE: all .map() callbacks use descriptive names — never 'h' (shadows JSX factory)
 
@@ -72,6 +73,7 @@ export default function History() {
 
     return (
         <div class="flex flex-col gap-6 animate-page-enter">
+            <PageBanner title="History" subtitle="completed and failed jobs" />
 
             {/* DLQ section — only shown when entries exist */}
             {dlqCnt > 0 && (
@@ -190,13 +192,20 @@ function DLQRow({ entry, onAction }) {
     const [dismissFb, dismissAct] = useActionFeedback();
     const [rescheduleFb, rescheduleAct] = useActionFeedback();
     const [expanded, setExpanded] = useState(false);
+    const rowRef = useRef(null);
+
+    // ThreatPulse: DLQ entries are always critical — fire on mount so the user
+    // can't miss that these jobs need attention.
+    useEffect(() => {
+        if (rowRef.current) rowRef.current.setAttribute('data-sh-effect', 'threat-pulse');
+    }, []);
 
     const reschedule = dlqRescheduleStatus(entry);
     const hasReasoning = !!entry.reschedule_reasoning;
     const alreadyRescheduled = !!entry.rescheduled_job_id;
 
     return (
-        <div style={{
+        <div ref={rowRef} style={{
             padding: '0.4rem 0',
             borderBottom: '1px solid var(--border-subtle)',
         }}>
