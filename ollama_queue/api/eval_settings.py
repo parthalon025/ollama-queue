@@ -93,6 +93,35 @@ def prime_eval_datasource():
 
 # --- Eval: Settings ---
 
+# Keys whose values must never be returned in plaintext — show first 6 chars + *** if non-empty
+_MASKED_SETTINGS = {"eval.data_source_token", "eval.claude_api_key", "eval.openai_api_key"}
+
+# Provider-role settings — values must be one of _VALID_PROVIDERS
+_PROVIDER_SETTINGS = {
+    "eval.generator_provider",
+    "eval.judge_provider",
+    "eval.optimizer_provider",
+    "eval.oracle_provider",
+}
+_VALID_PROVIDERS = {"ollama", "claude", "openai"}
+
+
+def _mask_value(key: str, value: str) -> str:
+    """Return masked form of a sensitive setting value.
+
+    What it shows: N/A — pure helper used by get_eval_settings.
+    Decision it drives: Preserves enough context (first 6 chars) to identify which key
+      is set without exposing the full credential.
+    """
+    if key == "eval.data_source_token":
+        # Legacy: token was always fully masked as "***"
+        return "***"
+    # API keys: show first 6 chars so user can identify which key is configured
+    # Short values (≤6 chars) get a full mask to avoid exposing the entire key
+    if len(value) <= 6:
+        return "***"
+    return value[:6] + "***"
+
 
 @router.get("/api/eval/settings")
 def get_eval_settings():
@@ -104,9 +133,10 @@ def get_eval_settings():
     db = _api.db
     all_settings = db.get_all_settings()
     result = {k: v for k, v in all_settings.items() if k.startswith("eval.")}
-    # Mask token — bearer credential must not be readable via API
-    if result.get("eval.data_source_token"):
-        result["eval.data_source_token"] = "***"  # noqa: S105
+    # Mask sensitive credentials — never return raw values via API
+    for key in _MASKED_SETTINGS:
+        if result.get(key):
+            result[key] = _mask_value(key, result[key])
     return result
 
 
@@ -136,10 +166,24 @@ def put_eval_settings(body: dict = Body(...)):
         "auto_promote",
         "auto_promote_min_improvement",
         "positive_threshold",
+        # Provider settings
+        "generator_provider",
+        "generator_model",
+        "judge_provider",
+        "optimizer_provider",
+        "optimizer_model",
+        "oracle_provider",
+        "oracle_model",
+        "oracle_enabled",
+        "claude_api_key",
+        "openai_api_key",
+        "openai_base_url",
+        "max_cost_per_run_usd",
     }
 
     # Validation rules — validate ALL before writing any
     validation_errors = []
+    provider_errors = []
     for key, value in body.items():
         bare_key = key.removeprefix("eval.")
         if bare_key not in _known_eval_keys:
@@ -179,6 +223,11 @@ def put_eval_settings(body: dict = Body(...)):
             validation_errors.append(f"auto_promote_min_improvement must be 0.0-1.0, got {value!r}")
         elif bare_key == "positive_threshold" and (not isinstance(value, int) or not (1 <= value <= 5)):
             validation_errors.append(f"positive_threshold must be an integer 1-5, got {value!r}")
+        elif f"eval.{bare_key}" in _PROVIDER_SETTINGS and value not in _VALID_PROVIDERS:
+            provider_errors.append(f"Invalid provider {value!r}: must be one of {sorted(_VALID_PROVIDERS)}")
+
+    if provider_errors:
+        raise HTTPException(status_code=400, detail="; ".join(provider_errors))
 
     if validation_errors:
         raise HTTPException(status_code=422, detail=validation_errors)
@@ -192,6 +241,63 @@ def put_eval_settings(body: dict = Body(...)):
 
 
 # --- Eval: Schedule ---
+
+
+@router.post("/api/eval/providers/test")
+def test_provider_connection(body: dict = Body(...)):
+    """Test provider connectivity with a minimal prompt.
+
+    What it shows: Whether the configured provider is reachable and responding.
+    Decision it drives: Confirms API keys and network connectivity are correct
+      before starting a full eval run.
+    Returns {"ok": bool, "response_length": int, "error": str|None}.
+    """
+    from ollama_queue.eval.providers import get_provider
+    from ollama_queue.eval.validation import validate_provider
+
+    provider_name = body.get("provider", "ollama")
+    model = body.get("model")
+
+    if not model:
+        raise HTTPException(status_code=422, detail="model is required")
+
+    try:
+        provider_name = validate_provider(provider_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    db = _api.db
+    settings = db.get_all_settings()
+    api_key = None
+    base_url = None
+    http_base = settings.get("eval.http_base", "http://127.0.0.1:7683")
+
+    if provider_name == "claude":
+        api_key = settings.get("eval.claude_api_key") or None
+    elif provider_name == "openai":
+        api_key = settings.get("eval.openai_api_key") or None
+        base_url = settings.get("eval.openai_base_url") or None
+
+    try:
+        provider = get_provider(provider_name, http_base=http_base, api_key=api_key, base_url=base_url)
+    except ImportError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    text, _usage, _job_id = provider.generate(
+        prompt="Say hello in one word.",
+        system=None,
+        model=model,
+        temperature=0.1,
+        num_ctx=256,
+        params=None,
+        timeout=30,
+        source="provider_test",
+    )
+
+    if text is None:
+        return {"ok": False, "response_length": 0, "error": "No response from provider"}
+
+    return {"ok": True, "response_length": len(text), "error": None}
 
 
 @router.post("/api/eval/schedule")

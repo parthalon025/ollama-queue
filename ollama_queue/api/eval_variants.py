@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 
 from fastapi import APIRouter, Body, HTTPException
 from fastapi.responses import JSONResponse
 from starlette.responses import Response
 
 import ollama_queue.api as _api
+from ollama_queue.eval.validation import validate_provider, validate_variant_params
 
 _log = logging.getLogger(__name__)
 
@@ -155,11 +157,22 @@ def import_eval_variants(body: dict = Body(...)):
             )
             templates_imported += cur.rowcount
         for var in variants:
+            try:
+                params_val = validate_variant_params(var.get("params"))
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=f"Variant '{var.get('id', '?')}': {exc}")
+
+            try:
+                provider_val = validate_provider(var.get("provider"))
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=f"Variant '{var.get('id', '?')}': {exc}")
+
             cur = conn.execute(
                 """INSERT OR IGNORE INTO eval_variants
                    (id, label, prompt_template_id, model, temperature, num_ctx,
-                    is_recommended, is_system, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    is_recommended, is_system, created_at,
+                    params, system_prompt, training_config, provider)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     var.get("id"),
                     var.get("label"),
@@ -170,6 +183,10 @@ def import_eval_variants(body: dict = Body(...)):
                     var.get("is_recommended", 0),
                     0,  # imported = user-owned
                     var.get("created_at") or now,
+                    params_val,
+                    var.get("system_prompt"),
+                    var.get("training_config"),
+                    provider_val,
                 ),
             )
             variants_imported += cur.rowcount
@@ -192,6 +209,20 @@ def generate_eval_variants(body: dict = Body(...)):
     tmpl_id = body.get("template_id") or "zero-shot-causal"
     if not models_list:
         raise HTTPException(status_code=400, detail="models list is required")
+
+    try:
+        params_json = validate_variant_params(body.get("params"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    try:
+        provider_str = validate_provider(body.get("provider"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    system_prompt = body.get("system_prompt")
+    training_config = body.get("training_config")
+
     now = _dt.datetime.now(_dt.UTC).isoformat()
     created = []
     with db._lock:
@@ -204,9 +235,24 @@ def generate_eval_variants(body: dict = Body(...)):
             conn.execute(
                 """INSERT INTO eval_variants
                    (id, label, prompt_template_id, model, temperature, num_ctx,
-                    is_recommended, is_system, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (new_id, label, tmpl_id, model_name, 0.6, 8192, 0, 0, now),
+                    is_recommended, is_system, created_at,
+                    params, system_prompt, training_config, provider)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    new_id,
+                    label,
+                    tmpl_id,
+                    model_name,
+                    0.6,
+                    8192,
+                    0,
+                    0,
+                    now,
+                    params_json,
+                    system_prompt,
+                    training_config,
+                    provider_str,
+                ),
             )
             created.append(
                 {
@@ -219,6 +265,10 @@ def generate_eval_variants(body: dict = Body(...)):
                     "is_recommended": 0,
                     "is_system": 0,
                     "created_at": now,
+                    "params": params_json,
+                    "system_prompt": system_prompt,
+                    "training_config": training_config,
+                    "provider": provider_str,
                 }
             )
         conn.commit()
@@ -241,6 +291,20 @@ def create_eval_variant(body: dict = Body(...)):
     model = body.get("model")
     if not label or not tmpl_id or not model:
         raise HTTPException(status_code=400, detail="label, prompt_template_id, and model are required")
+
+    try:
+        params_json = validate_variant_params(body.get("params"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    try:
+        provider_str = validate_provider(body.get("provider"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    system_prompt = body.get("system_prompt")
+    training_config = body.get("training_config")
+
     now = _dt.datetime.now(_dt.UTC).isoformat()
     new_id = str(uuid.uuid4())[:8]
     with db._lock:
@@ -249,8 +313,9 @@ def create_eval_variant(body: dict = Body(...)):
         conn.execute(
             """INSERT INTO eval_variants
                (id, label, prompt_template_id, model, temperature, num_ctx,
-                is_recommended, is_system, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                is_recommended, is_system, created_at,
+                params, system_prompt, training_config, provider)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 new_id,
                 label,
@@ -261,6 +326,10 @@ def create_eval_variant(body: dict = Body(...)):
                 1 if body.get("is_recommended") else 0,
                 0,  # user-created
                 now,
+                params_json,
+                system_prompt,
+                training_config,
+                provider_str,
             ),
         )
         conn.commit()
@@ -389,8 +458,9 @@ def clone_eval_variant(variant_id: str, body: dict = Body(default={})):
         conn.execute(
             """INSERT INTO eval_variants
                (id, label, prompt_template_id, model, temperature, num_ctx,
-                is_recommended, is_system, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                is_recommended, is_system, created_at,
+                params, system_prompt, training_config, provider)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 new_id,
                 label,
@@ -401,6 +471,10 @@ def clone_eval_variant(variant_id: str, body: dict = Body(default={})):
                 0,
                 0,  # always user-owned
                 now,
+                original.get("params"),
+                original.get("system_prompt"),
+                original.get("training_config"),
+                original.get("provider"),
             ),
         )
         conn.commit()
@@ -421,13 +495,39 @@ def update_eval_variant(variant_id: str, body: dict = Body(...)):
         variant = _get_eval_variant(conn, variant_id)
         if variant["is_system"]:
             raise HTTPException(status_code=422, detail="Cannot modify system variant — clone it first.")
-        updatable_fields = {"label", "prompt_template_id", "model", "temperature", "num_ctx", "is_recommended"}
+        updatable_fields = {
+            "label",
+            "prompt_template_id",
+            "model",
+            "temperature",
+            "num_ctx",
+            "is_recommended",
+            "system_prompt",
+            "params",
+            "training_config",
+            "provider",
+        }
         updates = {k: v for k, v in body.items() if k in updatable_fields}
         if not updates:
             return dict(variant)
         # Validate prompt_template_id if provided
         if "prompt_template_id" in updates:
             _get_eval_template(conn, updates["prompt_template_id"])
+        # Validate and normalise params if provided
+        if "params" in updates:
+            try:
+                updates["params"] = validate_variant_params(updates["params"])
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+        # Validate provider if provided
+        if "provider" in updates:
+            try:
+                updates["provider"] = validate_provider(updates["provider"])
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+        assert all(
+            re.match(r"^[a-z_]+$", k) for k in updates
+        ), f"unsafe column names: {set(updates) - {k for k in updates if re.match(r'^[a-z_]+$', k)}}"
         set_clause = ", ".join(f"{k} = ?" for k in updates)
         values = [*list(updates.values()), variant_id]
         conn.execute(f"UPDATE eval_variants SET {set_clause} WHERE id = ?", values)
@@ -487,6 +587,9 @@ def update_eval_template(template_id: str, body: dict = Body(...)):
         updates = {k: v for k, v in body.items() if k in updatable_fields}
         if not updates:
             return dict(template)
+        assert all(
+            re.match(r"^[a-z_]+$", k) for k in updates
+        ), f"unsafe column names: {set(updates) - {k for k in updates if re.match(r'^[a-z_]+$', k)}}"
         set_clause = ", ".join(f"{k} = ?" for k in updates)
         values = [*list(updates.values()), template_id]
         conn.execute(f"UPDATE eval_prompt_templates SET {set_clause} WHERE id = ?", values)

@@ -209,21 +209,40 @@ def _call_proxy(
     timeout: int,
     source: str,
     priority: int = 2,
+    extra_params: dict | None = None,
+    system_prompt: str | None = None,
 ) -> tuple[str | None, int | None]:
     """POST to the ollama-queue proxy and return (response_text, queue_job_id).
 
     Returns (None, None) on any error. Retries on 502/503.
     Strips <think>...</think> from the raw response text.
+
+    extra_params: optional dict of additional Ollama options (e.g. top_k, top_p).
+        Merged into the options dict; flat columns (temperature, num_ctx) always win.
+    system_prompt: optional system message passed as "system" in the request body.
+        Omitted entirely when None.
     """
+    options: dict[str, Any] = {"temperature": temperature, "num_ctx": num_ctx}
+
+    # Merge extra_params — flat columns win
+    if extra_params:
+        for k, v in extra_params.items():
+            if k not in ("temperature", "num_ctx"):
+                options[k] = v
+
     body: dict[str, Any] = {
         "model": model,
         "prompt": prompt,
         "stream": False,
-        "options": {"temperature": temperature, "num_ctx": num_ctx},
+        "options": options,
         "_priority": priority,
         "_source": source,
         "_timeout": timeout,
     }
+
+    # Add system prompt if provided
+    if system_prompt is not None:
+        body["system"] = system_prompt
 
     last_exc: Exception | None = None
     for attempt in range(_MAX_RETRIES + 1):

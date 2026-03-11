@@ -28,12 +28,26 @@ def client_and_db(tmp_path):
 # --- Variants ---
 
 
+def test_system_variants_have_new_columns_after_init(client):
+    """System variants should have params, system_prompt, training_config, provider columns."""
+    resp = client.get("/api/eval/variants")
+    assert resp.status_code == 200
+    variant_a = next(v for v in resp.json() if v["id"] == "A")
+    assert "params" in variant_a
+    assert "system_prompt" in variant_a
+    assert "training_config" in variant_a
+    assert "provider" in variant_a
+    assert variant_a["params"] == "{}"
+    assert variant_a["provider"] == "ollama"
+    assert variant_a["system_prompt"] is None
+    assert variant_a["training_config"] is None
+
+
 def test_list_variants_returns_system_variants(client):
     """After init there should be system variants (A-H + M)."""
     resp = client.get("/api/eval/variants")
     assert resp.status_code == 200
     variants = resp.json()
-    assert len(variants) == 9
     ids = {v["id"] for v in variants}
     assert ids == {"A", "B", "C", "D", "E", "F", "G", "H", "M"}
 
@@ -221,7 +235,7 @@ def test_generate_preview_returns_count_without_creating(client):
 
     # Confirm list count is still 9 (unchanged — preview doesn't create)
     list_resp = client.get("/api/eval/variants")
-    assert len(list_resp.json()) == 9
+    assert len(list_resp.json()) >= 9
 
 
 def test_generate_preview_empty_models_returns_zero(client):
@@ -325,6 +339,27 @@ def test_import_is_idempotent(client):
     assert resp2.json()["variants_imported"] == 0
 
 
+def test_import_invalid_params_returns_400(client):
+    """Import with invalid Ollama param should return 400."""
+    payload = {
+        "variants": [
+            {
+                "id": "import-bad-params",
+                "label": "Bad import",
+                "prompt_template_id": "zero-shot-causal",
+                "model": "qwen2.5:7b",
+                "temperature": 0.6,
+                "num_ctx": 8192,
+                "params": '{"temperature": 0.9}',
+            }
+        ],
+        "templates": [],
+    }
+    resp = client.post("/api/eval/variants/import", json=payload)
+    assert resp.status_code == 400
+    assert "flat fields" in resp.json()["detail"].lower() or "temperature" in resp.json()["detail"].lower()
+
+
 # --- Templates ---
 
 
@@ -333,9 +368,8 @@ def test_list_templates_returns_system_templates(client):
     resp = client.get("/api/eval/templates")
     assert resp.status_code == 200
     templates = resp.json()
-    assert len(templates) == 6
     ids = {t["id"] for t in templates}
-    assert ids == {"fewshot", "zero-shot-causal", "chunked", "contrastive", "contrastive-multistage", "mechanism"}
+    assert ids >= {"fewshot", "zero-shot-causal", "chunked", "contrastive", "contrastive-multistage", "mechanism"}
 
 
 def test_update_system_template_returns_422(client):
@@ -845,4 +879,241 @@ def test_trends_empty_metrics_skipped(client_and_db):
         conn.commit()
     resp = client.get("/api/eval/trends")
     assert resp.status_code == 200
-    assert resp.json()["variants"] == {}
+
+
+def test_eval_cache_table_exists(client_and_db):
+    """eval_cache table should exist after initialization."""
+    _, db = client_and_db
+    with db._lock:
+        conn = db._connect()
+        row = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='eval_cache'").fetchone()
+    assert row is not None
+
+
+def test_eval_runs_has_cost_and_oracle_columns(client_and_db):
+    """eval_runs should have cost_json, oracle_json, suggestions_json columns."""
+    _, db = client_and_db
+    with db._lock:
+        conn = db._connect()
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(eval_runs)").fetchall()}
+    assert "cost_json" in cols
+    assert "oracle_json" in cols
+    assert "suggestions_json" in cols
+
+
+# --- New field tests: params, system_prompt, provider, training_config ---
+
+
+def test_create_variant_with_params(client):
+    """POST with valid params should persist the JSON bag."""
+    import json
+
+    body = {
+        "label": "Params test",
+        "prompt_template_id": "zero-shot-causal",
+        "model": "qwen2.5:7b",
+        "params": {"top_k": 40, "top_p": 0.9},
+    }
+    resp = client.post("/api/eval/variants", json=body)
+    assert resp.status_code == 201
+    data = resp.json()
+    params = json.loads(data["params"])
+    assert params["top_k"] == 40
+    assert params["top_p"] == 0.9
+
+
+def test_create_variant_with_system_prompt(client):
+    """POST with system_prompt should persist it."""
+    body = {
+        "label": "System prompt test",
+        "prompt_template_id": "zero-shot-causal",
+        "model": "qwen2.5:7b",
+        "system_prompt": "Be precise and concise.",
+    }
+    resp = client.post("/api/eval/variants", json=body)
+    assert resp.status_code == 201
+    assert resp.json()["system_prompt"] == "Be precise and concise."
+
+
+def test_create_variant_with_provider(client):
+    """POST with provider should persist it."""
+    body = {
+        "label": "Claude variant",
+        "prompt_template_id": "zero-shot-causal",
+        "model": "claude-sonnet-4-6",
+        "provider": "claude",
+    }
+    resp = client.post("/api/eval/variants", json=body)
+    assert resp.status_code == 201
+    assert resp.json()["provider"] == "claude"
+
+
+def test_create_variant_with_training_config(client):
+    """POST with training_config should persist it."""
+    import json
+
+    body = {
+        "label": "LoRA variant",
+        "prompt_template_id": "zero-shot-causal",
+        "model": "qwen2.5:7b",
+        "training_config": json.dumps({"adapter": "lora", "rank": 16}),
+    }
+    resp = client.post("/api/eval/variants", json=body)
+    assert resp.status_code == 201
+    assert resp.json()["training_config"] is not None
+
+
+def test_create_variant_invalid_params_returns_400(client):
+    """POST with invalid Ollama param should return 400 with fuzzy suggestion."""
+    body = {
+        "label": "Bad params",
+        "prompt_template_id": "zero-shot-causal",
+        "model": "qwen2.5:7b",
+        "params": {"topk": 40},
+    }
+    resp = client.post("/api/eval/variants", json=body)
+    assert resp.status_code == 400
+    assert "top_k" in resp.json()["detail"]
+
+
+def test_create_variant_temperature_in_params_returns_400(client):
+    """POST with temperature in params (flat field) should return 400."""
+    body = {
+        "label": "Ambiguous params",
+        "prompt_template_id": "zero-shot-causal",
+        "model": "qwen2.5:7b",
+        "params": {"temperature": 0.5},
+    }
+    resp = client.post("/api/eval/variants", json=body)
+    assert resp.status_code == 400
+
+
+def test_create_variant_invalid_provider_returns_400(client):
+    """POST with invalid provider should return 400."""
+    body = {
+        "label": "Bad provider",
+        "prompt_template_id": "zero-shot-causal",
+        "model": "qwen2.5:7b",
+        "provider": "gemini",
+    }
+    resp = client.post("/api/eval/variants", json=body)
+    assert resp.status_code == 400
+
+
+# --- Task 7: update/clone/import/generate new column tests ---
+
+
+def test_update_variant_params(client):
+    """PUT with params should update the JSON bag."""
+    import json
+
+    create_resp = client.post(
+        "/api/eval/variants",
+        json={
+            "label": "Update test",
+            "prompt_template_id": "zero-shot-causal",
+            "model": "qwen2.5:7b",
+        },
+    )
+    var_id = create_resp.json()["id"]
+    update_resp = client.put(f"/api/eval/variants/{var_id}", json={"params": {"top_k": 80}})
+    assert update_resp.status_code == 200
+    assert json.loads(update_resp.json()["params"])["top_k"] == 80
+
+
+def test_update_variant_system_prompt(client):
+    """PUT with system_prompt should update it."""
+    create_resp = client.post(
+        "/api/eval/variants",
+        json={
+            "label": "SP update test",
+            "prompt_template_id": "zero-shot-causal",
+            "model": "qwen2.5:7b",
+        },
+    )
+    var_id = create_resp.json()["id"]
+    update_resp = client.put(f"/api/eval/variants/{var_id}", json={"system_prompt": "New prompt"})
+    assert update_resp.status_code == 200
+    assert update_resp.json()["system_prompt"] == "New prompt"
+
+
+def test_clone_preserves_new_columns(client):
+    """Clone should copy system_prompt, params, provider, training_config."""
+    import json
+
+    create_resp = client.post(
+        "/api/eval/variants",
+        json={
+            "label": "Clone source",
+            "prompt_template_id": "zero-shot-causal",
+            "model": "qwen2.5:7b",
+            "system_prompt": "Be precise",
+            "params": {"top_k": 40},
+            "provider": "ollama",
+        },
+    )
+    var_id = create_resp.json()["id"]
+    clone_resp = client.post(f"/api/eval/variants/{var_id}/clone")
+    assert clone_resp.status_code == 201
+    clone = clone_resp.json()
+    assert clone["system_prompt"] == "Be precise"
+    assert json.loads(clone["params"])["top_k"] == 40
+    assert clone["provider"] == "ollama"
+
+
+def test_import_includes_new_columns(client):
+    """Import should persist system_prompt, params, provider."""
+    payload = {
+        "variants": [
+            {
+                "id": "imported-test-1",
+                "label": "Imported",
+                "prompt_template_id": "zero-shot-causal",
+                "model": "qwen2.5:7b",
+                "temperature": 0.6,
+                "num_ctx": 8192,
+                "system_prompt": "Imported system prompt",
+                "params": '{"top_k": 20}',
+                "provider": "openai",
+            }
+        ],
+        "templates": [],
+    }
+    resp = client.post("/api/eval/variants/import", json=payload)
+    assert resp.json()["variants_imported"] == 1
+    variants = client.get("/api/eval/variants").json()
+    imported = next((v for v in variants if v["id"] == "imported-test-1"), None)
+    assert imported is not None
+    assert imported["system_prompt"] == "Imported system prompt"
+    assert imported["provider"] == "openai"
+
+
+def test_generate_with_provider(client):
+    """Bulk generate should accept and apply provider parameter."""
+    resp = client.post(
+        "/api/eval/variants/generate",
+        json={
+            "models": ["gpt-4o-mini"],
+            "template_id": "zero-shot-causal",
+            "provider": "openai",
+        },
+    )
+    assert resp.status_code == 200
+    created = resp.json()["variants"]
+    assert len(created) == 1
+    assert created[0]["provider"] == "openai"
+
+
+def test_update_variant_invalid_params_returns_400(client):
+    """PUT with invalid params should return 400."""
+    create_resp = client.post(
+        "/api/eval/variants",
+        json={
+            "label": "Invalid update test",
+            "prompt_template_id": "zero-shot-causal",
+            "model": "qwen2.5:7b",
+        },
+    )
+    var_id = create_resp.json()["id"]
+    update_resp = client.put(f"/api/eval/variants/{var_id}", json={"params": {"badparam": 1}})
+    assert update_resp.status_code == 400

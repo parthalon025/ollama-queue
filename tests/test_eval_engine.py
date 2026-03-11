@@ -4363,6 +4363,123 @@ class TestCallProxyExhaustedRetriesAfterLoop:
         assert job_id is None
 
 
+class TestCallProxyExtraParamsAndSystemPrompt:
+    """_call_proxy extra_params and system_prompt parameter wiring."""
+
+    def _make_mock_client(self, response_data: dict):
+        """Build a reusable mock httpx.Client context manager."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = response_data
+        mock_client = MagicMock()
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        mock_client.post.return_value = mock_resp
+        return mock_client
+
+    def test_call_proxy_merges_extra_params(self):
+        """_call_proxy should merge extra_params into options, flat columns winning."""
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = self._make_mock_client({"response": "test output", "prompt_eval_count": 10, "eval_count": 20})
+            mock_client_class.return_value = mock_client
+
+            _call_proxy(
+                http_base="http://localhost:7683",
+                model="qwen2.5:7b",
+                prompt="test prompt",
+                temperature=0.6,
+                num_ctx=8192,
+                timeout=300,
+                source="test",
+                extra_params={"top_k": 40, "temperature": 999},  # temperature should be ignored
+                system_prompt="Be precise",
+            )
+            body = mock_client.post.call_args[1]["json"]
+            assert body["options"]["top_k"] == 40
+            assert body["options"]["temperature"] == 0.6  # flat column wins
+            assert body["system"] == "Be precise"
+
+    def test_call_proxy_omits_system_when_none(self):
+        """_call_proxy should not include 'system' key when system_prompt is None."""
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = self._make_mock_client({"response": "text"})
+            mock_client_class.return_value = mock_client
+
+            _call_proxy(
+                http_base="http://localhost:7683",
+                model="qwen2.5:7b",
+                prompt="test",
+                temperature=0.6,
+                num_ctx=8192,
+                timeout=300,
+                source="test",
+            )
+            body = mock_client.post.call_args[1]["json"]
+            assert "system" not in body
+
+    def test_call_proxy_no_extra_params_no_system(self):
+        """_call_proxy with no extra_params and no system_prompt: options only has temperature and num_ctx."""
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = self._make_mock_client({"response": "text"})
+            mock_client_class.return_value = mock_client
+
+            _call_proxy(
+                http_base="http://localhost:7683",
+                model="m",
+                prompt="p",
+                temperature=0.5,
+                num_ctx=4096,
+                timeout=30,
+                source="test",
+                extra_params=None,
+                system_prompt=None,
+            )
+            body = mock_client.post.call_args[1]["json"]
+            assert body["options"] == {"temperature": 0.5, "num_ctx": 4096}
+            assert "system" not in body
+
+    def test_call_proxy_extra_params_no_system(self):
+        """extra_params with no system_prompt: merges params but no system key."""
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = self._make_mock_client({"response": "text"})
+            mock_client_class.return_value = mock_client
+
+            _call_proxy(
+                http_base="http://localhost:7683",
+                model="m",
+                prompt="p",
+                temperature=0.5,
+                num_ctx=4096,
+                timeout=30,
+                source="test",
+                extra_params={"top_p": 0.9, "repeat_penalty": 1.1},
+            )
+            body = mock_client.post.call_args[1]["json"]
+            assert body["options"]["top_p"] == 0.9
+            assert body["options"]["repeat_penalty"] == 1.1
+            assert "system" not in body
+
+    def test_call_proxy_num_ctx_in_extra_params_ignored(self):
+        """num_ctx in extra_params should be ignored (flat column wins)."""
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = self._make_mock_client({"response": "text"})
+            mock_client_class.return_value = mock_client
+
+            _call_proxy(
+                http_base="http://localhost:7683",
+                model="m",
+                prompt="p",
+                temperature=0.5,
+                num_ctx=4096,
+                timeout=30,
+                source="test",
+                extra_params={"num_ctx": 99999},
+            )
+            body = mock_client.post.call_args[1]["json"]
+            assert body["options"]["num_ctx"] == 4096  # flat column wins
+
+
 class TestRunEvalGenerateVariantsNonList:
     """Line 1997: json.loads succeeds but returns non-list value."""
 
@@ -4385,3 +4502,233 @@ class TestRunEvalGenerateVariantsNonList:
             run_eval_generate(1, MagicMock(), _sleep=lambda s: None)
         # Single variant "A" processed for 1 item
         assert len(submitted) == 1
+
+
+# ---------------------------------------------------------------------------
+# Task 9: variant params and system_prompt wired through _generate_one
+# ---------------------------------------------------------------------------
+
+
+def _make_variant_with_params(params: str | None = None, system_prompt: str | None = None) -> dict:
+    """Build a variant dict that includes optional params and system_prompt fields."""
+    v = _make_variant()
+    v["params"] = params
+    v["system_prompt"] = system_prompt
+    return v
+
+
+class TestGenerateOneItemVariantParams:
+    """_generate_one passes variant.params and system_prompt to _call_proxy."""
+
+    def _call_generate_one(self, variant: dict, template: dict | None = None) -> MagicMock:
+        """Call _generate_one with the given variant, patching _call_proxy and insert_eval_result.
+
+        Returns the mock for _call_proxy so callers can inspect call args.
+        """
+        from ollama_queue.eval.generate import _generate_one
+
+        if template is None:
+            template = _make_template()
+
+        mock_call_proxy = MagicMock(return_value=("some principle", 42))
+        source_item = {
+            "id": "1",
+            "title": "Test item",
+            "one_liner": "test",
+            "description": "",
+            "cluster_id": "c1",
+        }
+
+        with (
+            patch("ollama_queue.eval.engine._call_proxy", mock_call_proxy),
+            patch("ollama_queue.eval.engine.insert_eval_result"),
+        ):
+            _generate_one(
+                db=MagicMock(),
+                run_id=1,
+                variant_id="A",
+                variant=variant,
+                template=template,
+                source_item=source_item,
+                items_by_cluster={"c1": [source_item]},
+                http_base="http://localhost:7683",
+            )
+
+        return mock_call_proxy
+
+    def test_passes_params_as_extra_params(self):
+        """variant.params JSON is parsed and passed as extra_params to _call_proxy."""
+        variant = _make_variant_with_params(params='{"top_k": 40, "top_p": 0.95}')
+        mock_call_proxy = self._call_generate_one(variant)
+
+        assert mock_call_proxy.called
+        kwargs = mock_call_proxy.call_args.kwargs
+        assert kwargs["extra_params"] == {"top_k": 40, "top_p": 0.95}
+
+    def test_passes_system_prompt(self):
+        """variant.system_prompt is passed as system_prompt to _call_proxy."""
+        variant = _make_variant_with_params(system_prompt="Be precise and concise.")
+        mock_call_proxy = self._call_generate_one(variant)
+
+        assert mock_call_proxy.called
+        kwargs = mock_call_proxy.call_args.kwargs
+        assert kwargs["system_prompt"] == "Be precise and concise."
+
+    def test_passes_both_params_and_system_prompt(self):
+        """Both variant.params and system_prompt are forwarded to _call_proxy together."""
+        variant = _make_variant_with_params(
+            params='{"top_k": 40}',
+            system_prompt="Be precise.",
+        )
+        mock_call_proxy = self._call_generate_one(variant)
+
+        kwargs = mock_call_proxy.call_args.kwargs
+        assert kwargs["extra_params"] == {"top_k": 40}
+        assert kwargs["system_prompt"] == "Be precise."
+
+    def test_none_params_passes_none_extra_params(self):
+        """variant.params=None results in extra_params=None (not an empty dict)."""
+        variant = _make_variant_with_params(params=None, system_prompt=None)
+        mock_call_proxy = self._call_generate_one(variant)
+
+        kwargs = mock_call_proxy.call_args.kwargs
+        assert kwargs["extra_params"] is None
+        assert kwargs["system_prompt"] is None
+
+    def test_empty_params_string_passes_none_extra_params(self):
+        """variant.params='' (empty string) is treated as no params -> extra_params=None."""
+        variant = _make_variant_with_params(params="", system_prompt=None)
+        mock_call_proxy = self._call_generate_one(variant)
+
+        kwargs = mock_call_proxy.call_args.kwargs
+        assert kwargs["extra_params"] is None
+
+    def test_empty_params_dict_passes_none_extra_params(self):
+        """variant.params='{}' (empty JSON object) results in extra_params=None."""
+        variant = _make_variant_with_params(params="{}", system_prompt=None)
+        mock_call_proxy = self._call_generate_one(variant)
+
+        kwargs = mock_call_proxy.call_args.kwargs
+        assert kwargs["extra_params"] is None
+
+    def test_variant_without_params_field_passes_none_extra_params(self):
+        """A variant dict with no 'params' key results in extra_params=None."""
+        variant = _make_variant()  # no params key at all
+        mock_call_proxy = self._call_generate_one(variant)
+
+        kwargs = mock_call_proxy.call_args.kwargs
+        assert kwargs["extra_params"] is None
+        assert kwargs["system_prompt"] is None
+
+
+class TestSelfCritiqueVariantParams:
+    """_self_critique passes extra_params and system_prompt to _call_proxy."""
+
+    def test_self_critique_passes_extra_params_and_system_prompt(self):
+        """_self_critique forwards extra_params and system_prompt to _call_proxy."""
+        from ollama_queue.eval.generate import _self_critique
+
+        mock_call_proxy = MagicMock(return_value=("refined principle", 99))
+        diff_items = [{"title": "Unrelated item", "one_liner": "something else", "id": "2"}]
+
+        with patch("ollama_queue.eval.engine._call_proxy", mock_call_proxy):
+            result = _self_critique(
+                principle="original principle",
+                diff_cluster_items=diff_items,
+                model="test-model",
+                temperature=0.6,
+                num_ctx=4096,
+                http_base="http://localhost:7683",
+                source="eval-run-1-critique",
+                extra_params={"top_k": 30},
+                system_prompt="Refine carefully.",
+            )
+
+        assert result == "refined principle"
+        kwargs = mock_call_proxy.call_args.kwargs
+        assert kwargs["extra_params"] == {"top_k": 30}
+        assert kwargs["system_prompt"] == "Refine carefully."
+
+    def test_self_critique_defaults_no_extra_params(self):
+        """_self_critique defaults extra_params=None and system_prompt=None."""
+        from ollama_queue.eval.generate import _self_critique
+
+        mock_call_proxy = MagicMock(return_value=("refined", 99))
+        diff_items = [{"title": "Unrelated", "one_liner": "unrelated", "id": "3"}]
+
+        with patch("ollama_queue.eval.engine._call_proxy", mock_call_proxy):
+            _self_critique(
+                principle="original",
+                diff_cluster_items=diff_items,
+                model="test-model",
+                temperature=0.6,
+                num_ctx=4096,
+                http_base="http://localhost:7683",
+                source="eval-run-1-critique",
+            )
+
+        kwargs = mock_call_proxy.call_args.kwargs
+        assert kwargs.get("extra_params") is None
+        assert kwargs.get("system_prompt") is None
+
+
+class TestConfigDiffNewColumns:
+    """Tests that describe_config_diff reports new column changes."""
+
+    def test_config_diff_detects_params_change(self):
+        """describe_config_diff should report per-key params changes."""
+        from ollama_queue.eval.analysis import describe_config_diff
+
+        a = {"model": "m", "temperature": 0.6, "num_ctx": 8192, "prompt_template_id": "t", "params": '{"top_k": 20}'}
+        b = {"model": "m", "temperature": 0.6, "num_ctx": 8192, "prompt_template_id": "t", "params": '{"top_k": 40}'}
+        diffs = describe_config_diff(a, b)
+        assert any("top_k" in d for d in diffs)
+
+    def test_config_diff_detects_system_prompt_change(self):
+        """describe_config_diff should report system_prompt changes."""
+        from ollama_queue.eval.analysis import describe_config_diff
+
+        a = {"model": "m", "temperature": 0.6, "num_ctx": 8192, "prompt_template_id": "t", "system_prompt": None}
+        b = {
+            "model": "m",
+            "temperature": 0.6,
+            "num_ctx": 8192,
+            "prompt_template_id": "t",
+            "system_prompt": "Be precise",
+        }
+        diffs = describe_config_diff(a, b)
+        assert any("system" in d.lower() or "prompt" in d.lower() for d in diffs)
+
+    def test_config_diff_detects_provider_change(self):
+        """describe_config_diff should report provider changes."""
+        from ollama_queue.eval.analysis import describe_config_diff
+
+        a = {"model": "m", "temperature": 0.6, "num_ctx": 8192, "prompt_template_id": "t", "provider": "ollama"}
+        b = {"model": "m", "temperature": 0.6, "num_ctx": 8192, "prompt_template_id": "t", "provider": "claude"}
+        diffs = describe_config_diff(a, b)
+        assert any("provider" in d.lower() for d in diffs)
+
+    def test_config_diff_no_change_when_params_equal(self):
+        """describe_config_diff should not report diff when params are equal."""
+        from ollama_queue.eval.analysis import describe_config_diff
+
+        a = {"model": "m", "temperature": 0.6, "num_ctx": 8192, "prompt_template_id": "t", "params": '{"top_k": 40}'}
+        b = {"model": "m", "temperature": 0.6, "num_ctx": 8192, "prompt_template_id": "t", "params": '{"top_k": 40}'}
+        diffs = describe_config_diff(a, b)
+        assert not any("top_k" in d for d in diffs)
+
+    def test_config_diff_handles_invalid_params_json(self):
+        """describe_config_diff should not crash on corrupted params JSON."""
+        from ollama_queue.eval.analysis import describe_config_diff
+
+        a = {
+            "model": "m",
+            "temperature": 0.6,
+            "num_ctx": 8192,
+            "prompt_template_id": "t",
+            "params": '{"top_k": 40',
+        }  # truncated JSON
+        b = {"model": "m", "temperature": 0.6, "num_ctx": 8192, "prompt_template_id": "t", "params": '{"top_k": 40}'}
+        # Should not raise — returns diffs or empty list
+        diffs = describe_config_diff(a, b)
+        assert isinstance(diffs, list)

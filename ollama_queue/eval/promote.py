@@ -56,6 +56,10 @@ def do_promote_eval_run(db: Database, run_id: int) -> dict:
         "prompt_template_id": variant["prompt_template_id"],
         "temperature": variant.get("temperature"),
         "num_ctx": variant.get("num_ctx"),
+        "system_prompt": variant.get("system_prompt"),
+        "params": variant.get("params"),
+        "provider": variant.get("provider", "ollama"),
+        "training_config": variant.get("training_config"),
     }
     resp = httpx.post(promote_url, json=payload, timeout=10.0)
     if resp.status_code not in (200, 201, 204):

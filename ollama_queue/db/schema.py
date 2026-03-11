@@ -82,6 +82,19 @@ EVAL_SETTINGS_DEFAULTS = {
     "eval.auto_promote": False,  # explicit opt-in only
     "eval.auto_promote_min_improvement": 0.05,  # min F1 delta over current production
     "eval.positive_threshold": 3,  # score_transfer >= this counts as positive for F1 calc
+    # Provider settings — which backend to use for each pipeline role
+    "eval.generator_provider": "ollama",
+    "eval.generator_model": "",
+    "eval.judge_provider": "ollama",
+    "eval.optimizer_provider": "claude",
+    "eval.optimizer_model": "claude-sonnet-4-6",
+    "eval.oracle_provider": "claude",
+    "eval.oracle_model": "claude-sonnet-4-6",
+    "eval.oracle_enabled": "false",
+    "eval.claude_api_key": "",
+    "eval.openai_api_key": "",
+    "eval.openai_base_url": "",
+    "eval.max_cost_per_run_usd": "1.00",
 }
 
 
@@ -132,6 +145,18 @@ class SchemaMixin:
         self._add_column_if_missing(conn, "dlq", "rescheduled_job_id", "INTEGER")
         self._add_column_if_missing(conn, "dlq", "rescheduled_for", "REAL")
         self._add_column_if_missing(conn, "dlq", "reschedule_reasoning", "TEXT")
+        # Eval enhancement: variant params, system_prompt, training_config, provider
+        self._add_column_if_missing(conn, "eval_variants", "system_prompt", "TEXT")
+        self._add_column_if_missing(conn, "eval_variants", "params", "TEXT DEFAULT '{}'")
+        self._add_column_if_missing(conn, "eval_variants", "training_config", "TEXT")
+        self._add_column_if_missing(conn, "eval_variants", "provider", "TEXT DEFAULT 'ollama'")
+        # Eval enhancement: run-level tracking columns
+        self._add_column_if_missing(conn, "eval_runs", "cost_json", "TEXT")
+        self._add_column_if_missing(conn, "eval_runs", "oracle_json", "TEXT")
+        self._add_column_if_missing(conn, "eval_runs", "suggestions_json", "TEXT")
+        # Backfill pre-existing rows
+        conn.execute("UPDATE eval_variants SET params = '{}' WHERE params IS NULL")
+        conn.execute("UPDATE eval_variants SET provider = 'ollama' WHERE provider IS NULL")
         # Backfill descriptions for system variants that existed before the column was added.
         # INSERT OR IGNORE skips rows that already exist, so existing rows need an explicit UPDATE.
         _system_descriptions = {
@@ -449,6 +474,17 @@ class SchemaMixin:
                 judge_temp    REAL,
                 metrics       TEXT,
                 created_at    TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS eval_cache (
+                principle_hash TEXT NOT NULL,
+                target_hash TEXT NOT NULL,
+                judge_model TEXT NOT NULL,
+                judge_mode TEXT NOT NULL,
+                scores_json TEXT NOT NULL,
+                reasoning TEXT,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (principle_hash, target_hash, judge_model, judge_mode)
             );
 
             CREATE TABLE IF NOT EXISTS consumers (

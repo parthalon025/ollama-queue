@@ -504,3 +504,124 @@ def test_create_eval_schedule_duplicate_returns_409(client):
 
     resp2 = client.post("/api/eval/schedule", json=body)
     assert resp2.status_code == 409
+
+
+# --- Task 5: Provider settings and API key masking ---
+
+
+def test_provider_settings_exist_after_init(client):
+    """Provider settings should be seeded with defaults after initialization."""
+    resp = client.get("/api/eval/settings")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data.get("eval.generator_provider") == "ollama"
+    assert data.get("eval.judge_provider") == "ollama"
+    assert data.get("eval.optimizer_provider") == "claude"
+    assert data.get("eval.oracle_provider") == "claude"
+    assert data.get("eval.oracle_enabled") == "false"
+    assert data.get("eval.max_cost_per_run_usd") == "1.00"
+
+
+def test_api_keys_masked_in_get(client_and_db):
+    """API keys should be masked (first 6 chars + ***) in GET responses."""
+    client, db = client_and_db
+    db.set_setting("eval.claude_api_key", "sk-ant-api03-realkey123456")
+    resp = client.get("/api/eval/settings")
+    data = resp.json()
+    assert data.get("eval.claude_api_key") != "sk-ant-api03-realkey123456"
+    assert "***" in data.get("eval.claude_api_key", "")
+    assert data.get("eval.claude_api_key", "").startswith("sk-ant")
+
+
+def test_empty_api_key_not_masked(client):
+    """Empty API keys should be returned as empty string, not masked."""
+    resp = client.get("/api/eval/settings")
+    data = resp.json()
+    assert data.get("eval.claude_api_key") == ""
+    assert data.get("eval.openai_api_key") == ""
+
+
+def test_set_invalid_provider_rejected(client):
+    """PUT with invalid provider value should return 400."""
+    resp = client.put("/api/eval/settings", json={"eval.generator_provider": "gemini"})
+    assert resp.status_code == 400
+    assert "gemini" in resp.json().get("detail", "").lower() or "provider" in resp.json().get("detail", "").lower()
+
+
+def test_set_valid_provider_accepted(client):
+    """PUT with valid provider should succeed."""
+    resp = client.put("/api/eval/settings", json={"eval.generator_provider": "claude"})
+    assert resp.status_code == 200
+
+
+def test_short_api_key_fully_masked(client_and_db):
+    """API keys shorter than 6 chars should be fully masked."""
+    client, db = client_and_db
+    db.set_setting("eval.claude_api_key", "abc")
+    resp = client.get("/api/eval/settings")
+    data = resp.json()
+    assert data.get("eval.claude_api_key") == "***"
+    assert "abc" not in data.get("eval.claude_api_key", "")
+
+
+# --- Task 11: Provider test endpoint ---
+
+
+def test_provider_test_ollama_success(client):
+    """POST /api/eval/providers/test with ollama should succeed when proxy responds."""
+    from unittest.mock import patch
+
+    with patch("ollama_queue.eval.providers._call_proxy_raw") as mock:
+        mock.return_value = ("hello world", {"prompt_tokens": 5, "completion_tokens": 3}, None)
+        resp = client.post(
+            "/api/eval/providers/test",
+            json={
+                "provider": "ollama",
+                "model": "qwen2.5:7b",
+            },
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["response_length"] > 0
+
+
+def test_provider_test_ollama_failure(client):
+    """POST /api/eval/providers/test returns ok=False when proxy returns None."""
+    from unittest.mock import patch
+
+    with patch("ollama_queue.eval.providers._call_proxy_raw") as mock:
+        mock.return_value = (None, {}, None)
+        resp = client.post(
+            "/api/eval/providers/test",
+            json={
+                "provider": "ollama",
+                "model": "qwen2.5:7b",
+            },
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is False
+
+
+def test_provider_test_invalid_provider(client):
+    """POST /api/eval/providers/test with unknown provider should return 400."""
+    resp = client.post(
+        "/api/eval/providers/test",
+        json={
+            "provider": "invalid_provider",
+            "model": "test-model",
+        },
+    )
+    assert resp.status_code == 400
+
+
+def test_provider_test_missing_model(client):
+    """POST /api/eval/providers/test without model should return 422."""
+    resp = client.post(
+        "/api/eval/providers/test",
+        json={
+            "provider": "ollama",
+        },
+    )
+    assert resp.status_code == 422

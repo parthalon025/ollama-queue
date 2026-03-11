@@ -34,6 +34,7 @@ class TestInitialize:
             "consumers",
             "job_metrics",
             "deferrals",
+            "eval_cache",
         }
         assert expected == set(tables)
 

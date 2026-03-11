@@ -7,12 +7,15 @@ and by API endpoints for live cross-run queries.
 
 from __future__ import annotations
 
+import json
+import logging
 import random
 import statistics
 from collections import defaultdict
 from typing import Any
 
 _MIN_BOOTSTRAP_PAIRS = 10
+_log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -320,5 +323,46 @@ def describe_config_diff(
     pb = config_b.get("prompt_template_id")
     if pa != pb:
         diffs.append(f"Prompt template changed from {pa} to {pb}")
+
+    # System prompt diff
+    sp_a = config_a.get("system_prompt")
+    sp_b = config_b.get("system_prompt")
+    if sp_a != sp_b:
+        if sp_a is None:
+            diffs.append(f"System prompt: (none) → added ({len(sp_b or '')} chars)")
+        elif sp_b is None:
+            diffs.append(f"System prompt: removed ({len(sp_a or '')} chars) → (none)")
+        else:
+            diffs.append(f"System prompt: changed ({len(sp_a)} → {len(sp_b)} chars)")
+
+    # Params diff — key-by-key comparison
+    try:
+        params_a = json.loads(config_a.get("params") or "{}")
+    except (json.JSONDecodeError, ValueError):
+        _log.warning("describe_config_diff: invalid JSON in params for config_a")
+        params_a = {}
+    try:
+        params_b = json.loads(config_b.get("params") or "{}")
+    except (json.JSONDecodeError, ValueError):
+        _log.warning("describe_config_diff: invalid JSON in params for config_b")
+        params_b = {}
+    if params_a != params_b:
+        all_keys = set(params_a) | set(params_b)
+        for k in sorted(all_keys):
+            va, vb = params_a.get(k), params_b.get(k)
+            if va != vb:
+                diffs.append(f"Param {k}: {va!r} → {vb!r}")
+
+    # Provider diff
+    prov_a = config_a.get("provider") or "ollama"
+    prov_b = config_b.get("provider") or "ollama"
+    if prov_a != prov_b:
+        diffs.append(f"Provider: {prov_a} → {prov_b}")
+
+    # Training config diff
+    tc_a = config_a.get("training_config")
+    tc_b = config_b.get("training_config")
+    if tc_a != tc_b:
+        diffs.append("Training config: changed")
 
     return diffs
