@@ -137,6 +137,10 @@ class SchemaMixin:
         self._add_column_if_missing(conn, "eval_variants", "params", "TEXT DEFAULT '{}'")
         self._add_column_if_missing(conn, "eval_variants", "training_config", "TEXT")
         self._add_column_if_missing(conn, "eval_variants", "provider", "TEXT DEFAULT 'ollama'")
+        # Eval enhancement: run-level tracking columns
+        self._add_column_if_missing(conn, "eval_runs", "cost_json", "TEXT")
+        self._add_column_if_missing(conn, "eval_runs", "oracle_json", "TEXT")
+        self._add_column_if_missing(conn, "eval_runs", "suggestions_json", "TEXT")
         # Backfill pre-existing rows
         conn.execute("UPDATE eval_variants SET params = '{}' WHERE params IS NULL")
         conn.execute("UPDATE eval_variants SET provider = 'ollama' WHERE provider IS NULL")
@@ -457,6 +461,17 @@ class SchemaMixin:
                 judge_temp    REAL,
                 metrics       TEXT,
                 created_at    TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS eval_cache (
+                principle_hash TEXT NOT NULL,
+                target_hash TEXT NOT NULL,
+                judge_model TEXT NOT NULL,
+                judge_mode TEXT NOT NULL,
+                scores_json TEXT NOT NULL,
+                reasoning TEXT,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (principle_hash, target_hash, judge_model, judge_mode)
             );
 
             CREATE TABLE IF NOT EXISTS consumers (
