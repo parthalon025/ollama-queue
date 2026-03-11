@@ -16,6 +16,15 @@ from ollama_queue.sensing.system_snapshot import classify_failure
 
 logger = logging.getLogger(__name__)
 
+_DLQ_PREFIX = "dlq-reschedule:"
+
+
+def _strip_dlq_prefix(source: str) -> str:
+    """Remove all leading 'dlq-reschedule:' prefixes so they don't chain unboundedly."""
+    while source.startswith(_DLQ_PREFIX):
+        source = source[len(_DLQ_PREFIX) :]
+    return source
+
 
 class DLQScheduler:
     """Sweeps DLQ entries and auto-reschedules into optimal time slots."""
@@ -147,7 +156,7 @@ class DLQScheduler:
                 model=entry.get("model", ""),
                 priority=entry.get("priority", 0),
                 timeout=entry.get("timeout", 600),
-                source=f"dlq-reschedule:{entry.get('source', 'unknown')}",
+                source=f"dlq-reschedule:{_strip_dlq_prefix(entry.get('source', 'unknown'))}",
                 tag=entry.get("tag"),
                 resource_profile=entry.get("resource_profile", "ollama"),
             )

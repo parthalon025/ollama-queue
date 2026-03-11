@@ -107,6 +107,9 @@ def _call_generate_description(rj_id: int, name: str, tag: str | None, command: 
             db_ref.update_recurring_job(rj_id, description=description)
         else:
             _log.warning("generate-description: empty response from model for job %d", rj_id)
+    except httpx.ReadTimeout:
+        # Expected when Ollama is busy — not an error, just skip; next schedule add will retry
+        _log.warning("generate-description: Ollama timed out for recurring job %d — will retry on next trigger", rj_id)
     except Exception:
         _log.exception("generate-description failed for recurring job %s", rj_id)
 
