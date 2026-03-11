@@ -350,7 +350,7 @@ class Scheduler:
         for rj in self._get_recurring_jobs():
             if not rj["enabled"]:
                 continue
-            model = rj.get("model", "")
+            model = rj.get("model") or ""
             model_vram = _estimate_model_vram(model)
 
             # Build a temporary score array to find which slots this job fires in

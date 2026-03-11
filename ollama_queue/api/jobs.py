@@ -268,7 +268,8 @@ def _compute_kpis_locked(db: Database) -> dict:
     # NOTE: Use raw conn query (not db.get_setting) to avoid thread-safety issues
     # when _compute_kpis is called from FastAPI worker threads.
     setting_row = conn.execute("SELECT value FROM settings WHERE key = ?", ("poll_interval_seconds",)).fetchone()
-    poll_interval = json.loads(setting_row["value"]) if setting_row else 5
+    _raw_pi = json.loads(setting_row["value"]) if setting_row else None
+    poll_interval = int(float(_raw_pi)) if _raw_pi else 5
     row = conn.execute(
         """SELECT COUNT(*) as cnt FROM health_log
            WHERE daemon_state LIKE '%paused%' AND timestamp >= ?""",
