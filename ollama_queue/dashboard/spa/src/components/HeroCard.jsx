@@ -33,7 +33,6 @@ export default function HeroCard({ value, label, unit, delta, warning, loading, 
       <div class="flex items-center gap-1" style="margin-bottom: 4px;">
         <span
           style="font-size: var(--type-micro); color: var(--text-tertiary); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.05em;"
-          title={tooltip}
         >
           {label}
         </span>
