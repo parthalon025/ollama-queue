@@ -1,8 +1,9 @@
 import { h } from 'preact';
 import { useState, useMemo, useEffect, useRef } from 'preact/hooks';
 import { applyFreshness, shatterElement } from 'superhot-ui';
-import { queue, API, refreshQueue } from '../stores';
+import { queue, queueEtas, API, refreshQueue } from '../stores';
 import EmptyState from './EmptyState.jsx';
+import { formatDuration } from '../utils/time.js';
 
 /**
  * What it shows: Every job waiting to run, priority-ordered, with estimated duration.
@@ -167,6 +168,10 @@ export default function QueueList({ jobs, currentJob }) {
         {displayItems.map((job, idx) => {
           // Running job uses a fixed display index; pending jobs use idx offset by 1 if running job present
           const dragIndex = job._isRunning ? null : (currentJob ? idx - 1 : idx);
+          // queueEtas is parallel to allItems (the full unfiltered queue list from the server).
+          // Find this job's position in allItems to look up its ETA correctly even when tag filter is active.
+          const etaIndex = job._isRunning ? -1 : allItems.findIndex(j => j.id === job.id);
+          const jobEta = (!job._isRunning && etaIndex >= 0) ? (queueEtas.value || [])[etaIndex] : null;
 
           return (
             <FreshRow key={job.id} job={job}>
@@ -250,6 +255,18 @@ export default function QueueList({ jobs, currentJob }) {
                 >
                   {job.estimated_duration ? formatWait(job.estimated_duration) : '--'}
                 </span>
+
+                {/* Queue ETA — how long until this job starts. Shows ~Xm wait when
+                    queueEtas data is available from the /api/queue/etas fetch. */}
+                {jobEta != null && jobEta.estimated_start_offset != null && (
+                  <span
+                    class="data-mono"
+                    style="font-size: var(--type-micro); color: var(--text-tertiary); white-space: nowrap; flex-shrink: 0;"
+                    title={`Estimated wait before this job starts running`}
+                  >
+                    ~{formatDuration(jobEta.estimated_start_offset)}
+                  </span>
+                )}
 
                 {/* Cancel button */}
                 <button
