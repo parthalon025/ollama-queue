@@ -156,6 +156,16 @@ def import_eval_variants(body: dict = Body(...)):
             )
             templates_imported += cur.rowcount
         for var in variants:
+            try:
+                params_val = validate_variant_params(var.get("params"))
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=f"Variant '{var.get('id', '?')}': {exc}")
+
+            try:
+                provider_val = validate_provider(var.get("provider"))
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=f"Variant '{var.get('id', '?')}': {exc}")
+
             cur = conn.execute(
                 """INSERT OR IGNORE INTO eval_variants
                    (id, label, prompt_template_id, model, temperature, num_ctx,
@@ -172,10 +182,10 @@ def import_eval_variants(body: dict = Body(...)):
                     var.get("is_recommended", 0),
                     0,  # imported = user-owned
                     var.get("created_at") or now,
-                    var.get("params"),
+                    params_val,
                     var.get("system_prompt"),
                     var.get("training_config"),
-                    var.get("provider"),
+                    provider_val,
                 ),
             )
             variants_imported += cur.rowcount

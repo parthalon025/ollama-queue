@@ -339,6 +339,27 @@ def test_import_is_idempotent(client):
     assert resp2.json()["variants_imported"] == 0
 
 
+def test_import_invalid_params_returns_400(client):
+    """Import with invalid Ollama param should return 400."""
+    payload = {
+        "variants": [
+            {
+                "id": "import-bad-params",
+                "label": "Bad import",
+                "prompt_template_id": "zero-shot-causal",
+                "model": "qwen2.5:7b",
+                "temperature": 0.6,
+                "num_ctx": 8192,
+                "params": '{"temperature": 0.9}',
+            }
+        ],
+        "templates": [],
+    }
+    resp = client.post("/api/eval/variants/import", json=payload)
+    assert resp.status_code == 400
+    assert "flat fields" in resp.json()["detail"].lower() or "temperature" in resp.json()["detail"].lower()
+
+
 # --- Templates ---
 
 
