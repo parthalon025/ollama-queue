@@ -1,5 +1,6 @@
 import { h } from 'preact';
 import { useState, useMemo } from 'preact/hooks';
+import EmptyState from './EmptyState.jsx';
 
 const STATUS_CONFIG = {
   completed: { icon: '\u2713', color: 'var(--status-healthy)' },
@@ -28,9 +29,7 @@ export default function HistoryList({ jobs }) {
   if (allItems.length === 0) {
     return (
       <div class="t-frame" data-label="Recent Jobs">
-        <p style="color: var(--text-tertiary); font-size: var(--type-body); text-align: center;">
-          No jobs have finished yet — submit some jobs and they'll appear here
-        </p>
+        <EmptyState headline="No history yet" body="Run your first job to see results here." />
       </div>
     );
   }
