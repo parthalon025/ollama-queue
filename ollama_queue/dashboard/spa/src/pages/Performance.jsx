@@ -90,9 +90,15 @@ export default function Performance() {
             </div>
 
             {/* Performance Curve — tok/min vs model size */}
+            <p style="font-size: var(--type-label); color: var(--text-secondary); margin-bottom: 8px;">
+                Jobs completed per hour. Use this to estimate capacity for batch workloads.
+            </p>
             <PerformanceCurveChart curve={curve} models={models} />
 
             {/* Load Heatmap — hour × day-of-week */}
+            <p style="font-size: var(--type-label); color: var(--text-secondary); margin-bottom: 8px;">
+                Activity by hour of day and day of week. Darker cells mean more jobs ran during that window.
+            </p>
             <LoadHeatmap />
         </div>
     );

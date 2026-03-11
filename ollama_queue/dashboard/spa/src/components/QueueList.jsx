@@ -99,6 +99,15 @@ export default function QueueList({ jobs, currentJob }) {
   const tags = useMemo(() => [...new Set(allItems.map(j => j.tag).filter(Boolean))], [allItems]);
   const items = tagFilter ? allItems.filter(j => j.tag === tagFilter) : allItems;
 
+  // What it shows: For each source, the ordered list of job IDs in queue position order.
+  // Decision it drives: When a source has multiple jobs queued, the user can see
+  //   which of their jobs is #1/#3 in that source's backlog.
+  const sourcePositions = {};
+  items.forEach(job => {
+    if (!sourcePositions[job.source]) sourcePositions[job.source] = [];
+    sourcePositions[job.source].push(job.id);
+  });
+
   // Prepend the running job at position 0 (not draggable, not counted in wait)
   const displayItems = currentJob ? [{ ...currentJob, _isRunning: true }, ...items] : items;
 
@@ -274,6 +283,13 @@ export default function QueueList({ jobs, currentJob }) {
                 >
                   {job.model || '--'}
                 </span>
+
+                {/* Per-source queue position — shown when the same source has more than 1 job waiting */}
+                {sourcePositions[job.source]?.length > 1 && !job._isRunning && (
+                  <span class="data-mono" style="font-size:var(--type-micro);color:var(--text-tertiary);flex-shrink:0;">
+                    #{(sourcePositions[job.source].indexOf(job.id) + 1)}/{sourcePositions[job.source].length}
+                  </span>
+                )}
 
                 {/* Estimated duration */}
                 <span

@@ -30,49 +30,44 @@ export default function BottomNav({ active, onNavigate, dlqCount, onSubmitReques
                 zIndex: 50,
             }}
         >
-            {NAV_ITEMS.map(item => {
-                const isActive = active === item.id;
-                const badge = item.id === 'history' && dlqCount > 0 ? dlqCount : null;
-                return (
-                    <button
-                        key={item.id}
-                        title={item.tooltip}
-                        onClick={() => onNavigate(item.id)}
-                        style={{
-                            flex: 1,
-                            display: 'flex',
-                            flexDirection: 'column',
-                            alignItems: 'center',
-                            gap: '2px',
-                            padding: '0.5rem 0.25rem',
-                            color: isActive ? 'var(--accent)' : 'var(--text-secondary)',
-                            fontSize: 'var(--type-micro)',
-                            cursor: 'pointer',
-                            background: 'transparent',
-                            border: 'none',
-                            position: 'relative',
-                        }}
-                    >
-                        <span style="font-size: 1.1rem;">{item.icon}</span>
-                        <span>{item.label}</span>
-                        {badge && (
-                            <span style={{
-                                position: 'absolute',
-                                top: 4, right: '18%',
-                                background: 'var(--status-error)',
-                                color: '#fff',
-                                fontSize: '0.5rem',
-                                padding: '1px 3px',
-                                borderRadius: 8,
-                                fontFamily: 'var(--font-mono)',
-                                fontWeight: 700,
-                            }}>
-                                {badge}
-                            </span>
-                        )}
-                    </button>
-                );
-            })}
+            {/* Composite issue count — aggregates actionable signals into a single badge on the Now tab.
+                Currently uses DLQ count as the primary signal; extend with stall/error counts as needed. */}
+            {(() => {
+                const issueCount = dlqCount || 0;
+                return NAV_ITEMS.map(item => {
+                    const isActive = active === item.id;
+                    const showBadge = item.id === 'now' && issueCount > 0;
+                    return (
+                        <button
+                            key={item.id}
+                            title={item.tooltip}
+                            onClick={() => onNavigate(item.id)}
+                            style={{
+                                flex: 1,
+                                display: 'flex',
+                                flexDirection: 'column',
+                                alignItems: 'center',
+                                gap: '2px',
+                                padding: '0.5rem 0.25rem',
+                                color: isActive ? 'var(--accent)' : 'var(--text-secondary)',
+                                fontSize: 'var(--type-micro)',
+                                cursor: 'pointer',
+                                background: 'transparent',
+                                border: 'none',
+                                position: 'relative',
+                            }}
+                        >
+                            <span style="font-size: 1.1rem;">{item.icon}</span>
+                            <span>{item.label}</span>
+                            {showBadge && (
+                                <span style="position:absolute;top:4px;right:4px;background:var(--status-error);color:#fff;border-radius:50%;width:16px;height:16px;font-size:10px;display:flex;align-items:center;justify-content:center;font-weight:600;">
+                                    {issueCount > 9 ? '9+' : issueCount}
+                                </span>
+                            )}
+                        </button>
+                    );
+                });
+            })()}
         </nav>
         {onSubmitRequest && (
             <button

@@ -27,6 +27,9 @@ export default function HistoryList({ jobs }) {
   const [tagFilter, setTagFilter] = useState(null);
   const tags = useMemo(() => [...new Set(allItems.map(j => j.tag).filter(Boolean))], [allItems]);
   const items = (tagFilter ? allItems.filter(j => j.tag === tagFilter) : allItems).slice(0, 20);
+  // What it shows: Tracks which job's output was most recently copied to the clipboard.
+  // Decision it drives: Flips the copy button label to "✓ Copied" for 2s as confirmation.
+  const copied = useSignal(null);
 
   if (allItems.length === 0) {
     return (
@@ -55,7 +58,7 @@ export default function HistoryList({ jobs }) {
       )}
       <div class="flex flex-col">
         {items.map((job) => (
-          <HistoryRow key={job.id} job={job} />
+          <HistoryRow key={job.id} job={job} copied={copied} />
         ))}
       </div>
     </div>
@@ -66,7 +69,7 @@ export default function HistoryList({ jobs }) {
 //   model, and duration. Failed/killed rows show a ↺ Retry button to re-queue the job.
 // Decision it drives: Lets the user immediately retry a failed job without re-entering
 //   parameters, and expand the row to read the failure reason before deciding to retry.
-function HistoryRow({ job }) {
+function HistoryRow({ job, copied }) {
   const [expanded, setExpanded] = useState(false);
   // retrySuccess tracks which job id was most recently retried, to flip the button label
   // to "✓ Requeued" for 2 seconds as visual confirmation.
@@ -160,6 +163,22 @@ function HistoryRow({ job }) {
           {hasReason && (
             <div class="data-mono" style="font-size: var(--type-micro); color: var(--status-error); white-space: pre-wrap;">
               {job.outcome_reason}
+            </div>
+          )}
+          {/* Copy output button — lets the user grab the job's stdout for debugging without leaving the dashboard */}
+          {job.output && (
+            <div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
+              <button
+                class="t-btn"
+                style="font-size:var(--type-micro);padding:2px 8px;"
+                onClick={async () => {
+                  await navigator.clipboard.writeText(job.output);
+                  copied.value = job.id;
+                  setTimeout(() => { copied.value = null; }, 2000);
+                }}
+              >
+                {copied.value === job.id ? '\u2713 Copied' : '\u2398 Copy output'}
+              </button>
             </div>
           )}
         </div>
