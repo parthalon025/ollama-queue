@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@preact/signals": "^2.0.0",
-    "expedition33-ui": "file:../../../../expedition33-ui",
+    "superhot-ui": "file:../../../../superhot-ui",
     "preact": "^10.25.0",
     "uplot": "^1.6.32"
   },

@@ -1,4 +1,5 @@
 import { h } from 'preact';
+import { useEffect, useRef } from 'preact/hooks';
 
 /**
  * What it shows: RAM, VRAM, CPU load, and swap — the four metrics the health monitor watches
@@ -13,6 +14,23 @@ import { h } from 'preact';
  */
 export default function ResourceGauges({ ram, vram, load, swap, settings }) {
   const s = settings || {};
+  const containerRef = useRef(null);
+
+  const ramPause = s.ram_pause_pct || 85;
+  const vramPause = s.vram_pause_pct || 90;
+  const isOverThreshold = (ram ?? 0) >= ramPause || (vram ?? 0) >= vramPause;
+
+  // ThreatPulse: red glow when RAM or VRAM hits the pause threshold.
+  // Signals that the queue is about to auto-pause — this is urgent, not informational.
+  useEffect(() => {
+    if (!containerRef.current) return;
+    if (isOverThreshold) {
+      containerRef.current.setAttribute('data-sh-effect', 'threat-pulse');
+    } else {
+      containerRef.current.removeAttribute('data-sh-effect');
+    }
+  }, [isOverThreshold]);
+
   const gauges = [
     { label: 'RAM',  title: 'Main memory (RAM) — used by running programs',                value: ram,  pause: s.ram_pause_pct || 85,                              resume: s.ram_resume_pct || 75 },
     { label: 'GPU',  title: 'GPU memory (VRAM) — used by AI models',                       value: vram, pause: s.vram_pause_pct || 90,                             resume: s.vram_resume_pct || 80 },
@@ -21,7 +39,7 @@ export default function ResourceGauges({ ram, vram, load, swap, settings }) {
   ];
 
   return (
-    <div class="flex gap-3 flex-wrap">
+    <div ref={containerRef} class="flex gap-3 flex-wrap">
       {gauges.map((g) => {
         const pct = Math.min(100, Math.max(0, g.value ?? 0));
         let color = 'var(--accent)';

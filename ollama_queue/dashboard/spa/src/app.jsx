@@ -109,7 +109,7 @@ export function App() {
     const activeEval = status.value?.active_eval ?? null;
 
     return (
-        <div class="layout-root" style="background: var(--bg-base); color: var(--text-primary);">
+        <div class="layout-root sh-crt" style="background: var(--bg-base); color: var(--text-primary);">
             <Sidebar
                 active={currentTab.value}
                 onNavigate={handleNavigate}

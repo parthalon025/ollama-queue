@@ -1,11 +1,13 @@
 @import "tailwindcss";
-@import "expedition33-ui";
+@import "../node_modules/superhot-ui/css/superhot.css";
 @import "uplot/dist/uPlot.min.css";
 
-/* ── App-specific layout tokens (not provided by expedition33-ui) ── */
+/* ── App-specific layout tokens (not provided by superhot-ui) ── */
 :root {
   --sidebar-width: 200px;
   --sidebar-width-sm: 64px;
+  --bg-terminal: oklch(0.04 0 0);
+  --scan-line: oklch(0 0 0 / 0.08);
 }
 
 /* ── Global theme-aware base styles ── */
@@ -470,11 +472,11 @@ body {
 
 /* ── Tier 3: Status Alert (strongest attention, auto-expires) ── */
 @keyframes orange-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 var(--accent-warm-glow); }
-  50% { box-shadow: 0 0 0 6px var(--accent-warm-glow); }
+  0%, 100% { box-shadow: 0 0 0 0 var(--accent-glow); }
+  50% { box-shadow: 0 0 0 6px var(--accent-glow); }
 }
 @keyframes border-alert {
-  0% { border-left-color: var(--accent-warm); }
+  0% { border-left-color: var(--accent); }
   50% { border-left-color: var(--accent); }
   100% { border-left-color: var(--border-subtle); }
 }
@@ -490,7 +492,7 @@ body {
 }
 
 .t3-orange-pulse { animation: orange-pulse 0.6s ease-out 3; }
-.t3-border-alert { animation: border-alert 1s ease-out forwards; border-left: 3px solid var(--accent-warm); }
+.t3-border-alert { animation: border-alert 1s ease-out forwards; border-left: 3px solid var(--accent); }
 .t3-badge-appear { animation: badge-appear 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
 .t3-counter-bump { animation: counter-bump 0.3s ease-out; }
 
@@ -507,7 +509,7 @@ body {
     animation: none;
   }
   .t-section-header::after { animation: none; }
-  .t3-border-alert { animation: none; border-left-color: var(--accent-warm); }
+  .t3-border-alert { animation: none; border-left-color: var(--accent); }
 }
 
 /* Tablet: Tier 1 reduced */
@@ -526,8 +528,8 @@ body {
     animation: none !important;
     opacity: 1 !important;
   }
-  .t3-orange-pulse { animation: none; box-shadow: 0 0 0 4px var(--accent-warm-glow); }
-  .t3-border-alert { animation: none; border-left-color: var(--accent-warm); }
+  .t3-orange-pulse { animation: none; box-shadow: 0 0 0 4px var(--accent-glow); }
+  .t3-border-alert { animation: none; border-left-color: var(--accent); }
   .t3-badge-appear { animation: none; opacity: 1; }
   .t-section-header::after { animation: none; }
 }
@@ -1448,3 +1450,8 @@ body {
 .badge--system { background: var(--text-secondary, #6c757d); color: #fff; }
 .badge--caution { background: #fd7e14; color: #fff; }
 .badge--ok { background: color-mix(in srgb, var(--status-ok, #198754) 15%, var(--bg-surface)); color: var(--status-ok, #198754); }
+
+/* CRT scanlines — superhot-ui aesthetic, enabled on .sh-crt elements */
+.sh-crt {
+  --sh-crt-stripe: block;
+}

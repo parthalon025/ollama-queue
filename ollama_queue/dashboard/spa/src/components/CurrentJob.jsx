@@ -1,4 +1,6 @@
 import { h } from 'preact';
+import { useEffect, useRef } from 'preact/hooks';
+import { applyMantra, removeMantra } from 'superhot-ui';
 import StatusBadge from './StatusBadge.jsx';
 import ResourceGauges from './ResourceGauges.jsx';
 
@@ -19,11 +21,38 @@ import ResourceGauges from './ResourceGauges.jsx';
  *     not just during individual proxy calls, so eval activity is always visible in the Now tab
  */
 export default function CurrentJob({ daemon, currentJob, latestHealth, settings, activeEval }) {
-  if (!daemon) return null;
+  // Hooks must come before any conditional return (Rules of Hooks).
+  const cardRef = useRef(null);
 
-  const state = daemon.state || 'idle';
+  const state = daemon ? (daemon.state || 'idle') : 'idle';
   const isPaused = state.startsWith('paused');
   const isRunning = state === 'running';
+  const isStalled = isRunning && currentJob && !!currentJob.stall_detected_at;
+
+  // Mantra: stamp "RUNNING" watermark on the card while a job is active.
+  // Removes itself on idle/paused — the absence of the watermark is its own signal.
+  useEffect(() => {
+    if (!cardRef.current) return;
+    if (isRunning) {
+      applyMantra(cardRef.current, 'RUNNING');
+    } else {
+      removeMantra(cardRef.current);
+    }
+    return () => { if (cardRef.current) removeMantra(cardRef.current); };
+  }, [isRunning]);
+
+  // ThreatPulse: red glow pulse when stall detected.
+  useEffect(() => {
+    if (!cardRef.current || !isStalled) return;
+    cardRef.current.setAttribute('data-sh-effect', 'threat-pulse');
+    const timer = setTimeout(
+      () => { if (cardRef.current) cardRef.current.removeAttribute('data-sh-effect'); },
+      3000
+    );
+    return () => clearTimeout(timer);
+  }, [isStalled]);
+
+  if (!daemon) return null;
 
   // Elapsed time for running job
   let elapsed = null;
@@ -40,7 +69,7 @@ export default function CurrentJob({ daemon, currentJob, latestHealth, settings,
   const isOverrun = estimated && progressPct > 100;
 
   const hp = latestHealth || {};
-  const isStalled = isRunning && currentJob && !!currentJob.stall_detected_at;
+
   const burstRegime = daemon.burst_regime || 'unknown';
 
   const pausedReasonLabel = {
@@ -50,7 +79,7 @@ export default function CurrentJob({ daemon, currentJob, latestHealth, settings,
   }[state] || (daemon.paused_reason || state.replace('paused_', ''));
 
   return (
-    <div class="t-frame" data-label="Currently Running"
+    <div ref={cardRef} class="t-frame" data-label="Currently Running"
       style={isStalled ? 'border-left: 3px solid var(--status-warning);' : ''}>
       {isRunning ? (
         <div class="flex flex-col gap-2">
