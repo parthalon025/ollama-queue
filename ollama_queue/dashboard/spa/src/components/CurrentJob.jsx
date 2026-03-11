@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'preact/hooks';
 import { applyMantra, removeMantra } from 'superhot-ui';
 import StatusBadge from './StatusBadge.jsx';
 import ResourceGauges from './ResourceGauges.jsx';
+import EmptyState from './EmptyState.jsx';
 
 /**
  * What it shows: What the daemon is doing RIGHT NOW — running job name/model/elapsed time
@@ -20,7 +21,7 @@ import ResourceGauges from './ResourceGauges.jsx';
  *   activeEval: active eval_run row if any (id, status, judge_model) — present for the full session,
  *     not just during individual proxy calls, so eval activity is always visible in the Now tab
  */
-export default function CurrentJob({ daemon, currentJob, latestHealth, settings, activeEval }) {
+export default function CurrentJob({ daemon, currentJob, latestHealth, settings, activeEval, onSubmitRequest }) {
   // Hooks must come before any conditional return (Rules of Hooks).
   const cardRef = useRef(null);
 
@@ -185,10 +186,11 @@ export default function CurrentJob({ daemon, currentJob, latestHealth, settings,
           </span>
         </div>
       ) : (
-        <div class="flex items-center gap-3">
-          <StatusBadge state="idle" />
-          <span style="color: var(--text-secondary); font-size: var(--type-body);">Ready — waiting for jobs to run</span>
-        </div>
+        <EmptyState
+          headline="Ready — nothing in queue"
+          body="Jobs you submit will appear here."
+          action={onSubmitRequest ? { label: '+ Submit a job', onClick: onSubmitRequest } : undefined}
+        />
       )}
     </div>
   );

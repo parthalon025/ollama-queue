@@ -2,6 +2,7 @@ import { h } from 'preact';
 import { useState, useMemo, useEffect, useRef } from 'preact/hooks';
 import { applyFreshness, shatterElement } from 'superhot-ui';
 import { queue, API, refreshQueue } from '../stores';
+import EmptyState from './EmptyState.jsx';
 
 /**
  * What it shows: Every job waiting to run, priority-ordered, with estimated duration.
@@ -77,9 +78,7 @@ export default function QueueList({ jobs, currentJob }) {
   if (allItems.length === 0 && !currentJob) {
     return (
       <div class="t-frame" data-label="Waiting to Run">
-        <p style="color: var(--text-tertiary); font-size: var(--type-body); text-align: center;">
-          Nothing in the queue — all caught up
-        </p>
+        <EmptyState headline="Queue is empty" body="Jobs you submit will appear here." />
       </div>
     );
   }
