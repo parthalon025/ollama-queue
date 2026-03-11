@@ -24,7 +24,7 @@ Tested against 6 diverse job types before implementation. Context-aware prompt a
 
 On `POST /api/schedule` (new job creation), if no description is provided, generation fires in a background thread immediately. The endpoint returns immediately; the description appears 5-10s later on next poll.
 
-On `POST /api/schedule/{id}/generate-description` (manual trigger), the call is **synchronous** — the endpoint blocks until Ollama responds and returns the description directly. This allows the UI to update the textarea immediately without polling.
+On `POST /api/schedule/{id}/generate-description` (manual trigger), the call is **asynchronous** — the endpoint spawns a background thread and returns `{"ok": True}` immediately. The description appears on the next `GET /api/schedule` poll (typically 5–15s). Changed to async in PR #102 to match the auto-generation pattern and prevent blocking the API worker.
 
 ### UI
 
@@ -32,8 +32,8 @@ Placed at the **top** of the expanded detail panel in Plan.jsx — above Command
 
 ## Approach Considered
 
-**Option A (chosen): Local Ollama (qwen3:8b), synchronous for manual trigger**
-- Accurate with domain context. ~5-10s wait for ↻. No external calls.
+**Option A (chosen): Local Ollama (qwen3:8b), async background thread**
+- Accurate with domain context. ~5-15s until visible on next poll. No external calls. Both auto and manual triggers use the same background pattern (changed to async in PR #102).
 
 **Option B: DB-stored, no auto-generation**
 - Simpler, but requires manual entry for all 30 jobs. Not scalable.

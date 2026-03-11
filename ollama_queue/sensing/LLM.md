@@ -17,6 +17,8 @@ The `currently_paused` parameter determines which threshold to compare. Without 
 
 **VRAM cache**: `_vram_cache` has a 5s TTL. Read-only from the poll thread (no lock needed). `__init__` must be called to initialize it -- if subclassing in tests, call `super().__init__()`.
 
+**`get_vram_total_gb()`**: Returns total GPU VRAM in GB by running `nvidia-smi --query-gpu=memory.total`. Falls back to `24.0` (the original hardcoded value) when nvidia-smi is unavailable or returns an unparseable result. Used by `DeferralScheduler` and `DLQScheduler` for slot VRAM headroom calculations. The daemon wires `self.health.get_vram_total_gb` into both schedulers at construction time.
+
 **Interactive yield**: When `yield_to_interactive=True` and Ollama shows a loaded model not in `recent_job_models` (10-minute window), the daemon yields to the interactive user.
 
 ## StallDetector Threading

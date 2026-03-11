@@ -28,6 +28,12 @@ Soft factors: hot-model bonus, recurring-conflict penalty, historical quiet bonu
 
 ## Deferral Sweep (deferral.py)
 
+```python
+DeferralScheduler(db, estimator, load_map_fn, vram_total_fn=None)
+```
+
+`vram_total_fn` is an optional callable returning total GPU VRAM in GB. Defaults to `lambda: 24.0`. Pass `health.get_vram_total_gb` from the daemon to use live nvidia-smi readings.
+
 `DeferralScheduler.sweep()` is a **two-phase sweep** -- this is critical:
 
 1. **Phase 1**: Fetch ALL deferred entries, resume any whose `scheduled_for` has passed
@@ -41,10 +47,17 @@ The original single-call design filtered out scheduled entries, making phase-1 r
 
 `DLQScheduler` auto-reschedules failed jobs from the DLQ:
 
+```python
+DLQScheduler(db, estimator, load_map_fn, vram_total_fn=None)
+```
+
+`vram_total_fn` is an optional callable returning total GPU VRAM in GB. Defaults to `lambda: 24.0`. Pass `health.get_vram_total_gb` from the daemon to use live nvidia-smi readings.
+
 - **Failure classification**: `system_snapshot.classify_failure(reason)` tags entries as `resource`, `timeout`, `transient`, or `permanent`. Permanent failures are never auto-rescheduled.
 - **Chronic skip**: Entries with `auto_reschedule_count >= chronic_failure_threshold` are skipped.
 - **Two-step crash safety**: `mark_dlq_scheduling()` (marks, does NOT increment count) -> submit job -> `update_dlq_reschedule()` (increments count, sets resolution). Prevents double-counting on crash.
 - **Event-driven + periodic**: Triggered by `on_job_completed()` and as fallback by `periodic_sweep()`.
+- **`list_dlq` fetch is inside `_sweep_lock`** — the unscheduled DLQ list is fetched inside `_sweep_lock`, not before acquiring it. This prevents a stale-list race between `on_job_completed` and `periodic_sweep` callers. Tests must not assume the list is fetched before lock acquisition.
 
 ## DLQ Priority Sort
 
