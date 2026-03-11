@@ -2,9 +2,10 @@ import { h } from 'preact';
 import { useEffect } from 'preact/hooks';
 import {
     status, queue, history, healthData, durationData, settings,
-    dlqCount, connectionStatus, currentTab,
+    dlqCount, connectionStatus, currentTab, clearDLQ,
     scheduleJobs, fetchSchedule,
 } from '../stores';
+import { useActionFeedback } from '../hooks/useActionFeedback.js';
 import CurrentJob from '../components/CurrentJob.jsx';
 import QueueList from '../components/QueueList.jsx';
 import HeroCard from '../components/HeroCard.jsx';
@@ -27,6 +28,10 @@ export default function Now({ onSubmitRequest }) {
     const durations = durationData.value;
     const sett = settings.value;
     const dlqCnt = dlqCount.value;
+
+    // Action feedback hooks for DLQ quick-actions — must precede any conditional return
+    const [viewFb, viewAct] = useActionFeedback();
+    const [dismissFb, dismissAct] = useActionFeedback();
 
     // Fetch schedule once on mount so disabled recurring job count is available
     // even if the Plan tab hasn't been visited yet.
@@ -113,22 +118,36 @@ export default function Now({ onSubmitRequest }) {
                                 ⚠ Needs Attention
                             </span>
                             {dlqCnt > 0 && (
-                                <button
-                                    onClick={() => { currentTab.value = 'history'; }}
-                                    title="Dead-letter queue — jobs that ran out of retries"
-                                    style={{
-                                        fontSize: 'var(--type-label)',
-                                        color: 'var(--status-error)',
-                                        background: 'transparent',
-                                        border: 'none',
-                                        cursor: 'pointer',
-                                        textDecoration: 'underline',
-                                        fontFamily: 'var(--font-mono)',
-                                        padding: 0,
-                                    }}
-                                >
-                                    {dlqCnt} failed {dlqCnt === 1 ? 'job' : 'jobs'} need attention
-                                </button>
+                                // What it shows: DLQ count + two quick-action buttons to navigate
+                                //   to History or bulk-clear the DLQ without leaving the Now tab.
+                                // Decision it drives: User can dismiss noise or jump to detail
+                                //   without hunting through tabs.
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                    <span
+                                        title="Dead-letter queue — jobs that ran out of retries"
+                                        style={{
+                                            fontSize: 'var(--type-label)',
+                                            color: 'var(--status-error)',
+                                            fontFamily: 'var(--font-mono)',
+                                        }}
+                                    >
+                                        {dlqCnt} failed {dlqCnt === 1 ? 'job' : 'jobs'} need attention
+                                    </span>
+                                    <button
+                                        class="t-btn"
+                                        style={{ fontSize: 'var(--type-micro)', padding: '2px 8px' }}
+                                        disabled={viewFb.phase === 'loading'}
+                                        onClick={() => viewAct('', () => { currentTab.value = 'history'; }, () => '')}
+                                    >View failed</button>
+                                    {viewFb.msg && <span class={`action-fb action-fb--${viewFb.phase}`}>{viewFb.msg}</span>}
+                                    <button
+                                        class="t-btn"
+                                        style={{ fontSize: 'var(--type-micro)', padding: '2px 8px', color: 'var(--text-tertiary)' }}
+                                        disabled={dismissFb.phase === 'loading'}
+                                        onClick={() => dismissAct('Clearing…', clearDLQ, () => 'Cleared')}
+                                    >Dismiss all</button>
+                                    {dismissFb.msg && <span class={`action-fb action-fb--${dismissFb.phase}`}>{dismissFb.msg}</span>}
+                                </div>
                             )}
                             {recentFailures > 0 && (
                                 <button
