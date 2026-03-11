@@ -143,13 +143,24 @@ export default function CurrentJob({ daemon, currentJob, latestHealth, settings,
                   </span>
                 </>
               )}
+              {/* What it shows: Expandable stall resolution panel when the stall detector flags a frozen job.
+               *  Decision it drives: Gives the user a concrete 4-step checklist so they know exactly
+               *    what to do next — wait, cancel, inspect, or restart — without leaving the dashboard. */}
               {isStalled && (
-                <span
-                  title="This job appears to be frozen — not producing output or making progress"
-                  style="font-size: var(--type-label); color: var(--status-warning); background: var(--status-warning-subtle);
-                             padding: 1px 6px; border-radius: 3px; border: 1px solid var(--status-warning);">
-                  ⚠ frozen
-                </span>
+                <details style="display:inline-block;position:relative;">
+                  <summary style="cursor:pointer;font-size:var(--type-label);color:var(--status-warning);background:color-mix(in srgb,var(--status-warning) 12%,transparent);padding:2px 8px;border-radius:3px;border:1px solid var(--status-warning);list-style:none;display:inline-flex;align-items:center;gap:4px;">
+                    ⚠ frozen — what should I do?
+                  </summary>
+                  <div style="position:absolute;z-index:10;background:var(--bg-surface);border:1px solid var(--border-primary);border-radius:var(--radius);padding:12px;max-width:300px;font-size:var(--type-label);color:var(--text-secondary);box-shadow:var(--card-shadow-hover);margin-top:4px;left:0;">
+                    <p style="margin:0 0 8px;font-weight:600;color:var(--status-warning);">Job is not producing output.</p>
+                    <ol style="margin:0;padding-left:16px;display:flex;flex-direction:column;gap:4px;">
+                      <li>Wait 2 more minutes — some models are slow to start</li>
+                      <li>Cancel and retry — click × in the queue below</li>
+                      <li>Check Ollama: run <code style="font-family:var(--font-mono);">ollama ps</code> to verify model is loaded</li>
+                      <li>Restart daemon from Settings if Ollama itself is stuck</li>
+                    </ol>
+                  </div>
+                </details>
               )}
               {/* Burst regime badge — shows traffic pattern detected by burst detector.
                *  steady=normal, burst=high-activity surge, trough=quiet window, unknown=no data yet.
