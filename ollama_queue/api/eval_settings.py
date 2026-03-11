@@ -243,6 +243,63 @@ def put_eval_settings(body: dict = Body(...)):
 # --- Eval: Schedule ---
 
 
+@router.post("/api/eval/providers/test")
+def test_provider_connection(body: dict = Body(...)):
+    """Test provider connectivity with a minimal prompt.
+
+    What it shows: Whether the configured provider is reachable and responding.
+    Decision it drives: Confirms API keys and network connectivity are correct
+      before starting a full eval run.
+    Returns {"ok": bool, "response_length": int, "error": str|None}.
+    """
+    from ollama_queue.eval.providers import get_provider
+    from ollama_queue.eval.validation import validate_provider
+
+    provider_name = body.get("provider", "ollama")
+    model = body.get("model")
+
+    if not model:
+        raise HTTPException(status_code=422, detail="model is required")
+
+    try:
+        provider_name = validate_provider(provider_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    db = _api.db
+    settings = db.get_all_settings()
+    api_key = None
+    base_url = None
+    http_base = settings.get("eval.http_base", "http://127.0.0.1:7683")
+
+    if provider_name == "claude":
+        api_key = settings.get("eval.claude_api_key") or None
+    elif provider_name == "openai":
+        api_key = settings.get("eval.openai_api_key") or None
+        base_url = settings.get("eval.openai_base_url") or None
+
+    try:
+        provider = get_provider(provider_name, http_base=http_base, api_key=api_key, base_url=base_url)
+    except ImportError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    text, _usage, _job_id = provider.generate(
+        prompt="Say hello in one word.",
+        system=None,
+        model=model,
+        temperature=0.1,
+        num_ctx=256,
+        params=None,
+        timeout=30,
+        source="provider_test",
+    )
+
+    if text is None:
+        return {"ok": False, "response_length": 0, "error": "No response from provider"}
+
+    return {"ok": True, "response_length": len(text), "error": None}
+
+
 @router.post("/api/eval/schedule")
 def create_eval_schedule(body: dict = Body(...)):
     """Create a recurring eval job.

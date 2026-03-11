@@ -562,3 +562,66 @@ def test_short_api_key_fully_masked(client_and_db):
     data = resp.json()
     assert data.get("eval.claude_api_key") == "***"
     assert "abc" not in data.get("eval.claude_api_key", "")
+
+
+# --- Task 11: Provider test endpoint ---
+
+
+def test_provider_test_ollama_success(client):
+    """POST /api/eval/providers/test with ollama should succeed when proxy responds."""
+    from unittest.mock import patch
+
+    with patch("ollama_queue.eval.providers._call_proxy_raw") as mock:
+        mock.return_value = ("hello world", {"prompt_tokens": 5, "completion_tokens": 3}, None)
+        resp = client.post(
+            "/api/eval/providers/test",
+            json={
+                "provider": "ollama",
+                "model": "qwen2.5:7b",
+            },
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["response_length"] > 0
+
+
+def test_provider_test_ollama_failure(client):
+    """POST /api/eval/providers/test returns ok=False when proxy returns None."""
+    from unittest.mock import patch
+
+    with patch("ollama_queue.eval.providers._call_proxy_raw") as mock:
+        mock.return_value = (None, {}, None)
+        resp = client.post(
+            "/api/eval/providers/test",
+            json={
+                "provider": "ollama",
+                "model": "qwen2.5:7b",
+            },
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is False
+
+
+def test_provider_test_invalid_provider(client):
+    """POST /api/eval/providers/test with unknown provider should return 400."""
+    resp = client.post(
+        "/api/eval/providers/test",
+        json={
+            "provider": "invalid_provider",
+            "model": "test-model",
+        },
+    )
+    assert resp.status_code == 400
+
+
+def test_provider_test_missing_model(client):
+    """POST /api/eval/providers/test without model should return 422."""
+    resp = client.post(
+        "/api/eval/providers/test",
+        json={
+            "provider": "ollama",
+        },
+    )
+    assert resp.status_code == 422
