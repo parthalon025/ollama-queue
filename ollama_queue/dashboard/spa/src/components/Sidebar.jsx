@@ -1,4 +1,6 @@
 import { h } from 'preact';
+import { healthData, settings, connectionStatus } from '../stores';
+import SystemHealthChip from './SystemHealthChip.jsx';
 
 // NOTE: callback params use descriptive names (item, etc.) — never 'h' (shadows JSX factory)
 const NAV_ITEMS = [
@@ -12,44 +14,29 @@ const NAV_ITEMS = [
     { id: 'performance', icon: '⊘', label: 'Perf', tooltip: 'Model performance stats and system health' },
 ];
 
+// What it shows: Sidebar navigation + aggregate system health chip at the top.
+// Decision it drives: User can navigate between tabs and see at a glance whether the
+//   system is healthy, has warnings, or has issues requiring attention.
 export default function Sidebar({ active, onNavigate, daemonState, dlqCount, theme, onToggleTheme }) {
-    const state = daemonState?.state || 'idle';
-    const isRunning = state === 'running';
-    const isPaused  = state.startsWith('paused');
-
-    const chipColor = isRunning ? 'var(--status-healthy)'
-        : isPaused ? 'var(--status-warning)'
-        : 'var(--text-tertiary)';
-
-    const chipDot  = isRunning ? '▶' : isPaused ? '⏸' : '○';
-    const chipText = isRunning
-        ? (daemonState?.current_job_source || 'running')
-        : isPaused ? (daemonState?.state === 'paused_health' ? 'paused — high resources'
-                    : daemonState?.state === 'paused_manual' ? 'paused manually'
-                    : daemonState?.state === 'paused_interactive' ? 'paused — user active'
-                    : 'paused')
-        : 'idle — ready';
+    // Read health/settings/connection signals directly — avoids threading more props through App
+    const latestHealth = healthData.value?.length > 0 ? healthData.value[0] : null;
+    const sett = settings.value;
+    const connStatus = connectionStatus.value;
 
     return (
         <aside class="layout-sidebar">
-            {/* Daemon status chip */}
-            <div style={{
-                padding: '1rem 0.75rem 0.75rem',
-                borderBottom: '1px solid var(--border-subtle)',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.4rem',
-                color: chipColor,
-                fontFamily: 'var(--font-mono)',
-                fontSize: 'var(--type-label)',
-                fontWeight: 600,
-                overflow: 'hidden',
-                flexShrink: 0,
-            }}>
-                <span style="flex-shrink: 0;">{chipDot}</span>
-                <span class="sidebar-label" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                    {chipText}
-                </span>
+            {/* Aggregate health chip — replaces old daemon-only status display */}
+            <div style={{ borderBottom: '1px solid var(--border-subtle)', flexShrink: 0 }}>
+                <SystemHealthChip
+                    daemonState={daemonState?.state || 'idle'}
+                    dlqCount={dlqCount}
+                    ram={latestHealth?.ram_pct}
+                    vram={latestHealth?.vram_pct}
+                    load={latestHealth?.load_avg}
+                    swap={latestHealth?.swap_pct}
+                    settings={sett}
+                    connectionStatus={connStatus}
+                />
             </div>
 
             {/* Nav items */}
