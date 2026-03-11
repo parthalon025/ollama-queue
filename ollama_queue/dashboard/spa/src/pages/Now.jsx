@@ -29,8 +29,7 @@ export default function Now({ onSubmitRequest }) {
     const sett = settings.value;
     const dlqCnt = dlqCount.value;
 
-    // Action feedback hooks for DLQ quick-actions — must precede any conditional return
-    const [viewFb, viewAct] = useActionFeedback();
+    // Action feedback hook for "Dismiss all" — must precede any conditional return
     const [dismissFb, dismissAct] = useActionFeedback();
 
     // Fetch schedule once on mount so disabled recurring job count is available
@@ -136,17 +135,17 @@ export default function Now({ onSubmitRequest }) {
                                     <button
                                         class="t-btn"
                                         style={{ fontSize: 'var(--type-micro)', padding: '2px 8px' }}
-                                        disabled={viewFb.phase === 'loading'}
-                                        onClick={() => viewAct('', () => { currentTab.value = 'history'; }, () => '')}
+                                        onClick={() => { currentTab.value = 'history'; }}
                                     >View failed</button>
-                                    {viewFb.msg && <span class={`action-fb action-fb--${viewFb.phase}`}>{viewFb.msg}</span>}
-                                    <button
-                                        class="t-btn"
-                                        style={{ fontSize: 'var(--type-micro)', padding: '2px 8px', color: 'var(--text-tertiary)' }}
-                                        disabled={dismissFb.phase === 'loading'}
-                                        onClick={() => dismissAct('Clearing…', clearDLQ, () => 'Cleared')}
-                                    >Dismiss all</button>
-                                    {dismissFb.msg && <span class={`action-fb action-fb--${dismissFb.phase}`}>{dismissFb.msg}</span>}
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                        <button
+                                            class="t-btn"
+                                            style={{ fontSize: 'var(--type-micro)', padding: '2px 8px', color: 'var(--text-tertiary)' }}
+                                            disabled={dismissFb.phase === 'loading'}
+                                            onClick={() => dismissAct('Clearing…', clearDLQ, () => 'Cleared')}
+                                        >Dismiss all</button>
+                                        {dismissFb.msg && <span class={`action-fb action-fb--${dismissFb.phase}`}>{dismissFb.msg}</span>}
+                                    </div>
                                 </div>
                             )}
                             {recentFailures > 0 && (
