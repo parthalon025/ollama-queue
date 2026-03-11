@@ -38,6 +38,7 @@ export default function Settings() {
 
   const [pauseFb, pauseAct] = useActionFeedback();
   const [resumeFb, resumeAct] = useActionFeedback();
+  const [restartFb, restartAct] = useActionFeedback();
 
   /** Save a single setting key via PUT /api/settings. Returns true on success. */
   const handleSave = useCallback(async (key, value) => {
@@ -105,10 +106,12 @@ export default function Settings() {
           <button
             class="t-btn"
             style="font-size:var(--type-micro);padding:2px 10px;"
-            onClick={restartDaemon}
+            disabled={restartFb.phase === 'loading'}
+            onClick={() => restartAct('Restarting…', restartDaemon, () => 'Restart signalled')}
           >
-            Restart daemon
+            {restartFb.phase === 'loading' ? 'Restarting…' : 'Restart daemon'}
           </button>
+          {restartFb.msg && <div class={`action-fb action-fb--${restartFb.phase}`}>{restartFb.msg}</div>}
         </div>
       )}
       <SettingsForm
