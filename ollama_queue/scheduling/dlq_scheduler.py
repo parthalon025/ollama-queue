@@ -29,37 +29,42 @@ def _strip_dlq_prefix(source: str) -> str:
 class DLQScheduler:
     """Sweeps DLQ entries and auto-reschedules into optimal time slots."""
 
-    def __init__(self, db, estimator, load_map_fn):
+    def __init__(self, db, estimator, load_map_fn, vram_total_fn=None):
         """
         Args:
             db: Database instance.
             estimator: RuntimeEstimator instance.
             load_map_fn: Callable returning list[dict] (the load map from scheduler).
+            vram_total_fn: Callable returning float (total GPU VRAM in GB). Defaults to 24.0.
         """
         self.db = db
         self.estimator = estimator
         self.load_map_fn = load_map_fn
+        self.vram_total_fn = vram_total_fn or (lambda: 24.0)
         self._sweep_lock = threading.Lock()
         self._last_sweep = 0.0
 
     def on_job_completed(self, job_id: int) -> None:
         """Event-driven trigger — called after any job completes."""
-        unscheduled = self.db.list_dlq(unscheduled_only=True)
-        if unscheduled:
-            self._sweep(unscheduled)
+        self._sweep()
 
     def periodic_sweep(self) -> None:
         """Fallback trigger — called from daemon poll loop."""
-        unscheduled = self.db.list_dlq(unscheduled_only=True)
-        if unscheduled:
-            self._sweep(unscheduled)
+        self._sweep()
 
-    def _sweep(self, entries: list[dict]) -> list[dict]:
-        """Core sweep logic. Returns list of rescheduled entries."""
+    def _sweep(self) -> list[dict]:
+        """Core sweep logic. Returns list of rescheduled entries.
+
+        Fetches the unscheduled DLQ list INSIDE the lock to prevent stale-list
+        races between concurrent on_job_completed and periodic_sweep callers.
+        """
         if not self._sweep_lock.acquire(blocking=False):
             return []  # Another sweep in progress
         try:
-            return self._do_sweep(entries)
+            unscheduled = self.db.list_dlq(unscheduled_only=True)
+            if not unscheduled:
+                return []
+            return self._do_sweep(unscheduled)
         finally:
             self._sweep_lock.release()
 
@@ -115,7 +120,7 @@ class DLQScheduler:
             slot = find_fitting_slot(
                 load_map,
                 job_vram_needed_gb=job_vram,
-                total_vram_gb=24.0,  # TODO: get from health monitor
+                total_vram_gb=self.vram_total_fn(),
                 estimated_slots=estimated_slots,
                 failure_category=failure_cat,
                 job_model=model,

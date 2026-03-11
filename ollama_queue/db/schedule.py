@@ -260,6 +260,24 @@ class ScheduleMixin:
             ).fetchone()
             return row is not None
 
+    def has_pending_recurring(self, recurring_job_id):
+        """Return True if this recurring job already has a pending (waiting) instance.
+
+        Plain English: Checks whether a follow-up run is already sitting in the queue,
+        waiting to start. Used by the scheduler to avoid stacking multiple waiters for
+        the same job — one queued follower is enough.
+        Decision it drives: If pending exists → skip. If only running → still submit one follower.
+        """
+        with self._lock:
+            conn = self._connect()
+            row = conn.execute(
+                """SELECT 1 FROM jobs
+                   WHERE recurring_job_id = ? AND status = 'pending'
+                   LIMIT 1""",
+                (recurring_job_id,),
+            ).fetchone()
+            return row is not None
+
     def get_last_successful_run_time(self, recurring_job_id):
         """Return timestamp of most recent successful (exit_code=0) job for a recurring job.
 

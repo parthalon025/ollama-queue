@@ -51,6 +51,12 @@ export function buildTooltip(job, isConcurrent) {
         : 'never';
     const modelStr = job.model || job.model_profile || 'ollama';
     const parts = [];
+    // Disabled status shown first — most important state for a paused job
+    if (!job.enabled) {
+        parts.push(job.outcome_reason
+            ? `⏸ disabled: ${job.outcome_reason}`
+            : '⏸ disabled');
+    }
     // Plain-English description first — the most useful context line
     if (job.description) parts.push(job.description);
     parts.push(
@@ -63,6 +69,10 @@ export function buildTooltip(job, isConcurrent) {
     if (job.command) {
         const cmd = job.command.length > 70 ? `${job.command.slice(0, 67)}…` : job.command;
         parts.push(`runs: ${cmd}`);
+    }
+    // Skip rate: high count = job regularly overruns its interval (next run fires before current finishes)
+    if (job.skip_count_24h > 0) {
+        parts.push(`↻ skipped ${job.skip_count_24h}× in last 24h — runs longer than its interval`);
     }
     if (isConcurrent) parts.push('⟡ runs at the same time as another job');
     return parts.join('\n');
@@ -248,9 +258,15 @@ function BarDetailCard({ job, runs, runsLoading, onClose, onRunJob, onScrollToJo
                     ['model', modelStr],
                     ['starts', startStr],
                     ['runs', `~${formatDuration(job.estimated_duration)}`],
-                    ...(job.warmup_estimate > 0 ? [['warmup', `~${job.warmup_estimate}s`]] : []),
+                    // Candlestick segment breakdown — shows load/run/unload phases when model warmup applies
+                    ...(job.warmup_estimate > 0 ? [
+                        ['load', `~${job.warmup_estimate}s`],
+                        ['run', `~${formatDuration(Math.max(1, (job.estimated_duration || 600) - job.warmup_estimate))}`],
+                        ['unload', '~30s'],
+                    ] : []),
                     ['last ran', lastRunStr],
                     ['interval', _fmtInterval(job.interval_seconds)],
+                    ...(job.skip_count_24h > 0 ? [['skips today', `↻ ${job.skip_count_24h}×`]] : []),
                 ].map(([k, v]) => (
                     <Fragment key={k}>
                         <span style={{ color: 'var(--text-tertiary)' }}>{k}</span>
@@ -261,6 +277,12 @@ function BarDetailCard({ job, runs, runsLoading, onClose, onRunJob, onScrollToJo
             {job.model_profile === 'heavy' && (
                 <div style={{ fontSize: 'var(--type-micro)', color: 'var(--status-warning)', marginBottom: '0.35rem', fontFamily: 'var(--font-mono)' }}>
                     ⚠ large model — needs ≥16GB VRAM
+                </div>
+            )}
+            {/* Disabled reason — explains why the job was auto-disabled and how to re-enable */}
+            {!job.enabled && (
+                <div style={{ fontSize: 'var(--type-micro)', color: 'var(--status-warning)', marginBottom: '0.35rem', fontFamily: 'var(--font-mono)', lineHeight: 1.4 }}>
+                    ⏸ {job.outcome_reason || 'disabled'} — re-enable from the Schedule table
                 </div>
             )}
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.5rem', fontFamily: 'var(--font-mono)', fontSize: 'var(--type-micro)', color: 'var(--text-tertiary)' }}>
@@ -311,9 +333,22 @@ export function GanttChart({
     const now = zoomedAnchor ? zoomedAnchor - zoomWindowSecs * 0.5 : wallNow;
     const windowEnd = now + windowSecs;
 
-    const laneJobs = assignLanes(
-        jobs.filter(job => job.next_run < windowEnd)
-    );
+    // "Now" needle position — in normal mode, wallNow IS the left edge so left:0%.
+    // In zoom mode the window is centered on the clicked bar, so wallNow may be anywhere
+    // in the window (or even offscreen left when zooming a future bar).
+    // needleLeftPct tracks the real wall-clock position; hide needle when outside the window.
+    const needleLeftPct = ((wallNow - now) / windowSecs) * 100;
+    const needleVisible = needleLeftPct >= -0.5 && needleLeftPct <= 100.5;
+
+    // A job is visible if it overlaps the current window — starts before the right edge
+    // AND its end (next_run + duration) is after the left edge (now).
+    // This prevents past-due/disabled jobs from piling up at left:0% in zoom mode.
+    const visibleJobs = jobs.filter(job => {
+        const jobEnd = job.next_run + (job.estimated_duration || 600);
+        return job.next_run < windowEnd && jobEnd > now;
+    });
+
+    const laneJobs = assignLanes(visibleJobs);
     const conflictIds = findHeavyConflicts(laneJobs);
     const laneCount = laneJobs.reduce((max, job) => Math.max(max, job._lane + 1), 1);
     const laneHeight = 44;
@@ -325,10 +360,10 @@ export function GanttChart({
     const useLoadMap = loadMapSlots.length > 0;
     const densityBuckets = useLoadMap
         ? alignLoadMapToNow(loadMapSlots, now).slice(0, bucketCount)
-        : buildDensityBuckets(jobs.filter(job => job.next_run < windowEnd), now, windowSecs);
+        : buildDensityBuckets(visibleJobs, now, windowSecs);
 
     const bucketJobIds = buildBucketJobIds(
-        jobs.filter(job => job.next_run < windowEnd),
+        visibleJobs,
         now, windowSecs, bucketCount
     );
 
@@ -506,12 +541,15 @@ export function GanttChart({
                     }} />
                 ))}
 
-                {/* "Now" cursor needle */}
+                {/* "Now" cursor needle — position tracks real wall-clock within the window.
+                    In zoom mode the window is anchored on a future bar so needle may be
+                    to the left of center. Hidden entirely when the current time is offscreen. */}
+                {needleVisible && (
                 <div
                     aria-hidden="true"
                     style={{
                         position: 'absolute',
-                        left: 0,
+                        left: `${Math.max(0, needleLeftPct)}%`,
                         top: 0,
                         bottom: 0,
                         width: 2,
@@ -533,6 +571,7 @@ export function GanttChart({
                         borderTop: '5px solid var(--accent)',
                     }} />
                 </div>
+                )}
 
                 {/* Job bars */}
                 {/* Heavy conflict badges */}
@@ -585,8 +624,12 @@ export function GanttChart({
 
                     // Candlestick segments — left wick (warmup), body (inference), right wick (unload hold).
                     // warmup: time to cold-load model weights; inference: actual compute; unload: VRAM hold time.
-                    const warmupSecs = job.warmup_estimate || 0;
-                    const inferenceSecs = Math.max(1, (job.estimated_duration || 600) - warmupSecs);
+                    // Cap warmup at 40% of estimated_duration so the body never collapses to a sliver
+                    // (edge case: heavy model with very few historical runs → short duration estimate).
+                    const _rawWarmup = job.warmup_estimate || 0;
+                    const _estDur = job.estimated_duration || 600;
+                    const warmupSecs = Math.min(_rawWarmup, Math.floor(_estDur * 0.4));
+                    const inferenceSecs = Math.max(1, _estDur - warmupSecs);
                     const unloadSecs = job.model ? UNLOAD_HOLD_SECS : 0;
                     const totalSecs = warmupSecs + inferenceSecs + unloadSecs;
                     const widthPct = Math.max(0.5, (totalSecs / windowSecs) * 100);
@@ -599,6 +642,9 @@ export function GanttChart({
                     const showChip = barWidth > 5;
                     const showSource = barWidth > 14 && job.source && job.source !== job.name;
                     const isSelected = selectedBarId === job.id;
+                    // Disabled jobs render with reduced opacity and a hatched body pattern
+                    // so they're visually distinct from enabled bars without cluttering the chart.
+                    const isDisabled = !job.enabled;
 
                     // Outcome dot uses real exit code, not timing drift.
                     const { label: outcomeLabel, color: outcomeColor } = lastRunOutcome(job.last_exit_code, job.last_run);
@@ -625,7 +671,7 @@ export function GanttChart({
                                 width: `${barWidth}%`,
                                 top: job._lane * laneHeight + 4,
                                 height: laneHeight - 8,
-                                opacity: isDimmed ? 0.15 : 1,
+                                opacity: isDimmed ? 0.15 : (isDisabled ? 0.4 : 1),
                                 transition: 'opacity 0.2s ease',
                                 outline: conflictIds.has(job.id) ? '2px solid var(--status-error)' : undefined,
                                 outlineOffset: conflictIds.has(job.id) ? '-1px' : undefined,
@@ -647,16 +693,19 @@ export function GanttChart({
                                     flexShrink: 0,
                                 }} />
                             )}
-                            {/* Body: full-height rectangle = inference runtime — the main job work */}
+                            {/* Body: full-height rectangle = inference runtime — the main job work.
+                                Disabled jobs get a dashed border outline to distinguish from enabled. */}
                             <div style={{
                                 width: `${inferenceFrac * 100}%`,
                                 height: '100%',
                                 background: color,
-                                opacity: 0.85,
+                                opacity: isDisabled ? 0.6 : 0.85,
                                 borderRadius: warmupSecs > 0
                                     ? (unloadSecs > 0 ? '0' : '0 var(--radius) var(--radius) 0')
                                     : (unloadSecs > 0 ? 'var(--radius) 0 0 var(--radius)' : 'var(--radius)'),
                                 borderLeft: (warmupSecs === 0 && isHeavy) ? '3px solid var(--status-warning)' : undefined,
+                                outline: isDisabled ? '1px dashed rgba(255,255,255,0.45)' : undefined,
+                                outlineOffset: isDisabled ? '-2px' : undefined,
                                 flexShrink: 0,
                                 display: 'flex',
                                 alignItems: 'center',
@@ -675,7 +724,7 @@ export function GanttChart({
                                     textOverflow: 'ellipsis',
                                     flexShrink: 1,
                                 }}>
-                                    {isConcurrent && '⟡ '}{job.name}
+                                    {isDisabled ? '⏸ ' : ''}{isConcurrent && '⟡ '}{job.name}
                                 </span>
                                 {showChip && modelLabel && (
                                     <span style={{
@@ -703,6 +752,25 @@ export function GanttChart({
                                         flexShrink: 0,
                                     }}>
                                         {job.source}
+                                    </span>
+                                )}
+                                {/* Skip badge: ↻N shows when the job was skipped N times in the last 24h
+                                    because it was still running when the next interval fired. */}
+                                {showChip && (job.skip_count_24h || 0) > 0 && (
+                                    <span
+                                        title={`Skipped ${job.skip_count_24h} times in the last 24h — the job was still running when it was supposed to start again`}
+                                        style={{
+                                            fontFamily: 'var(--font-mono)',
+                                            fontSize: 'var(--type-micro)',
+                                            color: 'rgba(255,255,255,0.85)',
+                                            background: 'rgba(249,115,22,0.6)',
+                                            borderRadius: 3,
+                                            padding: '1px 4px',
+                                            whiteSpace: 'nowrap',
+                                            flexShrink: 0,
+                                        }}
+                                    >
+                                        ↻{job.skip_count_24h}
                                     </span>
                                 )}
                                 {/* Outcome dot: green=last succeeded, red=last failed, gray=unknown */}

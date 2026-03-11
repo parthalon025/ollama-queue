@@ -82,13 +82,13 @@ class Scheduler:
                     rj.get("priority"),
                 )
                 continue
-            if self.db.has_pending_or_running_recurring(rj["id"]):
-                self.db.log_schedule_event(
-                    "skipped_duplicate",
-                    recurring_job_id=rj["id"],
-                    details={"name": rj["name"], "reason": "already pending or running"},
-                )
-                # Advance next_run to avoid re-evaluating on every poll
+
+            # Compute next_run advancement for poll-suppression — advances past the trigger
+            # point so the 5s poll loop doesn't re-evaluate this job every tick while it runs.
+            # The real next_run is set by update_recurring_next_run() after job completion:
+            #   next_run = completed_at + interval_seconds  (fixed-delay semantics)
+            # This value is a temporary suppression sentinel, not the authoritative schedule.
+            def _compute_next_run(rj=rj, now=now):
                 cron_expr = rj.get("cron_expression")
                 if cron_expr:
                     import datetime
@@ -96,17 +96,28 @@ class Scheduler:
                     from croniter import croniter
 
                     start_dt = datetime.datetime.fromtimestamp(now)
-                    new_next_run = croniter(cron_expr, start_dt).get_next(datetime.datetime).timestamp()
-                else:
-                    if not rj.get("interval_seconds") and not rj.get("cron_expression"):
-                        _log.warning(
-                            "Recurring job #%d has neither interval_seconds nor cron_expression; defaulting to 300s",
-                            rj.get("id"),
-                        )
-                    interval = rj.get("interval_seconds") or 300  # fallback 5min
-                    new_next_run = now + interval
-                next_run_updates[rj["id"]] = new_next_run
+                    return croniter(cron_expr, start_dt).get_next(datetime.datetime).timestamp()
+                if not rj.get("interval_seconds"):
+                    _log.warning(
+                        "Recurring job #%d has neither interval_seconds nor cron_expression; defaulting to 300s",
+                        rj.get("id"),
+                    )
+                return now + (rj.get("interval_seconds") or 300)
+
+            if self.db.has_pending_or_running_recurring(rj["id"]):
+                # A previous run is still pending or running — skip this trigger.
+                # Fixed-delay semantics: the real next_run is set by the completion handler
+                # (completed_at + interval), not by wall-clock cadence.
+                # Advance next_run temporarily to suppress further poll evaluations until
+                # the completion handler overwrites it with the authoritative value.
+                self.db.log_schedule_event(
+                    "skipped_duplicate",
+                    recurring_job_id=rj["id"],
+                    details={"name": rj["name"], "reason": "already pending or running"},
+                )
+                next_run_updates[rj["id"]] = _compute_next_run()
                 continue
+
             job_id = self.db.submit_job(
                 command=rj["command"],
                 model=rj["model"],

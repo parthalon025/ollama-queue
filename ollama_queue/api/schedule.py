@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 
 import httpx
 from fastapi import APIRouter, Body, HTTPException
@@ -139,6 +140,20 @@ def list_schedule():
             for row in rows:
                 last_exit_map[row["id"]] = row["exit_code"]
 
+    # Batch-query skip counts (skipped_duplicate events) per job in the last 24h.
+    # Shows as a ↻N badge on Gantt bars — high count means the job regularly overruns its interval.
+    _since_24h = time.time() - 86400
+    skip_count_map: dict[int, int] = {}
+    with db._lock:
+        _skip_conn = db._connect()
+        for row in _skip_conn.execute(
+            "SELECT recurring_job_id, COUNT(*) as cnt FROM schedule_events "
+            "WHERE event_type = 'skipped_duplicate' AND timestamp >= ? "
+            "GROUP BY recurring_job_id",
+            (_since_24h,),
+        ).fetchall():
+            skip_count_map[row["recurring_job_id"]] = row["cnt"]
+
     for rj in jobs:
         rj["estimated_duration"] = est.estimate(
             rj.get("name") or rj.get("source") or "",
@@ -164,6 +179,10 @@ def list_schedule():
         # Replaces the timing-only heuristic used in the old runStatus() function.
         last_job_id = rj.get("last_job_id")
         rj["last_exit_code"] = last_exit_map.get(last_job_id) if last_job_id else None
+
+        # Skip count: how many times this job was skipped in the last 24h because a previous
+        # run was still in progress. High counts indicate the job regularly overruns its interval.
+        rj["skip_count_24h"] = skip_count_map.get(rj["id"], 0)
 
     return jobs
 
@@ -266,19 +285,27 @@ def add_schedule(body: RecurringJobCreate):
     return rj
 
 
+# Fields that affect the timing of scheduled jobs and require a rebalance after edit.
+# Cosmetic/runtime fields (description, tag, command, model, timeout, etc.) do not.
+_REBALANCE_FIELDS = frozenset({"interval_seconds", "cron_expression", "priority", "pinned"})
+
+
 @router.put("/api/schedule/{rj_id}")
 def update_schedule(rj_id: int, body: RecurringJobUpdate):
     db = _api.db
-    updated = db.update_recurring_job(rj_id, **body.model_dump(exclude_unset=True))
+    updates = body.model_dump(exclude_unset=True)
+    updated = db.update_recurring_job(rj_id, **updates)
     if not updated:
         raise HTTPException(status_code=404, detail="Recurring job not found")
-    # Rebalance next_run after edit
-    try:
-        from ollama_queue.scheduling.scheduler import Scheduler
+    # Only rebalance when a schedule-affecting field changed (interval, cron, priority, pinned).
+    # Skipping rebalance for cosmetic edits avoids O(N) DB writes on every description save.
+    if any(k in _REBALANCE_FIELDS for k in updates):
+        try:
+            from ollama_queue.scheduling.scheduler import Scheduler
 
-        Scheduler(db).rebalance()
-    except Exception:
-        _log.exception("rebalance after update_schedule failed")
+            Scheduler(db).rebalance()
+        except Exception:
+            _log.exception("rebalance after update_schedule failed")
     return {"ok": True}
 
 
@@ -315,18 +342,23 @@ def run_schedule_now(rj_id: int):
 def generate_description(rj_id: int):
     """Ask local Ollama (qwen3.5:9b) to write a layman description for this recurring job.
 
-    Plain English: The caller waits while the AI model writes 2 plain-English sentences
-    about what the job does. The description is saved to the DB and returned so the UI
-    can update immediately without a second fetch.
+    Plain English: Kicks off a background Ollama call (same pattern as job creation).
+    Returns immediately with ok=True; the description arrives via the next GET /api/schedule
+    poll (typically within 5-15s). The UI will see it on the next 10s refresh.
     Decision it drives: Lets the owner understand any job's purpose without reading its command.
     """
+    import threading as _threading
+
     db = _api.db
     rj = db.get_recurring_job(rj_id)
     if not rj:
         raise HTTPException(status_code=404, detail="Recurring job not found")
-    _call_generate_description(rj_id, rj["name"], rj.get("tag"), rj["command"], db)
-    updated = db.get_recurring_job(rj_id)
-    return {"ok": True, "description": updated.get("description") if updated else None}
+    _threading.Thread(
+        target=_call_generate_description,
+        args=(rj_id, rj["name"], rj.get("tag"), rj["command"], db),
+        daemon=True,
+    ).start()
+    return {"ok": True, "description": None}
 
 
 @router.get("/api/schedule/{rj_id}/runs")

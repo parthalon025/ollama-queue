@@ -67,6 +67,8 @@ export default function Plan() {
     const [suggestLoading, setSuggestLoading] = useState(false);
     // Which job (by id) is currently generating its AI description
     const [generatingDescId, setGeneratingDescId] = useState(null);
+    // Two-click delete guard: tracks which job's delete button is in "confirm?" state
+    const [pendingDeleteId, setPendingDeleteId] = useState(null);
 
     const refreshingRef = useRef(false);
     const jobRowRefs = useRef({});
@@ -175,26 +177,29 @@ export default function Plan() {
     }
 
     // Ask the backend to auto-generate a plain-English description for this job using Ollama.
-    // The backend call is synchronous (~5-10s); we show a spinner during the wait.
+    // The backend starts a background thread and returns immediately; description arrives via
+    // the next 10s schedule refresh (or sooner if the model responds quickly).
     async function handleGenerateDescription(rjId) {
         setGeneratingDescId(rjId);
         await generateAct(
             'Generating description\u2026',
             async () => {
-                const result = await generateJobDescription(rjId);
-                if (result.description) {
-                    setEditForm(prev => ({ ...prev, description: result.description }));
-                    await fetchSchedule(); // keep signal in sync
-                }
+                await generateJobDescription(rjId);
+                await fetchSchedule(); // refresh now; background thread may already be done
             },
-            'Description generated'
+            'Queued \u2014 description arriving shortly'
         );
         setGeneratingDescId(null);
     }
 
-    async function handleDelete(rjId) {
-        const rj = jobs.find(j => j.id === rjId);
-        if (!window.confirm(`Delete recurring job "${rj?.name}"? This cannot be undone.`)) return;
+    // First click sets pendingDeleteId; second click (on confirm button) executes the delete.
+    // Matches the two-click inline delete pattern used in VariantRow (no window.confirm).
+    function handleDeleteRequest(rjId) {
+        setPendingDeleteId(rjId);
+    }
+
+    async function handleDeleteConfirm(rjId) {
+        setPendingDeleteId(null);
         await deleteAct(
             'Deleting\u2026',
             async () => {
@@ -204,6 +209,10 @@ export default function Plan() {
             },
             'Deleted'
         );
+    }
+
+    function handleDeleteCancel() {
+        setPendingDeleteId(null);
     }
 
     async function handleRunNow(rj) {
@@ -779,17 +788,39 @@ export default function Plan() {
                                 </button>
                                 {runNowFb.msg && <div class={`action-fb action-fb--${runNowFb.phase}`}>{runNowFb.msg}</div>}
                             </div>
-                            <div>
-                                <button class="t-btn"
-                                        style={{
-                                            padding: '0.3rem 0.75rem', fontSize: 'var(--type-body)',
-                                            color: 'var(--status-error)', border: '1px solid var(--status-error)',
-                                            background: 'transparent', opacity: deleteFb.phase === 'loading' ? 0.6 : 1,
-                                        }}
-                                        disabled={deleteFb.phase === 'loading'}
-                                        onClick={() => handleDelete(rjId)}>
-                                    {deleteFb.phase === 'loading' ? 'Deleting\u2026' : 'Delete'}
-                                </button>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                                {pendingDeleteId !== rjId ? (
+                                    <button class="t-btn"
+                                            style={{
+                                                padding: '0.3rem 0.75rem', fontSize: 'var(--type-body)',
+                                                color: 'var(--status-error)', border: '1px solid var(--status-error)',
+                                                background: 'transparent', opacity: deleteFb.phase === 'loading' ? 0.6 : 1,
+                                            }}
+                                            disabled={deleteFb.phase === 'loading'}
+                                            onClick={() => handleDeleteRequest(rjId)}>
+                                        {deleteFb.phase === 'loading' ? 'Deleting\u2026' : 'Delete'}
+                                    </button>
+                                ) : (
+                                    <>
+                                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--status-error)' }}>
+                                            Delete "{jobs.find(j => j.id === rjId)?.name}"?
+                                        </span>
+                                        <button class="t-btn"
+                                                style={{
+                                                    padding: '0.2rem 0.6rem', fontSize: 'var(--type-label)',
+                                                    color: 'var(--status-error)', borderColor: 'var(--status-error)',
+                                                }}
+                                                disabled={deleteFb.phase === 'loading'}
+                                                onClick={() => handleDeleteConfirm(rjId)}>
+                                            {deleteFb.phase === 'loading' ? 'Deleting\u2026' : 'Yes, delete'}
+                                        </button>
+                                        <button class="t-btn t-btn-secondary"
+                                                style={{ padding: '0.2rem 0.6rem', fontSize: 'var(--type-label)' }}
+                                                onClick={handleDeleteCancel}>
+                                            Cancel
+                                        </button>
+                                    </>
+                                )}
                                 {deleteFb.msg && <div class={`action-fb action-fb--${deleteFb.phase}`}>{deleteFb.msg}</div>}
                             </div>
                         </div>
@@ -938,6 +969,49 @@ export default function Plan() {
                                 {suggestLoading ? '\u2026' : suggestSlots === null ? 'Find best slot' : suggestSlots.length === 0 ? 'No open slots found' : 'Clear suggestions'}
                             </button>
                         </div>
+                    </div>
+                );
+            })()}
+
+            {/* Health summary strip — one-line status count of the entire schedule.
+                What it shows: active · failing · disabled · overdue job counts at a glance.
+                Decision: spot a systemic problem (e.g., 8 disabled jobs) before scrolling the table. */}
+            {jobs.length > 0 && (() => {
+                const activeCount = jobs.filter(rj => rj.enabled).length;
+                const failingCount = jobs.filter(rj => rj.enabled && rj.last_exit_code != null && rj.last_exit_code !== 0).length;
+                const disabledCount = jobs.filter(rj => !rj.enabled).length;
+                const overdueCount = jobs.filter(rj => rj.enabled && rj.next_run < Date.now() / 1000).length;
+                const skipCount = jobs.reduce((sum, rj) => sum + (rj.skip_count_24h || 0), 0);
+                return (
+                    <div style={{
+                        display: 'flex', flexWrap: 'wrap', gap: '0.25rem 1rem',
+                        fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)',
+                        color: 'var(--text-tertiary)', alignItems: 'center',
+                        padding: '0.2rem 0',
+                    }}>
+                        <span title="Recurring jobs that will run on schedule">
+                            <span style={{ color: 'var(--status-healthy)', fontWeight: 600 }}>{activeCount}</span> active
+                        </span>
+                        {failingCount > 0 && (
+                            <span title="Enabled jobs whose last run exited non-zero">
+                                <span style={{ color: 'var(--status-error)', fontWeight: 600 }}>{failingCount}</span> failing
+                            </span>
+                        )}
+                        {disabledCount > 0 && (
+                            <span title="Jobs that have been disabled (manually or automatically)">
+                                <span style={{ color: 'var(--status-warning)', fontWeight: 600 }}>{disabledCount}</span> disabled
+                            </span>
+                        )}
+                        {overdueCount > 0 && (
+                            <span title="Enabled jobs whose next_run timestamp has passed">
+                                <span style={{ color: '#f97316', fontWeight: 600 }}>{overdueCount}</span> overdue
+                            </span>
+                        )}
+                        {skipCount > 0 && (
+                            <span title="Total number of times any job was skipped in the last 24h because a previous run hadn't finished">
+                                <span style={{ color: '#f97316', fontWeight: 600 }}>↻ {skipCount}</span> skip{skipCount !== 1 ? 's' : ''} today
+                            </span>
+                        )}
                     </div>
                 );
             })()}

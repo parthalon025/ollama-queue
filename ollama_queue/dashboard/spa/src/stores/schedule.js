@@ -18,7 +18,7 @@ export async function fetchSchedule() {
     try {
         const [jobsResp, eventsResp] = await Promise.all([
             fetch(`${API}/schedule`),
-            fetch(`${API}/schedule/events?limit=50`),
+            fetch(`${API}/schedule/events?limit=20`),
         ]);
         if (jobsResp.ok) scheduleJobs.value = await jobsResp.json();
         if (eventsResp.ok) scheduleEvents.value = await eventsResp.json();

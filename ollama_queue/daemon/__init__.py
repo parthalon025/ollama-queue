@@ -72,6 +72,10 @@ class Daemon(LoopMixin, ExecutorMixin):
         self._burst_regime: str = "unknown"  # cached for /api/health
         # DLQ auto-reschedule + deferral schedulers
         self._runtime_estimator = RuntimeEstimator(db)
-        self._dlq_scheduler = DLQScheduler(db, self._runtime_estimator, self._get_load_map)
-        self._deferral_scheduler = DeferralScheduler(db, self._runtime_estimator, self._get_load_map)
+        self._dlq_scheduler = DLQScheduler(
+            db, self._runtime_estimator, self._get_load_map, self.health.get_vram_total_gb
+        )
+        self._deferral_scheduler = DeferralScheduler(
+            db, self._runtime_estimator, self._get_load_map, self.health.get_vram_total_gb
+        )
         self._last_dlq_sweep: float = 0.0

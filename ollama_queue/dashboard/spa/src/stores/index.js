@@ -23,7 +23,6 @@ import { settings } from './settings.js';
 import { healthData, durationData, heatmapData, dlqSchedulePreview,
          fetchDLQ, fetchDeferred, fetchDLQSchedulePreview, fetchModelPerformance,
          fetchPerformanceCurve } from './health.js';
-import { loadMap } from './schedule.js';
 import { history } from './queue.js';
 
 // ── Polling loop ────────────────────────────────────────────────────────────
@@ -79,19 +78,20 @@ async function fetchStatus() {
 }
 
 async function _fetchNonRealtime() {
+    // What it does: Refreshes slower-changing data every 60s (every 12 status polls).
+    // load-map is intentionally excluded here — Plan's own 10s interval covers it when
+    // the Plan tab is open, and tab-focus fetchAll() covers the cold-load case.
     try {
-        const [hResp, durResp, heatResp, histResp, lmResp] = await Promise.all([
+        const [hResp, durResp, heatResp, histResp] = await Promise.all([
             fetch(`${API}/health`),
             fetch(`${API}/durations`),
             fetch(`${API}/heatmap`),
             fetch(`${API}/history`),
-            fetch(`${API}/schedule/load-map`),
         ]);
         if (hResp.ok) { const d = await hResp.json(); healthData.value = Array.isArray(d) ? d : (d.log ?? []); }
         if (durResp.ok) durationData.value = await durResp.json();
         if (heatResp.ok) heatmapData.value = await heatResp.json();
         if (histResp.ok) history.value = await histResp.json();
-        if (lmResp.ok) loadMap.value = await lmResp.json();
         // DLQ/deferral/performance non-realtime refresh
         fetchDeferred();
         fetchDLQSchedulePreview();
