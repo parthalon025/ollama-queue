@@ -10,6 +10,7 @@ import QueueList from '../components/QueueList.jsx';
 import HeroCard from '../components/HeroCard.jsx';
 import ResourceGauges from '../components/ResourceGauges.jsx';
 import SubmitJobModal from '../components/SubmitJobModal.jsx';
+import PageBanner from '../components/PageBanner.jsx';
 
 // NOTE: all .map() callbacks use descriptive names — never 'h' (shadows JSX factory)
 
@@ -70,6 +71,7 @@ export default function Now() {
 
     return (
         <div class="flex flex-col gap-4 animate-page-enter">
+            <PageBanner title="Now" subtitle="live queue status" />
             {/* Disconnected banner */}
             {connectionStatus.value === 'disconnected' && (
                 <div style={{

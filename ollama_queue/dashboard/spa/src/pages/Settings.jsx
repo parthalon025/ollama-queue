@@ -3,6 +3,7 @@ import { useCallback } from 'preact/hooks';
 import { settings, status, API } from '../stores';
 import SettingsForm from '../components/SettingsForm';
 import { useActionFeedback } from '../hooks/useActionFeedback.js';
+import PageBanner from '../components/PageBanner.jsx';
 
 // What it shows: All queue configuration — health thresholds that trigger automatic pausing,
 //   job defaults (timeout, priority), data retention periods, and daemon manual controls
@@ -70,6 +71,7 @@ export default function Settings() {
 
   return (
     <div class="flex flex-col gap-4 animate-page-enter">
+      <PageBanner title="Settings" subtitle="queue configuration and thresholds" />
       <SettingsForm
         settings={sett}
         daemonState={daemonState}

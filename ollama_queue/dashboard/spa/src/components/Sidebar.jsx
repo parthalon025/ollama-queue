@@ -12,7 +12,7 @@ const NAV_ITEMS = [
     { id: 'performance', icon: '⊘', label: 'Perf', tooltip: 'Model performance stats and system health' },
 ];
 
-export default function Sidebar({ active, onNavigate, daemonState, dlqCount }) {
+export default function Sidebar({ active, onNavigate, daemonState, dlqCount, theme, onToggleTheme }) {
     const state = daemonState?.state || 'idle';
     const isRunning = state === 'running';
     const isPaused  = state.startsWith('paused');
@@ -53,7 +53,7 @@ export default function Sidebar({ active, onNavigate, daemonState, dlqCount }) {
             </div>
 
             {/* Nav items */}
-            <nav style="flex: 1; padding: 0.5rem 0;">
+            <nav style="flex: 1; padding: 0.5rem 0; overflow-y: auto;">
                 {NAV_ITEMS.map(item => {
                     const isActive = active === item.id;
                     const badge = item.id === 'history' && dlqCount > 0 ? dlqCount : null;
@@ -102,6 +102,15 @@ export default function Sidebar({ active, onNavigate, daemonState, dlqCount }) {
                     );
                 })}
             </nav>
+            {/* Theme toggle — dark/light mode switcher */}
+            <button
+                class="theme-toggle"
+                onClick={onToggleTheme}
+                title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            >
+                <span style="font-size: 1rem; flex-shrink: 0;">{theme === 'dark' ? '☀' : '◗'}</span>
+                <span class="sidebar-label">{theme === 'dark' ? 'Light' : 'Dark'}</span>
+            </button>
         </aside>
     );
 }

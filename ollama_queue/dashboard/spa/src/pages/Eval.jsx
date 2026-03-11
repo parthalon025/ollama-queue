@@ -3,6 +3,7 @@ import { h } from 'preact';
 // Decision it drives: Entry point for all eval functionality (runs, variants, trends, settings)
 
 import { evalSubTab } from '../stores';
+import PageBanner from '../components/PageBanner.jsx';
 import EvalRuns from '../views/EvalRuns.jsx';
 import EvalVariants from '../views/EvalVariants.jsx';
 import EvalTrends from '../views/EvalTrends.jsx';
@@ -22,6 +23,7 @@ export default function Eval() {
   const subTab = evalSubTab.value;
   return (
     <div class="eval-page">
+      <PageBanner title="Eval" subtitle="test and compare AI model configurations" />
       <nav class="eval-subnav">
         {EVAL_TABS.map(tab => (
           <button

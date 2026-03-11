@@ -8,6 +8,157 @@
   --sidebar-width-sm: 64px;
   --bg-terminal: oklch(0.04 0 0);
   --scan-line: oklch(0 0 0 / 0.08);
+  /* VT323 loads via Google Fonts <link> in index.html — prefix before the fallback stack */
+  --font-mono: 'VT323', 'Perfect DOS VGA 437', 'Fixedsys Excelsior', 'Courier New', monospace;
+}
+
+/* ── Light theme token overrides ── */
+/* Paper/dawn aesthetic: warm cream background, dark text, SUPERHOT red accent preserved */
+[data-theme="light"] {
+  --bg-base:          oklch(0.97 0.01 90);
+  --bg-surface:       oklch(0.99 0.005 90);
+  --bg-surface-raised:oklch(0.93 0.01 90);
+  --bg-inset:         oklch(0.90 0.01 90);
+  --bg-terminal:      oklch(0.86 0.02 85);
+  --text-primary:     oklch(0.12 0.02 250);
+  --text-secondary:   oklch(0.30 0.02 250);
+  --text-tertiary:    oklch(0.50 0.02 250);
+  --text-accent:      oklch(0.45 0.20 29);
+  --border-subtle:    oklch(0.82 0.01 90);
+  --border-primary:   oklch(0.68 0.02 90);
+  --card-shadow:      0 1px 3px rgba(0,0,0,0.12);
+  --card-shadow-hover:0 4px 12px rgba(0,0,0,0.18);
+  --scan-line:        oklch(0 0 0 / 0.04);
+}
+[data-theme="light"] body {
+  color-scheme: light;
+}
+
+/* ── SUPERHOT page banner ── */
+/* CRT terminal aesthetic: dark background stripe, phosphor glow accent border,
+   horizontal scan beam sweep, and CRT scanline texture overlay.
+   Identical to ARIA's .page-banner-sh pattern — shared design language. */
+
+@keyframes sh-banner-scan {
+  0%   { left: -20%; opacity: 0; }
+  10%  { opacity: 0.7; }
+  90%  { opacity: 0.7; }
+  100% { left: 120%; opacity: 0; }
+}
+
+@keyframes sh-banner-glow {
+  0%, 100% { filter: drop-shadow(0 0 2px var(--accent)) drop-shadow(0 0 0 transparent); }
+  50%      { filter: drop-shadow(0 0 6px var(--accent)) drop-shadow(0 0 12px var(--accent-glow)); }
+}
+
+@keyframes sh-crt-flicker {
+  0%   { opacity: 0.97; }
+  50%  { opacity: 1; }
+  100% { opacity: 0.98; }
+}
+
+.page-banner-sh {
+  position: relative;
+  overflow: hidden;
+  padding: 0.625rem 1rem;
+  background: var(--bg-terminal);
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  margin-bottom: 1rem;
+  animation: sh-crt-flicker 4s ease-in-out infinite;
+}
+
+/* CRT scanline stripes */
+.page-banner-sh::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.04) 2px,
+    rgba(0, 0, 0, 0.04) 4px
+  );
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* Horizontal scan beam sweep */
+.page-banner-sh::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -20%;
+  width: 8%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 3;
+  animation: sh-banner-scan 6s linear infinite;
+}
+
+.page-banner-sh .banner-title {
+  position: relative;
+  z-index: 1;
+  font-family: var(--font-mono);
+  font-size: 1.5rem;
+  font-weight: 400; /* VT323 is already bold by design */
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  margin: 0 0 1px;
+  line-height: 1.1;
+  animation: sh-banner-glow 4s ease-in-out infinite;
+}
+
+.page-banner-sh .banner-subtitle {
+  position: relative;
+  z-index: 1;
+  font-family: var(--font-mono);
+  font-size: var(--type-label);
+  color: var(--text-tertiary);
+  letter-spacing: 0.06em;
+  margin: 0;
+  text-transform: lowercase;
+}
+
+/* Phone: hide banner scan beam, reduce title size */
+@media (max-width: 639px) {
+  .page-banner-sh::after { animation: none; }
+  .page-banner-sh .banner-title { font-size: 1.2rem; }
+}
+
+/* Reduced motion: freeze glow + scan animations */
+@media (prefers-reduced-motion: reduce) {
+  .page-banner-sh { animation: none; }
+  .page-banner-sh::after { animation: none; }
+  .page-banner-sh .banner-title { animation: none; }
+}
+
+/* Theme toggle button (sits at the bottom of the sidebar) */
+.theme-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.625rem 0.75rem;
+  background: transparent;
+  border: none;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--type-label);
+  cursor: pointer;
+  text-align: left;
+  transition: color 0.15s ease, background 0.15s ease;
+  flex-shrink: 0;
+}
+.theme-toggle:hover {
+  color: var(--text-primary);
+  background: var(--bg-surface-raised);
 }
 
 /* ── Global theme-aware base styles ── */

@@ -8,6 +8,7 @@ import { useActionFeedback } from '../hooks/useActionFeedback.js';
 import ActivityHeatmap from '../components/ActivityHeatmap.jsx';
 import HistoryList from '../components/HistoryList.jsx';
 import TimeChart from '../components/TimeChart.jsx';
+import PageBanner from '../components/PageBanner.jsx';
 
 // NOTE: all .map() callbacks use descriptive names — never 'h' (shadows JSX factory)
 
@@ -72,6 +73,7 @@ export default function History() {
 
     return (
         <div class="flex flex-col gap-6 animate-page-enter">
+            <PageBanner title="History" subtitle="completed and failed jobs" />
 
             {/* DLQ section — only shown when entries exist */}
             {dlqCnt > 0 && (

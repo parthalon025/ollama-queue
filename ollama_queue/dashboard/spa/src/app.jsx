@@ -1,5 +1,5 @@
 import { h, Component } from 'preact';
-import { useEffect } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 
 // Temporary debug boundary — catches Plan render errors that signals swallows silently
 class PlanErrorBoundary extends Component {
@@ -80,6 +80,21 @@ function EvalActivityBanner({ activeEval, onNavigate }) {
 }
 
 export function App() {
+    // Theme: read from localStorage, default dark. Writes to <html data-theme="...">
+    const [theme, setTheme] = useState(() => {
+        const saved = localStorage.getItem('queue-theme');
+        return (saved === 'light' || saved === 'dark') ? saved : 'dark';
+    });
+
+    useEffect(() => {
+        document.documentElement.setAttribute('data-theme', theme);
+        localStorage.setItem('queue-theme', theme);
+    }, [theme]);
+
+    function handleToggleTheme() {
+        setTheme(t => t === 'dark' ? 'light' : 'dark');
+    }
+
     useEffect(() => {
         startPolling();
         return () => stopPolling();
@@ -115,6 +130,8 @@ export function App() {
                 onNavigate={handleNavigate}
                 daemonState={daemonState}
                 dlqCount={dlqCount.value}
+                theme={theme}
+                onToggleTheme={handleToggleTheme}
             />
             <main class="layout-main animate-page-enter">
                 {/* Banner only on tabs without a dedicated eval panel — Now has CurrentJob, Eval has ActiveRunProgress */}
