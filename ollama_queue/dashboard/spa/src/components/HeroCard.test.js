@@ -34,4 +34,7 @@ test('renders without tooltip icon when not provided', () => {
   // When no tooltip, no node should have aria-label
   const withAriaLabel = findAll(vnode, n => n.props?.['aria-label'] !== undefined);
   expect(withAriaLabel).toHaveLength(0);
+  // Also verify no '?' text node appears (the icon is absent, not just unlabelled)
+  const withQuestionMark = findAll(vnode, n => n === '?' || n?.props?.children === '?');
+  expect(withQuestionMark).toHaveLength(0);
 });
