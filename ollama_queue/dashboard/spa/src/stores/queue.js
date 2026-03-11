@@ -36,6 +36,29 @@ export async function submitJob(body) {
     return resp.json(); // { job_id: N }
 }
 
+// What it does: Re-submits a failed or killed job as a new queue entry using the original
+//   job's source, model, prompt, priority, and timeout.
+// Decision it drives: Lets the user recover from a failure without re-entering all the
+//   job parameters manually — one click re-queues and the job runs again.
+export async function retryJob(jobId) {
+    const r1 = await fetch(`${API}/jobs/${jobId}`);
+    if (!r1.ok) throw new Error('Job not found');
+    const job = await r1.json();
+    const r2 = await fetch(`${API}/jobs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            source: job.source || 'retry',
+            model: job.model,
+            prompt: job.prompt,
+            priority: job.priority ?? 5,
+            timeout: job.timeout ?? 600,
+        }),
+    });
+    if (!r2.ok) throw new Error('Retry submit failed');
+    return r2.json();
+}
+
 export async function refreshQueue() {
     try {
         const resp = await fetch(`${API}/status`);

@@ -1,6 +1,8 @@
 import { h } from 'preact';
 import { useState, useMemo } from 'preact/hooks';
+import { useSignal } from '@preact/signals';
 import EmptyState from './EmptyState.jsx';
+import { retryJob } from '../stores/queue.js';
 
 const STATUS_CONFIG = {
   completed: { icon: '\u2713', color: 'var(--status-healthy)' },
@@ -60,8 +62,15 @@ export default function HistoryList({ jobs }) {
   );
 }
 
+// What it shows: A single history entry row — status icon, relative time, source name,
+//   model, and duration. Failed/killed rows show a ↺ Retry button to re-queue the job.
+// Decision it drives: Lets the user immediately retry a failed job without re-entering
+//   parameters, and expand the row to read the failure reason before deciding to retry.
 function HistoryRow({ job }) {
   const [expanded, setExpanded] = useState(false);
+  // retrySuccess tracks which job id was most recently retried, to flip the button label
+  // to "✓ Requeued" for 2 seconds as visual confirmation.
+  const retrySuccess = useSignal(null);
   const cfg = STATUS_CONFIG[job.status] || STATUS_CONFIG.cancelled;
   const hasReason = (job.status === 'failed' || job.status === 'killed') && job.outcome_reason;
   const hasStall = !!job.stall_detected_at;
@@ -119,6 +128,26 @@ function HistoryRow({ job }) {
           <span style="font-size: 10px; color: var(--text-tertiary); width: 12px; text-align: center;">
             {expanded ? '\u25B4' : '\u25BE'}
           </span>
+        )}
+        {/* Retry button — only on failed/killed rows. Fetches original job details and
+            re-submits with the same parameters. Flips to "✓ Requeued" for 2s on success. */}
+        {(job.status === 'failed' || job.status === 'killed') && (
+          <button
+            class="t-btn"
+            style="font-size:var(--type-micro);padding:2px 8px;margin-left:8px;color:var(--status-warning);"
+            onClick={async e => {
+              e.stopPropagation();
+              try {
+                await retryJob(job.id);
+                retrySuccess.value = job.id;
+                setTimeout(() => { retrySuccess.value = null; }, 2000);
+              } catch (err) {
+                console.error('Retry failed:', err);
+              }
+            }}
+          >
+            {retrySuccess.value === job.id ? '\u2713 Requeued' : '\u21BA Retry'}
+          </button>
         )}
       </div>
       {expanded && (
