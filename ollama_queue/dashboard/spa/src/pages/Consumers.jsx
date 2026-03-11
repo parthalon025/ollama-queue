@@ -72,6 +72,21 @@ export default function Consumers() {
   return (
     <div class="consumers-page">
       <PageBanner title="Consumers" subtitle="ollama traffic routing and patching" />
+
+      {/* What it shows: A plain-language explanation of what consumers are and how the
+          scanner works. Decision it drives: User understands why services appear here
+          and what their options are (patch, ignore, or use intercept mode). */}
+      <p style={{
+        fontSize: 'var(--type-sm)',
+        color: 'var(--text-secondary)',
+        margin: '0 0 1rem 0',
+        lineHeight: 1.6,
+      }}>
+        Consumers are services on this machine that talk directly to Ollama (port 11434)
+        and bypass the queue. The scanner detects them automatically. You can patch their
+        config to route through the queue, or mark them as ignored if they&apos;re intentional.
+      </p>
+
       <InterceptBanner />
 
       <div class="consumers-header">

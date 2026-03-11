@@ -24,6 +24,7 @@ import {
 import Sidebar from './components/Sidebar.jsx';
 import BottomNav from './components/BottomNav.jsx';
 import SubmitJobModal from './components/SubmitJobModal.jsx';
+import OnboardingOverlay from './components/OnboardingOverlay.jsx';
 import Now from './pages/Now.jsx';
 import Plan from './pages/Plan';
 import History from './pages/History.jsx';
@@ -181,6 +182,10 @@ export function App() {
                 onClose={() => { showSubmitModal.value = false; }}
                 onJobSubmitted={() => refreshQueue()}
             />
+            {/* OnboardingOverlay — self-manages visibility via localStorage.
+                Renders nothing if localStorage key 'oq_onboarding_done' is already set.
+                Shown unconditionally here; the component decides whether to display. */}
+            <OnboardingOverlay />
         </div>
     );
 }
