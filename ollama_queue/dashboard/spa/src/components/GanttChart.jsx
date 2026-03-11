@@ -606,6 +606,14 @@ export function GanttChart({
                         ? new Date(job.last_run * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
                         : 'never';
 
+                    // Stock-market horizontal candlestick layout:
+                    //   left wick (thin line) = model cold-load time
+                    //   body (full-height rect) = inference runtime
+                    //   right wick (thin line) = VRAM hold after completion
+                    // align-items:center on the outer div vertically centers the thin wicks
+                    // against the full-height body — matching the classic candlestick silhouette.
+                    const wickThickness = 3; // px, thin wick height
+
                     return (
                         <div
                             key={job.id}
@@ -623,32 +631,31 @@ export function GanttChart({
                                 outlineOffset: conflictIds.has(job.id) ? '-1px' : undefined,
                                 overflow: 'visible',
                                 display: 'flex',
+                                alignItems: 'center',  // vertically centers thin wicks against the body
                                 cursor: 'pointer',
-                                borderRadius: 'var(--radius)',
                             }}
                         >
-                            {/* Left wick: model warmup (loading from disk into VRAM) */}
+                            {/* Left wick: thin horizontal line = model cold-load time */}
                             {warmupSecs > 0 && (
                                 <div style={{
                                     width: `${warmupFrac * 100}%`,
-                                    height: '100%',
-                                    background: `repeating-linear-gradient(
-                                        90deg,
-                                        ${color}55 0px, ${color}55 3px,
-                                        transparent 3px, transparent 6px
-                                    )`,
-                                    borderRadius: 'var(--radius) 0 0 var(--radius)',
-                                    borderLeft: isHeavy ? '3px solid var(--status-warning)' : undefined,
+                                    height: wickThickness,
+                                    background: color,
+                                    opacity: 0.7,
+                                    borderRadius: '2px 0 0 2px',
+                                    borderLeft: isHeavy ? `2px solid var(--status-warning)` : undefined,
                                     flexShrink: 0,
                                 }} />
                             )}
-                            {/* Body: inference runtime — the main job work */}
+                            {/* Body: full-height rectangle = inference runtime — the main job work */}
                             <div style={{
                                 width: `${inferenceFrac * 100}%`,
                                 height: '100%',
                                 background: color,
                                 opacity: 0.85,
-                                borderRadius: warmupSecs > 0 ? '0' : 'var(--radius) 0 0 var(--radius)',
+                                borderRadius: warmupSecs > 0
+                                    ? (unloadSecs > 0 ? '0' : '0 var(--radius) var(--radius) 0')
+                                    : (unloadSecs > 0 ? 'var(--radius) 0 0 var(--radius)' : 'var(--radius)'),
                                 borderLeft: (warmupSecs === 0 && isHeavy) ? '3px solid var(--status-warning)' : undefined,
                                 flexShrink: 0,
                                 display: 'flex',
@@ -717,14 +724,14 @@ export function GanttChart({
                                     />
                                 )}
                             </div>
-                            {/* Right wick: VRAM hold after job ends (model stays warm briefly) */}
+                            {/* Right wick: thin horizontal line = VRAM hold after job ends */}
                             {unloadSecs > 0 && (
                                 <div style={{
                                     flex: 1,
-                                    height: '100%',
+                                    height: wickThickness,
                                     background: color,
-                                    opacity: 0.18,
-                                    borderRadius: '0 var(--radius) var(--radius) 0',
+                                    opacity: 0.5,
+                                    borderRadius: '0 2px 2px 0',
                                     flexShrink: 0,
                                 }} />
                             )}
@@ -765,12 +772,13 @@ export function GanttChart({
                 </span>
             ))}
             <span style={{ color: 'var(--border-subtle)', userSelect: 'none' }}>│</span>
-            {/* Candlestick encoding legend */}
+            {/* Candlestick encoding legend — mimics the actual bar shape: thin-wick body thin-wick */}
             <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                <span style={{
-                    display: 'inline-block', width: 24, height: 10, borderRadius: 2,
-                    background: 'linear-gradient(90deg, rgba(99,179,237,0.3) 25%, rgba(99,179,237,0.85) 25% 75%, rgba(99,179,237,0.18) 75%)',
-                }} />
+                <span style={{ display: 'flex', alignItems: 'center', width: 36, height: 10 }}>
+                    <span style={{ flex: 1, height: 2, background: 'rgba(99,179,237,0.7)', borderRadius: '2px 0 0 2px' }} />
+                    <span style={{ width: 16, height: '100%', background: 'rgba(99,179,237,0.85)', borderRadius: 1 }} />
+                    <span style={{ flex: 1, height: 2, background: 'rgba(99,179,237,0.5)', borderRadius: '0 2px 2px 0' }} />
+                </span>
                 load · run · unload
             </span>
             <span style={{ color: 'var(--border-subtle)', userSelect: 'none' }}>│</span>
