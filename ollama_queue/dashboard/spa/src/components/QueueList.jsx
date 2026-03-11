@@ -1,5 +1,6 @@
 import { h } from 'preact';
 import { useState, useMemo, useEffect, useRef } from 'preact/hooks';
+import { useSignal } from '@preact/signals';
 import { applyFreshness, shatterElement } from 'superhot-ui';
 import { queue, queueEtas, API, refreshQueue } from '../stores';
 import EmptyState from './EmptyState.jsx';
@@ -69,6 +70,35 @@ export default function QueueList({ jobs, currentJob }) {
   const [dropIdx, setDropIdx] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
   const [cancelError, setCancelError] = useState(null);
+
+  // What it shows: Tracks which jobs are in the 5-second undo window after the user clicks ×.
+  // Decision it drives: Lets the user recover from an accidental cancel before the DELETE fires.
+  const pendingCancels = useSignal({}); // { [jobId]: timerId }
+
+  function requestCancel(jobId) {
+    const timerId = setTimeout(async () => {
+      const next = { ...pendingCancels.value };
+      delete next[jobId];
+      pendingCancels.value = next;
+      try {
+        const r = await fetch(`${API}/queue/cancel/${jobId}`, { method: 'POST' });
+        if (r.ok) refreshQueue();
+        else setCancelError(`Cancel failed: HTTP ${r.status}`);
+      } catch (err) {
+        console.error('Cancel failed:', err);
+        setCancelError(`Cancel failed: ${err.message}`);
+      }
+    }, 5000);
+    pendingCancels.value = { ...pendingCancels.value, [jobId]: timerId };
+  }
+
+  function undoCancel(jobId) {
+    const timerId = pendingCancels.value[jobId];
+    if (timerId != null) clearTimeout(timerId);
+    const next = { ...pendingCancels.value };
+    delete next[jobId];
+    pendingCancels.value = next;
+  }
 
   const tags = useMemo(() => [...new Set(allItems.map(j => j.tag).filter(Boolean))], [allItems]);
   const items = tagFilter ? allItems.filter(j => j.tag === tagFilter) : allItems;
@@ -269,15 +299,26 @@ export default function QueueList({ jobs, currentJob }) {
                   </span>
                 )}
 
-                {/* Cancel button */}
-                <button
-                  class="t-btn"
-                  style="background: none; border: none; color: var(--status-error); font-size: 14px; cursor: pointer; padding: 2px 6px; line-height: 1; flex-shrink: 0;"
-                  title="Remove this job from the queue — cannot be undone"
-                  onClick={(e) => { e.stopPropagation(); cancelJob(job.id, job._isRunning, setCancelError, e.currentTarget.closest('[data-fresh-row]')); }}
-                >
-                  ×
-                </button>
+                {/* Cancel button — shows "Cancelling..." at reduced opacity during the 5s undo window */}
+                {pendingCancels.value[job.id] != null ? (
+                  <button
+                    class="t-btn"
+                    disabled
+                    style="background: none; border: none; color: var(--text-tertiary); font-size: 11px; cursor: default; padding: 2px 6px; line-height: 1; flex-shrink: 0; opacity: 0.6;"
+                    title="Cancelling — click Undo in the toast to abort"
+                  >
+                    Cancelling…
+                  </button>
+                ) : (
+                  <button
+                    class="t-btn"
+                    style="background: none; border: none; color: var(--status-error); font-size: 14px; cursor: pointer; padding: 2px 6px; line-height: 1; flex-shrink: 0;"
+                    title="Remove this job from the queue"
+                    onClick={(e) => { e.stopPropagation(); requestCancel(job.id); }}
+                  >
+                    ×
+                  </button>
+                )}
               </div>
 
               {/* Expandable command panel */}
@@ -293,6 +334,25 @@ export default function QueueList({ jobs, currentJob }) {
           );
         })}
       </div>
+
+      {/* Undo-cancel toasts — one per pending cancel, fixed to bottom-center of viewport.
+          What it shows: "Cancelled." confirmation with an Undo button for each job in the 5s window.
+          Decision it drives: Lets the user recover an accidental cancel before the DELETE fires. */}
+      {Object.keys(pendingCancels.value).map(jobId => (
+        <div
+          key={jobId}
+          style="position:fixed;bottom:80px;left:50%;transform:translateX(-50%);z-index:200;background:var(--bg-surface);border:1px solid var(--border-primary);padding:8px 16px;border-radius:var(--radius);display:flex;align-items:center;gap:12px;font-size:var(--type-label);box-shadow:var(--card-shadow-hover);"
+        >
+          <span style="color:var(--text-secondary);">Cancelled.</span>
+          <button
+            class="t-btn"
+            style="font-size:var(--type-micro);padding:2px 8px;"
+            onClick={() => undoCancel(jobId)}
+          >
+            Undo
+          </button>
+        </div>
+      ))}
     </div>
   );
 }
