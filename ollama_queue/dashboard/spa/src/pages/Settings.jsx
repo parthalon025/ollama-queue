@@ -81,6 +81,16 @@ export default function Settings() {
         pauseFb={pauseFb}
         resumeFb={resumeFb}
       />
+      <div style="margin-top:24px;padding-top:16px;border-top:1px solid var(--border-subtle);">
+        <p style="font-family:var(--font-mono);font-size:var(--type-micro);color:var(--text-tertiary);">
+          Keyboard shortcuts:{'  '}
+          <kbd>1</kbd> Now{'  ·  '}
+          <kbd>2</kbd> Plan{'  ·  '}
+          <kbd>3</kbd> History{'  ·  '}
+          <kbd>4</kbd> Models{'  ·  '}
+          <kbd>5</kbd> Settings
+        </p>
+      </div>
     </div>
   );
 }

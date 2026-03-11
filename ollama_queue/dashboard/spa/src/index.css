@@ -1606,3 +1606,14 @@ body {
 .sh-crt {
   --sh-crt-stripe: block;
 }
+
+/* Keyboard shortcut keys */
+kbd {
+  font-family: var(--font-mono);
+  font-size: 0.75em;
+  padding: 1px 5px;
+  border: 1px solid var(--border-primary);
+  border-radius: 3px;
+  background: var(--bg-surface-raised);
+  color: var(--text-secondary);
+}
