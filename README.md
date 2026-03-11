@@ -43,7 +43,7 @@ Running multiple services against a local Ollama instance creates a resource con
 | **Consumer detection** | 4-phase scanner finds every service calling Ollama directly. Config patcher rewrites them to route through the queue. Optional iptables REDIRECT intercept catches unpatched callers at the network layer. |
 | **Eval pipeline** | Run A/B–E prompt variant evaluations with an LLM judge (F1/recall/precision). Auto-promote the winning config when quality gates pass. Thompson Sampling routes production traffic to the recommended variant. |
 | **Intelligence layer** | Bayesian log-normal runtime estimation (4-tier hierarchy), log-linear cross-model performance curves, 10-factor slot scoring with VRAM hard gates, hourly/daily load pattern learning. |
-| **Web dashboard** | 8-view Preact SPA: Now, Plan, History, Models, Performance, Settings, Eval, Consumers. |
+| **Web dashboard** | 8-view Preact SPA: Now, Plan, History, Models, Performance, Settings, Eval, Consumers. SUPERHOT terminal aesthetic — CRT page banners, VT323 pixel font, glitch/shatter effects on state transitions, light/dark mode toggle. |
 | **REST API** | 90+ endpoints covering all features. |
 
 ---
