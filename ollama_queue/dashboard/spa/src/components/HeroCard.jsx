@@ -1,3 +1,4 @@
+import { h } from 'preact';
 import TimeChart from './TimeChart.jsx';
 
 /**
@@ -17,8 +18,9 @@ import TimeChart from './TimeChart.jsx';
  * @param {boolean} [props.loading] - Loading state (cursor-working)
  * @param {Array} [props.sparkData] - uPlot data array for sparkline [timestamps[], values[]]
  * @param {string} [props.sparkColor] - CSS color for sparkline (default: var(--accent))
+ * @param {string} [props.tooltip] - Plain-English explanation shown on hover (ARIA "Explain like I'm 5")
  */
-export default function HeroCard({ value, label, unit, delta, warning, loading, sparkData, sparkColor }) {
+export default function HeroCard({ value, label, unit, delta, warning, loading, sparkData, sparkColor, tooltip }) {
   const cursorClass = loading ? 'cursor-working' : 'cursor-active';
 
   return (
@@ -27,6 +29,24 @@ export default function HeroCard({ value, label, unit, delta, warning, loading, 
       data-label={label}
       style={warning ? 'border-left: 3px solid var(--status-warning);' : ''}
     >
+      {/* Label row: metric name + optional plain-English tooltip icon */}
+      <div class="flex items-center gap-1" style="margin-bottom: 4px;">
+        <span
+          style="font-size: var(--type-micro); color: var(--text-tertiary); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.05em;"
+          title={tooltip}
+        >
+          {label}
+        </span>
+        {tooltip && (
+          <span
+            aria-label={tooltip}
+            title={tooltip}
+            style="font-size: var(--type-micro); color: var(--text-tertiary); cursor: help; opacity: 0.6; line-height: 1;"
+          >
+            ?
+          </span>
+        )}
+      </div>
       <div class="flex items-baseline gap-2" style="justify-content: space-between;">
         <div class="flex items-baseline gap-2">
           <span

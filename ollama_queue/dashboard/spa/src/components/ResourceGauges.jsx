@@ -31,11 +31,19 @@ export default function ResourceGauges({ ram, vram, load, swap, settings }) {
     }
   }, [isOverThreshold]);
 
+  // Plain-English explanations for each resource gauge (ARIA "Explain like I'm 5")
+  const GAUGE_TOOLTIPS = {
+    ram:  'System RAM in use. Above the pause threshold, the daemon stops accepting new jobs.',
+    vram: 'GPU memory in use by Ollama. Near 100% causes model loading failures — most common bottleneck.',
+    load: '1-minute system load average. Values above CPU count indicate the system is overloaded.',
+    swap: 'Swap (disk memory) in use. Non-zero swap on a machine with adequate RAM signals memory pressure.',
+  };
+
   const gauges = [
-    { label: 'RAM',  title: 'Main memory (RAM) — used by running programs',                value: ram,  pause: s.ram_pause_pct || 85,                              resume: s.ram_resume_pct || 75 },
-    { label: 'GPU',  title: 'GPU memory (VRAM) — used by AI models',                       value: vram, pause: s.vram_pause_pct || 90,                             resume: s.vram_resume_pct || 80 },
-    { label: 'CPU',  title: 'CPU workload — how busy the processor is',                    value: load, pause: (s.load_pause_multiplier || 2) * 50,                resume: (s.load_resume_multiplier || 1.5) * 50 },
-    { label: 'Swap', title: 'Swap memory — disk used as overflow when RAM is full',        value: swap, pause: s.swap_pause_pct || 50,                             resume: s.swap_resume_pct || 40 },
+    { label: 'RAM',  title: GAUGE_TOOLTIPS.ram,  value: ram,  pause: s.ram_pause_pct || 85,                              resume: s.ram_resume_pct || 75 },
+    { label: 'GPU',  title: GAUGE_TOOLTIPS.vram, value: vram, pause: s.vram_pause_pct || 90,                             resume: s.vram_resume_pct || 80 },
+    { label: 'CPU',  title: GAUGE_TOOLTIPS.load, value: load, pause: (s.load_pause_multiplier || 2) * 50,                resume: (s.load_resume_multiplier || 1.5) * 50 },
+    { label: 'Swap', title: GAUGE_TOOLTIPS.swap, value: swap, pause: s.swap_pause_pct || 50,                             resume: s.swap_resume_pct || 40 },
   ];
 
   return (

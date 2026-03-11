@@ -200,6 +200,7 @@ export default function Now() {
                             sparkData={buildHealthSparkline(health, 'ram_pct')}
                             sparkColor="var(--accent)"
                             delta={kpis ? buildJobsDelta(kpis, hist) : null}
+                            tooltip="Total jobs completed in the last 24 hours. Rising = queue is healthy. Falling = daemon may be stalled."
                         />
                         <HeroCard
                             label="Average Wait Before Starting"
@@ -207,6 +208,7 @@ export default function Now() {
                             sparkData={buildDurationSparkline(durations)}
                             sparkColor="var(--accent)"
                             delta={kpis ? buildWaitDelta(kpis.avg_wait_seconds) : null}
+                            tooltip="Average time a job spends in queue before the daemon starts it. Spikes mean the daemon was busy or paused."
                         />
                         <HeroCard
                             label="Auto-Paused Time Today"
@@ -216,6 +218,7 @@ export default function Now() {
                             sparkData={buildHealthSparkline(health, 'ram_pct')}
                             sparkColor="var(--status-warning)"
                             delta={kpis ? buildPauseDelta(kpis.pause_minutes_24h) : null}
+                            tooltip="Total minutes the daemon spent paused in the last 24 hours. High values mean frequent health-triggered pauses."
                         />
                         <HeroCard
                             label="7-Day Success Rate"
@@ -223,6 +226,7 @@ export default function Now() {
                             unit="%"
                             warning={kpis && kpis.success_rate_7d < 0.9}
                             delta={kpis ? buildSuccessRateDelta(kpis, hist) : null}
+                            tooltip="Percentage of completed jobs that succeeded. Below 90% warrants investigation in History."
                         />
                     </div>
 
