@@ -28,6 +28,21 @@ def client_and_db(tmp_path):
 # --- Variants ---
 
 
+def test_system_variants_have_new_columns_after_init(client):
+    """System variants should have params, system_prompt, training_config, provider columns."""
+    resp = client.get("/api/eval/variants")
+    assert resp.status_code == 200
+    variant_a = next(v for v in resp.json() if v["id"] == "A")
+    assert "params" in variant_a
+    assert "system_prompt" in variant_a
+    assert "training_config" in variant_a
+    assert "provider" in variant_a
+    assert variant_a["params"] == "{}"
+    assert variant_a["provider"] == "ollama"
+    assert variant_a["system_prompt"] is None
+    assert variant_a["training_config"] is None
+
+
 def test_list_variants_returns_system_variants(client):
     """After init there should be system variants (A-H + M)."""
     resp = client.get("/api/eval/variants")

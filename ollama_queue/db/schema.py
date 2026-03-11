@@ -132,6 +132,14 @@ class SchemaMixin:
         self._add_column_if_missing(conn, "dlq", "rescheduled_job_id", "INTEGER")
         self._add_column_if_missing(conn, "dlq", "rescheduled_for", "REAL")
         self._add_column_if_missing(conn, "dlq", "reschedule_reasoning", "TEXT")
+        # Eval enhancement: variant params, system_prompt, training_config, provider
+        self._add_column_if_missing(conn, "eval_variants", "system_prompt", "TEXT")
+        self._add_column_if_missing(conn, "eval_variants", "params", "TEXT DEFAULT '{}'")
+        self._add_column_if_missing(conn, "eval_variants", "training_config", "TEXT")
+        self._add_column_if_missing(conn, "eval_variants", "provider", "TEXT DEFAULT 'ollama'")
+        # Backfill pre-existing rows
+        conn.execute("UPDATE eval_variants SET params = '{}' WHERE params IS NULL")
+        conn.execute("UPDATE eval_variants SET provider = 'ollama' WHERE provider IS NULL")
         # Backfill descriptions for system variants that existed before the column was added.
         # INSERT OR IGNORE skips rows that already exist, so existing rows need an explicit UPDATE.
         _system_descriptions = {
