@@ -82,6 +82,19 @@ EVAL_SETTINGS_DEFAULTS = {
     "eval.auto_promote": False,  # explicit opt-in only
     "eval.auto_promote_min_improvement": 0.05,  # min F1 delta over current production
     "eval.positive_threshold": 3,  # score_transfer >= this counts as positive for F1 calc
+    # Provider settings — which backend to use for each pipeline role
+    "eval.generator_provider": "ollama",
+    "eval.generator_model": "",
+    "eval.judge_provider": "ollama",
+    "eval.optimizer_provider": "claude",
+    "eval.optimizer_model": "claude-sonnet-4-6",
+    "eval.oracle_provider": "claude",
+    "eval.oracle_model": "claude-sonnet-4-6",
+    "eval.oracle_enabled": "false",
+    "eval.claude_api_key": "",
+    "eval.openai_api_key": "",
+    "eval.openai_base_url": "",
+    "eval.max_cost_per_run_usd": "1.00",
 }
 
 

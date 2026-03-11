@@ -93,6 +93,32 @@ def prime_eval_datasource():
 
 # --- Eval: Settings ---
 
+# Keys whose values must never be returned in plaintext — show first 6 chars + *** if non-empty
+_MASKED_SETTINGS = {"eval.data_source_token", "eval.claude_api_key", "eval.openai_api_key"}
+
+# Provider-role settings — values must be one of _VALID_PROVIDERS
+_PROVIDER_SETTINGS = {
+    "eval.generator_provider",
+    "eval.judge_provider",
+    "eval.optimizer_provider",
+    "eval.oracle_provider",
+}
+_VALID_PROVIDERS = {"ollama", "claude", "openai"}
+
+
+def _mask_value(key: str, value: str) -> str:
+    """Return masked form of a sensitive setting value.
+
+    What it shows: N/A — pure helper used by get_eval_settings.
+    Decision it drives: Preserves enough context (first 6 chars) to identify which key
+      is set without exposing the full credential.
+    """
+    if key == "eval.data_source_token":
+        # Legacy: token was always fully masked as "***"
+        return "***"
+    # API keys: show first 6 chars so user can identify which key is configured
+    return value[:6] + "***"
+
 
 @router.get("/api/eval/settings")
 def get_eval_settings():
@@ -104,9 +130,10 @@ def get_eval_settings():
     db = _api.db
     all_settings = db.get_all_settings()
     result = {k: v for k, v in all_settings.items() if k.startswith("eval.")}
-    # Mask token — bearer credential must not be readable via API
-    if result.get("eval.data_source_token"):
-        result["eval.data_source_token"] = "***"  # noqa: S105
+    # Mask sensitive credentials — never return raw values via API
+    for key in _MASKED_SETTINGS:
+        if result.get(key):
+            result[key] = _mask_value(key, result[key])
     return result
 
 
@@ -136,6 +163,19 @@ def put_eval_settings(body: dict = Body(...)):
         "auto_promote",
         "auto_promote_min_improvement",
         "positive_threshold",
+        # Provider settings
+        "generator_provider",
+        "generator_model",
+        "judge_provider",
+        "optimizer_provider",
+        "optimizer_model",
+        "oracle_provider",
+        "oracle_model",
+        "oracle_enabled",
+        "claude_api_key",
+        "openai_api_key",
+        "openai_base_url",
+        "max_cost_per_run_usd",
     }
 
     # Validation rules — validate ALL before writing any
@@ -179,6 +219,11 @@ def put_eval_settings(body: dict = Body(...)):
             validation_errors.append(f"auto_promote_min_improvement must be 0.0-1.0, got {value!r}")
         elif bare_key == "positive_threshold" and (not isinstance(value, int) or not (1 <= value <= 5)):
             validation_errors.append(f"positive_threshold must be an integer 1-5, got {value!r}")
+        elif f"eval.{bare_key}" in _PROVIDER_SETTINGS and value not in _VALID_PROVIDERS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid provider {value!r}: must be one of {sorted(_VALID_PROVIDERS)}",
+            )
 
     if validation_errors:
         raise HTTPException(status_code=422, detail=validation_errors)
