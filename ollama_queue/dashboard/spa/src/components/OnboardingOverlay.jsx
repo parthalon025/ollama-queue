@@ -4,7 +4,6 @@
 // Decision it drives: User knows what the dashboard does and how to use it without
 //   reading docs. Dismissed permanently via localStorage so it never re-appears.
 import { h } from 'preact';
-import { useEffect } from 'preact/hooks';
 import { useSignal } from '@preact/signals';
 
 const STORAGE_KEY = 'oq_onboarding_done';
@@ -89,6 +88,9 @@ export default function OnboardingOverlay() {
         >
             <div
                 class="onboarding-card"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="onboarding-title"
                 style={{
                     background: 'var(--bg-surface-raised)',
                     border: '1px solid var(--border-subtle)',
@@ -110,7 +112,7 @@ export default function OnboardingOverlay() {
                 </div>
 
                 {/* Headline */}
-                <h2 style={{
+                <h2 id="onboarding-title" style={{
                     margin: 0,
                     fontSize: 'var(--type-lg, 1.25rem)',
                     color: 'var(--text-primary)',
@@ -160,7 +162,7 @@ export default function OnboardingOverlay() {
                                 background: 'var(--accent)',
                                 border: 'none',
                                 borderRadius: 'var(--radius-md)',
-                                color: '#fff',
+                                color: 'var(--text-on-accent, #fff)',
                                 cursor: 'pointer',
                                 fontSize: 'var(--type-sm)',
                                 fontWeight: 600,
@@ -176,7 +178,7 @@ export default function OnboardingOverlay() {
                                 background: 'var(--accent)',
                                 border: 'none',
                                 borderRadius: 'var(--radius-md)',
-                                color: '#fff',
+                                color: 'var(--text-on-accent, #fff)',
                                 cursor: 'pointer',
                                 fontSize: 'var(--type-sm)',
                                 fontWeight: 600,

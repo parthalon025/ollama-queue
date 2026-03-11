@@ -4,18 +4,14 @@
 import { jest } from '@jest/globals';
 
 // Mock @preact/signals — useSignal returns a mutable object with a .value property.
-// We use a plain object because the component reads and writes .value directly.
+// Using jest.fn so individual tests can override with mockReturnValueOnce for state-specific tests.
 jest.mock('@preact/signals', () => ({
-    useSignal: (v) => ({ value: v }),
-}));
-
-// Mock preact/hooks — useEffect is called immediately in tests (synchronous).
-jest.mock('preact/hooks', () => ({
-    useEffect: jest.fn((fn) => fn()),
+    useSignal: jest.fn((v) => ({ value: v })),
 }));
 
 import _OnboardingOverlay from './OnboardingOverlay.jsx';
 const OnboardingOverlay = _OnboardingOverlay.default || _OnboardingOverlay;
+import { useSignal } from '@preact/signals';
 
 // ---------------------------------------------------------------------------
 // Vnode tree helpers
@@ -107,4 +103,40 @@ test('renders Skip link on step 1', () => {
     const buttons = findAll(vnode, n => n?.type === 'button');
     const skipBtn = buttons.find(b => collectText(b).some(t => t === 'Skip'));
     expect(skipBtn).toBeTruthy();
+});
+
+test('Skip onClick calls localStorage.setItem with oq_onboarding_done=1', () => {
+    global.localStorage.getItem.mockReturnValue(null);
+    const vnode = OnboardingOverlay({});
+    const buttons = findAll(vnode, n => n?.type === 'button');
+    const skipBtn = buttons.find(b => collectText(b).some(t => t === 'Skip'));
+    expect(skipBtn).toBeTruthy();
+    skipBtn.props.onClick();
+    expect(global.localStorage.setItem).toHaveBeenCalledWith('oq_onboarding_done', '1');
+});
+
+test('renders Got it button on last step (step 5, index 4)', () => {
+    global.localStorage.getItem.mockReturnValue(null);
+    // First useSignal call = visible (true), second = step (4 = last step index)
+    useSignal.mockReturnValueOnce({ value: true });
+    useSignal.mockReturnValueOnce({ value: 4 });
+    const vnode = OnboardingOverlay({});
+    expect(vnode).not.toBeNull();
+    const texts = collectText(vnode);
+    expect(texts.some(t => t.includes('Got it'))).toBe(true);
+    expect(texts.some(t => t === 'Next')).toBe(false);
+});
+
+test('handleNext onClick increments step value', () => {
+    global.localStorage.getItem.mockReturnValue(null);
+    const stepSig = { value: 0 };
+    // First useSignal call = visible (true), second = step signal (mutable)
+    useSignal.mockReturnValueOnce({ value: true });
+    useSignal.mockReturnValueOnce(stepSig);
+    const vnode = OnboardingOverlay({});
+    const buttons = findAll(vnode, n => n?.type === 'button');
+    const nextBtn = buttons.find(b => collectText(b).some(t => t === 'Next'));
+    expect(nextBtn).toBeTruthy();
+    nextBtn.props.onClick();
+    expect(stepSig.value).toBe(1);
 });
