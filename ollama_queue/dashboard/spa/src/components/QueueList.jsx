@@ -76,6 +76,7 @@ export default function QueueList({ jobs, currentJob }) {
   const pendingCancels = useSignal({}); // { [jobId]: timerId }
 
   function requestCancel(jobId) {
+    setCancelError(null);
     const timerId = setTimeout(async () => {
       const next = { ...pendingCancels.value };
       delete next[jobId];
@@ -348,12 +349,14 @@ export default function QueueList({ jobs, currentJob }) {
       {Object.keys(pendingCancels.value).map(jobId => (
         <div
           key={jobId}
+          role="status"
           style="position:fixed;bottom:80px;left:50%;transform:translateX(-50%);z-index:200;background:var(--bg-surface);border:1px solid var(--border-primary);padding:8px 16px;border-radius:var(--radius);display:flex;align-items:center;gap:12px;font-size:var(--type-label);box-shadow:var(--card-shadow-hover);"
         >
-          <span style="color:var(--text-secondary);">Cancelled.</span>
+          <span style="color:var(--text-secondary);">Cancelling in 5s…</span>
           <button
             class="t-btn"
             style="font-size:var(--type-micro);padding:2px 8px;"
+            aria-label="Undo cancel"
             onClick={() => undoCancel(jobId)}
           >
             Undo
