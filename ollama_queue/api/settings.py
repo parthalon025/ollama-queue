@@ -44,3 +44,15 @@ def daemon_resume():
     db = _api.db
     db.update_daemon_state(state="idle", paused_reason=None, paused_since=None)
     return {"ok": True}
+
+
+@router.post("/api/daemon/restart")
+def daemon_restart():
+    """Signal the daemon to restart: transition to 'restarting', then back to 'idle'.
+
+    The daemon's polling loop detects the 'restarting' state and re-initialises
+    itself on the next cycle, after which it returns to 'idle'/'running'.
+    """
+    db = _api.db
+    db.update_daemon_state(state="restarting")
+    return {"ok": True}

@@ -1,6 +1,7 @@
 import { h } from 'preact';
 import { useState, useMemo, useEffect, useRef } from 'preact/hooks';
-import { applyFreshness, shatterElement } from 'superhot-ui';
+import { useSignal } from '@preact/signals';
+import { applyFreshness } from 'superhot-ui';
 import { queue, queueEtas, API, refreshQueue } from '../stores';
 import EmptyState from './EmptyState.jsx';
 import { formatDuration } from '../utils/time.js';
@@ -31,18 +32,6 @@ function priorityColor(p) {
   return PRIORITY_COLORS.background;
 }
 
-async function cancelJob(id, isRunning, setError, cardEl) {
-  if (isRunning && !confirm('Cancel this running job? The process will be killed.')) return;
-  if (cardEl) shatterElement(cardEl, { fragments: 6 });
-  try {
-    const res = await fetch(`${API}/queue/cancel/${id}`, { method: 'POST' });
-    if (!res.ok) { setError(`Cancel failed: HTTP ${res.status}`); return; }
-    await refreshQueue();
-  } catch (e) {
-    setError(`Cancel failed: ${e.message}`);
-  }
-}
-
 // What it shows: Visual freshness state on a queue row based on how long ago the job was submitted.
 // Decision it drives: Old jobs sitting in the queue stand out visually (cooling → frozen → stale),
 //   prompting the user to investigate why they haven't started.
@@ -70,8 +59,54 @@ export default function QueueList({ jobs, currentJob }) {
   const [expandedId, setExpandedId] = useState(null);
   const [cancelError, setCancelError] = useState(null);
 
+  // What it shows: Tracks which jobs are in the 5-second undo window after the user clicks ×.
+  // Decision it drives: Lets the user recover from an accidental cancel before the DELETE fires.
+  const pendingCancels = useSignal({}); // { [jobId]: timerId }
+
+  function requestCancel(jobId) {
+    setCancelError(null);
+    const timerId = setTimeout(async () => {
+      const next = { ...pendingCancels.value };
+      delete next[jobId];
+      pendingCancels.value = next;
+      try {
+        const r = await fetch(`${API}/queue/cancel/${jobId}`, { method: 'POST' });
+        if (r.ok) refreshQueue();
+        else setCancelError(`Cancel failed: HTTP ${r.status}`);
+      } catch (err) {
+        console.error('Cancel failed:', err);
+        setCancelError(`Cancel failed: ${err.message}`);
+      }
+    }, 5000);
+    pendingCancels.value = { ...pendingCancels.value, [jobId]: timerId };
+  }
+
+  function undoCancel(jobId) {
+    const timerId = pendingCancels.value[jobId];
+    if (timerId != null) clearTimeout(timerId);
+    const next = { ...pendingCancels.value };
+    delete next[jobId];
+    pendingCancels.value = next;
+  }
+
+  // Clear all pending timers when the component unmounts (e.g. navigating away mid-countdown).
+  useEffect(() => {
+    return () => {
+      Object.values(pendingCancels.value).forEach(id => clearTimeout(id));
+    };
+  }, []);
+
   const tags = useMemo(() => [...new Set(allItems.map(j => j.tag).filter(Boolean))], [allItems]);
   const items = tagFilter ? allItems.filter(j => j.tag === tagFilter) : allItems;
+
+  // What it shows: For each source, the ordered list of job IDs in queue position order.
+  // Decision it drives: When a source has multiple jobs queued, the user can see
+  //   which of their jobs is #1/#3 in that source's backlog.
+  const sourcePositions = {};
+  items.forEach(job => {
+    if (!sourcePositions[job.source]) sourcePositions[job.source] = [];
+    sourcePositions[job.source].push(job.id);
+  });
 
   // Prepend the running job at position 0 (not draggable, not counted in wait)
   const displayItems = currentJob ? [{ ...currentJob, _isRunning: true }, ...items] : items;
@@ -249,6 +284,13 @@ export default function QueueList({ jobs, currentJob }) {
                   {job.model || '--'}
                 </span>
 
+                {/* Per-source queue position — shown when the same source has more than 1 job waiting */}
+                {sourcePositions[job.source]?.length > 1 && !job._isRunning && (
+                  <span class="data-mono" style="font-size:var(--type-micro);color:var(--text-tertiary);flex-shrink:0;">
+                    #{(sourcePositions[job.source].indexOf(job.id) + 1)}/{sourcePositions[job.source].length}
+                  </span>
+                )}
+
                 {/* Estimated duration */}
                 <span
                   class="data-mono"
@@ -269,15 +311,26 @@ export default function QueueList({ jobs, currentJob }) {
                   </span>
                 )}
 
-                {/* Cancel button */}
-                <button
-                  class="t-btn"
-                  style="background: none; border: none; color: var(--status-error); font-size: 14px; cursor: pointer; padding: 2px 6px; line-height: 1; flex-shrink: 0;"
-                  title="Remove this job from the queue — cannot be undone"
-                  onClick={(e) => { e.stopPropagation(); cancelJob(job.id, job._isRunning, setCancelError, e.currentTarget.closest('[data-fresh-row]')); }}
-                >
-                  ×
-                </button>
+                {/* Cancel button — shows "Cancelling..." at reduced opacity during the 5s undo window */}
+                {pendingCancels.value[job.id] != null ? (
+                  <button
+                    class="t-btn"
+                    disabled
+                    style="background: none; border: none; color: var(--text-tertiary); font-size: 11px; cursor: default; padding: 2px 6px; line-height: 1; flex-shrink: 0; opacity: 0.6;"
+                    title="Cancelling — click Undo in the toast to abort"
+                  >
+                    Cancelling…
+                  </button>
+                ) : (
+                  <button
+                    class="t-btn"
+                    style="background: none; border: none; color: var(--status-error); font-size: 14px; cursor: pointer; padding: 2px 6px; line-height: 1; flex-shrink: 0;"
+                    title="Remove this job from the queue"
+                    onClick={(e) => { e.stopPropagation(); requestCancel(job.id); }}
+                  >
+                    ×
+                  </button>
+                )}
               </div>
 
               {/* Expandable command panel */}
@@ -293,6 +346,27 @@ export default function QueueList({ jobs, currentJob }) {
           );
         })}
       </div>
+
+      {/* Undo-cancel toasts — one per pending cancel, fixed to bottom-center of viewport.
+          What it shows: "Cancelled." confirmation with an Undo button for each job in the 5s window.
+          Decision it drives: Lets the user recover an accidental cancel before the DELETE fires. */}
+      {Object.keys(pendingCancels.value).map(jobId => (
+        <div
+          key={jobId}
+          role="status"
+          style="position:fixed;bottom:80px;left:50%;transform:translateX(-50%);z-index:200;background:var(--bg-surface);border:1px solid var(--border-primary);padding:8px 16px;border-radius:var(--radius);display:flex;align-items:center;gap:12px;font-size:var(--type-label);box-shadow:var(--card-shadow-hover);"
+        >
+          <span style="color:var(--text-secondary);">Cancelling…</span>
+          <button
+            class="t-btn"
+            style="font-size:var(--type-micro);padding:2px 8px;"
+            aria-label="Undo cancel"
+            onClick={() => undoCancel(jobId)}
+          >
+            Undo
+          </button>
+        </div>
+      ))}
     </div>
   );
 }

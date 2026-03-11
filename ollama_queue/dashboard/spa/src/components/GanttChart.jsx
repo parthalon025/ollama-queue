@@ -1,5 +1,6 @@
 import { h, Fragment } from 'preact';
 import { useState } from 'preact/hooks';
+import { useSignal } from '@preact/signals';
 import { fetchJobRuns } from '../stores';
 
 // NOTE: all .map() callbacks use descriptive names (job, slot, laneIdx) — never 'h'
@@ -323,6 +324,10 @@ export function GanttChart({
     // zoomedAnchor: when set, the timeline shows a ±1h window around that timestamp.
     // Clicking a bar zooms in; clicking zoom-out button or the same bar returns to full view.
     const [zoomedAnchor, setZoomedAnchor] = useState(null);
+
+    // What it shows: Rich hover tooltip for each Gantt bar — name, model, and estimated duration.
+    // Decision it drives: User can quickly scan bar details without clicking to zoom.
+    const tooltip = useSignal(null); // { x, y, job }
 
     const wallNow = Date.now() / 1000;
     // When zoomed, windowStart shifts so the anchor bar is centered in a 2h view.
@@ -665,6 +670,8 @@ export function GanttChart({
                             key={job.id}
                             title={buildTooltip(job, isConcurrent)}
                             onClick={evt => { evt.stopPropagation(); handleBarClick(job); }}
+                            onMouseEnter={e => { tooltip.value = { x: e.clientX + 16, y: e.clientY, job }; }}
+                            onMouseLeave={() => { tooltip.value = null; }}
                             style={{
                                 position: 'absolute',
                                 left: `${Math.min(leftPct, 99.5)}%`,
@@ -867,6 +874,16 @@ export function GanttChart({
             <span style={{ color: 'var(--border-subtle)', userSelect: 'none' }}>│</span>
             <span>click bar to zoom · click again to reset</span>
         </div>
+
+        {/* Hover tooltip — appears near cursor with job name, model, and estimated duration.
+            pointer-events:none so it never blocks hover on underlying bars. */}
+        {tooltip.value && (
+            <div style={`position:fixed;left:${tooltip.value.x}px;top:${tooltip.value.y}px;z-index:100;background:var(--bg-surface);border:1px solid var(--border-primary);border-radius:var(--radius);padding:10px 12px;font-size:var(--type-label);color:var(--text-secondary);pointer-events:none;box-shadow:var(--card-shadow-hover);`}>
+                <div style="color:var(--text-primary);margin-bottom:4px;font-weight:600;">{tooltip.value.job.name || tooltip.value.job.source}</div>
+                <div>{tooltip.value.job.model || '—'}</div>
+                {tooltip.value.job.estimated_duration && <div style="color:var(--text-tertiary);">~{formatDuration(tooltip.value.job.estimated_duration)}</div>}
+            </div>
+        )}
     </div>
     );
 }

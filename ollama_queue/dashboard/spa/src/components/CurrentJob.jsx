@@ -1,10 +1,12 @@
 import { h } from 'preact';
 import { useEffect, useRef } from 'preact/hooks';
+import { useSignal } from '@preact/signals';
 import { applyMantra, removeMantra } from 'superhot-ui';
 import StatusBadge from './StatusBadge.jsx';
 import ResourceGauges from './ResourceGauges.jsx';
 import EmptyState from './EmptyState.jsx';
 import { formatDuration } from '../utils/time.js';
+import { API } from '../stores';
 
 /**
  * What it shows: What the daemon is doing RIGHT NOW — running job name/model/elapsed time
@@ -25,6 +27,11 @@ import { formatDuration } from '../utils/time.js';
 export default function CurrentJob({ daemon, currentJob, latestHealth, settings, activeEval, onSubmitRequest }) {
   // Hooks must come before any conditional return (Rules of Hooks).
   const cardRef = useRef(null);
+
+  // What it shows: The last 5 lines of stdout from the running job, polled every 5s.
+  // Decision it drives: Lets the user see whether the job is producing output or stuck silent.
+  const logLines = useSignal([]);
+  const logExpanded = useSignal(false);
 
   const state = daemon ? (daemon.state || 'idle') : 'idle';
   const isPaused = state.startsWith('paused');
@@ -53,6 +60,28 @@ export default function CurrentJob({ daemon, currentJob, latestHealth, settings,
     );
     return () => clearTimeout(timer);
   }, [isStalled]);
+
+  // Live log tail: polls /api/jobs/{id}/log?tail=5 every 5s while a job is running.
+  // Clears when the job stops so stale output doesn't persist into the next run.
+  useEffect(() => {
+    if (!isRunning || !currentJob?.id) {
+      logLines.value = [];
+      return;
+    }
+    let cancelled = false;
+    async function fetchLog() {
+      try {
+        const r = await fetch(`${API}/jobs/${currentJob.id}/log?tail=5`);
+        if (!cancelled && r.ok) {
+          const data = await r.json();
+          logLines.value = data.lines || [];
+        }
+      } catch (_) { /* best-effort */ }
+    }
+    fetchLog();
+    const iv = setInterval(fetchLog, 5000);
+    return () => { cancelled = true; clearInterval(iv); };
+  }, [isRunning, currentJob?.id]);
 
   if (!daemon) return null;
 
@@ -114,13 +143,24 @@ export default function CurrentJob({ daemon, currentJob, latestHealth, settings,
                   </span>
                 </>
               )}
+              {/* What it shows: Expandable stall resolution panel when the stall detector flags a frozen job.
+               *  Decision it drives: Gives the user a concrete 4-step checklist so they know exactly
+               *    what to do next — wait, cancel, inspect, or restart — without leaving the dashboard. */}
               {isStalled && (
-                <span
-                  title="This job appears to be frozen — not producing output or making progress"
-                  style="font-size: var(--type-label); color: var(--status-warning); background: var(--status-warning-subtle);
-                             padding: 1px 6px; border-radius: 3px; border: 1px solid var(--status-warning);">
-                  ⚠ frozen
-                </span>
+                <details style="display:inline-block;position:relative;">
+                  <summary style="cursor:pointer;font-size:var(--type-label);color:var(--status-warning);background:var(--status-warning-subtle);padding:2px 8px;border-radius:3px;border:1px solid var(--status-warning);list-style:none;display:inline-flex;align-items:center;gap:4px;">
+                    ⚠ frozen — what should I do? ▾
+                  </summary>
+                  <div style="position:absolute;z-index:10;background:var(--bg-surface);border:1px solid var(--border-primary);border-radius:var(--radius);padding:12px;max-width:300px;font-size:var(--type-label);color:var(--text-secondary);box-shadow:var(--card-shadow-hover);margin-top:4px;left:0;">
+                    <p style="margin:0 0 8px;font-weight:600;color:var(--status-warning);">Job is not producing output.</p>
+                    <ol style="margin:0;padding-left:16px;display:flex;flex-direction:column;gap:4px;">
+                      <li>Wait 2 more minutes — some models are slow to start</li>
+                      <li>Cancel and retry — click × in the queue below</li>
+                      <li>Check Ollama: run <code style="font-family:var(--font-mono);">ollama ps</code> to verify model is loaded</li>
+                      <li>Restart daemon from Settings if Ollama itself is stuck</li>
+                    </ol>
+                  </div>
+                </details>
               )}
               {/* Burst regime badge — shows traffic pattern detected by burst detector.
                *  steady=normal, burst=high-activity surge, trough=quiet window, unknown=no data yet.
@@ -161,6 +201,22 @@ export default function CurrentJob({ daemon, currentJob, latestHealth, settings,
             swap={hp.swap_pct}
             settings={settings}
           />
+          {/* Collapsible live log tail — last 5 lines of job stdout, polled every 5s */}
+          <details
+            style="margin-top:4px;"
+            open={logExpanded.value}
+            onToggle={e => { logExpanded.value = e.currentTarget.open; }}
+          >
+            <summary style="font-family:var(--font-mono);font-size:var(--type-micro);color:var(--text-tertiary);cursor:pointer;user-select:none;list-style:none;">
+              Output {logLines.value.length > 0 ? `(${logLines.value.length} lines)` : ''}
+            </summary>
+            <div style="margin-top:6px;padding:8px;background:var(--bg-terminal,var(--bg-inset));border-radius:var(--radius);font-family:var(--font-mono);font-size:var(--type-micro);color:var(--text-secondary);white-space:pre-wrap;word-break:break-all;max-height:120px;overflow-y:auto;">
+              {logLines.value.length > 0
+                ? logLines.value.map((line, i) => <div key={i}>{line}</div>)
+                : <span style="color:var(--text-tertiary);">No output yet</span>
+              }
+            </div>
+          </details>
         </div>
       ) : isPaused ? (
         <div class="flex items-center gap-3">

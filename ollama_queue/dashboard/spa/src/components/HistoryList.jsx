@@ -1,6 +1,8 @@
 import { h } from 'preact';
 import { useState, useMemo } from 'preact/hooks';
+import { useSignal } from '@preact/signals';
 import EmptyState from './EmptyState.jsx';
+import { retryJob } from '../stores/queue.js';
 
 const STATUS_CONFIG = {
   completed: { icon: '\u2713', color: 'var(--status-healthy)' },
@@ -25,6 +27,9 @@ export default function HistoryList({ jobs }) {
   const [tagFilter, setTagFilter] = useState(null);
   const tags = useMemo(() => [...new Set(allItems.map(j => j.tag).filter(Boolean))], [allItems]);
   const items = (tagFilter ? allItems.filter(j => j.tag === tagFilter) : allItems).slice(0, 20);
+  // What it shows: Tracks which job's output was most recently copied to the clipboard.
+  // Decision it drives: Flips the copy button label to "✓ Copied" for 2s as confirmation.
+  const copied = useSignal(null);
 
   if (allItems.length === 0) {
     return (
@@ -53,15 +58,22 @@ export default function HistoryList({ jobs }) {
       )}
       <div class="flex flex-col">
         {items.map((job) => (
-          <HistoryRow key={job.id} job={job} />
+          <HistoryRow key={job.id} job={job} copied={copied} />
         ))}
       </div>
     </div>
   );
 }
 
-function HistoryRow({ job }) {
+// What it shows: A single history entry row — status icon, relative time, source name,
+//   model, and duration. Failed/killed rows show a ↺ Retry button to re-queue the job.
+// Decision it drives: Lets the user immediately retry a failed job without re-entering
+//   parameters, and expand the row to read the failure reason before deciding to retry.
+function HistoryRow({ job, copied }) {
   const [expanded, setExpanded] = useState(false);
+  // retrySuccess tracks which job id was most recently retried, to flip the button label
+  // to "✓ Requeued" for 2 seconds as visual confirmation.
+  const retrySuccess = useSignal(null);
   const cfg = STATUS_CONFIG[job.status] || STATUS_CONFIG.cancelled;
   const hasReason = (job.status === 'failed' || job.status === 'killed') && job.outcome_reason;
   const hasStall = !!job.stall_detected_at;
@@ -120,6 +132,26 @@ function HistoryRow({ job }) {
             {expanded ? '\u25B4' : '\u25BE'}
           </span>
         )}
+        {/* Retry button — only on failed/killed rows. Fetches original job details and
+            re-submits with the same parameters. Flips to "✓ Requeued" for 2s on success. */}
+        {(job.status === 'failed' || job.status === 'killed') && (
+          <button
+            class="t-btn"
+            style="font-size:var(--type-micro);padding:2px 8px;margin-left:8px;color:var(--status-warning);"
+            onClick={async e => {
+              e.stopPropagation();
+              try {
+                await retryJob(job.id);
+                retrySuccess.value = job.id;
+                setTimeout(() => { retrySuccess.value = null; }, 2000);
+              } catch (err) {
+                console.error('Retry failed:', err);
+              }
+            }}
+          >
+            {retrySuccess.value === job.id ? '\u2713 Requeued' : '\u21BA Retry'}
+          </button>
+        )}
       </div>
       {expanded && (
         <div style="padding: 2px 0 6px 24px; display: flex; flex-direction: column; gap: 3px;">
@@ -131,6 +163,22 @@ function HistoryRow({ job }) {
           {hasReason && (
             <div class="data-mono" style="font-size: var(--type-micro); color: var(--status-error); white-space: pre-wrap;">
               {job.outcome_reason}
+            </div>
+          )}
+          {/* Copy output button — lets the user grab the job's stdout for debugging without leaving the dashboard */}
+          {job.output && (
+            <div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
+              <button
+                class="t-btn"
+                style="font-size:var(--type-micro);padding:2px 8px;"
+                onClick={async () => {
+                  await navigator.clipboard.writeText(job.output);
+                  copied.value = job.id;
+                  setTimeout(() => { copied.value = null; }, 2000);
+                }}
+              >
+                {copied.value === job.id ? '\u2713 Copied' : '\u2398 Copy output'}
+              </button>
             </div>
           )}
         </div>
