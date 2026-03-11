@@ -123,6 +123,22 @@ def list_schedule():
     jobs = db.list_recurring_jobs()
     est = DurationEstimator(db)
     om = OllamaModels()
+
+    # Batch-fetch last exit codes so we avoid N+1 queries.
+    # last_job_id is the queue job that most recently ran for each recurring job.
+    last_job_ids = [rj["last_job_id"] for rj in jobs if rj.get("last_job_id")]
+    last_exit_map: dict[int, int | None] = {}
+    if last_job_ids:
+        with db._lock:
+            conn = db._connect()
+            placeholders = ",".join("?" * len(last_job_ids))
+            rows = conn.execute(
+                f"SELECT id, exit_code FROM jobs WHERE id IN ({placeholders})",
+                last_job_ids,
+            ).fetchall()
+            for row in rows:
+                last_exit_map[row["id"]] = row["exit_code"]
+
     for rj in jobs:
         rj["estimated_duration"] = est.estimate(
             rj.get("name") or rj.get("source") or "",
@@ -132,11 +148,23 @@ def list_schedule():
             classification = om.classify(rj["model"])
             rj["model_profile"] = classification["resource_profile"]
             rj["model_type"] = classification["type_tag"]
-            rj["model_vram_mb"] = round(om.estimate_vram_mb(rj["model"], db), 1)
+            vram_mb = round(om.estimate_vram_mb(rj["model"], db), 1)
+            rj["model_vram_mb"] = vram_mb
+            # Warmup estimate: time to cold-load this model's weights into VRAM.
+            # Uses ~200 MB/s effective rate (NVMe + PCIe + OS overhead), min 3s.
+            # Lets the Gantt candlestick show load overhead before inference starts.
+            rj["warmup_estimate"] = max(3, round(vram_mb / 200)) if vram_mb else 0
         else:
             rj["model_profile"] = "ollama"
             rj["model_type"] = "general"
             rj["model_vram_mb"] = None
+            rj["warmup_estimate"] = 0
+
+        # Last-run outcome: real exit code from the most recent job execution.
+        # Replaces the timing-only heuristic used in the old runStatus() function.
+        last_job_id = rj.get("last_job_id")
+        rj["last_exit_code"] = last_exit_map.get(last_job_id) if last_job_id else None
+
     return jobs
 
 
