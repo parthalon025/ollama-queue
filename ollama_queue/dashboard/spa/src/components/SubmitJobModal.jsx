@@ -21,8 +21,19 @@ const labelStyle = {
 // Decision it drives: Run a command through the queue right now with a chosen priority and
 //   timeout. Pre-fills defaults from Settings so usually only the command field needs typing.
 //   After submit, a toast confirms the job_id and the queue list refreshes.
-export default function SubmitJobModal({ onJobSubmitted }) {
-    const [open, setOpen] = useState(false);
+// What it shows: A modal form for submitting a one-off job to the queue — command, source,
+//   model, priority, and timeout. When open/onClose props are provided, the component runs
+//   in controlled mode (caller drives open state); otherwise it manages its own open state
+//   via an internal FAB. The internal FAB is hidden in controlled mode to avoid a duplicate button.
+// Decision it drives: Submit a job directly from the dashboard from any tab (Sidebar button or
+//   mobile FAB triggers the modal), not just from the Now page.
+export default function SubmitJobModal({ onJobSubmitted, open: controlledOpen, onClose: controlledOnClose }) {
+    const isControlled = controlledOpen !== undefined;
+    const [internalOpen, setInternalOpen] = useState(false);
+    const open = isControlled ? controlledOpen : internalOpen;
+    const setOpen = isControlled
+        ? (val) => { if (!val && controlledOnClose) controlledOnClose(); }
+        : setInternalOpen;
     const [command, setCommand] = useState('');
     const [source, setSource] = useState('dashboard');
     const [model, setModel] = useState('');
@@ -128,8 +139,8 @@ export default function SubmitJobModal({ onJobSubmitted }) {
 
     return (
         <div>
-            {/* FAB */}
-            <button
+            {/* FAB — hidden in controlled mode; caller (Sidebar/BottomNav) owns the trigger */}
+            {!isControlled && <button
                 aria-label="Add a new job to the queue"
                 onClick={() => setOpen(true)}
                 style={{
@@ -153,7 +164,7 @@ export default function SubmitJobModal({ onJobSubmitted }) {
                 }}
             >
                 +
-            </button>
+            </button>}
 
             {/* Native dialog */}
             <dialog

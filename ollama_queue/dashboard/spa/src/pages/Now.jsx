@@ -1,15 +1,14 @@
 import { h } from 'preact';
-import { useState, useRef, useEffect } from 'preact/hooks';
+import { useEffect } from 'preact/hooks';
 import {
     status, queue, history, healthData, durationData, settings,
-    dlqCount, connectionStatus, currentTab, refreshQueue,
+    dlqCount, connectionStatus, currentTab,
     scheduleJobs, fetchSchedule,
 } from '../stores';
 import CurrentJob from '../components/CurrentJob.jsx';
 import QueueList from '../components/QueueList.jsx';
 import HeroCard from '../components/HeroCard.jsx';
 import ResourceGauges from '../components/ResourceGauges.jsx';
-import SubmitJobModal from '../components/SubmitJobModal.jsx';
 import PageBanner from '../components/PageBanner.jsx';
 
 // NOTE: all .map() callbacks use descriptive names — never 'h' (shadows JSX factory)
@@ -20,7 +19,7 @@ import PageBanner from '../components/PageBanner.jsx';
 // Decision it drives: Is the queue healthy and progressing? Should I submit more work, cancel
 //   something, or go investigate a problem in History? The alert strip makes issues impossible
 //   to miss. The + FAB opens SubmitJobModal to queue a one-off job immediately.
-export default function Now() {
+export default function Now({ onSubmitRequest }) {
     const st = status.value;
     const q = queue.value;
     const hist = history.value;
@@ -29,8 +28,6 @@ export default function Now() {
     const sett = settings.value;
     const dlqCnt = dlqCount.value;
 
-    const toastTimer = useRef(null);
-    useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
     // Fetch schedule once on mount so disabled recurring job count is available
     // even if the Plan tab hasn't been visited yet.
     useEffect(() => { fetchSchedule(); }, []);
@@ -62,13 +59,6 @@ export default function Now() {
     ).length;
     const showProxyStat = proxyGenerate > 0 || proxyEmbed > 0;
 
-    function handleJobSubmitted(jobId) {
-        setToast(`Job #${jobId} queued`);
-        if (toastTimer.current) clearTimeout(toastTimer.current);
-        toastTimer.current = setTimeout(() => setToast(null), 2000);
-        refreshQueue();
-    }
-
     return (
         <div class="flex flex-col gap-4 animate-page-enter">
             <PageBanner title="Now" subtitle="live queue status" />
@@ -95,6 +85,7 @@ export default function Now() {
                         latestHealth={latestHealth}
                         settings={sett}
                         activeEval={activeEval}
+                        onSubmitRequest={onSubmitRequest}
                     />
                     {/* QueueList renders its own t-frame — no wrapper needed */}
                     <QueueList jobs={q} currentJob={currentJob} />
@@ -251,25 +242,6 @@ export default function Now() {
                 </div>
             </div>
 
-            {/* Toast notification after job submit */}
-            {toast && (
-                <div style={{
-                    position: 'fixed',
-                    bottom: '6rem',
-                    right: '4.5rem',
-                    background: 'var(--bg-surface-raised)',
-                    border: '1px solid var(--status-healthy)',
-                    color: 'var(--status-healthy)',
-                    fontFamily: 'var(--font-mono)',
-                    fontSize: 'var(--type-label)',
-                    padding: '0.4rem 0.75rem',
-                    borderRadius: 'var(--radius)',
-                    zIndex: 60,
-                }}>
-                    ✓ {toast}
-                </div>
-            )}
-            <SubmitJobModal onJobSubmitted={handleJobSubmitted} />
         </div>
     );
 }

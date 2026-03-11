@@ -1,5 +1,6 @@
 import { h, Component } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
+import { signal } from '@preact/signals';
 
 // Temporary debug boundary — catches Plan render errors that signals swallows silently
 class PlanErrorBoundary extends Component {
@@ -18,10 +19,11 @@ class PlanErrorBoundary extends Component {
 }
 import {
     currentTab, dlqCount, fetchModels, fetchSchedule,
-    startPolling, stopPolling, stopEvalPoll, status,
+    startPolling, stopPolling, stopEvalPoll, status, refreshQueue,
 } from './stores';
 import Sidebar from './components/Sidebar.jsx';
 import BottomNav from './components/BottomNav.jsx';
+import SubmitJobModal from './components/SubmitJobModal.jsx';
 import Now from './pages/Now.jsx';
 import Plan from './pages/Plan';
 import History from './pages/History.jsx';
@@ -30,6 +32,10 @@ import Settings from './pages/Settings.jsx';
 import Eval from './pages/Eval.jsx';
 import Consumers from './pages/Consumers.jsx';
 import Performance from './pages/Performance.jsx';
+
+// Module-level signal — controls the app-wide SubmitJobModal.
+// Sidebar [+ Submit] and BottomNav FAB both set this to true; the modal resets it on close.
+const showSubmitModal = signal(false);
 
 // What it shows: A thin persistent strip at the top of the content area whenever an eval
 //   session is running — shows eval run #, model name, and current phase.
@@ -107,6 +113,8 @@ export function App() {
         if (viewId === 'plan') fetchSchedule();
     }
 
+    function handleSubmitRequest() { showSubmitModal.value = true; }
+
     function renderView() {
         switch (currentTab.value) {
             case 'plan':     return <PlanErrorBoundary><Plan /></PlanErrorBoundary>;
@@ -116,7 +124,7 @@ export function App() {
             case 'eval':      return <Eval />;
             case 'consumers': return <Consumers />;
             case 'performance': return <Performance />;
-            default:          return <Now />;
+            default:          return <Now onSubmitRequest={handleSubmitRequest} />;
         }
     }
 
@@ -132,6 +140,7 @@ export function App() {
                 dlqCount={dlqCount.value}
                 theme={theme}
                 onToggleTheme={handleToggleTheme}
+                onSubmitRequest={handleSubmitRequest}
             />
             <main class="layout-main animate-page-enter">
                 {/* Banner only on tabs without a dedicated eval panel — Now has CurrentJob, Eval has ActiveRunProgress */}
@@ -142,6 +151,14 @@ export function App() {
                 active={currentTab.value}
                 onNavigate={handleNavigate}
                 dlqCount={dlqCount.value}
+                onSubmitRequest={handleSubmitRequest}
+            />
+            {/* App-level SubmitJobModal — opened by Sidebar button and BottomNav FAB from any tab.
+                onJobSubmitted calls refreshQueue so the queue list updates immediately after submit. */}
+            <SubmitJobModal
+                open={showSubmitModal.value}
+                onClose={() => { showSubmitModal.value = false; }}
+                onJobSubmitted={() => refreshQueue()}
             />
         </div>
     );

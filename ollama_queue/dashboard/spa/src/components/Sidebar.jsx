@@ -17,7 +17,12 @@ const NAV_ITEMS = [
 // What it shows: Sidebar navigation + aggregate system health chip at the top.
 // Decision it drives: User can navigate between tabs and see at a glance whether the
 //   system is healthy, has warnings, or has issues requiring attention.
-export default function Sidebar({ active, onNavigate, daemonState, dlqCount, theme, onToggleTheme }) {
+// What it shows: Desktop navigation rail with tab buttons, system health chip, and a
+//   persistent [+ Submit] button at the bottom. The submit button is hidden when the daemon
+//   is in an error state (no point queuing if the system is broken).
+// Decision it drives: User can navigate between tabs and submit a new job from any tab without
+//   hunting for the action — it's always visible on desktop.
+export default function Sidebar({ active, onNavigate, daemonState, dlqCount, theme, onToggleTheme, onSubmitRequest }) {
     // Read health/settings/connection signals directly — avoids threading more props through App
     const latestHealth = healthData.value?.length > 0 ? healthData.value[0] : null;
     const sett = settings.value;
@@ -89,6 +94,17 @@ export default function Sidebar({ active, onNavigate, daemonState, dlqCount, the
                     );
                 })}
             </nav>
+            {/* [+ Submit] button — permanently visible so users can queue a job from any tab */}
+            {onSubmitRequest && daemonState?.state !== 'error' && (
+                <button
+                    class="t-btn"
+                    onClick={onSubmitRequest}
+                    title="Submit a new job to the queue"
+                    style="width:100%;margin-top:auto;font-size:var(--type-label);padding:8px;"
+                >
+                    <span class="sidebar-label">+ Submit</span>
+                </button>
+            )}
             {/* Theme toggle — dark/light mode switcher */}
             <button
                 class="theme-toggle"
