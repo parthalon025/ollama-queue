@@ -19,10 +19,11 @@ logger = logging.getLogger(__name__)
 class DeferralScheduler:
     """Sweeps deferred jobs and resumes them when conditions are favorable."""
 
-    def __init__(self, db, estimator, load_map_fn):
+    def __init__(self, db, estimator, load_map_fn, vram_total_fn=None):
         self.db = db
         self.estimator = estimator
         self.load_map_fn = load_map_fn
+        self.vram_total_fn = vram_total_fn or (lambda: 24.0)
         self._sweep_lock = threading.Lock()
 
     def sweep(self) -> list[dict]:
@@ -86,7 +87,7 @@ class DeferralScheduler:
             slot = find_fitting_slot(
                 load_map,
                 job_vram_needed_gb=job_vram,
-                total_vram_gb=24.0,  # TODO: get from health monitor
+                total_vram_gb=self.vram_total_fn(),
                 estimated_slots=estimated_slots,
                 job_model=model,
             )

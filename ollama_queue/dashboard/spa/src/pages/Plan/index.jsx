@@ -67,6 +67,8 @@ export default function Plan() {
     const [suggestLoading, setSuggestLoading] = useState(false);
     // Which job (by id) is currently generating its AI description
     const [generatingDescId, setGeneratingDescId] = useState(null);
+    // Two-click delete guard: tracks which job's delete button is in "confirm?" state
+    const [pendingDeleteId, setPendingDeleteId] = useState(null);
 
     const refreshingRef = useRef(false);
     const jobRowRefs = useRef({});
@@ -175,26 +177,29 @@ export default function Plan() {
     }
 
     // Ask the backend to auto-generate a plain-English description for this job using Ollama.
-    // The backend call is synchronous (~5-10s); we show a spinner during the wait.
+    // The backend starts a background thread and returns immediately; description arrives via
+    // the next 10s schedule refresh (or sooner if the model responds quickly).
     async function handleGenerateDescription(rjId) {
         setGeneratingDescId(rjId);
         await generateAct(
             'Generating description\u2026',
             async () => {
-                const result = await generateJobDescription(rjId);
-                if (result.description) {
-                    setEditForm(prev => ({ ...prev, description: result.description }));
-                    await fetchSchedule(); // keep signal in sync
-                }
+                await generateJobDescription(rjId);
+                await fetchSchedule(); // refresh now; background thread may already be done
             },
-            'Description generated'
+            'Queued \u2014 description arriving shortly'
         );
         setGeneratingDescId(null);
     }
 
-    async function handleDelete(rjId) {
-        const rj = jobs.find(j => j.id === rjId);
-        if (!window.confirm(`Delete recurring job "${rj?.name}"? This cannot be undone.`)) return;
+    // First click sets pendingDeleteId; second click (on confirm button) executes the delete.
+    // Matches the two-click inline delete pattern used in VariantRow (no window.confirm).
+    function handleDeleteRequest(rjId) {
+        setPendingDeleteId(rjId);
+    }
+
+    async function handleDeleteConfirm(rjId) {
+        setPendingDeleteId(null);
         await deleteAct(
             'Deleting\u2026',
             async () => {
@@ -204,6 +209,10 @@ export default function Plan() {
             },
             'Deleted'
         );
+    }
+
+    function handleDeleteCancel() {
+        setPendingDeleteId(null);
     }
 
     async function handleRunNow(rj) {
@@ -779,17 +788,39 @@ export default function Plan() {
                                 </button>
                                 {runNowFb.msg && <div class={`action-fb action-fb--${runNowFb.phase}`}>{runNowFb.msg}</div>}
                             </div>
-                            <div>
-                                <button class="t-btn"
-                                        style={{
-                                            padding: '0.3rem 0.75rem', fontSize: 'var(--type-body)',
-                                            color: 'var(--status-error)', border: '1px solid var(--status-error)',
-                                            background: 'transparent', opacity: deleteFb.phase === 'loading' ? 0.6 : 1,
-                                        }}
-                                        disabled={deleteFb.phase === 'loading'}
-                                        onClick={() => handleDelete(rjId)}>
-                                    {deleteFb.phase === 'loading' ? 'Deleting\u2026' : 'Delete'}
-                                </button>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                                {pendingDeleteId !== rjId ? (
+                                    <button class="t-btn"
+                                            style={{
+                                                padding: '0.3rem 0.75rem', fontSize: 'var(--type-body)',
+                                                color: 'var(--status-error)', border: '1px solid var(--status-error)',
+                                                background: 'transparent', opacity: deleteFb.phase === 'loading' ? 0.6 : 1,
+                                            }}
+                                            disabled={deleteFb.phase === 'loading'}
+                                            onClick={() => handleDeleteRequest(rjId)}>
+                                        {deleteFb.phase === 'loading' ? 'Deleting\u2026' : 'Delete'}
+                                    </button>
+                                ) : (
+                                    <>
+                                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--status-error)' }}>
+                                            Delete "{jobs.find(j => j.id === rjId)?.name}"?
+                                        </span>
+                                        <button class="t-btn"
+                                                style={{
+                                                    padding: '0.2rem 0.6rem', fontSize: 'var(--type-label)',
+                                                    color: 'var(--status-error)', borderColor: 'var(--status-error)',
+                                                }}
+                                                disabled={deleteFb.phase === 'loading'}
+                                                onClick={() => handleDeleteConfirm(rjId)}>
+                                            {deleteFb.phase === 'loading' ? 'Deleting\u2026' : 'Yes, delete'}
+                                        </button>
+                                        <button class="t-btn t-btn-secondary"
+                                                style={{ padding: '0.2rem 0.6rem', fontSize: 'var(--type-label)' }}
+                                                onClick={handleDeleteCancel}>
+                                            Cancel
+                                        </button>
+                                    </>
+                                )}
                                 {deleteFb.msg && <div class={`action-fb action-fb--${deleteFb.phase}`}>{deleteFb.msg}</div>}
                             </div>
                         </div>

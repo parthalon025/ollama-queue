@@ -285,19 +285,27 @@ def add_schedule(body: RecurringJobCreate):
     return rj
 
 
+# Fields that affect the timing of scheduled jobs and require a rebalance after edit.
+# Cosmetic/runtime fields (description, tag, command, model, timeout, etc.) do not.
+_REBALANCE_FIELDS = frozenset({"interval_seconds", "cron_expression", "priority", "pinned"})
+
+
 @router.put("/api/schedule/{rj_id}")
 def update_schedule(rj_id: int, body: RecurringJobUpdate):
     db = _api.db
-    updated = db.update_recurring_job(rj_id, **body.model_dump(exclude_unset=True))
+    updates = body.model_dump(exclude_unset=True)
+    updated = db.update_recurring_job(rj_id, **updates)
     if not updated:
         raise HTTPException(status_code=404, detail="Recurring job not found")
-    # Rebalance next_run after edit
-    try:
-        from ollama_queue.scheduling.scheduler import Scheduler
+    # Only rebalance when a schedule-affecting field changed (interval, cron, priority, pinned).
+    # Skipping rebalance for cosmetic edits avoids O(N) DB writes on every description save.
+    if any(k in _REBALANCE_FIELDS for k in updates):
+        try:
+            from ollama_queue.scheduling.scheduler import Scheduler
 
-        Scheduler(db).rebalance()
-    except Exception:
-        _log.exception("rebalance after update_schedule failed")
+            Scheduler(db).rebalance()
+        except Exception:
+            _log.exception("rebalance after update_schedule failed")
     return {"ok": True}
 
 
@@ -334,18 +342,23 @@ def run_schedule_now(rj_id: int):
 def generate_description(rj_id: int):
     """Ask local Ollama (qwen3.5:9b) to write a layman description for this recurring job.
 
-    Plain English: The caller waits while the AI model writes 2 plain-English sentences
-    about what the job does. The description is saved to the DB and returned so the UI
-    can update immediately without a second fetch.
+    Plain English: Kicks off a background Ollama call (same pattern as job creation).
+    Returns immediately with ok=True; the description arrives via the next GET /api/schedule
+    poll (typically within 5-15s). The UI will see it on the next 10s refresh.
     Decision it drives: Lets the owner understand any job's purpose without reading its command.
     """
+    import threading as _threading
+
     db = _api.db
     rj = db.get_recurring_job(rj_id)
     if not rj:
         raise HTTPException(status_code=404, detail="Recurring job not found")
-    _call_generate_description(rj_id, rj["name"], rj.get("tag"), rj["command"], db)
-    updated = db.get_recurring_job(rj_id)
-    return {"ok": True, "description": updated.get("description") if updated else None}
+    _threading.Thread(
+        target=_call_generate_description,
+        args=(rj_id, rj["name"], rj.get("tag"), rj["command"], db),
+        daemon=True,
+    ).start()
+    return {"ok": True, "description": None}
 
 
 @router.get("/api/schedule/{rj_id}/runs")

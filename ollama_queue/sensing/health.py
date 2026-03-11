@@ -72,6 +72,28 @@ class HealthMonitor:
         self._vram_cache = (now, result)
         return result
 
+    _VRAM_TOTAL_FALLBACK_GB = 24.0
+
+    def get_vram_total_gb(self) -> float:
+        """Return total GPU VRAM in GB from nvidia-smi, or 24.0 as fallback.
+
+        Used by DeferralScheduler and DLQScheduler for slot VRAM headroom calculations.
+        Falls back to 24.0 GB (original hardcoded value) when nvidia-smi is unavailable.
+        """
+        try:
+            result = subprocess.run(
+                ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode != 0:
+                return self._VRAM_TOTAL_FALLBACK_GB
+            total_mib = float(result.stdout.strip().split("\n")[0].strip())
+            return round(total_mib / 1024, 1)
+        except (OSError, subprocess.TimeoutExpired, ValueError, IndexError, UnicodeDecodeError):
+            return self._VRAM_TOTAL_FALLBACK_GB
+
     def _fetch_vram_pct(self) -> float | None:
         """Query nvidia-smi for VRAM usage percentage (uncached)."""
         try:
