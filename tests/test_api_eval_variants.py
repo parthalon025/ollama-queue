@@ -878,3 +878,102 @@ def test_eval_runs_has_cost_and_oracle_columns(client_and_db):
     assert "cost_json" in cols
     assert "oracle_json" in cols
     assert "suggestions_json" in cols
+
+
+# --- New field tests: params, system_prompt, provider, training_config ---
+
+
+def test_create_variant_with_params(client):
+    """POST with valid params should persist the JSON bag."""
+    import json
+
+    body = {
+        "label": "Params test",
+        "prompt_template_id": "zero-shot-causal",
+        "model": "qwen2.5:7b",
+        "params": {"top_k": 40, "top_p": 0.9},
+    }
+    resp = client.post("/api/eval/variants", json=body)
+    assert resp.status_code == 201
+    data = resp.json()
+    params = json.loads(data["params"])
+    assert params["top_k"] == 40
+    assert params["top_p"] == 0.9
+
+
+def test_create_variant_with_system_prompt(client):
+    """POST with system_prompt should persist it."""
+    body = {
+        "label": "System prompt test",
+        "prompt_template_id": "zero-shot-causal",
+        "model": "qwen2.5:7b",
+        "system_prompt": "Be precise and concise.",
+    }
+    resp = client.post("/api/eval/variants", json=body)
+    assert resp.status_code == 201
+    assert resp.json()["system_prompt"] == "Be precise and concise."
+
+
+def test_create_variant_with_provider(client):
+    """POST with provider should persist it."""
+    body = {
+        "label": "Claude variant",
+        "prompt_template_id": "zero-shot-causal",
+        "model": "claude-sonnet-4-6",
+        "provider": "claude",
+    }
+    resp = client.post("/api/eval/variants", json=body)
+    assert resp.status_code == 201
+    assert resp.json()["provider"] == "claude"
+
+
+def test_create_variant_with_training_config(client):
+    """POST with training_config should persist it."""
+    import json
+
+    body = {
+        "label": "LoRA variant",
+        "prompt_template_id": "zero-shot-causal",
+        "model": "qwen2.5:7b",
+        "training_config": json.dumps({"adapter": "lora", "rank": 16}),
+    }
+    resp = client.post("/api/eval/variants", json=body)
+    assert resp.status_code == 201
+    assert resp.json()["training_config"] is not None
+
+
+def test_create_variant_invalid_params_returns_400(client):
+    """POST with invalid Ollama param should return 400 with fuzzy suggestion."""
+    body = {
+        "label": "Bad params",
+        "prompt_template_id": "zero-shot-causal",
+        "model": "qwen2.5:7b",
+        "params": {"topk": 40},
+    }
+    resp = client.post("/api/eval/variants", json=body)
+    assert resp.status_code == 400
+    assert "top_k" in resp.json()["detail"]
+
+
+def test_create_variant_temperature_in_params_returns_400(client):
+    """POST with temperature in params (flat field) should return 400."""
+    body = {
+        "label": "Ambiguous params",
+        "prompt_template_id": "zero-shot-causal",
+        "model": "qwen2.5:7b",
+        "params": {"temperature": 0.5},
+    }
+    resp = client.post("/api/eval/variants", json=body)
+    assert resp.status_code == 400
+
+
+def test_create_variant_invalid_provider_returns_400(client):
+    """POST with invalid provider should return 400."""
+    body = {
+        "label": "Bad provider",
+        "prompt_template_id": "zero-shot-causal",
+        "model": "qwen2.5:7b",
+        "provider": "gemini",
+    }
+    resp = client.post("/api/eval/variants", json=body)
+    assert resp.status_code == 400

@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from starlette.responses import Response
 
 import ollama_queue.api as _api
+from ollama_queue.eval.validation import validate_provider, validate_variant_params
 
 _log = logging.getLogger(__name__)
 
@@ -241,6 +242,20 @@ def create_eval_variant(body: dict = Body(...)):
     model = body.get("model")
     if not label or not tmpl_id or not model:
         raise HTTPException(status_code=400, detail="label, prompt_template_id, and model are required")
+
+    try:
+        params_json = validate_variant_params(body.get("params"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    try:
+        provider_str = validate_provider(body.get("provider"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    system_prompt = body.get("system_prompt")
+    training_config = body.get("training_config")
+
     now = _dt.datetime.now(_dt.UTC).isoformat()
     new_id = str(uuid.uuid4())[:8]
     with db._lock:
@@ -249,8 +264,9 @@ def create_eval_variant(body: dict = Body(...)):
         conn.execute(
             """INSERT INTO eval_variants
                (id, label, prompt_template_id, model, temperature, num_ctx,
-                is_recommended, is_system, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                is_recommended, is_system, created_at,
+                params, system_prompt, training_config, provider)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 new_id,
                 label,
@@ -261,6 +277,10 @@ def create_eval_variant(body: dict = Body(...)):
                 1 if body.get("is_recommended") else 0,
                 0,  # user-created
                 now,
+                params_json,
+                system_prompt,
+                training_config,
+                provider_str,
             ),
         )
         conn.commit()
