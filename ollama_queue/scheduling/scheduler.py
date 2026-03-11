@@ -83,7 +83,11 @@ class Scheduler:
                 )
                 continue
 
-            # Compute next_run advancement once — used in both the skip and the running-behind paths.
+            # Compute next_run advancement for poll-suppression — advances past the trigger
+            # point so the 5s poll loop doesn't re-evaluate this job every tick while it runs.
+            # The real next_run is set by update_recurring_next_run() after job completion:
+            #   next_run = completed_at + interval_seconds  (fixed-delay semantics)
+            # This value is a temporary suppression sentinel, not the authoritative schedule.
             def _compute_next_run(rj=rj, now=now):
                 cron_expr = rj.get("cron_expression")
                 if cron_expr:
@@ -100,43 +104,18 @@ class Scheduler:
                     )
                 return now + (rj.get("interval_seconds") or 300)
 
-            if self.db.has_pending_recurring(rj["id"]):
-                # A follow-up is already queued — skip entirely to avoid pile-up.
+            if self.db.has_pending_or_running_recurring(rj["id"]):
+                # A previous run is still pending or running — skip this trigger.
+                # Fixed-delay semantics: the real next_run is set by the completion handler
+                # (completed_at + interval), not by wall-clock cadence.
+                # Advance next_run temporarily to suppress further poll evaluations until
+                # the completion handler overwrites it with the authoritative value.
                 self.db.log_schedule_event(
                     "skipped_duplicate",
                     recurring_job_id=rj["id"],
-                    details={"name": rj["name"], "reason": "already pending"},
+                    details={"name": rj["name"], "reason": "already pending or running"},
                 )
                 next_run_updates[rj["id"]] = _compute_next_run()
-                continue
-
-            if self.db.has_pending_or_running_recurring(rj["id"]):
-                # Currently running but no pending follower yet — submit one to queue behind it.
-                # The daemon serialises execution so it will start immediately after the current run.
-                job_id = self.db.submit_job(
-                    command=rj["command"],
-                    model=rj["model"],
-                    priority=rj["priority"],
-                    timeout=rj["timeout"],
-                    source=rj["source"] or rj["name"],
-                    tag=rj.get("tag"),
-                    max_retries=rj.get("max_retries", 0),
-                    resource_profile=rj.get("resource_profile", "ollama"),
-                    recurring_job_id=rj["id"],
-                )
-                self.db.log_schedule_event(
-                    "promoted",
-                    recurring_job_id=rj["id"],
-                    job_id=job_id,
-                    details={"name": rj["name"], "queued_behind_running": True},
-                )
-                new_ids.append(job_id)
-                next_run_updates[rj["id"]] = _compute_next_run()
-                _log.info(
-                    "Promoted recurring job %r → job #%d (queued behind running instance)",
-                    rj["name"],
-                    job_id,
-                )
                 continue
 
             job_id = self.db.submit_job(
