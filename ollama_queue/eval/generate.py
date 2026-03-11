@@ -260,6 +260,8 @@ def _self_critique(
     num_ctx: int,
     http_base: str,
     source: str,
+    extra_params: dict | None = None,
+    system_prompt: str | None = None,
 ) -> str:
     """Run self-critique pass. Returns refined principle or original."""
     if not diff_cluster_items:
@@ -275,6 +277,8 @@ def _self_critique(
         timeout=180,
         source=source,
         priority=2,
+        extra_params=extra_params,
+        system_prompt=system_prompt,
     )
 
     if refined and len(refined.strip()) > 10:
@@ -318,6 +322,8 @@ def _generate_one(
 
     prompt = build_generation_prompt(template, source_item, cluster_items, diff_cluster_items)
     t0 = time.monotonic()
+    _extra_params = json.loads(variant.get("params") or "{}")
+    _system_prompt = variant.get("system_prompt")
     text, queue_job_id = _eng._call_proxy(
         http_base=http_base,
         model=variant["model"],
@@ -327,6 +333,8 @@ def _generate_one(
         timeout=300,
         source=f"eval-run-{run_id}",
         priority=2,
+        extra_params=_extra_params or None,
+        system_prompt=_system_prompt,
     )
     generation_time_s = round(time.monotonic() - t0, 1)
 
@@ -341,6 +349,8 @@ def _generate_one(
             num_ctx=variant.get("num_ctx", 8192),
             http_base=http_base,
             source=f"eval-run-{run_id}-critique",
+            extra_params=_extra_params or None,
+            system_prompt=_system_prompt,
         )
 
     # Clean CoT artifacts before storing

@@ -4502,3 +4502,171 @@ class TestRunEvalGenerateVariantsNonList:
             run_eval_generate(1, MagicMock(), _sleep=lambda s: None)
         # Single variant "A" processed for 1 item
         assert len(submitted) == 1
+
+
+# ---------------------------------------------------------------------------
+# Task 9: variant params and system_prompt wired through _generate_one
+# ---------------------------------------------------------------------------
+
+
+def _make_variant_with_params(params: str | None = None, system_prompt: str | None = None) -> dict:
+    """Build a variant dict that includes optional params and system_prompt fields."""
+    v = _make_variant()
+    v["params"] = params
+    v["system_prompt"] = system_prompt
+    return v
+
+
+class TestGenerateOneItemVariantParams:
+    """_generate_one passes variant.params and system_prompt to _call_proxy."""
+
+    def _call_generate_one(self, variant: dict, template: dict | None = None) -> MagicMock:
+        """Call _generate_one with the given variant, patching _call_proxy and insert_eval_result.
+
+        Returns the mock for _call_proxy so callers can inspect call args.
+        """
+        from ollama_queue.eval.generate import _generate_one
+
+        if template is None:
+            template = _make_template()
+
+        mock_call_proxy = MagicMock(return_value=("some principle", 42))
+        source_item = {
+            "id": "1",
+            "title": "Test item",
+            "one_liner": "test",
+            "description": "",
+            "cluster_id": "c1",
+        }
+
+        with (
+            patch("ollama_queue.eval.engine._call_proxy", mock_call_proxy),
+            patch("ollama_queue.eval.engine.insert_eval_result"),
+        ):
+            _generate_one(
+                db=MagicMock(),
+                run_id=1,
+                variant_id="A",
+                variant=variant,
+                template=template,
+                source_item=source_item,
+                items_by_cluster={"c1": [source_item]},
+                http_base="http://localhost:7683",
+            )
+
+        return mock_call_proxy
+
+    def test_passes_params_as_extra_params(self):
+        """variant.params JSON is parsed and passed as extra_params to _call_proxy."""
+        variant = _make_variant_with_params(params='{"top_k": 40, "top_p": 0.95}')
+        mock_call_proxy = self._call_generate_one(variant)
+
+        assert mock_call_proxy.called
+        kwargs = mock_call_proxy.call_args.kwargs
+        assert kwargs["extra_params"] == {"top_k": 40, "top_p": 0.95}
+
+    def test_passes_system_prompt(self):
+        """variant.system_prompt is passed as system_prompt to _call_proxy."""
+        variant = _make_variant_with_params(system_prompt="Be precise and concise.")
+        mock_call_proxy = self._call_generate_one(variant)
+
+        assert mock_call_proxy.called
+        kwargs = mock_call_proxy.call_args.kwargs
+        assert kwargs["system_prompt"] == "Be precise and concise."
+
+    def test_passes_both_params_and_system_prompt(self):
+        """Both variant.params and system_prompt are forwarded to _call_proxy together."""
+        variant = _make_variant_with_params(
+            params='{"top_k": 40}',
+            system_prompt="Be precise.",
+        )
+        mock_call_proxy = self._call_generate_one(variant)
+
+        kwargs = mock_call_proxy.call_args.kwargs
+        assert kwargs["extra_params"] == {"top_k": 40}
+        assert kwargs["system_prompt"] == "Be precise."
+
+    def test_none_params_passes_none_extra_params(self):
+        """variant.params=None results in extra_params=None (not an empty dict)."""
+        variant = _make_variant_with_params(params=None, system_prompt=None)
+        mock_call_proxy = self._call_generate_one(variant)
+
+        kwargs = mock_call_proxy.call_args.kwargs
+        assert kwargs["extra_params"] is None
+        assert kwargs["system_prompt"] is None
+
+    def test_empty_params_string_passes_none_extra_params(self):
+        """variant.params='' (empty string) is treated as no params -> extra_params=None."""
+        variant = _make_variant_with_params(params="", system_prompt=None)
+        mock_call_proxy = self._call_generate_one(variant)
+
+        kwargs = mock_call_proxy.call_args.kwargs
+        assert kwargs["extra_params"] is None
+
+    def test_empty_params_dict_passes_none_extra_params(self):
+        """variant.params='{}' (empty JSON object) results in extra_params=None."""
+        variant = _make_variant_with_params(params="{}", system_prompt=None)
+        mock_call_proxy = self._call_generate_one(variant)
+
+        kwargs = mock_call_proxy.call_args.kwargs
+        assert kwargs["extra_params"] is None
+
+    def test_variant_without_params_field_passes_none_extra_params(self):
+        """A variant dict with no 'params' key results in extra_params=None."""
+        variant = _make_variant()  # no params key at all
+        mock_call_proxy = self._call_generate_one(variant)
+
+        kwargs = mock_call_proxy.call_args.kwargs
+        assert kwargs["extra_params"] is None
+        assert kwargs["system_prompt"] is None
+
+
+class TestSelfCritiqueVariantParams:
+    """_self_critique passes extra_params and system_prompt to _call_proxy."""
+
+    def test_self_critique_passes_extra_params_and_system_prompt(self):
+        """_self_critique forwards extra_params and system_prompt to _call_proxy."""
+        from ollama_queue.eval.generate import _self_critique
+
+        mock_call_proxy = MagicMock(return_value=("refined principle", 99))
+        diff_items = [{"title": "Unrelated item", "one_liner": "something else", "id": "2"}]
+
+        with patch("ollama_queue.eval.engine._call_proxy", mock_call_proxy):
+            result = _self_critique(
+                principle="original principle",
+                diff_cluster_items=diff_items,
+                model="test-model",
+                temperature=0.6,
+                num_ctx=4096,
+                http_base="http://localhost:7683",
+                source="eval-run-1-critique",
+                extra_params={"top_k": 30},
+                system_prompt="Refine carefully.",
+            )
+
+        assert result == "refined principle"
+        kwargs = mock_call_proxy.call_args.kwargs
+        assert kwargs["extra_params"] == {"top_k": 30}
+        assert kwargs["system_prompt"] == "Refine carefully."
+
+    def test_self_critique_defaults_no_extra_params(self):
+        """_self_critique defaults extra_params=None and system_prompt=None."""
+        from ollama_queue.eval.generate import _self_critique
+
+        mock_call_proxy = MagicMock(return_value=("refined", 99))
+        diff_items = [{"title": "Unrelated", "one_liner": "unrelated", "id": "3"}]
+
+        with patch("ollama_queue.eval.engine._call_proxy", mock_call_proxy):
+            _self_critique(
+                principle="original",
+                diff_cluster_items=diff_items,
+                model="test-model",
+                temperature=0.6,
+                num_ctx=4096,
+                http_base="http://localhost:7683",
+                source="eval-run-1-critique",
+            )
+
+        kwargs = mock_call_proxy.call_args.kwargs
+        assert kwargs.get("extra_params") is None
+        assert kwargs.get("system_prompt") is None
