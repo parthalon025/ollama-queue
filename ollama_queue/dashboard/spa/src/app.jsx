@@ -108,6 +108,25 @@ export function App() {
         return () => stopPolling();
     }, []);
 
+    // Keyboard shortcuts: 1-5 to switch tabs
+    useEffect(() => {
+        const TABS = ['now', 'plan', 'history', 'models', 'settings'];
+        function onKeyDown(e) {
+            // Skip if modifier keys held (Ctrl, Alt, Meta)
+            if (e.ctrlKey || e.altKey || e.metaKey) return;
+            // Skip if focus is inside a text input, textarea, select, or contenteditable
+            const tag = (document.activeElement?.tagName || '').toLowerCase();
+            if (tag === 'input' || tag === 'textarea' || tag === 'select' ||
+                document.activeElement?.isContentEditable) return;
+            const idx = parseInt(e.key, 10) - 1;
+            if (idx >= 0 && idx < TABS.length) {
+                currentTab.value = TABS[idx];
+            }
+        }
+        window.addEventListener('keydown', onKeyDown);
+        return () => window.removeEventListener('keydown', onKeyDown);
+    }, []);  // empty deps — handler captures currentTab via signal write, no closure issue
+
     function handleNavigate(viewId) {
         if (viewId !== 'eval') stopEvalPoll();  // stop eval poll when leaving eval tab
         currentTab.value = viewId;
