@@ -4,9 +4,10 @@ Re-exports commonly used names so that ``from ollama_queue.eval import X``
 works for the primary API surface. For internal helpers (prompt builders,
 signal computers, tournament/Bayesian metrics), import from the specific
 submodule: ``engine``, ``generate``, ``judge``, ``metrics``, ``promote``,
-or ``analysis``.
+``analysis``, ``validation``, or ``providers``.
 """
 
+from ollama_queue.eval import providers, validation
 from ollama_queue.eval.analysis import (
     bootstrap_f1_ci,
     compute_per_item_breakdown,
@@ -56,9 +57,11 @@ __all__ = [
     "get_eval_variant",
     "insert_eval_result",
     "parse_judge_response",
+    "providers",
     "render_report",
     "run_eval_judge",
     "run_eval_session",
     "update_eval_run",
     "update_eval_variant",
+    "validation",
 ]
