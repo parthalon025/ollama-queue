@@ -121,6 +121,7 @@ export default function QueueList({ jobs, currentJob }) {
 
     // Optimistic update — signal update causes Dashboard re-render
     queue.value = updated;
+    queueEtas.value = [];  // clear stale ETAs — indices no longer match server order
 
     // Persist changed priorities to backend
     updated.forEach((job, i) => {
@@ -141,7 +142,7 @@ export default function QueueList({ jobs, currentJob }) {
   }
 
   return (
-    <div class="t-frame" data-label="Waiting to Run" data-footer={`Estimated wait for all jobs: ${formatWait(totalWait)}`}>
+    <div class="t-frame" data-label="Waiting to Run" data-footer={`Estimated wait for all jobs: ${formatDuration(totalWait)}`}>
       {/* Tag filter chips */}
       {tags.length > 0 && (
         <div style="display: flex; gap: 0.4rem; margin-bottom: 0.5rem; flex-wrap: wrap;">
@@ -253,7 +254,7 @@ export default function QueueList({ jobs, currentJob }) {
                   class="data-mono"
                   style="font-size: var(--type-micro); color: var(--text-tertiary); width: 48px; text-align: right; flex-shrink: 0;"
                 >
-                  {job.estimated_duration ? formatWait(job.estimated_duration) : '--'}
+                  {job.estimated_duration ? formatDuration(job.estimated_duration) : '--'}
                 </span>
 
                 {/* Queue ETA — how long until this job starts. Shows ~Xm wait when
@@ -296,12 +297,3 @@ export default function QueueList({ jobs, currentJob }) {
   );
 }
 
-function formatWait(seconds) {
-  if (!seconds || seconds <= 0) return '0s';
-  const s = Math.round(seconds);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m`;
-  const hrs = Math.floor(m / 60);
-  return `${hrs}h ${m % 60}m`;
-}
