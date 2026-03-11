@@ -1,4 +1,4 @@
-"""Proxy endpoints: /api/generate and /api/embed."""
+"""Proxy endpoints: /api/generate, /api/embed, /v1/chat/completions, /v1/embeddings."""
 
 from __future__ import annotations
 
@@ -6,6 +6,8 @@ import asyncio
 import json
 import logging
 import os
+import time
+import uuid
 
 import httpx
 from fastapi import APIRouter, Body, HTTPException
@@ -324,3 +326,133 @@ async def proxy_embed(body: dict = Body(...)):
         extract_stdout_fn=lambda r: f"embeddings: {len(r.get('embeddings', []))} vectors",
         error_prefix="Ollama embed request failed",
     )
+
+
+# ---------------------------------------------------------------------------
+# OpenAI-compatible endpoints — translates OpenAI wire format to/from Ollama
+# so that LangChain's ChatOpenAI can route through the queue without fork changes.
+# ---------------------------------------------------------------------------
+
+
+def _openai_to_ollama_chat_request(body: dict) -> dict:
+    """Translate an OpenAI /v1/chat/completions request body to Ollama /api/chat format.
+
+    Preserves queue metadata fields (_priority, _source, _timeout) so that
+    _proxy_ollama_request can pop them from the translated body as normal.
+    """
+    ollama: dict = {
+        "model": body.get("model", ""),
+        "messages": body.get("messages", []),
+        "stream": False,
+    }
+    options: dict = {}
+    if "temperature" in body:
+        options["temperature"] = body["temperature"]
+    if "max_tokens" in body:
+        options["num_predict"] = body["max_tokens"]
+    if options:
+        ollama["options"] = options
+    for key in ("_priority", "_source", "_timeout"):
+        if key in body:
+            ollama[key] = body[key]
+    return ollama
+
+
+def _ollama_chat_to_openai_response(result: dict, model: str) -> dict:
+    """Translate an Ollama /api/chat response to OpenAI /v1/chat/completions format."""
+    message = result.get("message", {})
+    done_reason = result.get("done_reason", "stop")
+    # Ollama uses "stop" and "length"; map others to "stop" for compatibility.
+    finish_reason = done_reason if done_reason in ("stop", "length") else "stop"
+    prompt_tokens = result.get("prompt_eval_count", 0) or 0
+    completion_tokens = result.get("eval_count", 0) or 0
+    return {
+        "id": f"chatcmpl-{uuid.uuid4().hex[:24]}",
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": model or result.get("model", ""),
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": message.get("role", "assistant"),
+                    "content": message.get("content", ""),
+                },
+                "finish_reason": finish_reason,
+            }
+        ],
+        "usage": {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+        },
+    }
+
+
+def _ollama_embed_to_openai_response(result: dict) -> dict:
+    """Translate an Ollama /api/embed response to OpenAI /v1/embeddings format."""
+    embeddings = result.get("embeddings", [])
+    prompt_tokens = result.get("prompt_eval_count", 0) or 0
+    return {
+        "object": "list",
+        "data": [{"object": "embedding", "index": i, "embedding": vec} for i, vec in enumerate(embeddings)],
+        "model": result.get("model", ""),
+        "usage": {
+            "prompt_tokens": prompt_tokens,
+            "total_tokens": prompt_tokens,
+        },
+    }
+
+
+@router.post("/v1/chat/completions")
+async def proxy_chat_completions(body: dict = Body(...)):
+    """OpenAI-compatible chat completions endpoint, serialized through the queue.
+
+    Accepts OpenAI /v1/chat/completions format; translates to Ollama /api/chat,
+    queues through the daemon sentinel, then translates the response back to
+    OpenAI format. Allows LangChain ChatOpenAI (and any OpenAI-compat client)
+    to route through the queue without modifying the caller.
+
+    Queue-specific fields (extracted from body, not forwarded to Ollama):
+      _priority: int (default 0)
+      _source: str (default "proxy")
+      _timeout: int (default 600)
+    """
+    ollama_body = _openai_to_ollama_chat_request(body)
+    model = ollama_body.get("model", "")
+    result = await _proxy_ollama_request(
+        endpoint="/api/chat",
+        command="proxy:/v1/chat/completions",
+        body=ollama_body,
+        resource_profile="ollama",
+        extract_stdout_fn=lambda r: str(r.get("message", {}).get("content", ""))[:500],
+        error_prefix="Chat completion failed",
+    )
+    return _ollama_chat_to_openai_response(result, model=model)
+
+
+@router.post("/v1/embeddings")
+async def proxy_embeddings(body: dict = Body(...)):
+    """OpenAI-compatible embeddings endpoint, serialized through the queue.
+
+    Accepts OpenAI /v1/embeddings format; the request body shape is identical
+    to Ollama /api/embed (model + input), so no request translation is needed.
+    The response is wrapped in OpenAI list format.
+
+    Queue-specific fields (extracted from body, not forwarded to Ollama):
+      _priority: int (default 0)
+      _source: str (default "proxy")
+      _timeout: int (default 600)
+    """
+    body["stream"] = False
+    model = body.get("model", "")
+    resource_profile = OllamaModels().classify(model)["resource_profile"] if model else "embed"
+    result = await _proxy_ollama_request(
+        endpoint="/api/embed",
+        command="proxy:/v1/embeddings",
+        body=body,
+        resource_profile=resource_profile,
+        extract_stdout_fn=lambda r: f"embeddings: {len(r.get('embeddings', []))} vectors",
+        error_prefix="Embeddings request failed",
+    )
+    return _ollama_embed_to_openai_response(result)
