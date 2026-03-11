@@ -104,7 +104,7 @@ class OllamaProvider(EvalProvider):
             "_source": source,
             "_timeout": timeout,
         }
-        if system:
+        if system is not None:
             body["system"] = system
 
         return _call_proxy_raw(body, self.http_base, timeout)
@@ -131,7 +131,7 @@ class ClaudeProvider(EvalProvider):
             "max_tokens": min(num_ctx, 4096),
             "temperature": temperature,
         }
-        if system:
+        if system is not None:
             kwargs["system"] = system
 
         try:
@@ -167,7 +167,7 @@ class OpenAIProvider(EvalProvider):
 
     def generate(self, prompt, system, model, temperature, num_ctx, params, timeout, source, priority=2):
         messages = []
-        if system:
+        if system is not None:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 

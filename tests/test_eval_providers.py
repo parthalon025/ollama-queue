@@ -67,6 +67,25 @@ class TestOllamaProvider:
         body = mock.call_args[0][0]
         assert "system" not in body
 
+    def test_generate_empty_string_system_is_included(self):
+        """system='' should still be included (it's not None)."""
+        provider = OllamaProvider(http_base="http://127.0.0.1:7683")
+        with patch("ollama_queue.eval.providers._call_proxy_raw") as mock:
+            mock.return_value = ("text", {}, None)
+            provider.generate(
+                prompt="test",
+                system="",
+                model="m",
+                temperature=0.6,
+                num_ctx=8192,
+                params=None,
+                timeout=300,
+                source="test",
+            )
+        body = mock.call_args[0][0]
+        assert "system" in body
+        assert body["system"] == ""
+
     def test_flat_columns_win_over_params_bag(self):
         """temperature/num_ctx from flat columns should override params bag."""
         provider = OllamaProvider(http_base="http://127.0.0.1:7683")
