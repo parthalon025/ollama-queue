@@ -2,7 +2,9 @@
 // Tests for tooltip prop behavior — uses node+mock environment (same as GanttChart.test.js)
 // h() mock returns plain objects: { type, props } for structural assertions.
 import { h } from 'preact';
-import HeroCard from './HeroCard.jsx';
+import _HeroCardModule from './HeroCard.jsx';
+// babel-jest compiles ESM default exports to CJS exports.default — unwrap for Jest's ESM vm mode
+const HeroCard = _HeroCardModule.default || _HeroCardModule;
 
 /**
  * Walk a vnode tree and return all nodes matching predicate.
