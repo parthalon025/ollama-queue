@@ -8,12 +8,14 @@ and by API endpoints for live cross-run queries.
 from __future__ import annotations
 
 import json
+import logging
 import random
 import statistics
 from collections import defaultdict
 from typing import Any
 
 _MIN_BOOTSTRAP_PAIRS = 10
+_log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -334,8 +336,16 @@ def describe_config_diff(
             diffs.append(f"System prompt: changed ({len(sp_a)} → {len(sp_b)} chars)")
 
     # Params diff — key-by-key comparison
-    params_a = json.loads(config_a.get("params") or "{}")
-    params_b = json.loads(config_b.get("params") or "{}")
+    try:
+        params_a = json.loads(config_a.get("params") or "{}")
+    except (json.JSONDecodeError, ValueError):
+        _log.warning("describe_config_diff: invalid JSON in params for config_a")
+        params_a = {}
+    try:
+        params_b = json.loads(config_b.get("params") or "{}")
+    except (json.JSONDecodeError, ValueError):
+        _log.warning("describe_config_diff: invalid JSON in params for config_b")
+        params_b = {}
     if params_a != params_b:
         all_keys = set(params_a) | set(params_b)
         for k in sorted(all_keys):

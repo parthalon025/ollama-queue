@@ -4716,3 +4716,19 @@ class TestConfigDiffNewColumns:
         b = {"model": "m", "temperature": 0.6, "num_ctx": 8192, "prompt_template_id": "t", "params": '{"top_k": 40}'}
         diffs = describe_config_diff(a, b)
         assert not any("top_k" in d for d in diffs)
+
+    def test_config_diff_handles_invalid_params_json(self):
+        """describe_config_diff should not crash on corrupted params JSON."""
+        from ollama_queue.eval.analysis import describe_config_diff
+
+        a = {
+            "model": "m",
+            "temperature": 0.6,
+            "num_ctx": 8192,
+            "prompt_template_id": "t",
+            "params": '{"top_k": 40',
+        }  # truncated JSON
+        b = {"model": "m", "temperature": 0.6, "num_ctx": 8192, "prompt_template_id": "t", "params": '{"top_k": 40}'}
+        # Should not raise — returns diffs or empty list
+        diffs = describe_config_diff(a, b)
+        assert isinstance(diffs, list)

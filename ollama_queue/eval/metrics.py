@@ -8,6 +8,7 @@ render_report() for variant config details.
 from __future__ import annotations
 
 import json
+import logging
 import math
 from collections import defaultdict
 from datetime import UTC, datetime
@@ -16,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from ollama_queue.db import Database
 
+_log = logging.getLogger(__name__)
 
 # Prior: P(transfers) = 0.25 — most principles DON'T transfer to arbitrary targets
 _PRIOR_LOG_ODDS = math.log(0.25 / 0.75)  # approx -1.10
@@ -282,7 +284,11 @@ def render_report(run_id: int, metrics: dict[str, dict[str, float]], db: Databas
         lines.append(f"\nModel: `{variant_row.get('model', 'N/A')}`")
         if template_row:
             lines.append(f"Template: `{template_row.get('label', 'N/A')}`")
-        params = json.loads(variant_row.get("params") or "{}")
+        try:
+            params = json.loads(variant_row.get("params") or "{}")
+        except (json.JSONDecodeError, ValueError):
+            _log.warning("render_report: invalid JSON in params for variant %s", winner)
+            params = {}
         params_str = f", params={params}" if params else ""
         provider = variant_row.get("provider") or "ollama"
         provider_str = f", provider={provider}" if provider != "ollama" else ""
