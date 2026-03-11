@@ -47,8 +47,6 @@ export default function Now({ onSubmitRequest }) {
     const disabledRecurring = (scheduleJobs.value || []).filter(rj => !rj.enabled && rj.outcome_reason).length;
     const showAlerts = dlqCnt > 0 || recentFailures > 0 || disabledRecurring > 0;
 
-    const [toast, setToast] = useState(null);
-
     // Proxy mini-stat: count proxy calls in last 24h from history signal
     // (reuse the oneDayAgo already computed above for the alert strip)
     const proxyGenerate = (hist || []).filter(

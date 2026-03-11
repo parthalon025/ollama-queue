@@ -9,8 +9,8 @@ const LEVELS = [
   { label: 'Critical',   value: 1, color: 'var(--status-error)' },
   { label: 'High',       value: 3, color: 'var(--status-warning)' },
   { label: 'Normal',     value: 5, color: 'var(--accent)' },
-  { label: 'Low',        value: 7, color: '#6b7280' },
-  { label: 'Background', value: 9, color: '#374151' },
+  { label: 'Low',        value: 7, color: 'var(--text-tertiary)' },
+  { label: 'Background', value: 9, color: 'var(--bg-inset, #374151)' },
 ];
 
 // Maps numeric priority value to the correct category level using range boundaries.
