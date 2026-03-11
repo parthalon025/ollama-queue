@@ -1,7 +1,7 @@
 import { h } from 'preact';
 import { useState, useMemo, useEffect, useRef } from 'preact/hooks';
 import { useSignal } from '@preact/signals';
-import { applyFreshness, shatterElement } from 'superhot-ui';
+import { applyFreshness } from 'superhot-ui';
 import { queue, queueEtas, API, refreshQueue } from '../stores';
 import EmptyState from './EmptyState.jsx';
 import { formatDuration } from '../utils/time.js';
@@ -30,18 +30,6 @@ function priorityColor(p) {
   if (p <= 6) return PRIORITY_COLORS.normal;
   if (p <= 8) return PRIORITY_COLORS.low;
   return PRIORITY_COLORS.background;
-}
-
-async function cancelJob(id, isRunning, setError, cardEl) {
-  if (isRunning && !confirm('Cancel this running job? The process will be killed.')) return;
-  if (cardEl) shatterElement(cardEl, { fragments: 6 });
-  try {
-    const res = await fetch(`${API}/queue/cancel/${id}`, { method: 'POST' });
-    if (!res.ok) { setError(`Cancel failed: HTTP ${res.status}`); return; }
-    await refreshQueue();
-  } catch (e) {
-    setError(`Cancel failed: ${e.message}`);
-  }
 }
 
 // What it shows: Visual freshness state on a queue row based on how long ago the job was submitted.
@@ -352,7 +340,7 @@ export default function QueueList({ jobs, currentJob }) {
           role="status"
           style="position:fixed;bottom:80px;left:50%;transform:translateX(-50%);z-index:200;background:var(--bg-surface);border:1px solid var(--border-primary);padding:8px 16px;border-radius:var(--radius);display:flex;align-items:center;gap:12px;font-size:var(--type-label);box-shadow:var(--card-shadow-hover);"
         >
-          <span style="color:var(--text-secondary);">Cancelling in 5s…</span>
+          <span style="color:var(--text-secondary);">Cancelling…</span>
           <button
             class="t-btn"
             style="font-size:var(--type-micro);padding:2px 8px;"
