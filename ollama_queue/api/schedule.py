@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 
 import httpx
 from fastapi import APIRouter, Body, HTTPException
@@ -139,6 +140,20 @@ def list_schedule():
             for row in rows:
                 last_exit_map[row["id"]] = row["exit_code"]
 
+    # Batch-query skip counts (skipped_duplicate events) per job in the last 24h.
+    # Shows as a ↻N badge on Gantt bars — high count means the job regularly overruns its interval.
+    _since_24h = time.time() - 86400
+    skip_count_map: dict[int, int] = {}
+    with db._lock:
+        _skip_conn = db._connect()
+        for row in _skip_conn.execute(
+            "SELECT recurring_job_id, COUNT(*) as cnt FROM schedule_events "
+            "WHERE event_type = 'skipped_duplicate' AND timestamp >= ? "
+            "GROUP BY recurring_job_id",
+            (_since_24h,),
+        ).fetchall():
+            skip_count_map[row["recurring_job_id"]] = row["cnt"]
+
     for rj in jobs:
         rj["estimated_duration"] = est.estimate(
             rj.get("name") or rj.get("source") or "",
@@ -164,6 +179,10 @@ def list_schedule():
         # Replaces the timing-only heuristic used in the old runStatus() function.
         last_job_id = rj.get("last_job_id")
         rj["last_exit_code"] = last_exit_map.get(last_job_id) if last_job_id else None
+
+        # Skip count: how many times this job was skipped in the last 24h because a previous
+        # run was still in progress. High counts indicate the job regularly overruns its interval.
+        rj["skip_count_24h"] = skip_count_map.get(rj["id"], 0)
 
     return jobs
 

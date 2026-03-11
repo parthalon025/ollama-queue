@@ -942,6 +942,49 @@ export default function Plan() {
                 );
             })()}
 
+            {/* Health summary strip — one-line status count of the entire schedule.
+                What it shows: active · failing · disabled · overdue job counts at a glance.
+                Decision: spot a systemic problem (e.g., 8 disabled jobs) before scrolling the table. */}
+            {jobs.length > 0 && (() => {
+                const activeCount = jobs.filter(rj => rj.enabled).length;
+                const failingCount = jobs.filter(rj => rj.enabled && rj.last_exit_code != null && rj.last_exit_code !== 0).length;
+                const disabledCount = jobs.filter(rj => !rj.enabled).length;
+                const overdueCount = jobs.filter(rj => rj.enabled && rj.next_run < Date.now() / 1000).length;
+                const skipCount = jobs.reduce((sum, rj) => sum + (rj.skip_count_24h || 0), 0);
+                return (
+                    <div style={{
+                        display: 'flex', flexWrap: 'wrap', gap: '0.25rem 1rem',
+                        fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)',
+                        color: 'var(--text-tertiary)', alignItems: 'center',
+                        padding: '0.2rem 0',
+                    }}>
+                        <span title="Recurring jobs that will run on schedule">
+                            <span style={{ color: 'var(--status-healthy)', fontWeight: 600 }}>{activeCount}</span> active
+                        </span>
+                        {failingCount > 0 && (
+                            <span title="Enabled jobs whose last run exited non-zero">
+                                <span style={{ color: 'var(--status-error)', fontWeight: 600 }}>{failingCount}</span> failing
+                            </span>
+                        )}
+                        {disabledCount > 0 && (
+                            <span title="Jobs that have been disabled (manually or automatically)">
+                                <span style={{ color: 'var(--status-warning)', fontWeight: 600 }}>{disabledCount}</span> disabled
+                            </span>
+                        )}
+                        {overdueCount > 0 && (
+                            <span title="Enabled jobs whose next_run timestamp has passed">
+                                <span style={{ color: '#f97316', fontWeight: 600 }}>{overdueCount}</span> overdue
+                            </span>
+                        )}
+                        {skipCount > 0 && (
+                            <span title="Total number of times any job was skipped in the last 24h because a previous run hadn't finished">
+                                <span style={{ color: '#f97316', fontWeight: 600 }}>↻ {skipCount}</span> skip{skipCount !== 1 ? 's' : ''} today
+                            </span>
+                        )}
+                    </div>
+                );
+            })()}
+
             {/* Load map density strip — 48-slot daily load visualization */}
             <LoadMapStrip data={loadMap.value} />
 

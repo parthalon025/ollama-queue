@@ -3,6 +3,7 @@ import { useState, useRef, useEffect } from 'preact/hooks';
 import {
     status, queue, history, healthData, durationData, settings,
     dlqCount, connectionStatus, currentTab, refreshQueue,
+    scheduleJobs, fetchSchedule,
 } from '../stores';
 import CurrentJob from '../components/CurrentJob.jsx';
 import QueueList from '../components/QueueList.jsx';
@@ -29,6 +30,9 @@ export default function Now() {
 
     const toastTimer = useRef(null);
     useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
+    // Fetch schedule once on mount so disabled recurring job count is available
+    // even if the Plan tab hasn't been visited yet.
+    useEffect(() => { fetchSchedule(); }, []);
 
     const daemon = st?.daemon ?? null;
     const kpis = st?.kpis ?? null;
@@ -41,7 +45,9 @@ export default function Now() {
     const recentFailures = (hist || []).filter(
         job => (job.status === 'failed' || job.status === 'killed') && (job.completed_at ?? 0) >= oneDayAgo
     ).length;
-    const showAlerts = dlqCnt > 0 || recentFailures > 0;
+    // Count recurring jobs that were auto-disabled (have outcome_reason set) — signals a systemic issue
+    const disabledRecurring = (scheduleJobs.value || []).filter(rj => !rj.enabled && rj.outcome_reason).length;
+    const showAlerts = dlqCnt > 0 || recentFailures > 0 || disabledRecurring > 0;
 
     const [toast, setToast] = useState(null);
 
@@ -148,6 +154,24 @@ export default function Now() {
                                     }}
                                 >
                                     {recentFailures} job{recentFailures > 1 ? 's' : ''} failed in the last 24h
+                                </button>
+                            )}
+                            {disabledRecurring > 0 && (
+                                <button
+                                    onClick={() => { currentTab.value = 'plan'; }}
+                                    title="Recurring jobs that were auto-disabled — click to view in Schedule tab"
+                                    style={{
+                                        fontSize: 'var(--type-label)',
+                                        color: 'var(--status-warning)',
+                                        background: 'transparent',
+                                        border: 'none',
+                                        cursor: 'pointer',
+                                        textDecoration: 'underline',
+                                        fontFamily: 'var(--font-mono)',
+                                        padding: 0,
+                                    }}
+                                >
+                                    {disabledRecurring} scheduled job{disabledRecurring > 1 ? 's' : ''} auto-disabled
                                 </button>
                             )}
                         </div>
