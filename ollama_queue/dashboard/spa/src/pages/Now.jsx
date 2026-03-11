@@ -54,10 +54,10 @@ export default function Now() {
     // Proxy mini-stat: count proxy calls in last 24h from history signal
     // (reuse the oneDayAgo already computed above for the alert strip)
     const proxyGenerate = (hist || []).filter(
-        job => job.source === 'proxy:/api/generate' && (job.completed_at ?? 0) >= oneDayAgo
+        job => job.command === 'proxy:/api/generate' && (job.completed_at ?? 0) >= oneDayAgo
     ).length;
     const proxyEmbed = (hist || []).filter(
-        job => job.source === 'proxy:/api/embed' && (job.completed_at ?? 0) >= oneDayAgo
+        job => job.command === 'proxy:/api/embed' && (job.completed_at ?? 0) >= oneDayAgo
     ).length;
     const showProxyStat = proxyGenerate > 0 || proxyEmbed > 0;
 
