@@ -204,6 +204,25 @@ def list_deferred_jobs():
     return db.list_deferred()
 
 
+@router.get("/api/jobs/{job_id}/log")
+def get_job_log(job_id: int, tail: int = 5):
+    """Return the last N lines of a job's stdout output.
+
+    Plain English: fetches the captured stdout tail for a specific job and
+    returns the last `tail` lines (default 5, max 50). Used by the dashboard
+    to show live-ish log output without streaming. Returns 404 if the job
+    does not exist; returns empty lines list if the job has no output yet.
+    """
+    db = _api.db
+    job = db.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    output = job.get("stdout_tail") or ""
+    tail = max(1, min(tail, 50))
+    lines = [ln for ln in output.splitlines() if ln.strip()]
+    return {"lines": lines[-tail:]}
+
+
 @router.post("/api/jobs/{job_id}/defer")
 def defer_job(job_id: int, body: dict = Body(default={})):
     """User-initiated deferral."""
