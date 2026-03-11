@@ -82,13 +82,9 @@ class Scheduler:
                     rj.get("priority"),
                 )
                 continue
-            if self.db.has_pending_or_running_recurring(rj["id"]):
-                self.db.log_schedule_event(
-                    "skipped_duplicate",
-                    recurring_job_id=rj["id"],
-                    details={"name": rj["name"], "reason": "already pending or running"},
-                )
-                # Advance next_run to avoid re-evaluating on every poll
+
+            # Compute next_run advancement once — used in both the skip and the running-behind paths.
+            def _compute_next_run(rj=rj, now=now):
                 cron_expr = rj.get("cron_expression")
                 if cron_expr:
                     import datetime
@@ -96,17 +92,53 @@ class Scheduler:
                     from croniter import croniter
 
                     start_dt = datetime.datetime.fromtimestamp(now)
-                    new_next_run = croniter(cron_expr, start_dt).get_next(datetime.datetime).timestamp()
-                else:
-                    if not rj.get("interval_seconds") and not rj.get("cron_expression"):
-                        _log.warning(
-                            "Recurring job #%d has neither interval_seconds nor cron_expression; defaulting to 300s",
-                            rj.get("id"),
-                        )
-                    interval = rj.get("interval_seconds") or 300  # fallback 5min
-                    new_next_run = now + interval
-                next_run_updates[rj["id"]] = new_next_run
+                    return croniter(cron_expr, start_dt).get_next(datetime.datetime).timestamp()
+                if not rj.get("interval_seconds"):
+                    _log.warning(
+                        "Recurring job #%d has neither interval_seconds nor cron_expression; defaulting to 300s",
+                        rj.get("id"),
+                    )
+                return now + (rj.get("interval_seconds") or 300)
+
+            if self.db.has_pending_recurring(rj["id"]):
+                # A follow-up is already queued — skip entirely to avoid pile-up.
+                self.db.log_schedule_event(
+                    "skipped_duplicate",
+                    recurring_job_id=rj["id"],
+                    details={"name": rj["name"], "reason": "already pending"},
+                )
+                next_run_updates[rj["id"]] = _compute_next_run()
                 continue
+
+            if self.db.has_pending_or_running_recurring(rj["id"]):
+                # Currently running but no pending follower yet — submit one to queue behind it.
+                # The daemon serialises execution so it will start immediately after the current run.
+                job_id = self.db.submit_job(
+                    command=rj["command"],
+                    model=rj["model"],
+                    priority=rj["priority"],
+                    timeout=rj["timeout"],
+                    source=rj["source"] or rj["name"],
+                    tag=rj.get("tag"),
+                    max_retries=rj.get("max_retries", 0),
+                    resource_profile=rj.get("resource_profile", "ollama"),
+                    recurring_job_id=rj["id"],
+                )
+                self.db.log_schedule_event(
+                    "promoted",
+                    recurring_job_id=rj["id"],
+                    job_id=job_id,
+                    details={"name": rj["name"], "queued_behind_running": True},
+                )
+                new_ids.append(job_id)
+                next_run_updates[rj["id"]] = _compute_next_run()
+                _log.info(
+                    "Promoted recurring job %r → job #%d (queued behind running instance)",
+                    rj["name"],
+                    job_id,
+                )
+                continue
+
             job_id = self.db.submit_job(
                 command=rj["command"],
                 model=rj["model"],
