@@ -419,6 +419,7 @@ async def proxy_chat_completions(body: dict = Body(...)):
       _timeout: int (default 600)
     """
     ollama_body = _openai_to_ollama_chat_request(body)
+    ollama_body.setdefault("_source", "gpt-researcher")
     model = ollama_body.get("model", "")
     result = await _proxy_ollama_request(
         endpoint="/api/chat",
@@ -445,6 +446,7 @@ async def proxy_embeddings(body: dict = Body(...)):
       _timeout: int (default 600)
     """
     body["stream"] = False
+    body.setdefault("_source", "gpt-researcher")
     model = body.get("model", "")
     resource_profile = OllamaModels().classify(model)["resource_profile"] if model else "embed"
     result = await _proxy_ollama_request(
