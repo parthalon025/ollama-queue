@@ -2,6 +2,7 @@ import { h } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { settings, submitJob } from '../stores';
 import { useActionFeedback } from '../hooks/useActionFeedback.js';
+import PrioritySelector from './PrioritySelector.jsx';
 
 const inputStyle = {
     fontFamily: 'var(--font-mono)', fontSize: 'var(--type-body)',
@@ -93,7 +94,7 @@ export default function SubmitJobModal({ onJobSubmitted, open: controlledOpen, o
         if (!command.trim()) return 'Command is required';
         if (!source.trim()) return 'Source is required';
         const p = Number(priority);
-        if (!Number.isInteger(p) || p < 0 || p > 10) return 'Priority must be an integer 0–10';
+        if (!Number.isInteger(p) || p < 1 || p > 9) return 'Priority must be a valid level (1–9)';
         const t = Number(timeout);
         if (!Number.isInteger(t) || t < 1) return 'Timeout must be a positive integer (seconds)';
         return null;
@@ -231,35 +232,28 @@ export default function SubmitJobModal({ onJobSubmitted, open: controlledOpen, o
                                 />
                             </div>
 
-                            {/* Priority + Timeout side-by-side */}
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                                <div>
-                                    <label style={labelStyle}>Priority (1–10)</label>
-                                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-micro)', color: 'var(--text-tertiary)', margin: '0 0 0.25rem' }}>
-                                        1 = run first (urgent) · 10 = run last (background)
-                                    </p>
-                                    <input
-                                        type="number"
-                                        min={0}
-                                        max={10}
-                                        value={priority}
-                                        onInput={(e) => setPriority(e.target.value)}
-                                        style={inputStyle}
-                                    />
-                                </div>
-                                <div>
-                                    <label style={labelStyle}>Time Limit (seconds)</label>
-                                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-micro)', color: 'var(--text-tertiary)', margin: '0 0 0.25rem' }}>
-                                        The job will be killed if it takes longer than this
-                                    </p>
-                                    <input
-                                        type="number"
-                                        min={1}
-                                        value={timeout}
-                                        onInput={(e) => setTimeout_(e.target.value)}
-                                        style={inputStyle}
-                                    />
-                                </div>
+                            {/* Priority */}
+                            <div>
+                                <label style={labelStyle}>Priority</label>
+                                <p style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-micro)', color: 'var(--text-tertiary)', margin: '0 0 0.25rem' }}>
+                                    Choose how urgently this job should run relative to others in the queue
+                                </p>
+                                <PrioritySelector value={priority} onChange={v => setPriority(v)} />
+                            </div>
+
+                            {/* Timeout */}
+                            <div>
+                                <label style={labelStyle}>Time Limit (seconds)</label>
+                                <p style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-micro)', color: 'var(--text-tertiary)', margin: '0 0 0.25rem' }}>
+                                    The job will be killed if it takes longer than this
+                                </p>
+                                <input
+                                    type="number"
+                                    min={1}
+                                    value={timeout}
+                                    onInput={(e) => setTimeout_(e.target.value)}
+                                    style={inputStyle}
+                                />
                             </div>
 
                             {/* Inline error */}

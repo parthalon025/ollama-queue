@@ -1,6 +1,7 @@
 import { h } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { loadMap, addRecurringJob, fetchSchedule, fetchLoadMap } from '../stores';
+import PrioritySelector from './PrioritySelector.jsx';
 
 const inputStyle = {
     fontFamily: 'var(--font-mono)', fontSize: 'var(--type-body)',
@@ -105,7 +106,7 @@ export default function AddRecurringJobModal({ onAdded }) {
             if (!form.cron.trim()) return 'Cron expression is required';
         }
         const p = Number(form.priority);
-        if (!Number.isInteger(p) || p < 0 || p > 10) return 'Priority must be 0\u201310';
+        if (!Number.isInteger(p) || p < 1 || p > 9) return 'Priority must be a valid level (1\u20139)';
         return null;
     }
 
@@ -310,14 +311,7 @@ export default function AddRecurringJobModal({ onAdded }) {
                             {/* Priority */}
                             <div>
                                 <label style={labelStyle}>Priority</label>
-                                <input
-                                    type="number"
-                                    min={0}
-                                    max={10}
-                                    value={form.priority}
-                                    onInput={(e) => setField('priority', e.target.value)}
-                                    style={inputStyle}
-                                />
+                                <PrioritySelector value={form.priority} onChange={v => setField('priority', v)} />
                             </div>
 
                             {/* Advanced toggle */}
