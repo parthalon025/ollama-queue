@@ -4363,6 +4363,123 @@ class TestCallProxyExhaustedRetriesAfterLoop:
         assert job_id is None
 
 
+class TestCallProxyExtraParamsAndSystemPrompt:
+    """_call_proxy extra_params and system_prompt parameter wiring."""
+
+    def _make_mock_client(self, response_data: dict):
+        """Build a reusable mock httpx.Client context manager."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = response_data
+        mock_client = MagicMock()
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        mock_client.post.return_value = mock_resp
+        return mock_client
+
+    def test_call_proxy_merges_extra_params(self):
+        """_call_proxy should merge extra_params into options, flat columns winning."""
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = self._make_mock_client({"response": "test output", "prompt_eval_count": 10, "eval_count": 20})
+            mock_client_class.return_value = mock_client
+
+            _call_proxy(
+                http_base="http://localhost:7683",
+                model="qwen2.5:7b",
+                prompt="test prompt",
+                temperature=0.6,
+                num_ctx=8192,
+                timeout=300,
+                source="test",
+                extra_params={"top_k": 40, "temperature": 999},  # temperature should be ignored
+                system_prompt="Be precise",
+            )
+            body = mock_client.post.call_args[1]["json"]
+            assert body["options"]["top_k"] == 40
+            assert body["options"]["temperature"] == 0.6  # flat column wins
+            assert body["system"] == "Be precise"
+
+    def test_call_proxy_omits_system_when_none(self):
+        """_call_proxy should not include 'system' key when system_prompt is None."""
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = self._make_mock_client({"response": "text"})
+            mock_client_class.return_value = mock_client
+
+            _call_proxy(
+                http_base="http://localhost:7683",
+                model="qwen2.5:7b",
+                prompt="test",
+                temperature=0.6,
+                num_ctx=8192,
+                timeout=300,
+                source="test",
+            )
+            body = mock_client.post.call_args[1]["json"]
+            assert "system" not in body
+
+    def test_call_proxy_no_extra_params_no_system(self):
+        """_call_proxy with no extra_params and no system_prompt: options only has temperature and num_ctx."""
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = self._make_mock_client({"response": "text"})
+            mock_client_class.return_value = mock_client
+
+            _call_proxy(
+                http_base="http://localhost:7683",
+                model="m",
+                prompt="p",
+                temperature=0.5,
+                num_ctx=4096,
+                timeout=30,
+                source="test",
+                extra_params=None,
+                system_prompt=None,
+            )
+            body = mock_client.post.call_args[1]["json"]
+            assert body["options"] == {"temperature": 0.5, "num_ctx": 4096}
+            assert "system" not in body
+
+    def test_call_proxy_extra_params_no_system(self):
+        """extra_params with no system_prompt: merges params but no system key."""
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = self._make_mock_client({"response": "text"})
+            mock_client_class.return_value = mock_client
+
+            _call_proxy(
+                http_base="http://localhost:7683",
+                model="m",
+                prompt="p",
+                temperature=0.5,
+                num_ctx=4096,
+                timeout=30,
+                source="test",
+                extra_params={"top_p": 0.9, "repeat_penalty": 1.1},
+            )
+            body = mock_client.post.call_args[1]["json"]
+            assert body["options"]["top_p"] == 0.9
+            assert body["options"]["repeat_penalty"] == 1.1
+            assert "system" not in body
+
+    def test_call_proxy_num_ctx_in_extra_params_ignored(self):
+        """num_ctx in extra_params should be ignored (flat column wins)."""
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = self._make_mock_client({"response": "text"})
+            mock_client_class.return_value = mock_client
+
+            _call_proxy(
+                http_base="http://localhost:7683",
+                model="m",
+                prompt="p",
+                temperature=0.5,
+                num_ctx=4096,
+                timeout=30,
+                source="test",
+                extra_params={"num_ctx": 99999},
+            )
+            body = mock_client.post.call_args[1]["json"]
+            assert body["options"]["num_ctx"] == 4096  # flat column wins
+
+
 class TestRunEvalGenerateVariantsNonList:
     """Line 1997: json.loads succeeds but returns non-list value."""
 
