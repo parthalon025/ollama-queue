@@ -1,10 +1,12 @@
 import { h } from 'preact';
 import { useEffect, useRef } from 'preact/hooks';
+import { useSignal } from '@preact/signals';
 import { applyMantra, removeMantra } from 'superhot-ui';
 import StatusBadge from './StatusBadge.jsx';
 import ResourceGauges from './ResourceGauges.jsx';
 import EmptyState from './EmptyState.jsx';
 import { formatDuration } from '../utils/time.js';
+import { API } from '../stores';
 
 /**
  * What it shows: What the daemon is doing RIGHT NOW — running job name/model/elapsed time
@@ -25,6 +27,11 @@ import { formatDuration } from '../utils/time.js';
 export default function CurrentJob({ daemon, currentJob, latestHealth, settings, activeEval, onSubmitRequest }) {
   // Hooks must come before any conditional return (Rules of Hooks).
   const cardRef = useRef(null);
+
+  // What it shows: The last 5 lines of stdout from the running job, polled every 5s.
+  // Decision it drives: Lets the user see whether the job is producing output or stuck silent.
+  const logLines = useSignal([]);
+  const logExpanded = useSignal(false);
 
   const state = daemon ? (daemon.state || 'idle') : 'idle';
   const isPaused = state.startsWith('paused');
@@ -53,6 +60,28 @@ export default function CurrentJob({ daemon, currentJob, latestHealth, settings,
     );
     return () => clearTimeout(timer);
   }, [isStalled]);
+
+  // Live log tail: polls /api/jobs/{id}/log?tail=5 every 5s while a job is running.
+  // Clears when the job stops so stale output doesn't persist into the next run.
+  useEffect(() => {
+    if (!isRunning || !currentJob?.id) {
+      logLines.value = [];
+      return;
+    }
+    let cancelled = false;
+    async function fetchLog() {
+      try {
+        const r = await fetch(`${API}/jobs/${currentJob.id}/log?tail=5`);
+        if (!cancelled && r.ok) {
+          const data = await r.json();
+          logLines.value = data.lines || [];
+        }
+      } catch (_) { /* best-effort */ }
+    }
+    fetchLog();
+    const iv = setInterval(fetchLog, 5000);
+    return () => { cancelled = true; clearInterval(iv); };
+  }, [isRunning, currentJob?.id]);
 
   if (!daemon) return null;
 
@@ -161,6 +190,22 @@ export default function CurrentJob({ daemon, currentJob, latestHealth, settings,
             swap={hp.swap_pct}
             settings={settings}
           />
+          {/* Collapsible live log tail — last 5 lines of job stdout, polled every 5s */}
+          <details
+            style="margin-top:4px;"
+            open={logExpanded.value}
+            onToggle={e => { logExpanded.value = e.currentTarget.open; }}
+          >
+            <summary style="font-family:var(--font-mono);font-size:var(--type-micro);color:var(--text-tertiary);cursor:pointer;user-select:none;list-style:none;">
+              Output {logLines.value.length > 0 ? `(${logLines.value.length} lines)` : ''}
+            </summary>
+            <div style="margin-top:6px;padding:8px;background:var(--bg-terminal,var(--bg-inset));border-radius:var(--radius);font-family:var(--font-mono);font-size:var(--type-micro);color:var(--text-secondary);white-space:pre-wrap;word-break:break-all;max-height:120px;overflow-y:auto;">
+              {logLines.value.length > 0
+                ? logLines.value.map((line, i) => <div key={i}>{line}</div>)
+                : <span style="color:var(--text-tertiary);">No output yet</span>
+              }
+            </div>
+          </details>
         </div>
       ) : isPaused ? (
         <div class="flex items-center gap-3">
