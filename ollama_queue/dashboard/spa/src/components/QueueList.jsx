@@ -100,6 +100,13 @@ export default function QueueList({ jobs, currentJob }) {
     pendingCancels.value = next;
   }
 
+  // Clear all pending timers when the component unmounts (e.g. navigating away mid-countdown).
+  useEffect(() => {
+    return () => {
+      Object.values(pendingCancels.value).forEach(id => clearTimeout(id));
+    };
+  }, []);
+
   const tags = useMemo(() => [...new Set(allItems.map(j => j.tag).filter(Boolean))], [allItems]);
   const items = tagFilter ? allItems.filter(j => j.tag === tagFilter) : allItems;
 
