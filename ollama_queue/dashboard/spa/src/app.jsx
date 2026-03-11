@@ -1,6 +1,6 @@
 import { h, Component } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
-import { signal } from '@preact/signals';
+import { signal, useSignal } from '@preact/signals';
 
 // Temporary debug boundary — catches Plan render errors that signals swallows silently
 class PlanErrorBoundary extends Component {
@@ -32,10 +32,6 @@ import Settings from './pages/Settings.jsx';
 import Eval from './pages/Eval.jsx';
 import Consumers from './pages/Consumers.jsx';
 import Performance from './pages/Performance.jsx';
-
-// Module-level signal — controls the app-wide SubmitJobModal.
-// Sidebar [+ Submit] and BottomNav FAB both set this to true; the modal resets it on close.
-const showSubmitModal = signal(false);
 
 // What it shows: A thin persistent strip at the top of the content area whenever an eval
 //   session is running — shows eval run #, model name, and current phase.
@@ -86,6 +82,12 @@ function EvalActivityBanner({ activeEval, onNavigate }) {
 }
 
 export function App() {
+    // Component-scoped signal — controls the app-wide SubmitJobModal.
+    // Sidebar [+ Submit] and BottomNav FAB both set this to true; the modal resets it on close.
+    // Scoped here (not module-level) so it resets cleanly on each component mount, preventing
+    // HMR state leaks where the modal stays open after a hot reload.
+    const showSubmitModal = useSignal(false);
+
     // Theme: read from localStorage, default dark. Writes to <html data-theme="...">
     const [theme, setTheme] = useState(() => {
         const saved = localStorage.getItem('queue-theme');
