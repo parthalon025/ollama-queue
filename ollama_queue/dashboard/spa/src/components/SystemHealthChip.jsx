@@ -16,17 +16,22 @@ export default function SystemHealthChip({ daemonState, dlqCount, ram, vram, loa
     const isError = daemonState === 'error';
     const isDisconnected = connectionStatus === 'disconnected';
 
-    const resourceCritical = (ram ?? 0) >= (s.pause_ram_pct || 85) ||
-                             (vram ?? 0) >= (s.pause_vram_pct || 90) ||
+    const ramCrit  = s.pause_ram_pct  || 85;
+    const vramCrit = s.pause_vram_pct || 90;
+    const resourceCritical = (ram ?? 0) >= ramCrit ||
+                             (vram ?? 0) >= vramCrit ||
                              (load ?? 0) >= (s.pause_load_avg || 8);
-    const resourceWarning = !resourceCritical && ((ram ?? 0) >= 70 || (vram ?? 0) >= 75);
+    const RAM_WARN_RATIO  = 0.82;  // warning at ~82% of critical threshold
+    const VRAM_WARN_RATIO = 0.83;  // warning at ~83% of critical threshold
+    const resourceWarning = !resourceCritical &&
+        ((ram ?? 0) >= ramCrit * RAM_WARN_RATIO || (vram ?? 0) >= vramCrit * VRAM_WARN_RATIO);
 
     let label, color;
 
     if (isDisconnected || isError || isPaused || resourceCritical || (dlqCount || 0) > 3) {
-        // Count distinct issue types for label
-        const count = [isDisconnected || isError || isPaused, resourceCritical, (dlqCount || 0) > 3]
-            .filter(Boolean).length;
+        // When disconnected, only count 1 issue — stale resource/DLQ readings are not independent signals
+        const count = isDisconnected ? 1
+            : [isError || isPaused, resourceCritical, (dlqCount || 0) > 3].filter(Boolean).length;
         label = count === 1 ? '1 Issue' : `${count} Issues`;
         color = 'var(--status-error)';
     } else if (resourceWarning || (dlqCount || 0) > 0) {
