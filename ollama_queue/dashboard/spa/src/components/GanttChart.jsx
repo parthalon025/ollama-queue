@@ -129,6 +129,7 @@ export function findHeavyConflicts(jobs) {
     return conflictIds;
 }
 
+// Timing-based schedule health (kept for backward compat and lateJobs in Plan page).
 export function runStatus(lastRun, intervalSeconds, _now = Date.now() / 1000) {
     if (!lastRun) return { label: 'never run yet', color: 'var(--text-tertiary)' };
     const elapsed = _now - lastRun;
@@ -138,6 +139,19 @@ export function runStatus(lastRun, intervalSeconds, _now = Date.now() / 1000) {
     if (drift <= threshold) return { label: 'running on schedule', color: 'var(--status-healthy)' };
     return { label: 'running behind', color: 'var(--status-warning)' };
 }
+
+// Outcome dot: uses the actual exit code from the last run, not timing heuristics.
+// Drives: the small dot on each Gantt bar shows real pass/fail at a glance.
+export function lastRunOutcome(lastExitCode, lastRun) {
+    if (!lastRun) return { label: 'never run', color: 'var(--text-tertiary)' };
+    if (lastExitCode === 0) return { label: 'last run succeeded', color: 'var(--status-healthy)' };
+    if (lastExitCode != null) return { label: `last run failed (exit ${lastExitCode})`, color: 'var(--status-error)' };
+    return { label: 'last run outcome unknown', color: 'var(--text-secondary)' };
+}
+
+// Unload hold: seconds Ollama keeps the model warm in VRAM after a job completes.
+// This is shown as a right wick on the candlestick bar.
+const UNLOAD_HOLD_SECS = 30;
 
 // Score at which a slot is considered pinned/blocked by the scheduler.
 const LOAD_MAP_PIN_SCORE = 999;
@@ -185,7 +199,7 @@ function _fmtInterval(seconds) {
 // Decision it drives: User can see everything about a job and trigger it without leaving
 //   the schedule view. Works on touch screens where title tooltips don't work.
 function BarDetailCard({ job, runs, runsLoading, onClose, onRunJob, onScrollToJob }) {
-    const { label: runLabel, color: runColor } = runStatus(job.last_run, job.interval_seconds);
+    const { label: runLabel, color: runColor } = lastRunOutcome(job.last_exit_code, job.last_run);
     const startStr = new Date(job.next_run * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const lastRunStr = job.last_run ? `${_relativeTime(job.last_run)} ago` : 'never';
     const modelStr = job.model || job.model_profile || 'default';
@@ -234,6 +248,7 @@ function BarDetailCard({ job, runs, runsLoading, onClose, onRunJob, onScrollToJo
                     ['model', modelStr],
                     ['starts', startStr],
                     ['runs', `~${formatDuration(job.estimated_duration)}`],
+                    ...(job.warmup_estimate > 0 ? [['warmup', `~${job.warmup_estimate}s`]] : []),
                     ['last ran', lastRunStr],
                     ['interval', _fmtInterval(job.interval_seconds)],
                 ].map(([k, v]) => (
@@ -283,8 +298,17 @@ export function GanttChart({
     const [selectedBarId, setSelectedBarId] = useState(null);
     const [barRuns, setBarRuns] = useState({});
     const [barRunsLoading, setBarRunsLoading] = useState(false);
-    const now = Date.now() / 1000;
-    const windowSecs = windowHours * 3600;
+    // zoomedAnchor: when set, the timeline shows a ±1h window around that timestamp.
+    // Clicking a bar zooms in; clicking zoom-out button or the same bar returns to full view.
+    const [zoomedAnchor, setZoomedAnchor] = useState(null);
+
+    const wallNow = Date.now() / 1000;
+    // When zoomed, windowStart shifts so the anchor bar is centered in a 2h view.
+    const zoomWindowSecs = 2 * 3600;
+    const windowSecs = zoomedAnchor ? zoomWindowSecs : windowHours * 3600;
+    // now is used as the left edge of the timeline. In zoom mode, shift left so the
+    // zoomed bar appears near center (anchor − 45min = 75% into a 2h window).
+    const now = zoomedAnchor ? zoomedAnchor - zoomWindowSecs * 0.5 : wallNow;
     const windowEnd = now + windowSecs;
 
     const laneJobs = assignLanes(
@@ -309,8 +333,14 @@ export function GanttChart({
     );
 
     async function handleBarClick(job) {
-        if (selectedBarId === job.id) { setSelectedBarId(null); return; }
+        if (selectedBarId === job.id) {
+            setSelectedBarId(null);
+            setZoomedAnchor(null);
+            return;
+        }
         setSelectedBarId(job.id);
+        // Zoom the timeline to a 2h window centered on this bar's scheduled start.
+        setZoomedAnchor(job.next_run);
         if (!barRuns[job.id]) {
             setBarRunsLoading(true);
             try {
@@ -338,6 +368,26 @@ export function GanttChart({
 
     return (
         <div style={{ position: 'relative', width: '100%' }}>
+            {/* Zoom indicator — shown when user has clicked a bar to zoom the timeline to ±1h */}
+            {zoomedAnchor && (
+                <div style={{
+                    display: 'flex', alignItems: 'center', gap: '0.5rem',
+                    marginBottom: '0.25rem',
+                    fontFamily: 'var(--font-mono)', fontSize: 'var(--type-micro)',
+                    color: 'var(--accent)',
+                }}>
+                    <span>⌖ zoomed: {new Date(zoomedAnchor * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ±1h</span>
+                    <button
+                        onClick={() => { setZoomedAnchor(null); setSelectedBarId(null); }}
+                        style={{
+                            background: 'none', border: '1px solid var(--accent)',
+                            borderRadius: 'var(--radius)', cursor: 'pointer',
+                            color: 'var(--accent)', fontFamily: 'var(--font-mono)',
+                            fontSize: 'var(--type-micro)', padding: '1px 7px',
+                        }}
+                    >zoom out</button>
+                </div>
+            )}
             {/* Bucket selection label — shows time range and active job count for selected density bucket */}
             {selectedBucketIdx !== null && (() => {
                 const bucketSecs = windowSecs / bucketCount;
@@ -526,20 +576,35 @@ export function GanttChart({
                 {laneJobs.map(job => {
                     const isDimmed = selectedBucketIdx !== null && !(bucketJobIds[selectedBucketIdx]?.has(job.id));
                     const startOffset = Math.max(0, job.next_run - now);
-                    const duration = job.estimated_duration || 600;
-                    const leftPct = (startOffset / windowSecs) * 100;
-                    const widthPct = Math.max(0.5, (duration / windowSecs) * 100);
                     const color = sourceColor(job.source);
                     const isHeavy = job.model_profile === 'heavy';
                     const isConcurrent = job._lane > 0;
                     const modelLabel = job.model
                         ? job.model.split(':')[0]
                         : (job.model_profile || null);
+
+                    // Candlestick segments — left wick (warmup), body (inference), right wick (unload hold).
+                    // warmup: time to cold-load model weights; inference: actual compute; unload: VRAM hold time.
+                    const warmupSecs = job.warmup_estimate || 0;
+                    const inferenceSecs = Math.max(1, (job.estimated_duration || 600) - warmupSecs);
+                    const unloadSecs = job.model ? UNLOAD_HOLD_SECS : 0;
+                    const totalSecs = warmupSecs + inferenceSecs + unloadSecs;
+                    const widthPct = Math.max(0.5, (totalSecs / windowSecs) * 100);
+                    const leftPct = (startOffset / windowSecs) * 100;
                     const barWidth = Math.max(0.5, Math.min(widthPct, 100 - leftPct));
-                    // Lower threshold so model shows on smaller bars too
+                    // Fraction of total bar width each segment occupies
+                    const warmupFrac = warmupSecs / totalSecs;
+                    const inferenceFrac = inferenceSecs / totalSecs;
+
                     const showChip = barWidth > 5;
-                    // Source chip only when bar is wide enough to hold both name + chips
                     const showSource = barWidth > 14 && job.source && job.source !== job.name;
+                    const isSelected = selectedBarId === job.id;
+
+                    // Outcome dot uses real exit code, not timing drift.
+                    const { label: outcomeLabel, color: outcomeColor } = lastRunOutcome(job.last_exit_code, job.last_run);
+                    const lastRunStr = job.last_run
+                        ? new Date(job.last_run * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                        : 'never';
 
                     return (
                         <div
@@ -552,71 +617,91 @@ export function GanttChart({
                                 width: `${barWidth}%`,
                                 top: job._lane * laneHeight + 4,
                                 height: laneHeight - 8,
-                                background: color,
-                                opacity: isDimmed ? 0.15 : 0.85,
+                                opacity: isDimmed ? 0.15 : 1,
                                 transition: 'opacity 0.2s ease',
-                                borderRadius: 'var(--radius)',
-                                borderLeft: isHeavy ? '3px solid var(--status-warning)' : undefined,
                                 outline: conflictIds.has(job.id) ? '2px solid var(--status-error)' : undefined,
-                                outlineOffset: conflictIds.has(job.id) ? '-2px' : undefined,
+                                outlineOffset: conflictIds.has(job.id) ? '-1px' : undefined,
                                 overflow: 'visible',
                                 display: 'flex',
-                                alignItems: 'center',
-                                paddingLeft: isHeavy ? '0.3rem' : '0.4rem',
-                                gap: '0.3rem',
                                 cursor: 'pointer',
+                                borderRadius: 'var(--radius)',
                             }}
                         >
-                            <span style={{
-                                fontFamily: 'var(--font-mono)',
-                                fontSize: 'var(--type-label)',
-                                color: 'var(--accent-text)',
-                                fontWeight: 600,
-                                whiteSpace: 'nowrap',
+                            {/* Left wick: model warmup (loading from disk into VRAM) */}
+                            {warmupSecs > 0 && (
+                                <div style={{
+                                    width: `${warmupFrac * 100}%`,
+                                    height: '100%',
+                                    background: `repeating-linear-gradient(
+                                        90deg,
+                                        ${color}55 0px, ${color}55 3px,
+                                        transparent 3px, transparent 6px
+                                    )`,
+                                    borderRadius: 'var(--radius) 0 0 var(--radius)',
+                                    borderLeft: isHeavy ? '3px solid var(--status-warning)' : undefined,
+                                    flexShrink: 0,
+                                }} />
+                            )}
+                            {/* Body: inference runtime — the main job work */}
+                            <div style={{
+                                width: `${inferenceFrac * 100}%`,
+                                height: '100%',
+                                background: color,
+                                opacity: 0.85,
+                                borderRadius: warmupSecs > 0 ? '0' : 'var(--radius) 0 0 var(--radius)',
+                                borderLeft: (warmupSecs === 0 && isHeavy) ? '3px solid var(--status-warning)' : undefined,
+                                flexShrink: 0,
+                                display: 'flex',
+                                alignItems: 'center',
+                                paddingLeft: '0.4rem',
+                                gap: '0.3rem',
                                 overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                flexShrink: 1,
+                                position: 'relative',
                             }}>
-                                {isConcurrent && '⟡ '}{job.name}
-                            </span>
-                            {showChip && modelLabel && (
                                 <span style={{
                                     fontFamily: 'var(--font-mono)',
-                                    fontSize: 'var(--type-micro)',
-                                    color: 'rgba(255,255,255,0.7)',
-                                    background: 'rgba(0,0,0,0.25)',
-                                    borderRadius: 3,
-                                    padding: '1px 4px',
+                                    fontSize: 'var(--type-label)',
+                                    color: 'var(--accent-text)',
+                                    fontWeight: 600,
                                     whiteSpace: 'nowrap',
-                                    flexShrink: 0,
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    flexShrink: 1,
                                 }}>
-                                    {modelLabel}
+                                    {isConcurrent && '⟡ '}{job.name}
                                 </span>
-                            )}
-                            {/* Source program chip — only when bar is wide enough and source differs from name */}
-                            {showSource && (
-                                <span style={{
-                                    fontFamily: 'var(--font-mono)',
-                                    fontSize: 'var(--type-micro)',
-                                    color: 'rgba(255,255,255,0.55)',
-                                    background: 'rgba(0,0,0,0.18)',
-                                    borderRadius: 3,
-                                    padding: '1px 4px',
-                                    whiteSpace: 'nowrap',
-                                    flexShrink: 0,
-                                }}>
-                                    {job.source}
-                                </span>
-                            )}
-                            {/* On-time status dot — only shown when bar is wide enough */}
-                            {showChip && (() => {
-                                const { label, color } = runStatus(job.last_run, job.interval_seconds);
-                                const lastRunStr = job.last_run
-                                    ? new Date(job.last_run * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-                                    : 'never';
-                                return (
+                                {showChip && modelLabel && (
+                                    <span style={{
+                                        fontFamily: 'var(--font-mono)',
+                                        fontSize: 'var(--type-micro)',
+                                        color: 'rgba(255,255,255,0.7)',
+                                        background: 'rgba(0,0,0,0.25)',
+                                        borderRadius: 3,
+                                        padding: '1px 4px',
+                                        whiteSpace: 'nowrap',
+                                        flexShrink: 0,
+                                    }}>
+                                        {modelLabel}
+                                    </span>
+                                )}
+                                {showSource && (
+                                    <span style={{
+                                        fontFamily: 'var(--font-mono)',
+                                        fontSize: 'var(--type-micro)',
+                                        color: 'rgba(255,255,255,0.55)',
+                                        background: 'rgba(0,0,0,0.18)',
+                                        borderRadius: 3,
+                                        padding: '1px 4px',
+                                        whiteSpace: 'nowrap',
+                                        flexShrink: 0,
+                                    }}>
+                                        {job.source}
+                                    </span>
+                                )}
+                                {/* Outcome dot: green=last succeeded, red=last failed, gray=unknown */}
+                                {showChip && (
                                     <span
-                                        title={`Last ran: ${lastRunStr} · ${label}`}
+                                        title={`Last ran: ${lastRunStr} · ${outcomeLabel}`}
                                         style={{
                                             position: 'absolute',
                                             right: 4,
@@ -625,19 +710,30 @@ export function GanttChart({
                                             width: 7,
                                             height: 7,
                                             borderRadius: '50%',
-                                            background: color,
+                                            background: outcomeColor,
                                             border: '1px solid rgba(0,0,0,0.3)',
                                             flexShrink: 0,
                                         }}
                                     />
-                                );
-                            })()}
-                            {selectedBarId === job.id && (
+                                )}
+                            </div>
+                            {/* Right wick: VRAM hold after job ends (model stays warm briefly) */}
+                            {unloadSecs > 0 && (
+                                <div style={{
+                                    flex: 1,
+                                    height: '100%',
+                                    background: color,
+                                    opacity: 0.18,
+                                    borderRadius: '0 var(--radius) var(--radius) 0',
+                                    flexShrink: 0,
+                                }} />
+                            )}
+                            {isSelected && (
                                 <BarDetailCard
                                     job={job}
                                     runs={barRuns[job.id] || null}
                                     runsLoading={barRunsLoading}
-                                    onClose={() => setSelectedBarId(null)}
+                                    onClose={() => { setSelectedBarId(null); setZoomedAnchor(null); }}
                                     onRunJob={onRunJob}
                                     onScrollToJob={onScrollToJob}
                                 />
@@ -669,13 +765,13 @@ export function GanttChart({
                 </span>
             ))}
             <span style={{ color: 'var(--border-subtle)', userSelect: 'none' }}>│</span>
+            {/* Candlestick encoding legend */}
             <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
                 <span style={{
-                    display: 'inline-block', width: 10, height: 10,
-                    borderRadius: 2, background: 'var(--text-tertiary)',
-                    borderLeft: '3px solid var(--status-warning)', flexShrink: 0,
+                    display: 'inline-block', width: 24, height: 10, borderRadius: 2,
+                    background: 'linear-gradient(90deg, rgba(99,179,237,0.3) 25%, rgba(99,179,237,0.85) 25% 75%, rgba(99,179,237,0.18) 75%)',
                 }} />
-                large model
+                load · run · unload
             </span>
             <span style={{ color: 'var(--border-subtle)', userSelect: 'none' }}>│</span>
             <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
@@ -683,17 +779,17 @@ export function GanttChart({
                     display: 'inline-block', width: 7, height: 7,
                     borderRadius: '50%', background: 'var(--status-healthy)', flexShrink: 0,
                 }} />
-                on schedule
+                last ok
             </span>
             <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
                 <span style={{
                     display: 'inline-block', width: 7, height: 7,
-                    borderRadius: '50%', background: 'var(--status-warning)', flexShrink: 0,
+                    borderRadius: '50%', background: 'var(--status-error)', flexShrink: 0,
                 }} />
-                running late
+                last failed
             </span>
             <span style={{ color: 'var(--border-subtle)', userSelect: 'none' }}>│</span>
-            <span>bar width = expected run time · hover for details</span>
+            <span>click bar to zoom · click again to reset</span>
         </div>
     </div>
     );
