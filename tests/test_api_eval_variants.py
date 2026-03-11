@@ -977,3 +977,122 @@ def test_create_variant_invalid_provider_returns_400(client):
     }
     resp = client.post("/api/eval/variants", json=body)
     assert resp.status_code == 400
+
+
+# --- Task 7: update/clone/import/generate new column tests ---
+
+
+def test_update_variant_params(client):
+    """PUT with params should update the JSON bag."""
+    import json
+
+    create_resp = client.post(
+        "/api/eval/variants",
+        json={
+            "label": "Update test",
+            "prompt_template_id": "zero-shot-causal",
+            "model": "qwen2.5:7b",
+        },
+    )
+    var_id = create_resp.json()["id"]
+    update_resp = client.put(f"/api/eval/variants/{var_id}", json={"params": {"top_k": 80}})
+    assert update_resp.status_code == 200
+    assert json.loads(update_resp.json()["params"])["top_k"] == 80
+
+
+def test_update_variant_system_prompt(client):
+    """PUT with system_prompt should update it."""
+    create_resp = client.post(
+        "/api/eval/variants",
+        json={
+            "label": "SP update test",
+            "prompt_template_id": "zero-shot-causal",
+            "model": "qwen2.5:7b",
+        },
+    )
+    var_id = create_resp.json()["id"]
+    update_resp = client.put(f"/api/eval/variants/{var_id}", json={"system_prompt": "New prompt"})
+    assert update_resp.status_code == 200
+    assert update_resp.json()["system_prompt"] == "New prompt"
+
+
+def test_clone_preserves_new_columns(client):
+    """Clone should copy system_prompt, params, provider, training_config."""
+    import json
+
+    create_resp = client.post(
+        "/api/eval/variants",
+        json={
+            "label": "Clone source",
+            "prompt_template_id": "zero-shot-causal",
+            "model": "qwen2.5:7b",
+            "system_prompt": "Be precise",
+            "params": {"top_k": 40},
+            "provider": "ollama",
+        },
+    )
+    var_id = create_resp.json()["id"]
+    clone_resp = client.post(f"/api/eval/variants/{var_id}/clone")
+    assert clone_resp.status_code == 201
+    clone = clone_resp.json()
+    assert clone["system_prompt"] == "Be precise"
+    assert json.loads(clone["params"])["top_k"] == 40
+    assert clone["provider"] == "ollama"
+
+
+def test_import_includes_new_columns(client):
+    """Import should persist system_prompt, params, provider."""
+    payload = {
+        "variants": [
+            {
+                "id": "imported-test-1",
+                "label": "Imported",
+                "prompt_template_id": "zero-shot-causal",
+                "model": "qwen2.5:7b",
+                "temperature": 0.6,
+                "num_ctx": 8192,
+                "system_prompt": "Imported system prompt",
+                "params": '{"top_k": 20}',
+                "provider": "openai",
+            }
+        ],
+        "templates": [],
+    }
+    resp = client.post("/api/eval/variants/import", json=payload)
+    assert resp.json()["variants_imported"] == 1
+    variants = client.get("/api/eval/variants").json()
+    imported = next((v for v in variants if v["id"] == "imported-test-1"), None)
+    assert imported is not None
+    assert imported["system_prompt"] == "Imported system prompt"
+    assert imported["provider"] == "openai"
+
+
+def test_generate_with_provider(client):
+    """Bulk generate should accept and apply provider parameter."""
+    resp = client.post(
+        "/api/eval/variants/generate",
+        json={
+            "models": ["gpt-4o-mini"],
+            "template_id": "zero-shot-causal",
+            "provider": "openai",
+        },
+    )
+    assert resp.status_code == 200
+    created = resp.json()["variants"]
+    assert len(created) == 1
+    assert created[0]["provider"] == "openai"
+
+
+def test_update_variant_invalid_params_returns_400(client):
+    """PUT with invalid params should return 400."""
+    create_resp = client.post(
+        "/api/eval/variants",
+        json={
+            "label": "Invalid update test",
+            "prompt_template_id": "zero-shot-causal",
+            "model": "qwen2.5:7b",
+        },
+    )
+    var_id = create_resp.json()["id"]
+    update_resp = client.put(f"/api/eval/variants/{var_id}", json={"params": {"badparam": 1}})
+    assert update_resp.status_code == 400
