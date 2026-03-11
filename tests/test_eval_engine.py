@@ -4670,3 +4670,49 @@ class TestSelfCritiqueVariantParams:
         kwargs = mock_call_proxy.call_args.kwargs
         assert kwargs.get("extra_params") is None
         assert kwargs.get("system_prompt") is None
+
+
+class TestConfigDiffNewColumns:
+    """Tests that describe_config_diff reports new column changes."""
+
+    def test_config_diff_detects_params_change(self):
+        """describe_config_diff should report per-key params changes."""
+        from ollama_queue.eval.analysis import describe_config_diff
+
+        a = {"model": "m", "temperature": 0.6, "num_ctx": 8192, "prompt_template_id": "t", "params": '{"top_k": 20}'}
+        b = {"model": "m", "temperature": 0.6, "num_ctx": 8192, "prompt_template_id": "t", "params": '{"top_k": 40}'}
+        diffs = describe_config_diff(a, b)
+        assert any("top_k" in d for d in diffs)
+
+    def test_config_diff_detects_system_prompt_change(self):
+        """describe_config_diff should report system_prompt changes."""
+        from ollama_queue.eval.analysis import describe_config_diff
+
+        a = {"model": "m", "temperature": 0.6, "num_ctx": 8192, "prompt_template_id": "t", "system_prompt": None}
+        b = {
+            "model": "m",
+            "temperature": 0.6,
+            "num_ctx": 8192,
+            "prompt_template_id": "t",
+            "system_prompt": "Be precise",
+        }
+        diffs = describe_config_diff(a, b)
+        assert any("system" in d.lower() or "prompt" in d.lower() for d in diffs)
+
+    def test_config_diff_detects_provider_change(self):
+        """describe_config_diff should report provider changes."""
+        from ollama_queue.eval.analysis import describe_config_diff
+
+        a = {"model": "m", "temperature": 0.6, "num_ctx": 8192, "prompt_template_id": "t", "provider": "ollama"}
+        b = {"model": "m", "temperature": 0.6, "num_ctx": 8192, "prompt_template_id": "t", "provider": "claude"}
+        diffs = describe_config_diff(a, b)
+        assert any("provider" in d.lower() for d in diffs)
+
+    def test_config_diff_no_change_when_params_equal(self):
+        """describe_config_diff should not report diff when params are equal."""
+        from ollama_queue.eval.analysis import describe_config_diff
+
+        a = {"model": "m", "temperature": 0.6, "num_ctx": 8192, "prompt_template_id": "t", "params": '{"top_k": 40}'}
+        b = {"model": "m", "temperature": 0.6, "num_ctx": 8192, "prompt_template_id": "t", "params": '{"top_k": 40}'}
+        diffs = describe_config_diff(a, b)
+        assert not any("top_k" in d for d in diffs)
