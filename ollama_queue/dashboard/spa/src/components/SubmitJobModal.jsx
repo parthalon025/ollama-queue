@@ -94,7 +94,7 @@ export default function SubmitJobModal({ onJobSubmitted, open: controlledOpen, o
         if (!command.trim()) return 'Command is required';
         if (!source.trim()) return 'Source is required';
         const p = Number(priority);
-        if (!Number.isInteger(p) || p < 1 || p > 9) return 'Priority must be a valid level (1–9)';
+        if (!Number.isInteger(p) || p < 1 || p > 10) return 'Priority must be a valid level (1–10)';
         const t = Number(timeout);
         if (!Number.isInteger(t) || t < 1) return 'Timeout must be a positive integer (seconds)';
         return null;

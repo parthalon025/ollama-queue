@@ -106,7 +106,7 @@ export default function AddRecurringJobModal({ onAdded }) {
             if (!form.cron.trim()) return 'Cron expression is required';
         }
         const p = Number(form.priority);
-        if (!Number.isInteger(p) || p < 1 || p > 9) return 'Priority must be a valid level (1\u20139)';
+        if (!Number.isInteger(p) || p < 1 || p > 10) return 'Priority must be a valid level (1\u201310)';
         return null;
     }
 

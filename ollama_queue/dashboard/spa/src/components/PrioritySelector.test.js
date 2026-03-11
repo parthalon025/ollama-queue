@@ -55,3 +55,20 @@ test('marks selected level with distinct style', () => {
   const critStyle = critBtn?.props?.style || '';
   expect(normalStyle).not.toEqual(critStyle);
 });
+
+test('maps even priority values to correct category', () => {
+  // priority=2 → Critical (range 1-2), not High
+  let vnode = PrioritySelector({ value: 2, onChange: () => {} });
+  const buttons2 = findAll(vnode, n => n?.type === 'button');
+  const critBtn2 = buttons2.find(b => findText(b).match(/^critical$/i));
+  const highBtn2 = buttons2.find(b => findText(b).match(/^high$/i));
+  expect(critBtn2.props.style).toContain('status-error');
+  expect(critBtn2.props.style).not.toEqual(highBtn2.props.style);
+
+  // priority=4 → High (range 3-4), not Normal
+  vnode = PrioritySelector({ value: 4, onChange: () => {} });
+  const buttons4 = findAll(vnode, n => n?.type === 'button');
+  const highBtn4 = buttons4.find(b => findText(b).match(/^high$/i));
+  const normalBtn4 = buttons4.find(b => findText(b).match(/^normal$/i));
+  expect(highBtn4.props.style).not.toEqual(normalBtn4.props.style);
+});
