@@ -81,7 +81,7 @@ export default function Settings() {
         pauseFb={pauseFb}
         resumeFb={resumeFb}
       />
-      <div style="margin-top:24px;padding-top:16px;border-top:1px solid var(--border-subtle);">
+      <div aria-label="Keyboard shortcuts" style="margin-top:24px;padding-top:16px;border-top:1px solid var(--border-subtle);">
         <p style="font-family:var(--font-mono);font-size:var(--type-micro);color:var(--text-tertiary);">
           Keyboard shortcuts:{'  '}
           <kbd>1</kbd> Now{'  ·  '}
