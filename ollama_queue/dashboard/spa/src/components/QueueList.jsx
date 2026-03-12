@@ -114,7 +114,7 @@ export default function QueueList({ jobs, currentJob }) {
 
   if (allItems.length === 0 && !currentJob) {
     return (
-      <div class="t-frame" data-label="Waiting to Run">
+      <div class="t-frame" data-label="Waiting to Run" data-chroma="gustave">
         <EmptyState headline="Queue is empty" body="Jobs you submit will appear here." />
       </div>
     );
@@ -178,7 +178,7 @@ export default function QueueList({ jobs, currentJob }) {
   }
 
   return (
-    <div class="t-frame" data-label="Waiting to Run" data-footer={`Estimated wait for all jobs: ${formatDuration(totalWait)}`}>
+    <div class="t-frame" data-label="Waiting to Run" data-chroma="gustave" data-footer={`Estimated wait for all jobs: ${formatDuration(totalWait)}`}>
       {/* Tag filter chips */}
       {tags.length > 0 && (
         <div style="display: flex; gap: 0.4rem; margin-bottom: 0.5rem; flex-wrap: wrap;">

@@ -188,7 +188,7 @@ export default function Now({ onSubmitRequest }) {
 
                     {/* Resource gauges */}
                     {latestHealth && (
-                        <div class="t-frame" data-label="System Resources">
+                        <div class="t-frame" data-label="System Resources" data-chroma="lune">
                             <ResourceGauges
                                 ram={latestHealth.ram_pct}
                                 vram={latestHealth.vram_pct}
@@ -208,6 +208,7 @@ export default function Now({ onSubmitRequest }) {
                             sparkColor="var(--accent)"
                             delta={kpis ? buildJobsDelta(kpis, hist) : null}
                             tooltip="Total jobs completed in the last 24 hours. Rising = queue is healthy. Falling = daemon may be stalled."
+                            chroma="lune"
                         />
                         <HeroCard
                             label="Average Wait Before Starting"
@@ -216,6 +217,7 @@ export default function Now({ onSubmitRequest }) {
                             sparkColor="var(--accent)"
                             delta={kpis ? buildWaitDelta(kpis.avg_wait_seconds) : null}
                             tooltip="Average time a job spends in queue before the daemon starts it. Spikes mean the daemon was busy or paused."
+                            chroma="lune"
                         />
                         <HeroCard
                             label="Auto-Paused Time Today"
@@ -226,6 +228,7 @@ export default function Now({ onSubmitRequest }) {
                             sparkColor="var(--status-warning)"
                             delta={kpis ? buildPauseDelta(kpis.pause_minutes_24h) : null}
                             tooltip="Total minutes the daemon spent paused in the last 24 hours. High values mean frequent health-triggered pauses."
+                            chroma="maelle"
                         />
                         <HeroCard
                             label="7-Day Success Rate"
@@ -236,6 +239,7 @@ export default function Now({ onSubmitRequest }) {
                             sparkColor="var(--accent)"
                             delta={kpis ? buildSuccessRateDelta(kpis, hist) : null}
                             tooltip="Percentage of completed jobs that succeeded. Below 90% warrants investigation in History."
+                            chroma="maelle"
                         />
                     </div>
 
