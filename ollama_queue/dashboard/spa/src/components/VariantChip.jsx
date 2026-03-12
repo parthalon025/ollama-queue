@@ -7,12 +7,12 @@
 import { h } from 'preact';
 import F1Score from './F1Score.jsx';
 
-export default function VariantChip({ variantId, f1, isProduction, isRecommended, provider }) {
+export default function VariantChip({ variantId, f1, isProduction, isRecommended, provider, label }) {
   const star = isProduction ? '★' : isRecommended ? '☆' : null;
   return (
     <div class="variant-chip">
       {star && <span class="variant-star">{star}</span>}
-      <span class="variant-id">{variantId}</span>
+      <span class="variant-id">{label || variantId}</span>
       {provider && <span class="provider-badge">{provider}</span>}
       {f1 != null && <F1Score value={f1} />}
     </div>

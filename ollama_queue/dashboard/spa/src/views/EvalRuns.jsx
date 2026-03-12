@@ -19,13 +19,6 @@ import RunHistoryTable from '../components/eval/RunHistoryTable.jsx';
 
 // NOTE: All .map() callbacks use descriptive parameter names — never 'h' (shadows JSX factory)
 
-const PHASE_LABELS = {
-  generating: 'Generating outputs',
-  judging:    'Scoring with judge',
-  analyzing:  'Analyzing results',
-  promoting:  'Deciding winner',
-};
-
 export default function EvalRuns() {
   const winner = evalWinner.value;
   const activeRun = evalActiveRun.value;
