@@ -945,3 +945,224 @@ def test_iter_ndjson_release_on_error(client, db):
     # After error, proxy claim should be released via the finally block
     state = db.get_daemon_state()
     assert state["state"] == "idle"
+
+
+# ---------------------------------------------------------------------------
+# BitNet routing tests (/v1/chat/completions with bitnet: model prefix)
+# ---------------------------------------------------------------------------
+
+
+def test_bitnet_chat_completions_routes_to_bitnet_url(client):
+    """bitnet: model prefix routes to BITNET_URL, not OLLAMA_URL."""
+    captured = {}
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "id": "chatcmpl-abc",
+        "object": "chat.completion",
+        "choices": [{"index": 0, "message": {"role": "assistant", "content": "Hello!"}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
+    }
+
+    async def capture_post(url, json=None, **kwargs):
+        captured["url"] = url
+        captured["body"] = json
+        return mock_response
+
+    with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.post = capture_post
+        mock_cls.return_value = mock_client
+
+        resp = client.post(
+            "/v1/chat/completions",
+            json={"model": "bitnet:10b", "messages": [{"role": "user", "content": "hi"}]},
+        )
+
+    assert resp.status_code == 200
+    # Must route to BITNET_URL, not OLLAMA_URL
+    assert "11435" in captured["url"] or "bitnet" in captured["url"].lower()
+    assert "/v1/chat/completions" in captured["url"]
+
+
+def test_bitnet_chat_completions_returns_raw_openai_format(client):
+    """BitNet response is returned as-is (no Ollama→OpenAI translation)."""
+    openai_response = {
+        "id": "chatcmpl-xyz",
+        "object": "chat.completion",
+        "created": 1234567890,
+        "model": "bitnet:10b",
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": "Ternary!"},
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6},
+    }
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = openai_response
+
+    with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.post = AsyncMock(return_value=mock_response)
+        mock_cls.return_value = mock_client
+
+        resp = client.post(
+            "/v1/chat/completions",
+            json={"model": "bitnet:10b", "messages": [{"role": "user", "content": "hi"}]},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    # Response is passed through as-is (no translation wrapping)
+    assert data["object"] == "chat.completion"
+    assert data["choices"][0]["message"]["content"] == "Ternary!"
+    # _queue_job_id stripped before returning to caller
+    assert "_queue_job_id" not in data
+
+
+def test_bitnet_chat_completions_logged_in_jobs_table(client, db):
+    """BitNet requests create a job row with resource_profile='bitnet'."""
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "object": "chat.completion",
+        "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+    }
+
+    with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.post = AsyncMock(return_value=mock_response)
+        mock_cls.return_value = mock_client
+
+        client.post(
+            "/v1/chat/completions",
+            json={"model": "bitnet:10b", "messages": [{"role": "user", "content": "test"}]},
+        )
+
+    with db._lock:
+        row = (
+            db._connect()
+            .execute("SELECT * FROM jobs WHERE command = 'proxy:/v1/chat/completions[bitnet]' ORDER BY id DESC LIMIT 1")
+            .fetchone()
+        )
+
+    assert row is not None
+    assert row["model"] == "bitnet:10b"
+    assert row["resource_profile"] == "bitnet"
+    assert row["status"] == "completed"
+
+
+def test_bitnet_chat_completions_queue_metadata_not_forwarded(client):
+    """_priority/_source/_timeout are popped and not sent to BitNet."""
+    captured = {}
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "object": "chat.completion",
+        "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}],
+        "usage": {},
+    }
+
+    async def capture_post(url, json=None, **kwargs):
+        captured["body"] = json
+        return mock_response
+
+    with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.post = capture_post
+        mock_cls.return_value = mock_client
+
+        client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "bitnet:10b",
+                "messages": [{"role": "user", "content": "hi"}],
+                "_priority": 2,
+                "_source": "test",
+                "_timeout": 30,
+            },
+        )
+
+    body = captured["body"]
+    assert "_priority" not in body
+    assert "_source" not in body
+    assert "_timeout" not in body
+
+
+def test_bitnet_chat_completions_paused_returns_503(client):
+    """Returns 503 when daemon is manually paused."""
+    client.post("/api/daemon/pause")
+    resp = client.post(
+        "/v1/chat/completions",
+        json={"model": "bitnet:10b", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert resp.status_code == 503
+
+
+def test_bitnet_chat_completions_server_error_returns_502(client):
+    """Returns 502 when BitNet llama-server is unreachable."""
+    with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.post = AsyncMock(side_effect=Exception("connection refused"))
+        mock_cls.return_value = mock_client
+
+        resp = client.post(
+            "/v1/chat/completions",
+            json={"model": "bitnet:10b", "messages": [{"role": "user", "content": "hi"}]},
+        )
+
+    assert resp.status_code == 502
+    assert "BitNet" in resp.json()["detail"]
+
+
+def test_non_bitnet_model_still_routes_to_ollama(client):
+    """Non-bitnet: models still go through the Ollama translation path."""
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "message": {"role": "assistant", "content": "Hi"},
+        "done": True,
+        "done_reason": "stop",
+    }
+    captured = {}
+
+    async def capture_post(url, json=None, **kwargs):
+        captured["url"] = url
+        return mock_response
+
+    with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.post = capture_post
+        mock_cls.return_value = mock_client
+
+        resp = client.post(
+            "/v1/chat/completions",
+            json={"model": "qwen2.5:7b", "messages": [{"role": "user", "content": "hi"}]},
+        )
+
+    assert resp.status_code == 200
+    # Must route to Ollama /api/chat (not BitNet /v1/chat/completions)
+    assert "11434" in captured["url"] or "/api/chat" in captured["url"]
+    # Response is wrapped in OpenAI format by the Ollama translation layer
+    data = resp.json()
+    assert data["object"] == "chat.completion"
