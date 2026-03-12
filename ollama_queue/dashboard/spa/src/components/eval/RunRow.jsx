@@ -3,7 +3,7 @@ import { useState, useRef, useEffect } from 'preact/hooks';
 import { EVAL_TRANSLATIONS } from './translations.js';
 import ResultsTable from './ResultsTable.jsx';
 import ConfusionMatrix from './ConfusionMatrix.jsx';
-import { API, evalActiveRun, evalSubTab, evalVariants, fetchEvalRuns, fetchEvalVariants, fetchRunAnalysis, startEvalPoll } from '../../store.js';
+import { API, evalActiveRun, evalSubTab, evalVariants, fetchEvalRuns, fetchEvalVariants, fetchRunAnalysis, startEvalPoll } from '../../stores';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
 // What it shows: A single eval run row with 3-level progressive disclosure.
 //   L1: status dot, winner config, quality score, date, item count.
