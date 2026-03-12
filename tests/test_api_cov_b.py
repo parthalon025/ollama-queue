@@ -302,7 +302,11 @@ def test_run_now_not_found(client):
 # Lines 834-839: generate-description endpoint
 # ---------------------------------------------------------------------------
 def test_generate_description_success(client, db):
-    """Covers lines 834-839: rj found, description generated and returned."""
+    """Covers lines 834-839: rj found, background thread kicked off, ok=True returned.
+
+    The endpoint spawns a background thread and returns immediately with description=None.
+    The description is written to the DB asynchronously and visible on the next GET /api/schedule poll.
+    """
     client.post(
         "/api/schedule",
         json={"name": "desc-job", "command": "echo hi", "interval_seconds": 3600},
@@ -319,7 +323,8 @@ def test_generate_description_success(client, db):
     assert resp.status_code == 200
     data = resp.json()
     assert data["ok"] is True
-    assert data["description"] == "A great job."
+    # Endpoint returns None immediately — description arrives via next GET /api/schedule poll
+    assert data["description"] is None
 
 
 def test_generate_description_not_found(client):
