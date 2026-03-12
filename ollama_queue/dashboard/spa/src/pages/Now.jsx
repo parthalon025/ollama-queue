@@ -228,7 +228,7 @@ export default function Now({ onSubmitRequest }) {
                             sparkColor="var(--status-warning)"
                             delta={kpis ? buildPauseDelta(kpis.pause_minutes_24h) : null}
                             tooltip="Total minutes the daemon spent paused in the last 24 hours. High values mean frequent health-triggered pauses."
-                            chroma="maelle"
+                            chroma="sciel"
                         />
                         <HeroCard
                             label="7-Day Success Rate"
@@ -239,7 +239,7 @@ export default function Now({ onSubmitRequest }) {
                             sparkColor="var(--accent)"
                             delta={kpis ? buildSuccessRateDelta(kpis, hist) : null}
                             tooltip="Percentage of completed jobs that succeeded. Below 90% warrants investigation in History."
-                            chroma="maelle"
+                            chroma="gustave"
                         />
                     </div>
 
