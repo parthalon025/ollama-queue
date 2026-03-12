@@ -1,5 +1,5 @@
 import { h } from 'preact';
-import { useState } from 'preact/hooks';
+import { useState, useEffect } from 'preact/hooks';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
@@ -21,6 +21,17 @@ function formatCellLabel(dayIdx, hourIdx) {
 export default function ActivityHeatmap({ data }) {
   const [tooltip, setTooltip] = useState(null); // { x, y, label, value }
   const items = data || [];
+
+  useEffect(() => {
+    if (!tooltip) return;
+    const clear = () => setTooltip(null);
+    window.addEventListener('scroll', clear, { passive: true, capture: true });
+    window.addEventListener('resize', clear, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', clear, { capture: true });
+      window.removeEventListener('resize', clear);
+    };
+  }, [tooltip]);
 
   if (items.length === 0) {
     return (
@@ -63,23 +74,36 @@ export default function ActivityHeatmap({ data }) {
             {DAYS[dow]}
           </div>
           {HOURS.map((hr) => {
-            const val = lookup[`${dow}-${hr}`] || 0;
-            const opacity = maxMinutes > 0 ? Math.max(0.05, val / maxMinutes) : 0.05;
+            const val = lookup[`${dow}-${hr}`];  // undefined if no data row exists
+            const isEmpty = val === undefined || val === null;
+            const minutes = isEmpty ? 0 : val;
+            const opacity = maxMinutes > 0 ? Math.max(0.05, minutes / maxMinutes) : 0.05;
             return (
               <div
                 key={hr}
                 style={{
                   height: '14px',
                   background: `var(--accent)`,
-                  opacity: val > 0 ? opacity : 0.05,
+                  opacity: minutes > 0 ? opacity : 0.05,
                   borderRadius: '1px',
                 }}
-                onMouseEnter={e => setTooltip({
-                  x: e.clientX + 12,
-                  y: e.clientY - 40,
-                  label: formatCellLabel(dow, hr),
-                  value: val > 0 ? `${val.toFixed(1)} GPU-minutes` : 'No data',
-                })}
+                onMouseEnter={e => {
+                  const TOOLTIP_W = 160;
+                  const x = e.clientX + 12 + TOOLTIP_W > window.innerWidth
+                    ? e.clientX - TOOLTIP_W - 4
+                    : e.clientX + 12;
+                  const y = Math.max(8, e.clientY - 40);
+                  setTooltip({
+                    x,
+                    y,
+                    label: formatCellLabel(dow, hr),
+                    value: isEmpty
+                      ? 'No data'
+                      : minutes === 0
+                        ? '0 GPU-minutes (no active work)'
+                        : `${minutes.toFixed(1)} GPU-minutes`,
+                  });
+                }}
                 onMouseLeave={() => setTooltip(null)}
               />
             );
