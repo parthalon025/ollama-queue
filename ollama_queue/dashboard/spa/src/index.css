@@ -673,6 +673,26 @@ body {
   .stagger-children > * { opacity: 1; animation: none; }
 }
 
+/* ── Tab entrance animation (@starting-style) ── */
+/* Graceful fallback: browsers without @starting-style support get instant render, no layout shift */
+@starting-style {
+  .tab-enter {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+.tab-enter {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .tab-enter {
+    transition: opacity 0.2s ease, transform 0.2s ease;
+  }
+}
+
 /* ── Sidebar layout system ── */
 
 /* Root flex container */
