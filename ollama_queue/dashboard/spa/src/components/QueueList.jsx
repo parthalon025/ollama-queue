@@ -1,4 +1,3 @@
-import { h } from 'preact';
 import { useState, useMemo, useEffect } from 'preact/hooks';
 import { useSignal } from '@preact/signals';
 import { ShFrozen } from 'superhot-ui/preact';
