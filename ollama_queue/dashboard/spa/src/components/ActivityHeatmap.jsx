@@ -48,7 +48,7 @@ export default function ActivityHeatmap({ data }) {
   let maxMinutes = 0;
   for (const row of items) {
     const key = `${row.dow}-${parseInt(row.hour, 10)}`;
-    const val = row.gpu_minutes || 0;
+    const val = row.gpu_minutes != null ? row.gpu_minutes : 0;
     lookup[key] = val;
     if (val > maxMinutes) maxMinutes = val;
   }
