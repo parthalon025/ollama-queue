@@ -58,6 +58,7 @@ export default function EvalSettings() {
           ))}
         </div>
         <ProviderRoleSection
+          key={activeRole}
           role={activeRole}
           settings={settings ? {
             provider: settings[`${activeRole}_provider`],
