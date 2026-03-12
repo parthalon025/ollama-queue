@@ -19,3 +19,15 @@ test('handles null, undefined, negative', () => {
   expect(formatDuration(undefined)).toBe('--');
   expect(formatDuration(-1)).toBe('--');
 });
+
+test('handles zero', () => {
+  expect(formatDuration(0)).toBe('0s');
+});
+
+test('formats exactly 1 hour', () => {
+  expect(formatDuration(3600)).toBe('1h 0m');
+});
+
+test('handles very large values', () => {
+  expect(formatDuration(7380)).toBe('2h 3m');
+});
