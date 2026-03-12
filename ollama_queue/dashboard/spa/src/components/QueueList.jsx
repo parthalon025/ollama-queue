@@ -5,6 +5,7 @@ import { applyFreshness } from 'superhot-ui';
 import { queue, queueEtas, API, refreshQueue } from '../stores';
 import EmptyState from './EmptyState.jsx';
 import { formatDuration } from '../utils/time.js';
+import { priorityBorderWidth, priorityBorderOpacity } from '../utils/priority.js';
 
 /**
  * What it shows: Every job waiting to run, priority-ordered, with estimated duration.
@@ -30,20 +31,6 @@ function priorityColor(p) {
   if (p <= 6) return PRIORITY_COLORS.normal;
   if (p <= 8) return PRIORITY_COLORS.low;
   return PRIORITY_COLORS.background;
-}
-
-// Non-color encoding for priority — Treisman (1980): combine color + independent channel
-// for colorblind safety. Border thickness is independent of hue.
-function priorityBorderWidth(priority) {
-  if (priority <= 2) return '4px';  // Critical
-  if (priority <= 4) return '3px';  // High
-  if (priority <= 6) return '2px';  // Normal
-  if (priority <= 8) return '1px';  // Low
-  return '1px';                      // Background (opacity handled separately)
-}
-
-function priorityBorderOpacity(priority) {
-  return priority >= 9 ? '0.4' : '1';
 }
 
 // What it shows: Visual freshness state on a queue row based on how long ago the job was submitted.
