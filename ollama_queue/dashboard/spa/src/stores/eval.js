@@ -258,6 +258,29 @@ export const evalWinner = computed(() =>
   (evalVariants.value || []).find(v => v.is_recommended || v.is_production) || null
 );
 
+// What it shows: Post-run action suggestions parsed from the active eval run's suggestions_json field.
+// Decision it drives: Shows the user up to 3 recommended next actions after a run completes.
+export const evalActiveSuggestions = computed(() => {
+  const run = evalActiveRun.value;
+  if (!run?.suggestions_json) return [];
+  try {
+    const parsed = typeof run.suggestions_json === 'string'
+      ? JSON.parse(run.suggestions_json) : run.suggestions_json;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch { return []; }
+});
+
+// What it shows: Oracle (judge reliability) report parsed from the active eval run's oracle_json field.
+// Decision it drives: Shows kappa score and judge agreement metrics for the current eval session.
+export const evalActiveOracle = computed(() => {
+  const run = evalActiveRun.value;
+  if (!run?.oracle_json) return null;
+  try {
+    return typeof run.oracle_json === 'string'
+      ? JSON.parse(run.oracle_json) : run.oracle_json;
+  } catch { return null; }
+});
+
 // What it shows: Number of eval runs scheduled in the next 4 hours.
 // Decision it drives: Plan tab badge — is there an eval coming that will use the GPU?
 export const scheduledEvalCount = signal(0);
