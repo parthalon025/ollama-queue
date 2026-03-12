@@ -20,7 +20,7 @@ export * from './health.js';
 // ── Import individual signals/functions needed by the polling orchestrator ────
 import { status, queue, connectionStatus } from './queue.js';
 import { settings } from './settings.js';
-import { healthData, durationData, heatmapData, dlqSchedulePreview,
+import { healthData, cpuCount, durationData, heatmapData, dlqSchedulePreview,
          fetchDLQ, fetchDeferred, fetchDLQSchedulePreview, fetchModelPerformance,
          fetchPerformanceCurve } from './health.js';
 import { history } from './queue.js';
@@ -88,7 +88,7 @@ async function _fetchNonRealtime() {
             fetch(`${API}/heatmap`),
             fetch(`${API}/history`),
         ]);
-        if (hResp.ok) { const d = await hResp.json(); healthData.value = Array.isArray(d) ? d : (d.log ?? []); }
+        if (hResp.ok) { const d = await hResp.json(); healthData.value = Array.isArray(d) ? d : (d.log ?? []); if (d.cpu_count) cpuCount.value = d.cpu_count; }
         if (durResp.ok) durationData.value = await durResp.json();
         if (heatResp.ok) heatmapData.value = await heatResp.json();
         if (histResp.ok) history.value = await histResp.json();

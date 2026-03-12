@@ -6,7 +6,7 @@ import StatusBadge from './StatusBadge.jsx';
 import ResourceGauges from './ResourceGauges.jsx';
 import EmptyState from './EmptyState.jsx';
 import { formatDuration } from '../utils/time.js';
-import { API } from '../stores';
+import { API, cpuCount } from '../stores';
 
 /**
  * What it shows: What the daemon is doing RIGHT NOW — running job name/model/elapsed time
@@ -197,7 +197,7 @@ export default function CurrentJob({ daemon, currentJob, latestHealth, settings,
           <ResourceGauges
             ram={hp.ram_pct}
             vram={hp.vram_pct}
-            load={hp.load_avg}
+            load={(hp.load_avg / (cpuCount.value || 1)) * 100}
             swap={hp.swap_pct}
             settings={settings}
           />
