@@ -1733,3 +1733,6 @@ kbd {
 .lineage-tip             { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; font-size: 0.75rem; color: var(--text-muted, #9ca3af); }
 .lineage-tip__loading    { color: var(--text-muted, #9ca3af); font-style: italic; }
 .lineage-tip__empty      { display: none; }
+
+/* Variant card grid */
+.variant-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; padding: 16px 0; }
