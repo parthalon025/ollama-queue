@@ -18,7 +18,7 @@ import {
     formatCountdown, formatInterval, parseInterval, formatDuration,
     computeRho, rhoStatus, priorityCategory, groupJobsByTag, groupNextDue,
     CATEGORY_COLORS, COLUMN_DEFS, COL_COUNT, STATUS_COLORS,
-    labelStyle, inputStyle, isMobileScreen,
+    labelStyle, inputStyle, isMobileScreen, priorityBorderWidth,
 } from './helpers.js';
 
 // What it shows: The scheduling view — the Gantt timeline of upcoming jobs, the 24h load-map
@@ -419,7 +419,7 @@ export default function Plan() {
                 }}>
                 <td style={{
                     padding: '0.5rem 0.75rem',
-                    borderLeft: `3px solid ${color}`,
+                    borderLeft: `${priorityBorderWidth(rj.priority)} solid ${color}`,
                     position: 'sticky', left: 0,
                     background: isExpanded ? 'var(--bg-inset)' : 'var(--bg-surface-raised)',
                     zIndex: 1,

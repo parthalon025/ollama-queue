@@ -32,6 +32,20 @@ function priorityColor(p) {
   return PRIORITY_COLORS.background;
 }
 
+// Non-color encoding for priority — Treisman (1980): combine color + independent channel
+// for colorblind safety. Border thickness is independent of hue.
+function priorityBorderWidth(priority) {
+  if (priority <= 2) return '4px';  // Critical
+  if (priority <= 4) return '3px';  // High
+  if (priority <= 6) return '2px';  // Normal
+  if (priority <= 8) return '1px';  // Low
+  return '1px';                      // Background (opacity handled separately)
+}
+
+function priorityBorderOpacity(priority) {
+  return priority >= 9 ? '0.4' : '1';
+}
+
 // What it shows: Visual freshness state on a queue row based on how long ago the job was submitted.
 // Decision it drives: Old jobs sitting in the queue stand out visually (cooling → frozen → stale),
 //   prompting the user to investigate why they haven't started.
@@ -224,11 +238,11 @@ export default function QueueList({ jobs, currentJob }) {
                   `border-bottom: 1px solid var(--border-subtle);`,
                   job._isRunning
                     ? `border-left: 3px solid var(--accent);`
-                    : `border-left: 3px solid ${priorityColor(job.priority)};`,
+                    : `border-left: ${priorityBorderWidth(job.priority)} solid ${priorityColor(job.priority)};`,
                   `padding-left: 6px;`,
                   job._isRunning ? 'cursor: pointer;' : 'cursor: grab;',
                   'transition: opacity 0.1s, background 0.1s;',
-                  !job._isRunning && dragIndex !== null && dragIdx === dragIndex ? 'opacity: 0.35;' : 'opacity: 1;',
+                  !job._isRunning && dragIndex !== null && dragIdx === dragIndex ? 'opacity: 0.35;' : `opacity: ${priorityBorderOpacity(job.priority)};`,
                   !job._isRunning && dragIndex !== null && dropIdx === dragIndex && dragIdx !== dragIndex
                     ? 'background: var(--bg-surface-raised); border-radius: 4px;' : '',
                 ].join(' ')}
