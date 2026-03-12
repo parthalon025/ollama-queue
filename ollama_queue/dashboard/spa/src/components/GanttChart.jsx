@@ -314,6 +314,7 @@ function BarDetailCard({ job, runs, runsLoading, onClose, onRunJob, onScrollToJo
 
 export function GanttChart({
     jobs, tick, windowHours = 24, loadMapSlots = [], suggestSlots = [],
+    activeJobNames = new Set(),
     onRunJob = () => {}, onScrollToJob = () => {},
 }) {
     void tick;
@@ -330,6 +331,9 @@ export function GanttChart({
     const tooltip = useSignal(null); // { x, y, job }
 
     const wallNow = Date.now() / 1000;
+    // nowSeconds: integer Unix timestamp used for past/overrun bar classification.
+    // Computed once per render — no polling interval needed; re-renders on the normal poll cycle.
+    const nowSeconds = Math.floor(Date.now() / 1000);
     // When zoomed, windowStart shifts so the anchor bar is centered in a 2h view.
     const zoomWindowSecs = 2 * 3600;
     const windowSecs = zoomedAnchor ? zoomWindowSecs : windowHours * 3600;
@@ -651,6 +655,13 @@ export function GanttChart({
                     // so they're visually distinct from enabled bars without cluttering the chart.
                     const isDisabled = !job.enabled;
 
+                    // Time-aware bar state — uses nowSeconds computed once at render time (above).
+                    // isPast: the job's estimated window (start + duration) has already passed — shown desaturated.
+                    // isOverrun: window has passed AND the job is still listed as running — shown with threat-pulse effect.
+                    const jobEstEnd = job.next_run + (job.estimated_duration || 600);
+                    const isPast = nowSeconds > jobEstEnd;
+                    const isOverrun = isPast && activeJobNames.has(job.name);
+
                     // Outcome dot uses real exit code, not timing drift.
                     const { label: outcomeLabel, color: outcomeColor } = lastRunOutcome(job.last_exit_code, job.last_run);
                     const lastRunStr = job.last_run
@@ -672,6 +683,7 @@ export function GanttChart({
                             onClick={evt => { evt.stopPropagation(); handleBarClick(job); }}
                             onMouseEnter={e => { tooltip.value = { x: e.clientX + 16, y: e.clientY, job }; }}
                             onMouseLeave={() => { tooltip.value = null; }}
+                            data-sh-effect={isOverrun ? 'threat-pulse' : undefined}
                             style={{
                                 position: 'absolute',
                                 left: `${Math.min(leftPct, 99.5)}%`,
@@ -679,6 +691,9 @@ export function GanttChart({
                                 top: job._lane * laneHeight + 4,
                                 height: laneHeight - 8,
                                 opacity: isDimmed ? 0.15 : (isDisabled ? 0.4 : 1),
+                                // Past bars (estimated window fully elapsed) desaturate to signal
+                                // stale schedule data — the job window has passed without evidence of completion.
+                                filter: isPast ? 'saturate(0.2) opacity(0.6)' : undefined,
                                 transition: 'opacity 0.2s ease',
                                 outline: conflictIds.has(job.id) ? '2px solid var(--status-error)' : undefined,
                                 outlineOffset: conflictIds.has(job.id) ? '-1px' : undefined,
