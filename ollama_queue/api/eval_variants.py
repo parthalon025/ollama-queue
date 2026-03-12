@@ -275,6 +275,74 @@ def generate_eval_variants(body: dict = Body(...)):
     return {"created": len(created), "variants": created}
 
 
+@router.post("/api/eval/variants/sweep")
+def sweep_eval_variants(body: dict = Body(...)):
+    """Parameter sweep: clone a base variant N times, varying one dimension.
+
+    What it shows: N/A — write-only; created sweep variants appear in GET /api/eval/variants.
+    Decision it drives: Lets the user test a range of temperature/num_ctx values in one
+    operation instead of manually cloning N times.
+
+    Body: { base_variant_id, dimension (temperature|num_ctx|model), values: [...] }
+    Returns: { created: N, variants: [...] }
+    """
+    import datetime as _dt
+    import uuid
+
+    db = _api.db
+    base_id = body.get("base_variant_id")
+    dimension = body.get("dimension")
+    values = body.get("values", [])
+
+    allowed_dimensions = {"temperature", "num_ctx", "model"}
+    if not base_id:
+        raise HTTPException(status_code=400, detail="base_variant_id is required")
+    if dimension not in allowed_dimensions:
+        raise HTTPException(status_code=400, detail=f"dimension must be one of {sorted(allowed_dimensions)}")
+    if not values or not isinstance(values, list):
+        raise HTTPException(status_code=400, detail="values must be a non-empty list")
+
+    now = _dt.datetime.now(_dt.UTC).isoformat()
+    created = []
+    with db._lock:
+        conn = db._connect()
+        base = _get_eval_variant(conn, base_id)
+        for val in values:
+            new_id = str(uuid.uuid4())[:8]
+            label = f"{base['label']} ({dimension}={val})"
+            overrides = {
+                "temperature": base.get("temperature"),
+                "num_ctx": base.get("num_ctx"),
+                "model": base.get("model"),
+                dimension: val,
+            }
+            conn.execute(
+                """INSERT INTO eval_variants
+                   (id, label, prompt_template_id, model, temperature, num_ctx,
+                    is_recommended, is_system, created_at,
+                    params, system_prompt, training_config, provider)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    new_id,
+                    label,
+                    base["prompt_template_id"],
+                    overrides["model"],
+                    overrides["temperature"],
+                    overrides["num_ctx"],
+                    0,
+                    0,
+                    now,
+                    base.get("params"),
+                    base.get("system_prompt"),
+                    base.get("training_config"),
+                    base.get("provider"),
+                ),
+            )
+            created.append({"id": new_id, "label": label})
+        conn.commit()
+    return {"created": len(created), "variants": created}
+
+
 @router.post("/api/eval/variants")
 def create_eval_variant(body: dict = Body(...)):
     """Create a new user eval variant.
