@@ -277,7 +277,7 @@ function buildDurationSparkline(rows) {
 // Drives: lets the user see visually whether pauses cluster in a burst or are spread out.
 function buildPauseSparkline(rows) {
     if (!rows || rows.length < 2) return null;
-    const sorted = [...rows].reverse().slice(-24);
+    const sorted = [...rows].reverse();
     return [
         sorted.map((r) => r.timestamp),
         sorted.map((r) => (r.daemon_state === 'paused' ? 1 : 0)),
