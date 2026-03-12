@@ -1716,3 +1716,9 @@ kbd {
 @keyframes highlight-pulse { 0% { background: color-mix(in srgb, #f59e0b 25%, transparent); } 100% { background: transparent; } }
 .dlq-view-context { padding: 2px 8px; border-radius: 4px; border: 1px solid var(--border, #374151); background: none; color: var(--text-muted, #9ca3af); font-size: 0.75rem; cursor: pointer; }
 .model-filter-clear { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 6px; background: var(--surface-2, #1f2937); border: 1px solid var(--border, #374151); color: var(--text, #f3f4f6); font-size: 0.8rem; cursor: pointer; margin-bottom: 8px; }
+
+/* EvalRoleBadge */
+.eval-role-badge          { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 4px; border: none; font-size: 0.72rem; cursor: pointer; margin-left: 6px; }
+.eval-role-badge--judge   { background: #1e1b4b; color: #a5b4fc; }
+.eval-role-badge--generator { background: #14532d; color: #86efac; }
+.eval-role-badge__label   { font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }

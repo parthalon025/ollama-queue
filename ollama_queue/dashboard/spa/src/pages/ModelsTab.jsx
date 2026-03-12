@@ -7,6 +7,8 @@ import {
 } from '../stores';
 import { ModelBadge } from '../components/ModelBadge';
 import PageBanner from '../components/PageBanner.jsx';
+import { evalVariants } from '../stores/eval.js';
+import EvalRoleBadge from '../components/EvalRoleBadge.jsx';
 
 function useDebounce(value, delay) {
     const [debounced, setDebounced] = useState(value);
@@ -99,6 +101,13 @@ export default function ModelsTab() {
     }
 
     const installedNames = new Set(models.value.map(mdl => mdl.name));
+
+    // What it shows: Which model is the current eval judge and which is the generator under test.
+    // Decision it drives: Highlights eval roles directly in the model table so the user can
+    //   see at a glance which models are active in the eval pipeline.
+    const productionVariant = (evalVariants.value || []).find(pv => pv.is_production);
+    const judgeModel = productionVariant?.judge_model;
+    const generatorModel = productionVariant?.model;
 
     // What it shows: Active model filter set from an external signal (e.g. ModelChip click).
     // Decision it drives: Narrows the installed-models table to the selected model; shows a
@@ -208,7 +217,11 @@ export default function ModelsTab() {
                             {displayedModels.map(model => (
                                 <tr key={model.name} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                                     <td style={{ padding: '0.5rem 0.75rem', fontFamily: 'var(--font-mono)',
-                                                 color: 'var(--text-primary)' }}>{model.name}</td>
+                                                 color: 'var(--text-primary)' }}>
+                                        {model.name}
+                                        {model.name === judgeModel && <EvalRoleBadge role="judge" f1={productionVariant?.latest_f1} />}
+                                        {model.name === generatorModel && model.name !== judgeModel && <EvalRoleBadge role="generator" f1={productionVariant?.latest_f1} />}
+                                    </td>
                                     <td style={{ padding: '0.5rem 0.75rem' }}>
                                         <ModelBadge profile={model.resource_profile} typeTag={model.type_tag} />
                                     </td>

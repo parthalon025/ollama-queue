@@ -266,6 +266,24 @@ export const scheduledEvalCount = signal(0);
 // Decision it drives: VariantChip clicks set this; Variants tab scrolls to match.
 export const focusVariantId = signal(null);
 
+// What it shows: Eval runs scheduled within the next 4 hours.
+// Decision it drives: Plan tab Gantt renders these as indigo blocks so the user can see
+//   upcoming eval runs alongside recurring jobs and avoid scheduling conflicts.
+export const scheduledEvalRuns = signal([]);
+
+export async function fetchScheduledEvalRuns() {
+  try {
+    const res = await fetch(`${API}/eval/runs?status=scheduled`);
+    if (!res.ok) return;
+    const data = await res.json();
+    scheduledEvalRuns.value = Array.isArray(data) ? data : (data.items || []);
+    scheduledEvalCount.value = scheduledEvalRuns.value.filter(run => {
+      const inFourHours = Date.now() / 1000 + 4 * 3600;
+      return run.scheduled_for && run.scheduled_for < inFourHours;
+    }).length;
+  } catch { /* silent — eval scheduled runs are optional */ }
+}
+
 // On startup: verify stored active run is still live — clear it if the API says it's terminal.
 // This prevents a stale "Run #N generating" panel persisting after a service restart.
 if (evalActiveRun.value) {

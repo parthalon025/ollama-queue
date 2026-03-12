@@ -9,6 +9,8 @@ import {
 } from '../../stores';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
 import { GanttChart, runStatus } from '../../components/GanttChart';
+import { scheduledEvalRuns } from '../../stores/eval.js';
+import { currentTab } from '../../stores/health.js';
 import { ModelBadge } from '../../components/ModelBadge';
 import LoadMapStrip from '../../components/LoadMapStrip.jsx';
 import AddRecurringJobModal from '../../components/AddRecurringJobModal.jsx';
@@ -313,6 +315,22 @@ export default function Plan() {
 
     const jobs = scheduleJobs.value;
     const events = scheduleEvents.value;
+
+    // What it shows: Scheduled eval runs as Gantt bars alongside regular recurring jobs.
+    // Decision it drives: User can see at a glance when an eval will run so they can avoid
+    //   scheduling conflicting heavy jobs at the same time.
+    const evalBlocks = (scheduledEvalRuns.value || []).map(run => ({
+        id: `eval-${run.run_id}`,
+        name: `Eval: ${(run.variant_ids || []).slice(0, 3).join(',')}`,
+        source: 'eval',
+        next_run: run.scheduled_for,
+        estimated_duration: run.estimated_duration || 600,
+        enabled: true,
+        // Eval blocks are read-only pseudo-jobs — no recurring-job fields needed.
+        _isEval: true,
+        onClick: () => { currentTab.value = 'eval'; },
+    }));
+    const ganttJobs = [...jobs, ...evalBlocks];
 
     const visibleJobs = debouncedSearch
         ? jobs.filter(rj => rj.name.toLowerCase().includes(debouncedSearch.toLowerCase()))
@@ -1036,7 +1054,7 @@ export default function Plan() {
                     >{'\u2922'}</button>
                 </div>
                 <GanttChart
-                    jobs={jobs}
+                    jobs={ganttJobs}
                     tick={tick}
                     windowHours={24}
                     loadMapSlots={loadMap.value?.slots || []}
@@ -1061,7 +1079,7 @@ export default function Plan() {
                         >{'\u2715'} close</button>
                     </div>
                     <GanttChart
-                        jobs={jobs}
+                        jobs={ganttJobs}
                         tick={tick}
                         windowHours={isMobileScreen() ? 6 : 24}
                         loadMapSlots={loadMap.value?.slots || []}
