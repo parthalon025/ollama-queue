@@ -43,7 +43,8 @@ Running multiple services against a local Ollama instance creates a resource con
 | **Consumer detection** | 4-phase scanner finds every service calling Ollama directly. Config patcher rewrites them to route through the queue. Optional iptables REDIRECT intercept catches unpatched callers at the network layer. |
 | **Eval pipeline** | Run A/B–E prompt variant evaluations with an LLM judge (F1/recall/precision). Auto-promote the winning config when quality gates pass. Thompson Sampling routes production traffic to the recommended variant. |
 | **Intelligence layer** | Bayesian log-normal runtime estimation (4-tier hierarchy), log-linear cross-model performance curves, 10-factor slot scoring with VRAM hard gates, hourly/daily load pattern learning. |
-| **Web dashboard** | 8-view Preact SPA: Now, Plan, History, Models, Performance, Settings, Eval, Consumers. SUPERHOT terminal aesthetic — CRT page banners, VT323 pixel font, glitch/shatter effects on state transitions, light/dark mode toggle. |
+| **Web dashboard** | 8-view Preact SPA: Now, Plan, History, Models, Performance, Settings, Eval, Consumers. SUPERHOT terminal aesthetic — CRT page banners, VT323 pixel font, glitch/shatter effects on state transitions, ThreatPulse gauges with three-state ambient animation, KPI degradation glitch on warning transitions. |
+| **Accessible, science-backed UI** | Non-color priority discriminators (Treisman multi-channel encoding), progressive disclosure on queue row hover (Shneiderman), sparklines on every KPI card (Tufte), semantic `data-chroma` tokens, three-tier animation system with `prefers-reduced-motion` opt-in, `@starting-style` tab entrance animations. |
 | **REST API** | 90+ endpoints covering all features. |
 
 ---
@@ -234,7 +235,7 @@ Eight views served from `http://localhost:7683/ui/`:
 
 | View | Description |
 |---|---|
-| **Now** | Running job, queue, resource gauges (RAM/VRAM), KPI cards, burst regime badge, alert strip |
+| **Now** | Running job, queue, ThreatPulse resource gauges (RAM/VRAM with three-state ambient animation), KPI cards with sparkline trends and chroma-coded severity, burst regime badge, alert strip |
 | **Plan** | 24h Gantt timeline with "now" needle, 48-bucket load-map strip with DLQ/deferral slot markers, traffic intensity badge, "Suggest slot" button, tag-grouped recurring jobs |
 | **History** | Job history, DLQ entries with reschedule status badges and reasoning, deferred jobs panel, duration trends, activity heatmap |
 | **Models** | Model table with active model tracking |
@@ -324,7 +325,7 @@ systemd timers / apps / proxy clients
 | **Scheduling** | croniter, custom 48-slot load map |
 | **Dashboard** | Preact 10, @preact/signals, Tailwind v4, uPlot |
 | **CLI** | Click |
-| **Tests** | pytest, pytest-xdist (1,588 tests, 100% line coverage) |
+| **Tests** | pytest, pytest-xdist (1,677 tests, 100% line coverage) |
 
 ---
 
@@ -351,7 +352,7 @@ ollama_queue/
 scripts/
   migrate_timers.py              # Migrate systemd timers to recurring jobs
   migrate_dlq_max_retries.py     # Schema migration (idempotent)
-tests/                           # 1,588 tests, 100% line coverage (pytest-xdist parallel)
+tests/                           # 1,677 tests, 100% line coverage (pytest-xdist parallel)
 ```
 
 ---
@@ -381,7 +382,7 @@ Dev/test: `pip install -r requirements-dev.txt`
 
 ```bash
 source .venv/bin/activate
-pytest  # 1,588 tests, 100% line coverage, parallel by default
+pytest  # 1,677 tests, 100% line coverage, parallel by default
 ```
 
 ---
@@ -402,6 +403,9 @@ Implementation plans and design decisions are in [`docs/plans/`](docs/plans/):
 | [DLQ auto-reschedule](docs/plans/2026-03-09-dlq-auto-reschedule-design.md) | Failure classification, slot scoring, proactive deferral, runtime estimation |
 | [Eval analysis panel](docs/plans/2026-03-09-eval-analysis-panel-design.md) | Per-item breakdown, bootstrap CI, stability, config diff |
 | [Eval UX improvements](docs/plans/2026-03-09-eval-ux-design.md) | Dead button removal, inline tooltips, variant descriptions |
+| [UX design philosophy](docs/plans/2026-03-11-ux-design-philosophy-improvements-design.md) | SUPERHOT aesthetic, animation discipline, interaction depth strategy |
+| [UX Phase 3 — SUPERHOT effects](docs/plans/2026-03-11-ux-phase3-superhot-philosophy-plan.md) | ThreatPulse gauges, KPI glitch, StatusBadge beat, typed cursor states |
+| [UX Phase 4 — Visualization Science](docs/plans/2026-03-11-ux-phase4-viz-science-plan.md) | Treisman priority encoding, Shneiderman disclosure, Tufte sparklines, animation tiers |
 
 ---
 
