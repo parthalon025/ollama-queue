@@ -38,11 +38,10 @@ export default function EvalTrends() {
   const events = (runs || []).flatMap(run => {
     const evts = [];
     if (run.completed_at && run.status === 'complete') {
-      evts.push({ type: 'run_completed', timestamp: run.completed_at, label: `Run #${run.run_id} complete` });
+      evts.push({ type: 'run_completed', timestamp: run.completed_at, label: `Run #${run.id} complete` });
     }
-    if (run.promoted_at) {
-      evts.push({ type: 'variant_promoted', timestamp: run.promoted_at, label: `${run.winner_variant} promoted` });
-    }
+    // NOTE: promotion event markers require a `promoted_at` field on the run object.
+    // That field is not yet in the API response — placeholder removed until backend adds it.
     return evts;
   });
 
