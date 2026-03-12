@@ -1,4 +1,3 @@
-import { h } from 'preact';
 import { useState } from 'preact/hooks';
 import { evalTemplates } from '../../stores';
 import TemplateRow from './TemplateRow.jsx';

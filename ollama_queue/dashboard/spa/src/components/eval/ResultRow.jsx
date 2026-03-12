@@ -1,4 +1,3 @@
-import { h } from 'preact';
 import { useState } from 'preact/hooks';
 import { EVAL_TRANSLATIONS } from './translations.js';
 import GenerationInspector from './GenerationInspector.jsx';

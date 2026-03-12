@@ -1,4 +1,3 @@
-import { h } from 'preact';
 import { useState } from 'preact/hooks';
 // What it shows: The configured data source connection status and last-test result.
 //   Shows item count, cluster count, and response time so users can verify the

@@ -1,4 +1,3 @@
-import { h } from 'preact';
 import { useState, useRef, useEffect } from 'preact/hooks';
 import { EVAL_TRANSLATIONS } from '../translations.js';
 import ResultsTable from '../ResultsTable.jsx';

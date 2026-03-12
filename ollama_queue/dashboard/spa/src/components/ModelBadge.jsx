@@ -1,4 +1,3 @@
-import { h } from 'preact';
 
 const PROFILE_COLORS = {
     embed:  { bg: 'var(--status-healthy)',      label: 'embed' },

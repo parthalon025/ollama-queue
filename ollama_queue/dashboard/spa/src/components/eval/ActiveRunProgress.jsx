@@ -1,4 +1,3 @@
-import { h } from 'preact';
 import { API, evalActiveRun, cancelEvalRun, startEvalPoll } from '../../stores';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
 import EvalPipelineSwimline from './EvalPipelineSwimline.jsx';

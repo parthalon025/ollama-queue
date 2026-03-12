@@ -1,4 +1,3 @@
-import { h } from 'preact';
 import { useEffect } from 'preact/hooks';
 // What it shows: F1 trend charts and stability indicators for all eval variants.
 // Decision it drives: Is the eval system improving? Which variant is best?

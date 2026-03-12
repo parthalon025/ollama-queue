@@ -1,4 +1,3 @@
-import { h } from 'preact';
 import { healthData, settings, connectionStatus } from '../stores';
 import SystemHealthChip from './SystemHealthChip.jsx';
 

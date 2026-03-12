@@ -1,4 +1,3 @@
-import { h } from 'preact';
 import { useCallback, useEffect, useRef } from 'preact/hooks';
 import { useSignal } from '@preact/signals';
 import { settings, status, API, restartDaemon } from '../stores';

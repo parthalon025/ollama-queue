@@ -3,7 +3,6 @@
 //   request counts, and intercept mode control.
 // Decision it drives: User decides which services to route through the queue,
 //   applies patches, and optionally enables system-wide iptables interception.
-import { h } from 'preact';
 import { useEffect } from 'preact/hooks';
 import { useActionFeedback } from '../hooks/useActionFeedback.js';
 import {

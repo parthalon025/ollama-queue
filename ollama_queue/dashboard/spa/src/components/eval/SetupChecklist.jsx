@@ -1,4 +1,3 @@
-import { h } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
 // What it shows: A 2-step getting-started guide for first-time eval setup.
 //   Hidden once setup_complete=true is stored in eval settings.

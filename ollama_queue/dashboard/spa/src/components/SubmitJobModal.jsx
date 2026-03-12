@@ -1,4 +1,3 @@
-import { h } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { settings, submitJob } from '../stores';
 import { useActionFeedback } from '../hooks/useActionFeedback.js';

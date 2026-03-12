@@ -1,4 +1,3 @@
-import { h } from 'preact';
 import { signal } from '@preact/signals';
 // What it shows: 4 scheduling mode radio options with conditional sub-inputs.
 //   Full speed / One at a time / Fill open slots / Scheduled.

@@ -1,4 +1,3 @@
-import { h } from 'preact';
 import { useState, useMemo } from 'preact/hooks';
 import { useSignal } from '@preact/signals';
 import EmptyState from './EmptyState.jsx';

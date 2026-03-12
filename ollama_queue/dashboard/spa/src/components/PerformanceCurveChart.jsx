@@ -1,4 +1,3 @@
-import { h } from 'preact';
 
 // What it shows: A scatter plot of model size (GB) vs throughput (tok/min) with a fitted
 //   log-linear regression line and 90% confidence band. Point size encodes run count.

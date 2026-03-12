@@ -1,4 +1,3 @@
-import { h } from 'preact';
 import { useEffect, useRef } from 'preact/hooks';
 import { useSignal } from '@preact/signals';
 import { applyMantra, removeMantra } from 'superhot-ui';

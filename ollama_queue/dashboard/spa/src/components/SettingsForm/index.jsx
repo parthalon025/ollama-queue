@@ -1,4 +1,3 @@
-import { h } from 'preact';
 import { useState, useRef, useCallback, useEffect } from 'preact/hooks';
 import { ThresholdPair, NumberRow, SelectRow, ToggleRow } from './SettingControls.jsx';
 

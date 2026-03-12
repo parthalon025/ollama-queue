@@ -1,4 +1,4 @@
-import { h, Fragment } from 'preact';
+import { Fragment } from 'preact';
 
 // NOTE: callback params use descriptive names — never 'h'
 const NAV_ITEMS = [

@@ -1,4 +1,3 @@
-import { h } from 'preact';
 // What it shows: Data quality indicators for the trend signal — run count,
 //   item pool growth, and judge reliability.
 // Decision it drives: Whether the trend line is trustworthy enough to act on

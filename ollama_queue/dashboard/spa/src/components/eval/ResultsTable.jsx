@@ -1,4 +1,3 @@
-import { h } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
 import { API } from '../../stores';
 import ResultRow from './ResultRow.jsx';

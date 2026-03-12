@@ -1,4 +1,3 @@
-import { h } from 'preact';
 import { evalVariants } from '../../stores';
 import VariantRow from './VariantRow.jsx';
 // What it shows: The full list of eval variant configs — system defaults first,

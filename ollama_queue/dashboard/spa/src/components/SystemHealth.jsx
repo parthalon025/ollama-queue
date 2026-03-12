@@ -1,4 +1,3 @@
-import { h } from 'preact';
 import { status } from '../stores';
 
 // What it shows: Real-time health of the system — CPU load, memory usage, GPU VRAM,
