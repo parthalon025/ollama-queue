@@ -1697,3 +1697,12 @@ kbd {
 .active-eval-strip__fill   { height: 100%; background: #6366f1; border-radius: 2px; transition: width 0.3s ease; }
 .active-eval-strip__cancel { padding: 0 6px; border: none; background: none; color: var(--text-muted, #9ca3af); cursor: pointer; }
 @media (max-width: 768px)  { .active-eval-strip { display: none; } }
+
+/* CohesionHeader / SystemSummaryLine / EvalWinnerChip */
+.cohesion-header            { display: flex; align-items: center; justify-content: space-between; padding: 4px 16px; background: var(--surface-1, #111827); border-bottom: 1px solid var(--border, #374151); font-size: 0.75rem; color: var(--text-muted, #9ca3af); position: sticky; top: 0; z-index: 10; }
+.cohesion-header__dlq-badge { padding: 2px 8px; border-radius: 10px; background: var(--color-error, #ef4444); color: white; font-weight: 600; }
+.system-summary-line        { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.eval-winner-chip           { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 10px; border: 1px solid var(--border, #374151); background: none; color: var(--text, #f3f4f6); font-size: 0.75rem; cursor: pointer; }
+.eval-winner-chip__star--gold { color: #f59e0b; }
+.eval-winner-chip__star       { color: var(--text-muted, #9ca3af); }
+@media (max-width: 768px)   { .cohesion-header { display: none; } }
