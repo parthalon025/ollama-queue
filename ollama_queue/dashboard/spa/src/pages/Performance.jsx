@@ -3,11 +3,13 @@ import {
     modelPerformance, performanceCurve,
     fetchModelPerformance, fetchPerformanceCurve,
 } from '../stores';
+import { evalVariants } from '../stores/eval.js';
 import { SystemHealth } from '../components/SystemHealth.jsx';
 import PerformanceCurveChart from '../components/PerformanceCurveChart.jsx';
 import LoadHeatmap from '../components/LoadHeatmap.jsx';
 import PageBanner from '../components/PageBanner.jsx';
 import ModelChip from '../components/ModelChip.jsx';
+import F1Score from '../components/F1Score.jsx';
 
 // What it shows: Model-level performance data — how fast each model generates tokens,
 //   how long each takes to warm up, how many times each has run — plus a fitted regression
@@ -18,6 +20,12 @@ import ModelChip from '../components/ModelChip.jsx';
 export default function Performance() {
     const stats = modelPerformance.value;
     const curve = performanceCurve.value;
+
+    // What it shows: Which eval variant is currently in production and which model it uses as judge.
+    // Decision it drives: User can see the eval judge model's performance context alongside
+    //   benchmark data — confirming the right model is judging quality.
+    const productionVariant = (evalVariants.value || []).find(v => v.is_production);
+    const judgeModel = productionVariant?.judge_model;
 
     useEffect(() => {
         fetchModelPerformance();
@@ -94,6 +102,13 @@ export default function Performance() {
                 Jobs completed per hour. Use this to estimate capacity for batch workloads.
             </p>
             <PerformanceCurveChart curve={curve} models={models} />
+
+            {judgeModel && (
+                <div class="perf-eval-annotation">
+                    ★ <strong>{judgeModel}</strong> is the current eval judge
+                    {productionVariant?.latest_f1 != null && <> · <F1Score value={productionVariant.latest_f1} /></>}
+                </div>
+            )}
 
             {/* Load Heatmap — hour × day-of-week */}
             <p style="font-size: var(--type-label); color: var(--text-secondary); margin-bottom: 8px;">

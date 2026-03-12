@@ -1722,3 +1722,8 @@ kbd {
 .eval-role-badge--judge   { background: #1e1b4b; color: #a5b4fc; }
 .eval-role-badge--generator { background: #14532d; color: #86efac; }
 .eval-role-badge__label   { font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+
+/* EVAL badge + perf annotation */
+.nav-badge          { display: inline-block; padding: 1px 5px; border-radius: 4px; font-size: 0.65rem; font-weight: 700; letter-spacing: 0.04em; margin-left: 4px; }
+.nav-badge--eval    { background: #6366f1; color: white; }
+.perf-eval-annotation { padding: 8px 12px; background: var(--surface-2, #1f2937); border-left: 3px solid #f59e0b; border-radius: 4px; font-size: 0.8rem; color: var(--text, #f3f4f6); margin-top: 8px; }

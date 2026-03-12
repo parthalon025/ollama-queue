@@ -1,4 +1,5 @@
 import { healthData, settings, connectionStatus } from '../stores';
+import { scheduledEvalCount } from '../stores/eval.js';
 import SystemHealthChip from './SystemHealthChip.jsx';
 import SystemSummaryLine from './SystemSummaryLine.jsx';
 import EvalWinnerChip from './EvalWinnerChip.jsx';
@@ -81,6 +82,9 @@ export default function Sidebar({ active, onNavigate, daemonState, dlqCount, the
                         >
                             <span style="font-size: 1rem; flex-shrink: 0;">{item.icon}</span>
                             <span class="sidebar-label">{item.label}</span>
+                            {item.id === 'plan' && scheduledEvalCount.value > 0 && (
+                                <span class="nav-badge nav-badge--eval" title={`${scheduledEvalCount.value} eval run(s) in next 4h`}>EVAL</span>
+                            )}
                             {badge && (
                                 <span style={{
                                     marginLeft: 'auto',

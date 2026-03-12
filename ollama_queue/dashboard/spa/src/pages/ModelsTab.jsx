@@ -7,8 +7,10 @@ import {
 } from '../stores';
 import { ModelBadge } from '../components/ModelBadge';
 import PageBanner from '../components/PageBanner.jsx';
-import { evalVariants } from '../stores/eval.js';
+import { currentJob } from '../stores/index.js';
+import { evalVariants, evalActiveRun } from '../stores/eval.js';
 import EvalRoleBadge from '../components/EvalRoleBadge.jsx';
+import LiveIndicator from '../components/LiveIndicator.jsx';
 
 function useDebounce(value, delay) {
     const [debounced, setDebounced] = useState(value);
@@ -108,6 +110,15 @@ export default function ModelsTab() {
     const productionVariant = (evalVariants.value || []).find(pv => pv.is_production);
     const judgeModel = productionVariant?.judge_model;
     const generatorModel = productionVariant?.model;
+
+    // What it shows: Which model is currently running a queue job, and which models are
+    //   active in the eval pipeline right now.
+    // Decision it drives: User can see at a glance which models are in use so they know
+    //   not to delete or replace them mid-run.
+    const liveModel = currentJob.value?.model;
+    const evalModels = evalActiveRun.value
+        ? [evalActiveRun.value.judge_model, evalActiveRun.value.generator_model].filter(Boolean)
+        : [];
 
     // What it shows: Active model filter set from an external signal (e.g. ModelChip click).
     // Decision it drives: Narrows the installed-models table to the selected model; shows a
@@ -221,6 +232,8 @@ export default function ModelsTab() {
                                         {model.name}
                                         {model.name === judgeModel && <EvalRoleBadge role="judge" f1={productionVariant?.latest_f1} />}
                                         {model.name === generatorModel && model.name !== judgeModel && <EvalRoleBadge role="generator" f1={productionVariant?.latest_f1} />}
+                                        {model.name === liveModel && <LiveIndicator state="running" />}
+                                        {evalModels.includes(model.name) && <LiveIndicator state="in-eval" />}
                                     </td>
                                     <td style={{ padding: '0.5rem 0.75rem' }}>
                                         <ModelBadge profile={model.resource_profile} typeTag={model.type_tag} />
