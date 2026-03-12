@@ -167,9 +167,11 @@ export default function SubmitJobModal({ onJobSubmitted, open: controlledOpen, o
                 +
             </button>}
 
-            {/* Native dialog */}
+            {/* Native dialog — sh-crt applies CRT scanlines inside the modal overlay,
+                which renders in the top layer (outside the root .sh-crt wrapper) */}
             <dialog
                 ref={dialogRef}
+                class="sh-crt"
                 onClick={handleBackdropClick}
                 style={{
                     background: 'var(--bg-surface)',

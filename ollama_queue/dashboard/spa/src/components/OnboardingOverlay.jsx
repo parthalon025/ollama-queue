@@ -87,7 +87,7 @@ export default function OnboardingOverlay() {
             }}
         >
             <div
-                class="onboarding-card"
+                class="onboarding-card sh-crt"
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="onboarding-title"
