@@ -67,11 +67,18 @@ export default function ResourceGauges({ ram, vram, load, swap, settings }) {
       {gauges.map((g) => {
         const raw = g.value ?? 0;
         const pct = Math.min(100, Math.max(0, raw));
-        let color = 'var(--accent)';
-        // Use raw (unclamped) value for color — CPU load can exceed 100% of one core's worth,
-        // and the bar must turn warning/error even when the bar width is capped at 100%.
-        if (raw >= g.pause) color = 'var(--status-error)';
-        else if (raw >= g.resume) color = 'var(--status-warning)';
+
+        // Normalize threshold positions to the 0–100 visible bar range.
+        // CPU pause > 100 (multiplier × 100), so scale both stops proportionally so the
+        // full danger range maps into the visible bar rather than all collapsing at 100%.
+        const pauseNorm = Math.min(g.pause, 100);
+        const resumeNorm = g.pause > 100
+          ? (g.resume / g.pause) * 100
+          : Math.min(g.resume, 100);
+
+        // Gradient covers the full track. The mask div clips it at pct%, so the right
+        // edge of the visible bar always shows the color for the current load level.
+        const gradientBg = `linear-gradient(to right, var(--accent) 0%, var(--status-warning) ${resumeNorm.toFixed(1)}%, var(--status-error) ${pauseNorm.toFixed(1)}%)`;
 
         return (
           <div key={g.label} title={g.title} class="flex items-center gap-1" style="min-width: 80px; flex: 1;">
@@ -79,12 +86,22 @@ export default function ResourceGauges({ ram, vram, load, swap, settings }) {
               {g.label}
             </span>
             <div style="flex: 1; height: 6px; background: var(--bg-inset); border-radius: 3px; position: relative; overflow: hidden;">
-              {/* Pause threshold marker */}
+              {/* Gradient track — always full width, encodes the full threshold range as a color ramp */}
+              <div style={{ position: 'absolute', inset: '0', background: gradientBg }} />
+              {/* Unfilled mask — covers from pct% to 100% with the track background color */}
+              <div style={{
+                position: 'absolute',
+                left: `${pct}%`,
+                top: 0, bottom: 0, right: 0,
+                background: 'var(--bg-inset)',
+                transition: 'left 0.3s ease',
+              }} />
+              {/* Pause threshold marker — on top of gradient */}
               <div
                 title="Pause threshold — the queue stops starting new jobs above this level"
                 style={{
                   position: 'absolute',
-                  left: `${g.pause}%`,
+                  left: `${pauseNorm}%`,
                   top: 0,
                   bottom: 0,
                   width: '1px',
@@ -93,13 +110,6 @@ export default function ResourceGauges({ ram, vram, load, swap, settings }) {
                   zIndex: 1,
                 }}
               />
-              <div style={{
-                width: `${pct}%`,
-                height: '100%',
-                background: color,
-                borderRadius: '3px',
-                transition: 'width 0.3s ease, background 0.3s ease',
-              }} />
             </div>
             <span class="data-mono" style="font-size: var(--type-micro); color: var(--text-secondary); width: 28px;">
               {Math.round(pct)}%
