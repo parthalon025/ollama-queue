@@ -196,7 +196,7 @@ export default function QueueList({ jobs, currentJob }) {
           // Decision it drives: Old jobs sitting in the queue stand out visually (cooling → frozen → stale),
           //   prompting the user to investigate why they haven't started.
           return (
-            <ShFrozen key={job.id} timestamp={job.submitted_at * 1000} thresholds={{ cooling: 300, frozen: 1800, stale: 3600 }}>
+            <ShFrozen key={job.id} timestamp={job._isRunning ? null : job.submitted_at * 1000} thresholds={{ cooling: 300, frozen: 1800, stale: 3600 }}>
               {/* Row */}
               <div
                 draggable={!job._isRunning}
