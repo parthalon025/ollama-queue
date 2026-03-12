@@ -131,7 +131,7 @@ export default function History() {
                     </div>
                     {dlq.map(entry => (
                         <ShFrozen key={entry.id} timestamp={entry.moved_at * 1000} thresholds={DLQ_FRESHNESS}>
-                            <DLQRow key={entry.id} entry={entry} onAction={handleDLQAction} />
+                            <DLQRow entry={entry} onAction={handleDLQAction} />
                         </ShFrozen>
                     ))}
                 </div>
