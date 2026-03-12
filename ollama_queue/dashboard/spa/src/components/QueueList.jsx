@@ -334,13 +334,59 @@ export default function QueueList({ jobs, currentJob }) {
                 )}
               </div>
 
-              {/* Expandable command panel */}
+              {/* What it shows: Expandable job detail — enqueued time, estimated duration, retry count,
+               *   and prompt preview. Clicking the row toggles this panel.
+               * Decision it drives: User can verify which exact command is queued and when it was submitted
+               *   without leaving the dashboard or opening a separate view. */}
               {expandedId === job.id && (
-                <div class="data-mono" style="font-size: var(--type-micro); color: var(--text-secondary);
-                                              padding: 4px 8px 8px 32px; background: var(--bg-inset);">
-                  <div style="color: var(--text-tertiary); text-transform: uppercase; font-size: 10px; margin-bottom: 2px;">shell command</div>
-                  <div style="color: var(--text-primary); white-space: pre-wrap; word-break: break-all;">{job.command}</div>
-                  {job.timeout && <div style="margin-top: 4px; color: var(--text-tertiary);">time limit: {job.timeout}s  •  resource type: {job.resource_profile || 'ollama'}</div>}
+                <div style={{
+                  marginTop: '8px',
+                  padding: '8px',
+                  background: 'var(--bg-inset)',
+                  borderRadius: 'var(--radius)',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 'var(--type-micro)',
+                  color: 'var(--text-secondary)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '4px',
+                }}>
+                  {job.submitted_at && (
+                    <div>
+                      <span style={{ color: 'var(--text-tertiary)' }}>enqueued:</span>{' '}
+                      {new Date(job.submitted_at * 1000).toLocaleString()}
+                    </div>
+                  )}
+                  {job.estimated_duration && (
+                    <div>
+                      <span style={{ color: 'var(--text-tertiary)' }}>est. duration:</span>{' '}
+                      {formatDuration(job.estimated_duration)}
+                    </div>
+                  )}
+                  {job.retry_count > 0 && (
+                    <div>
+                      <span style={{ color: 'var(--text-tertiary)' }}>retries:</span>{' '}
+                      {job.retry_count}
+                    </div>
+                  )}
+                  {job.prompt && (
+                    <div style={{ maxHeight: '60px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      <span style={{ color: 'var(--text-tertiary)' }}>prompt:</span>{' '}
+                      {job.prompt.slice(0, 120)}{job.prompt.length > 120 ? '…' : ''}
+                    </div>
+                  )}
+                  <div>
+                    <span style={{ color: 'var(--text-tertiary)' }}>command:</span>{' '}
+                    <span style={{ color: 'var(--text-primary)', wordBreak: 'break-all' }}>{job.command}</span>
+                  </div>
+                  {job.timeout && (
+                    <div>
+                      <span style={{ color: 'var(--text-tertiary)' }}>time limit:</span>{' '}
+                      {job.timeout}s{'  •  '}
+                      <span style={{ color: 'var(--text-tertiary)' }}>resource:</span>{' '}
+                      {job.resource_profile || 'ollama'}
+                    </div>
+                  )}
                 </div>
               )}
             </FreshRow>
