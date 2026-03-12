@@ -12,7 +12,9 @@ module.exports = {
         '^@preact/signals$': '<rootDir>/src/__mocks__/preact-signals.cjs',
         '^uplot$': '<rootDir>/src/__mocks__/uplot.cjs',
         '^\\.\\./stores$': '<rootDir>/src/__mocks__/stores.cjs',
+        '^\\.\\./stores/index\\.js$': '<rootDir>/src/__mocks__/stores.cjs',
         '^\\.\\./stores/queue\\.js$': '<rootDir>/src/__mocks__/stores.cjs',
+        '^\\.\\./stores/health\\.js$': '<rootDir>/src/__mocks__/stores.cjs',
     },
     testMatch: ['**/*.test.js'],
 };

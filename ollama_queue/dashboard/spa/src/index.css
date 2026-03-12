@@ -1645,3 +1645,30 @@ kbd {
 .status-deferred  { background: #1c1917; color: #a8a29e; }
 .status-cancelled { background: #1c1917; color: #78716c; opacity: 0.7; }
 .status-unknown   { background: #1e1e2e; color: #cdd6f4; }
+
+/* PriorityPill */
+.priority-pill { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; }
+.priority-critical { background: #7f1d1d; color: #fecaca; }
+.priority-high     { background: #431407; color: #fdba74; }
+.priority-normal   { background: #1e293b; color: #94a3b8; }
+.priority-low      { background: #0f172a; color: #475569; }
+.priority-unknown  { background: #1e1e2e; color: #cdd6f4; }
+
+/* F1Score */
+.f1-score   { font-variant-numeric: tabular-nums; font-size: 0.85rem; font-weight: 600; }
+.f1-good    { color: #4ade80; }
+.f1-warn    { color: #fbbf24; }
+.f1-bad     { color: #f87171; }
+.f1-null    { color: #475569; }
+.f1-delta-pos { color: #4ade80; font-size: 0.75rem; margin-left: 3px; }
+.f1-delta-neg { color: #f87171; font-size: 0.75rem; margin-left: 3px; }
+
+/* ModelChip */
+.model-chip { display: inline-block; padding: 2px 8px; border-radius: 4px; background: #1e293b; color: #7dd3fc; border: 1px solid #334155; font-size: 0.78rem; cursor: pointer; }
+.model-chip:hover { background: #334155; }
+
+/* VariantChip */
+.variant-chip   { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; background: #1e293b; border-radius: 6px; font-size: 0.8rem; }
+.variant-star   { color: #facc15; }
+.variant-id     { color: #e2e8f0; font-weight: 500; }
+.provider-badge { background: #312e81; color: #a5b4fc; padding: 1px 5px; border-radius: 3px; font-size: 0.7rem; }
