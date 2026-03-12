@@ -18,6 +18,14 @@ module.exports = {
         '^\\.\\./stores/eval\\.js$': '<rootDir>/src/__mocks__/stores-eval.cjs',
         '^\\.\\./hooks/useActionFeedback\\.js$': '<rootDir>/src/__mocks__/useActionFeedback.cjs',
         '^\\.\\./utils/time\\.js$': '<rootDir>/src/__mocks__/utils-time.cjs',
+        // Depth-2 patterns for components in src/components/<subdirectory>/ (e.g. eval/)
+        '^\\.\\./\\.\\./stores$': '<rootDir>/src/__mocks__/stores.cjs',
+        '^\\.\\./\\.\\./stores/index\\.js$': '<rootDir>/src/__mocks__/stores.cjs',
+        '^\\.\\./\\.\\./stores/queue\\.js$': '<rootDir>/src/__mocks__/stores.cjs',
+        '^\\.\\./\\.\\./stores/health\\.js$': '<rootDir>/src/__mocks__/stores.cjs',
+        '^\\.\\./\\.\\./stores/eval\\.js$': '<rootDir>/src/__mocks__/stores-eval.cjs',
+        '^\\.\\./\\.\\./hooks/useActionFeedback\\.js$': '<rootDir>/src/__mocks__/useActionFeedback.cjs',
+        '^\\.\\./\\.\\./utils/time\\.js$': '<rootDir>/src/__mocks__/utils-time.cjs',
     },
     testMatch: ['**/*.test.js'],
 };
