@@ -4,10 +4,21 @@
 // Decision it drives: Keeps the import surface identical to the old monolithic store.js —
 //   no component changes needed beyond updating the import path.
 
+import { signal, computed } from '@preact/signals';
 import { API } from './_shared.js';
 
 // Re-export API so components that import { API } from '../stores' still work
 export { API } from './_shared.js';
+
+// ── Cross-tab navigation signals ──────────────────────────────────────────────
+
+// What it shows: Which job ID to highlight when navigating from History to Now.
+// Decision it drives: History "View context" button sets this; Now.jsx pulses that row.
+export const highlightJobId = signal(null);
+
+// What it shows: Which model name to filter to on the Models tab.
+// Decision it drives: ModelChip clicks set this; ModelsTab filters/scrolls to match.
+export const modelFilter = signal(null);
 
 // Re-export all domain stores
 export * from './queue.js';
@@ -16,6 +27,18 @@ export * from './schedule.js';
 export * from './models.js';
 export * from './settings.js';
 export * from './health.js';
+
+// ── Cross-component derived signals ───────────────────────────────────────────
+
+// What it shows: The currently-running job object, or null if the queue is idle.
+// Decision it drives: ActiveJobStrip and any component outside the Now tab can show
+//   at-a-glance whether something is running without reading the full status signal.
+import { status as _status, queue as _queue } from './queue.js';
+export const currentJob = computed(() => _status.value?.current_job ?? null);
+
+// What it shows: How many jobs are waiting behind the currently-running one.
+// Decision it drives: "Is it safe to submit another job? Will it have to wait?"
+export const queueDepth = computed(() => (_queue.value?.length ?? 0));
 
 // ── Import individual signals/functions needed by the polling orchestrator ────
 import { status, queue, connectionStatus } from './queue.js';

@@ -1,5 +1,8 @@
 import { healthData, settings, connectionStatus } from '../stores';
+import { scheduledEvalCount } from '../stores/eval.js';
 import SystemHealthChip from './SystemHealthChip.jsx';
+import SystemSummaryLine from './SystemSummaryLine.jsx';
+import EvalWinnerChip from './EvalWinnerChip.jsx';
 
 // NOTE: callback params use descriptive names (item, etc.) — never 'h' (shadows JSX factory)
 const NAV_ITEMS = [
@@ -43,6 +46,11 @@ export default function Sidebar({ active, onNavigate, daemonState, dlqCount, the
                 />
             </div>
 
+            <div class="sidebar-summary">
+                <SystemSummaryLine />
+                <EvalWinnerChip />
+            </div>
+
             {/* Nav items */}
             <nav style="flex: 1; padding: 0.5rem 0; overflow-y: auto;">
                 {NAV_ITEMS.map(item => {
@@ -74,6 +82,9 @@ export default function Sidebar({ active, onNavigate, daemonState, dlqCount, the
                         >
                             <span style="font-size: 1rem; flex-shrink: 0;">{item.icon}</span>
                             <span class="sidebar-label">{item.label}</span>
+                            {item.id === 'plan' && scheduledEvalCount.value > 0 && (
+                                <span class="nav-badge nav-badge--eval" title={`${scheduledEvalCount.value} eval run(s) in next 4h`}>EVAL</span>
+                            )}
                             {badge && (
                                 <span style={{
                                     marginLeft: 'auto',

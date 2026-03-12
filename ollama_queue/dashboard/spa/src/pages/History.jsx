@@ -3,8 +3,11 @@ import { shatterElement } from 'superhot-ui';
 import {
     dlqEntries, dlqCount, durationData, heatmapData, history,
     fetchDLQ, rescheduleDLQEntry, API,
+    highlightJobId,
 } from '../stores';
+import { currentTab } from '../stores/health.js';
 import { useEffect, useRef, useState } from 'preact/hooks';
+import { signal } from '@preact/signals';
 import { useActionFeedback } from '../hooks/useActionFeedback.js';
 import ActivityHeatmap from '../components/ActivityHeatmap.jsx';
 import HistoryList from '../components/HistoryList.jsx';
@@ -12,6 +15,12 @@ import TimeChart from '../components/TimeChart.jsx';
 import PageBanner from '../components/PageBanner.jsx';
 
 // NOTE: all .map() callbacks use descriptive names — never 'h' (shadows JSX factory)
+
+// What it shows: Eval run events (started/completed) fetched from the eval runs API.
+// Decision it drives: Would annotate the activity heatmap with eval milestones if ActivityHeatmap
+//   accepted an events prop. Fetched here for future use; ActivityHeatmap currently only accepts
+//   data (gpu_minutes heatmap) so events are not passed through.
+const evalEvents = signal([]);
 
 // Freshness thresholds for DLQ entries (in seconds):
 //   cooling = 1h (entry has been sitting a while), frozen = 6h (neglected),
@@ -38,6 +47,23 @@ export default function History() {
     const dlqListRef = useRef(null);
 
     useEffect(() => { fetchDLQ(); }, []);
+
+    // Fetch eval run events for heatmap annotation (future use — ActivityHeatmap does not yet
+    // accept an events prop, so these are prepared but not passed through).
+    useEffect(() => {
+        fetch('/api/eval/runs?limit=50')
+            .then(r => r.ok ? r.json() : { items: [] })
+            .then(data => {
+                const runs = Array.isArray(data) ? data : (data.items || []);
+                evalEvents.value = runs.flatMap(run => {
+                    const events = [];
+                    if (run.started_at) events.push({ type: 'eval_started', timestamp: run.started_at, label: 'Eval started' });
+                    if (run.completed_at && run.status === 'complete') events.push({ type: 'eval_completed', timestamp: run.completed_at, label: `Eval complete (F1 ${run.winner_f1?.toFixed(2) || '?'})` });
+                    return events;
+                });
+            })
+            .catch(() => {});
+    }, []);
 
     async function handleRetryAll() {
         if (!window.confirm(`Re-queue all ${dlq.length} failed jobs so they try again?`)) return;
@@ -323,6 +349,14 @@ function DLQRow({ entry, onAction }) {
                             onClick={() => setExpanded(prev => !prev)}
                         >
                             {expanded ? 'Hide' : 'Why?'}
+                        </button>
+                    )}
+                    {entry.job_id && (
+                        <button
+                            class="dlq-view-context"
+                            onClick={() => { highlightJobId.value = entry.job_id; currentTab.value = 'now'; }}
+                        >
+                            → View context
                         </button>
                     )}
                 </div>

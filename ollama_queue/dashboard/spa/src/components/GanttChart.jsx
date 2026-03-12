@@ -12,6 +12,7 @@ export const SOURCE_COLORS = {
     aria:     'var(--accent)',
     telegram: '#f97316',
     notion:   '#a78bfa',
+    eval:     '#6366f1',
 };
 
 export function sourceColor(source) {
@@ -20,6 +21,7 @@ export function sourceColor(source) {
     if (s === 'aria' || s.startsWith('aria-')) return 'var(--accent)';
     if (s === 'telegram' || s.startsWith('telegram-')) return '#f97316';
     if (s === 'notion' || s.startsWith('notion-')) return '#a78bfa';
+    if (s === 'eval' || s.startsWith('eval-')) return '#6366f1';
     return 'var(--text-tertiary)';
 }
 

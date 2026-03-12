@@ -5,6 +5,7 @@ import ConfusionMatrix from '../ConfusionMatrix.jsx';
 import { API, evalActiveRun, evalSubTab, evalVariants, fetchEvalRuns, fetchEvalVariants, fetchRunAnalysis, startEvalPoll } from '../../../stores';
 import { useActionFeedback } from '../../../hooks/useActionFeedback.js';
 import StatusDot from './StatusDot.jsx';
+import ModelChip from '../../ModelChip.jsx';
 import { formatDate, fmtPct, simpleRenderMd } from './helpers.js';
 
 // What it shows: A single eval run row with 3-level progressive disclosure.
@@ -82,7 +83,7 @@ export default function RunRow({ run }) {
         let data = null;
         try { data = await res.json(); } catch { /* non-JSON body */ }
         if (!res.ok) throw new Error(data?.detail || `Repeat failed: ${res.status}`);
-        evalSubTab.value = 'runs';
+        evalSubTab.value = 'campaign';
         const activeState = { run_id: data.run_id, status: 'queued' };
         evalActiveRun.value = activeState;
         sessionStorage.setItem('evalActiveRun', JSON.stringify(activeState));
@@ -313,15 +314,15 @@ export default function RunRow({ run }) {
 
           {/* Scorer info */}
           {judge_model && (
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', marginBottom: '0.5rem' }}>
-              Scorer: {judge_model} {'\u00B7'} {judgeCallCount} items
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.3rem', flexWrap: 'wrap' }}>
+              Scorer: <ModelChip model={judge_model} /> {'\u00B7'} {judgeCallCount} items
             </div>
           )}
 
           {/* Winner model — shown when we can resolve the winning variant's model from evalVariants */}
           {winnerVariantRow?.model && (
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', marginBottom: '0.25rem' }}>
-              Winner model: {winnerVariantRow.model}
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', marginBottom: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+              Winner model: <ModelChip model={winnerVariantRow.model} />
             </div>
           )}
 

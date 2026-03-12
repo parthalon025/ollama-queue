@@ -9,11 +9,11 @@ import EvalTrends from '../views/EvalTrends.jsx';
 import EvalSettings from '../views/EvalSettings.jsx';
 
 // NOTE: .map() callback uses descriptive name 'tab' — never 'h' (shadows JSX factory)
-const EVAL_TABS = [
-  { id: 'runs',           label: 'Runs' },
-  { id: 'configurations', label: 'Configurations' },
-  { id: 'trends',         label: 'Trends' },
-  { id: 'settings',       label: 'Settings' },
+const TABS = [
+  { id: 'campaign',  label: 'Campaign' },
+  { id: 'variants',  label: 'Variants' },
+  { id: 'timeline',  label: 'Timeline' },
+  { id: 'config',    label: 'Config' },
 ];
 
 export default function Eval() {
@@ -24,7 +24,7 @@ export default function Eval() {
     <div class="eval-page">
       <PageBanner title="Eval" subtitle="test and compare AI model configurations" />
       <nav class="eval-subnav">
-        {EVAL_TABS.map(tab => (
+        {TABS.map(tab => (
           <button
             key={tab.id}
             class={`eval-subnav-btn${subTab === tab.id ? ' active' : ''}`}
@@ -35,10 +35,10 @@ export default function Eval() {
         ))}
       </nav>
       <div class="eval-content">
-        {subTab === 'runs'           && <EvalRuns />}
-        {subTab === 'configurations' && <EvalVariants />}
-        {subTab === 'trends'         && <EvalTrends />}
-        {subTab === 'settings'       && <EvalSettings />}
+        {subTab === 'campaign'  && <EvalRuns />}
+        {subTab === 'variants'  && <EvalVariants />}
+        {subTab === 'timeline'  && <EvalTrends />}
+        {subTab === 'config'    && <EvalSettings />}
       </div>
     </div>
   );

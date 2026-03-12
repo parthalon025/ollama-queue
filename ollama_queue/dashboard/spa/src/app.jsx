@@ -22,6 +22,9 @@ import {
     startPolling, stopPolling, stopEvalPoll, status, refreshQueue,
 } from './stores';
 import Sidebar from './components/Sidebar.jsx';
+import CohesionHeader from './components/CohesionHeader.jsx';
+import ActiveJobStrip from './components/ActiveJobStrip.jsx';
+import ActiveEvalStrip from './components/ActiveEvalStrip.jsx';
 import BottomNav from './components/BottomNav.jsx';
 import SubmitJobModal from './components/SubmitJobModal.jsx';
 import OnboardingOverlay from './components/OnboardingOverlay.jsx';
@@ -167,6 +170,9 @@ export function App() {
             <main class="layout-main animate-page-enter">
                 {/* Banner only on tabs without a dedicated eval panel — Now has CurrentJob, Eval has ActiveRunProgress */}
                 {activeEval && currentTab.value !== 'eval' && currentTab.value !== 'now' && <EvalActivityBanner activeEval={activeEval} onNavigate={handleNavigate} />}
+                <CohesionHeader />
+                {currentTab.value !== 'now' && <ActiveJobStrip />}
+                {currentTab.value !== 'eval' && <ActiveEvalStrip />}
                 <div key={currentTab.value} class="tab-enter" style="flex:1;overflow-y:auto;">
                     {renderView()}
                 </div>
