@@ -1,4 +1,4 @@
-import { h } from 'preact';
+import { ShFrozen } from 'superhot-ui/preact';
 import {
     dlqEntries, dlqCount, durationData, heatmapData, history,
     fetchDLQ, rescheduleDLQEntry, API,
@@ -11,6 +11,12 @@ import TimeChart from '../components/TimeChart.jsx';
 import PageBanner from '../components/PageBanner.jsx';
 
 // NOTE: all .map() callbacks use descriptive names — never 'h' (shadows JSX factory)
+
+// Freshness thresholds for DLQ entries (in seconds):
+//   cooling = 1h (entry has been sitting a while), frozen = 6h (neglected),
+//   stale = 24h (long-ignored failure). DLQ entries that age toward stale
+//   are the highest-priority unaddressed failures.
+const DLQ_FRESHNESS = { cooling: 3600, frozen: 21600, stale: 86400 };
 
 // What it shows: The past — completed/failed job list, Dead Letter Queue (jobs that exhausted
 //   all retries and need manual intervention), GPU activity heatmap (7d × 24h), and duration
@@ -124,7 +130,9 @@ export default function History() {
                         </div>
                     </div>
                     {dlq.map(entry => (
-                        <DLQRow key={entry.id} entry={entry} onAction={handleDLQAction} />
+                        <ShFrozen key={entry.id} timestamp={entry.moved_at * 1000} thresholds={DLQ_FRESHNESS}>
+                            <DLQRow key={entry.id} entry={entry} onAction={handleDLQAction} />
+                        </ShFrozen>
                     ))}
                 </div>
             )}
