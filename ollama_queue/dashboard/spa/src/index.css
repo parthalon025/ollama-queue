@@ -1672,3 +1672,14 @@ kbd {
 .variant-star   { color: #facc15; }
 .variant-id     { color: #e2e8f0; font-weight: 500; }
 .provider-badge { background: #312e81; color: #a5b4fc; padding: 1px 5px; border-radius: 3px; font-size: 0.7rem; }
+
+/* LiveIndicator */
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.5; transform: scale(0.85); }
+}
+.live-indicator           { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.live-indicator--running  { background: var(--color-info, #3b82f6); }
+.live-indicator--queued   { background: var(--color-muted, #6b7280); }
+.live-indicator--eval     { background: #6366f1; }
+.live-indicator--pulse    { animation: pulse 1.5s ease-in-out infinite; }

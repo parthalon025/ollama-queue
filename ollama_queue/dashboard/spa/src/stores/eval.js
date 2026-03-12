@@ -4,7 +4,7 @@
 //   all read from these signals; mutations (trigger, cancel, save settings) go through
 //   the exported functions which update signals on success.
 
-import { signal } from '@preact/signals';
+import { signal, computed } from '@preact/signals';
 import { API } from './_shared.js';
 
 // ── Eval pipeline signals ─────────────────────────────────────────────────────
@@ -97,6 +97,11 @@ export async function fetchEvalRuns() {
   try {
     const res = await fetch(`${API}/eval/runs`);
     if (res.ok) evalRuns.value = await res.json();
+    // Fire-and-forget: update scheduled eval count for the next 4 hours
+    fetch(`${API}/eval/runs?status=scheduled&within_hours=4`)
+      .then(r => r.ok ? r.json() : [])
+      .then(data => { scheduledEvalCount.value = Array.isArray(data) ? data.length : (data.items?.length || 0); })
+      .catch(() => {});
   } catch (e) { console.error('fetchEvalRuns failed:', e); }
 }
 
@@ -244,6 +249,22 @@ export async function cancelEvalRun(runId) {
   sessionStorage.removeItem('evalActiveRun');
   await fetchEvalRuns();
 }
+
+// ── Cross-component navigation signals ───────────────────────────────────────
+
+// What it shows: The current recommended/production variant (the "winner").
+// Decision it drives: Every place that shows "who's winning" reads this.
+export const evalWinner = computed(() =>
+  (evalVariants.value || []).find(v => v.is_recommended || v.is_production) || null
+);
+
+// What it shows: Number of eval runs scheduled in the next 4 hours.
+// Decision it drives: Plan tab badge — is there an eval coming that will use the GPU?
+export const scheduledEvalCount = signal(0);
+
+// What it shows: Which variant the user wants to focus on in the Variants tab.
+// Decision it drives: VariantChip clicks set this; Variants tab scrolls to match.
+export const focusVariantId = signal(null);
 
 // On startup: verify stored active run is still live — clear it if the API says it's terminal.
 // This prevents a stale "Run #N generating" panel persisting after a service restart.

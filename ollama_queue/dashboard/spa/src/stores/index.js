@@ -4,10 +4,21 @@
 // Decision it drives: Keeps the import surface identical to the old monolithic store.js —
 //   no component changes needed beyond updating the import path.
 
+import { signal } from '@preact/signals';
 import { API } from './_shared.js';
 
 // Re-export API so components that import { API } from '../stores' still work
 export { API } from './_shared.js';
+
+// ── Cross-tab navigation signals ──────────────────────────────────────────────
+
+// What it shows: Which job ID to highlight when navigating from History to Now.
+// Decision it drives: History "View context" button sets this; Now.jsx pulses that row.
+export const highlightJobId = signal(null);
+
+// What it shows: Which model name to filter to on the Models tab.
+// Decision it drives: ModelChip clicks set this; ModelsTab filters/scrolls to match.
+export const modelFilter = signal(null);
 
 // Re-export all domain stores
 export * from './queue.js';

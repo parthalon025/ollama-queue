@@ -5,10 +5,12 @@
 
 import { h } from 'preact';
 import { currentTab } from '../stores/health.js';
+import { modelFilter } from '../stores/index.js';
 
 export default function ModelChip({ model }) {
   function handleClick() {
     currentTab.value = 'models';
+    modelFilter.value = model;
   }
   return <button class="model-chip" onClick={handleClick}>{model}</button>;
 }
