@@ -5,6 +5,7 @@ import { applyFreshness } from 'superhot-ui';
 import { queue, queueEtas, API, refreshQueue } from '../stores';
 import EmptyState from './EmptyState.jsx';
 import { formatDuration } from '../utils/time.js';
+import { priorityBorderWidth, priorityBorderOpacity } from '../utils/priority.js';
 
 /**
  * What it shows: Every job waiting to run, priority-ordered, with estimated duration.
@@ -113,7 +114,7 @@ export default function QueueList({ jobs, currentJob }) {
 
   if (allItems.length === 0 && !currentJob) {
     return (
-      <div class="t-frame" data-label="Waiting to Run">
+      <div class="t-frame" data-label="Waiting to Run" data-chroma="gustave">
         <EmptyState headline="Queue is empty" body="Jobs you submit will appear here." />
       </div>
     );
@@ -177,7 +178,7 @@ export default function QueueList({ jobs, currentJob }) {
   }
 
   return (
-    <div class="t-frame" data-label="Waiting to Run" data-footer={`Estimated wait for all jobs: ${formatDuration(totalWait)}`}>
+    <div class="t-frame" data-label="Waiting to Run" data-chroma="gustave" data-footer={`Estimated wait for all jobs: ${formatDuration(totalWait)}`}>
       {/* Tag filter chips */}
       {tags.length > 0 && (
         <div style="display: flex; gap: 0.4rem; margin-bottom: 0.5rem; flex-wrap: wrap;">
@@ -219,16 +220,18 @@ export default function QueueList({ jobs, currentJob }) {
                 onDragEnd={job._isRunning ? undefined : handleDragEnd}
                 onDrop={job._isRunning ? undefined : (e) => handleDrop(e, dragIndex)}
                 onClick={() => setExpandedId(expandedId === job.id ? null : job.id)}
+                role="button"
+                aria-expanded={expandedId === job.id}
                 class="flex items-center gap-2 py-1"
                 style={[
                   `border-bottom: 1px solid var(--border-subtle);`,
                   job._isRunning
                     ? `border-left: 3px solid var(--accent);`
-                    : `border-left: 3px solid ${priorityColor(job.priority)};`,
+                    : `border-left: ${priorityBorderWidth(job.priority)} solid ${priorityColor(job.priority)};`,
                   `padding-left: 6px;`,
                   job._isRunning ? 'cursor: pointer;' : 'cursor: grab;',
                   'transition: opacity 0.1s, background 0.1s;',
-                  !job._isRunning && dragIndex !== null && dragIdx === dragIndex ? 'opacity: 0.35;' : 'opacity: 1;',
+                  !job._isRunning && dragIndex !== null && dragIdx === dragIndex ? 'opacity: 0.35;' : `opacity: ${priorityBorderOpacity(job.priority)};`,
                   !job._isRunning && dragIndex !== null && dropIdx === dragIndex && dragIdx !== dragIndex
                     ? 'background: var(--bg-surface-raised); border-radius: 4px;' : '',
                 ].join(' ')}
@@ -331,15 +334,71 @@ export default function QueueList({ jobs, currentJob }) {
                     ×
                   </button>
                 )}
+
+                {/* Expand chevron — flip ▾/▴ to signal row is clickable to reveal job detail */}
+                <span
+                  style={`color: var(--text-tertiary); font-size: var(--type-micro); flex-shrink: 0; user-select: none;`}
+                  aria-hidden="true"
+                >
+                  {expandedId === job.id ? '▴' : '▾'}
+                </span>
               </div>
 
-              {/* Expandable command panel */}
+              {/* What it shows: Expandable job detail — enqueued time, estimated duration, retry count,
+               *   and prompt preview. Clicking the row toggles this panel.
+               * Decision it drives: User can verify which exact command is queued and when it was submitted
+               *   without leaving the dashboard or opening a separate view. */}
               {expandedId === job.id && (
-                <div class="data-mono" style="font-size: var(--type-micro); color: var(--text-secondary);
-                                              padding: 4px 8px 8px 32px; background: var(--bg-inset);">
-                  <div style="color: var(--text-tertiary); text-transform: uppercase; font-size: 10px; margin-bottom: 2px;">shell command</div>
-                  <div style="color: var(--text-primary); white-space: pre-wrap; word-break: break-all;">{job.command}</div>
-                  {job.timeout && <div style="margin-top: 4px; color: var(--text-tertiary);">time limit: {job.timeout}s  •  resource type: {job.resource_profile || 'ollama'}</div>}
+                <div style={{
+                  marginTop: '8px',
+                  padding: '8px',
+                  background: 'var(--bg-inset)',
+                  borderRadius: 'var(--radius)',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 'var(--type-micro)',
+                  color: 'var(--text-secondary)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '4px',
+                }}>
+                  {job.submitted_at && (
+                    <div>
+                      <span style={{ color: 'var(--text-tertiary)' }}>enqueued:</span>{' '}
+                      {new Date(job.submitted_at * 1000).toLocaleString()}
+                    </div>
+                  )}
+                  {job.estimated_duration && (
+                    <div>
+                      <span style={{ color: 'var(--text-tertiary)' }}>est. duration:</span>{' '}
+                      {formatDuration(job.estimated_duration)}
+                    </div>
+                  )}
+                  {job.retry_count > 0 && (
+                    <div>
+                      <span style={{ color: 'var(--text-tertiary)' }}>retries:</span>{' '}
+                      {job.retry_count}
+                    </div>
+                  )}
+                  {job.prompt && (
+                    <div style={{ maxHeight: '60px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      <span style={{ color: 'var(--text-tertiary)' }}>prompt:</span>{' '}
+                      {job.prompt.slice(0, 120)}{job.prompt.length > 120 ? '…' : ''}
+                    </div>
+                  )}
+                  {job.command && (
+                    <div>
+                      <span style={{ color: 'var(--text-tertiary)' }}>command:</span>{' '}
+                      <span style={{ color: 'var(--text-primary)', wordBreak: 'break-all' }}>{job.command}</span>
+                    </div>
+                  )}
+                  {job.timeout && (
+                    <div>
+                      <span style={{ color: 'var(--text-tertiary)' }}>time limit:</span>{' '}
+                      {job.timeout}s{'  •  '}
+                      <span style={{ color: 'var(--text-tertiary)' }}>resource:</span>{' '}
+                      {job.resource_profile || 'ollama'}
+                    </div>
+                  )}
                 </div>
               )}
             </FreshRow>

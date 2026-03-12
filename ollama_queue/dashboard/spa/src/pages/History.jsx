@@ -77,7 +77,7 @@ export default function History() {
 
             {/* DLQ section — only shown when entries exist */}
             {dlqCnt > 0 && (
-                <div class="t-frame" data-label={`Jobs That Couldn't Complete (${dlqCnt})`}>
+                <div class="t-frame" data-label={`Jobs That Couldn't Complete (${dlqCnt})`} data-chroma="maelle">
                     <div style={{
                         display: 'flex',
                         justifyContent: 'space-between',

@@ -1,22 +1,37 @@
 import { h } from 'preact';
+import { useState, useEffect } from 'preact/hooks';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
 
+// What it shows: 7-day × 24-hour GPU activity heatmap. Hovering any cell shows a tooltip
+//   with the exact day/hour label and GPU utilization in minutes.
+// Decision it drives: Identify the busiest hours of the day and whether there's a weekly
+//   pattern to GPU load — used to pick optimal scheduling windows.
+
+function formatCellLabel(dayIdx, hourIdx) {
+  return `${DAYS[dayIdx]} ${String(hourIdx).padStart(2, '0')}:00`;
+}
+
 /**
- * What it shows: 7 days × 24 hours of GPU activity. Each cell's brightness represents
- *   how many minutes the GPU was busy in that slot. Hover for the exact GPU-minutes.
- *   Brighter = heavier use. Max value shown bottom-right for scale reference.
- * Decision it drives: When does the queue run heaviest? Are there recurring spikes that
- *   suggest overloading at certain times? Useful for deciding where NOT to schedule new
- *   heavy jobs, and for spotting runaway overnight jobs.
- *
  * @param {{ data: Array<{ dow: string, hour: string, gpu_minutes: number }> }} props
  *   dow: strftime('%w') → '0'=Sun through '6'=Sat
  *   hour: strftime('%H') → '00' through '23'
  */
 export default function ActivityHeatmap({ data }) {
+  const [tooltip, setTooltip] = useState(null); // { x, y, label, value }
   const items = data || [];
+
+  useEffect(() => {
+    if (!tooltip) return;
+    const clear = () => setTooltip(null);
+    window.addEventListener('scroll', clear, { passive: true, capture: true });
+    window.addEventListener('resize', clear, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', clear, { capture: true });
+      window.removeEventListener('resize', clear);
+    };
+  }, [tooltip]);
 
   if (items.length === 0) {
     return (
@@ -33,7 +48,7 @@ export default function ActivityHeatmap({ data }) {
   let maxMinutes = 0;
   for (const row of items) {
     const key = `${row.dow}-${parseInt(row.hour, 10)}`;
-    const val = row.gpu_minutes || 0;
+    const val = row.gpu_minutes != null ? row.gpu_minutes : 0;
     lookup[key] = val;
     if (val > maxMinutes) maxMinutes = val;
   }
@@ -59,18 +74,37 @@ export default function ActivityHeatmap({ data }) {
             {DAYS[dow]}
           </div>
           {HOURS.map((hr) => {
-            const val = lookup[`${dow}-${hr}`] || 0;
-            const opacity = maxMinutes > 0 ? Math.max(0.05, val / maxMinutes) : 0.05;
+            const val = lookup[`${dow}-${hr}`];  // undefined if no data row exists
+            const isEmpty = val === undefined || val === null;
+            const minutes = isEmpty ? 0 : val;
+            const opacity = maxMinutes > 0 ? Math.max(0.05, minutes / maxMinutes) : 0.05;
             return (
               <div
                 key={hr}
-                title={`${DAYS[dow]} at ${hr}:00 — ${val.toFixed(1)} GPU-minutes of work`}
                 style={{
                   height: '14px',
                   background: `var(--accent)`,
-                  opacity: val > 0 ? opacity : 0.05,
+                  opacity: minutes > 0 ? opacity : 0.05,
                   borderRadius: '1px',
                 }}
+                onMouseEnter={e => {
+                  const TOOLTIP_W = 160;
+                  const x = e.clientX + 12 + TOOLTIP_W > window.innerWidth
+                    ? e.clientX - TOOLTIP_W - 4
+                    : e.clientX + 12;
+                  const y = Math.max(8, e.clientY - 40);
+                  setTooltip({
+                    x,
+                    y,
+                    label: formatCellLabel(dow, hr),
+                    value: isEmpty
+                      ? 'No data'
+                      : minutes === 0
+                        ? '0 GPU-minutes (no active work)'
+                        : `${minutes.toFixed(1)} GPU-minutes`,
+                  });
+                }}
+                onMouseLeave={() => setTooltip(null)}
               />
             );
           })}
@@ -89,6 +123,27 @@ export default function ActivityHeatmap({ data }) {
           busiest: {maxMinutes.toFixed(0)} GPU-minutes/hour
         </span>
       </div>
+      {tooltip && (
+        <div style={{
+          position: 'fixed',
+          left: `${tooltip.x}px`,
+          top: `${tooltip.y}px`,
+          zIndex: 200,
+          background: 'var(--bg-surface)',
+          border: '1px solid var(--border-primary)',
+          borderRadius: 'var(--radius)',
+          padding: '6px 10px',
+          fontFamily: 'var(--font-mono)',
+          fontSize: 'var(--type-micro)',
+          color: 'var(--text-secondary)',
+          pointerEvents: 'none',
+          boxShadow: 'var(--card-shadow-hover)',
+          whiteSpace: 'nowrap',
+        }}>
+          <div style={{ color: 'var(--text-primary)' }}>{tooltip.label}</div>
+          <div>{tooltip.value}</div>
+        </div>
+      )}
     </div>
   );
 }

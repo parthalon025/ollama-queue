@@ -19,14 +19,16 @@ import TimeChart from './TimeChart.jsx';
  * @param {Array} [props.sparkData] - uPlot data array for sparkline [timestamps[], values[]]
  * @param {string} [props.sparkColor] - CSS color for sparkline (default: var(--accent))
  * @param {string} [props.tooltip] - Plain-English explanation shown on hover (ARIA "Explain like I'm 5")
+ * @param {string} [props.chroma] - Superhot-ui chroma token for this card (e.g. "gustave", "lune", "maelle", "sciel"). Omit for no chroma.
  */
-export default function HeroCard({ value, label, unit, delta, warning, loading, sparkData, sparkColor, tooltip }) {
+export default function HeroCard({ value, label, unit, delta, warning, loading, sparkData, sparkColor, tooltip, chroma }) {
   const cursorClass = loading ? 'cursor-working' : 'cursor-active';
 
   return (
     <div
       class={`t-frame ${cursorClass}`}
       data-label={label}
+      data-chroma={chroma || undefined}
       style={warning ? 'border-left: 3px solid var(--status-warning);' : ''}
     >
       {/* Label row: metric name + optional plain-English tooltip icon */}

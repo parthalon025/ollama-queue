@@ -84,6 +84,8 @@ export function priorityCategory(p) {
     return 'background';
 }
 
+export { priorityBorderWidth } from '../../utils/priority.js';
+
 export function relativeTimeLog(ts) {
     if (!ts) return '\u2014';
     const diff = Math.max(0, Math.floor(Date.now() / 1000 - ts));

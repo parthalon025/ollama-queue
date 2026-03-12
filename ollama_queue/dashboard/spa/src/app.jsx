@@ -167,7 +167,9 @@ export function App() {
             <main class="layout-main animate-page-enter">
                 {/* Banner only on tabs without a dedicated eval panel — Now has CurrentJob, Eval has ActiveRunProgress */}
                 {activeEval && currentTab.value !== 'eval' && currentTab.value !== 'now' && <EvalActivityBanner activeEval={activeEval} onNavigate={handleNavigate} />}
-                {renderView()}
+                <div key={currentTab.value} class="tab-enter" style="flex:1;overflow-y:auto;">
+                    {renderView()}
+                </div>
             </main>
             <BottomNav
                 active={currentTab.value}

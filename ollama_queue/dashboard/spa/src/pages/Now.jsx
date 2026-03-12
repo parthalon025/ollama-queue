@@ -188,7 +188,7 @@ export default function Now({ onSubmitRequest }) {
 
                     {/* Resource gauges */}
                     {latestHealth && (
-                        <div class="t-frame" data-label="System Resources">
+                        <div class="t-frame" data-label="System Resources" data-chroma="lune">
                             <ResourceGauges
                                 ram={latestHealth.ram_pct}
                                 vram={latestHealth.vram_pct}
@@ -208,6 +208,7 @@ export default function Now({ onSubmitRequest }) {
                             sparkColor="var(--accent)"
                             delta={kpis ? buildJobsDelta(kpis, hist) : null}
                             tooltip="Total jobs completed in the last 24 hours. Rising = queue is healthy. Falling = daemon may be stalled."
+                            chroma="lune"
                         />
                         <HeroCard
                             label="Average Wait Before Starting"
@@ -216,24 +217,29 @@ export default function Now({ onSubmitRequest }) {
                             sparkColor="var(--accent)"
                             delta={kpis ? buildWaitDelta(kpis.avg_wait_seconds) : null}
                             tooltip="Average time a job spends in queue before the daemon starts it. Spikes mean the daemon was busy or paused."
+                            chroma="lune"
                         />
                         <HeroCard
                             label="Auto-Paused Time Today"
                             value={kpis ? `${kpis.pause_minutes_24h}` : '--'}
                             unit="min"
                             warning={kpis && kpis.pause_minutes_24h > 30}
-                            sparkData={buildHealthSparkline(health, 'ram_pct')}
+                            sparkData={buildPauseSparkline(health)}
                             sparkColor="var(--status-warning)"
                             delta={kpis ? buildPauseDelta(kpis.pause_minutes_24h) : null}
                             tooltip="Total minutes the daemon spent paused in the last 24 hours. High values mean frequent health-triggered pauses."
+                            chroma="sciel"
                         />
                         <HeroCard
                             label="7-Day Success Rate"
                             value={kpis ? `${Math.round(kpis.success_rate_7d * 100)}` : '--'}
                             unit="%"
                             warning={kpis && kpis.success_rate_7d < 0.9}
+                            sparkData={buildSuccessRateSparkline(durations)}
+                            sparkColor="var(--accent)"
                             delta={kpis ? buildSuccessRateDelta(kpis, hist) : null}
                             tooltip="Percentage of completed jobs that succeeded. Below 90% warrants investigation in History."
+                            chroma="gustave"
                         />
                     </div>
 
@@ -268,6 +274,33 @@ function buildDurationSparkline(rows) {
     if (!rows || rows.length < 2) return null;
     const sorted = [...rows].sort((a, b) => a.recorded_at - b.recorded_at).slice(-24);
     return [sorted.map((r) => r.recorded_at), sorted.map((r) => r.duration)];
+}
+
+// Pause state sparkline — 1.0 when daemon was paused, 0.0 otherwise, over last 24 health rows.
+// Uses health_log.daemon_state field which records the daemon state at each poll interval.
+// Drives: lets the user see visually whether pauses cluster in a burst or are spread out.
+function buildPauseSparkline(rows) {
+    if (!rows || rows.length < 2) return null;
+    const sorted = [...rows].reverse();
+    return [
+        sorted.map((r) => r.timestamp),
+        sorted.map((r) => (r.daemon_state === 'paused' ? 1 : 0)),
+    ];
+}
+
+// Success rate sparkline — rolling success fraction over last 24 completed duration_history rows.
+// Uses exit_code === 0 as the success signal (same convention used by the daemon).
+// Drives: shows whether success rate is trending up or down recently, beyond the 7-day aggregate.
+function buildSuccessRateSparkline(rows) {
+    if (!rows || rows.length < 2) return null;
+    const sorted = [...rows].sort((a, b) => a.recorded_at - b.recorded_at).slice(-24);
+    // Compute a rolling 5-job window so the sparkline shows trend shape, not just 0/1 noise.
+    const values = sorted.map((row, idx, arr) => {
+        const window = arr.slice(Math.max(0, idx - 4), idx + 1);
+        const successes = window.filter((r) => r.exit_code === 0).length;
+        return successes / window.length;
+    });
+    return [sorted.map((r) => r.recorded_at), values];
 }
 
 function buildHealthSparkline(rows, field) {

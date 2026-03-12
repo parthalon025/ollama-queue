@@ -110,7 +110,7 @@ export default function CurrentJob({ daemon, currentJob, latestHealth, settings,
   }[state] || (daemon.paused_reason || state.replace('paused_', ''));
 
   return (
-    <div ref={cardRef} class="t-frame" data-label="Currently Running"
+    <div ref={cardRef} class="t-frame" data-label="Currently Running" data-chroma="gustave"
       style={isStalled ? 'border-left: 3px solid var(--status-warning);' : ''}>
       {isRunning ? (
         <div class="flex flex-col gap-2">

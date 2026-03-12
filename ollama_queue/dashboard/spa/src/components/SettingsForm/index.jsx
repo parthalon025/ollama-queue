@@ -74,7 +74,7 @@ export default function SettingsForm({ settings, daemonState, onSave, onPause, o
        *   threshold if your system feels sluggish during heavy jobs; raise it if the queue
        *   pauses too often during normal use. The dashed marker on resource gauges shows
        *   exactly where each threshold sits. */}
-      <div class="t-frame" data-label="Auto-Pause Thresholds — when to stop starting new jobs">
+      <div class="t-frame" data-label="Auto-Pause Thresholds — when to stop starting new jobs" data-chroma="lune">
         <p style="font-size: var(--type-label); color: var(--text-tertiary); margin: 0 0 0.75rem;">
           The queue checks these limits before starting each job. If any are exceeded, it waits
           until usage drops back below the resume level before trying again.
@@ -128,7 +128,7 @@ export default function SettingsForm({ settings, daemonState, onSave, onPause, o
       </div>
 
       {/* 2. Job Defaults */}
-      <div class="t-frame" data-label="Job Defaults — what new jobs get unless you say otherwise">
+      <div class="t-frame" data-label="Job Defaults — what new jobs get unless you say otherwise" data-chroma="gustave">
         <div class="flex flex-col gap-3">
           <NumberRow label="Default Priority" sublabel="default_priority · 1 = run first, 10 = run last" settingKey="default_priority" min={1} max={10} settings={settings} flashKey={flashKey} onBlur={handleBlur} />
           <NumberRow label="Job Time Limit" sublabel="default_timeout_seconds · kill a job if it runs longer than this" settingKey="default_timeout_seconds" min={1} unit="sec" settings={settings} flashKey={flashKey} onBlur={handleBlur} />
@@ -137,7 +137,7 @@ export default function SettingsForm({ settings, daemonState, onSave, onPause, o
       </div>
 
       {/* 3. Data Retention */}
-      <div class="t-frame" data-label="Data Retention — how long to keep records">
+      <div class="t-frame" data-label="Data Retention — how long to keep records" data-chroma="sciel">
         <div class="flex flex-col gap-3">
           <NumberRow label="Job History" sublabel="job_log_retention_days · completed and failed job records" settingKey="job_log_retention_days" min={1} unit="days" settings={settings} flashKey={flashKey} onBlur={handleBlur} />
           <NumberRow label="System Health Log" sublabel="health_log_retention_days · RAM / GPU / CPU readings" settingKey="health_log_retention_days" min={1} unit="days" settings={settings} flashKey={flashKey} onBlur={handleBlur} />
@@ -146,7 +146,7 @@ export default function SettingsForm({ settings, daemonState, onSave, onPause, o
       </div>
 
       {/* 4. Automatic Retry */}
-      <div class="t-frame" data-label="Automatic Retry — what happens when a job fails">
+      <div class="t-frame" data-label="Automatic Retry — what happens when a job fails" data-chroma="maelle">
         <div class="flex flex-col gap-3">
           <NumberRow label="Max Retry Attempts" sublabel="default_max_retries · after this many failures the job moves to the dead-letter queue" settingKey="default_max_retries" min={0} max={10} settings={settings} flashKey={flashKey} onBlur={handleBlur} />
           <NumberRow label="Wait Before First Retry" sublabel="retry_backoff_base_seconds · seconds to pause after the first failure" settingKey="retry_backoff_base_seconds" min={1} unit="sec" settings={settings} flashKey={flashKey} onBlur={handleBlur} />
@@ -155,7 +155,7 @@ export default function SettingsForm({ settings, daemonState, onSave, onPause, o
       </div>
 
       {/* 5. Stuck Job Detection */}
-      <div class="t-frame" data-label="Stuck Job Detection — find and kill frozen jobs">
+      <div class="t-frame" data-label="Stuck Job Detection — find and kill frozen jobs" data-chroma="maelle">
         <div class="flex flex-col gap-3">
           <NumberRow label="Stall Sensitivity" sublabel="stall_posterior_threshold · probability (0-1) the job is stuck before acting; lower = more sensitive" settingKey="stall_posterior_threshold" min={0} max={1} step="0.01" settings={settings} flashKey={flashKey} onBlur={handleBlur} />
           <SelectRow label="Action When a Job Gets Stuck" sublabel="stall_action" settingKey="stall_action" options={['log', 'kill']} optionLabels={{ log: 'Log only — record it but let the job keep running', kill: 'Kill — terminate the frozen job' }} settings={settings} flashKey={flashKey} onSave={onSave} flash={flash} />
@@ -171,7 +171,7 @@ export default function SettingsForm({ settings, daemonState, onSave, onPause, o
       </div>
 
       {/* 6. Parallel Jobs */}
-      <div class="t-frame" data-label="Parallel Jobs — how many jobs can run at the same time">
+      <div class="t-frame" data-label="Parallel Jobs — how many jobs can run at the same time" data-chroma="lune">
         <div class="flex flex-col gap-3">
           <NumberRow label="Max Jobs at Once" sublabel="max_concurrent_jobs · set to 1 to run jobs one at a time (safest)" settingKey="max_concurrent_jobs" min={1} max={8} settings={settings} flashKey={flashKey} onBlur={handleBlur} />
           <NumberRow label="Learning Period" sublabel="concurrent_shadow_hours · collect timing data for this many hours before enabling parallel execution" settingKey="concurrent_shadow_hours" min={0} max={168} unit="hr" settings={settings} flashKey={flashKey} onBlur={handleBlur} />
@@ -263,7 +263,7 @@ export default function SettingsForm({ settings, daemonState, onSave, onPause, o
       </div>
 
       {/* 12. Daemon Controls */}
-      <div class="t-frame" data-label="Daemon Controls — manually pause or resume the queue">
+      <div class="t-frame" data-label="Daemon Controls — manually pause or resume the queue" data-chroma="gustave">
         <div class="flex flex-col gap-2">
           <div class="flex items-center gap-3">
             {isPaused ? (
