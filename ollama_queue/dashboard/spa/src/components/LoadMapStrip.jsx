@@ -19,7 +19,11 @@ export default function LoadMapStrip({ data }) {
     if (!data || !data.slots || data.slots.length === 0) return null;
 
     const slots = data.slots;
-    const maxLoad = Math.max(...slots, 1);
+    // PIN_SCORE (999) marks reserved slots for pinned cron jobs — exclude from normalization
+    // so their sentinel value doesn't compress all real job counts to near-invisible opacity.
+    const PIN_SCORE = 999;
+    const pinnedSlots = new Set(slots.reduce((acc, v, i) => { if (v >= PIN_SCORE) acc.push(i); return acc; }, []));
+    const nonPinMax = Math.max(...slots.filter(v => v < PIN_SCORE), 1);
 
     // Build marker sets: which slot indices have DLQ-rescheduled or deferred jobs
     const dlqSlotMarkers = new Set();
@@ -46,7 +50,8 @@ export default function LoadMapStrip({ data }) {
     }
 
     function slotOpacity(count) {
-        return 0.12 + (count / maxLoad) * 0.88;
+        if (count >= PIN_SCORE) return 1.0;  // pinned — always full opacity
+        return 0.12 + (count / nonPinMax) * 0.88;
     }
 
     function slotLabel(idx) {
@@ -96,11 +101,11 @@ export default function LoadMapStrip({ data }) {
                 {slots.map((count, idx) => (
                     <div
                         key={idx}
-                        title={`${slotLabel(idx)} — ${count} job${count !== 1 ? 's' : ''} scheduled${dlqSlotMarkers.has(idx) ? ' + DLQ rescheduled' : ''}${deferredSlotMarkers.has(idx) ? ' + deferred' : ''}${count === 0 && !dlqSlotMarkers.has(idx) && !deferredSlotMarkers.has(idx) ? ' (quiet time)' : ''}`}
+                        title={`${slotLabel(idx)} — ${pinnedSlots.has(idx) ? 'pinned (reserved)' : `${count} job${count !== 1 ? 's' : ''} scheduled`}${dlqSlotMarkers.has(idx) ? ' + DLQ rescheduled' : ''}${deferredSlotMarkers.has(idx) ? ' + deferred' : ''}${count === 0 && !dlqSlotMarkers.has(idx) && !deferredSlotMarkers.has(idx) && !pinnedSlots.has(idx) ? ' (quiet time)' : ''}`}
                         style={{
                             flex: 1,
                             height: '100%',
-                            background: 'var(--accent)',
+                            background: pinnedSlots.has(idx) ? 'var(--status-warn)' : 'var(--accent)',
                             opacity: slotOpacity(count),
                             borderRadius: '1px',
                         }}
