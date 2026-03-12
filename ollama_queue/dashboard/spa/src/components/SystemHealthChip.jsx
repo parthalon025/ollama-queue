@@ -1,4 +1,5 @@
-import { h } from 'preact';
+import { useEffect, useRef } from 'preact/hooks';
+import { glitchText } from 'superhot-ui';
 
 // What it shows: A single-line aggregate health indicator combining daemon state,
 //   DLQ failure count, and resource pressure (RAM/VRAM/load) into one green/amber/red signal.
@@ -15,6 +16,19 @@ export default function SystemHealthChip({ daemonState, dlqCount, ram, vram, loa
     const isPaused = (daemonState || '').startsWith('paused');
     const isError = daemonState === 'error';
     const isDisconnected = connectionStatus === 'disconnected';
+
+    const chipRef = useRef(null);
+    const prevDisconnected = useRef(isDisconnected);
+
+    // Glitch burst: fire once when transitioning INTO disconnected state.
+    // The visual jolt signals "connection just dropped" — distinct from the static warning color.
+    useEffect(() => {
+        const was = prevDisconnected.current;
+        prevDisconnected.current = isDisconnected;
+        if (isDisconnected && !was && chipRef.current) {
+            glitchText(chipRef.current, { intensity: 'high' });
+        }
+    }, [isDisconnected]);
 
     const ramCrit  = s.pause_ram_pct  || 85;
     const vramCrit = s.pause_vram_pct || 90;
@@ -44,7 +58,7 @@ export default function SystemHealthChip({ daemonState, dlqCount, ram, vram, loa
     }
 
     return (
-        <div style={`display:flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:var(--type-micro);color:${color};padding:6px 8px;`}>
+        <div ref={chipRef} style={`display:flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:var(--type-micro);color:${color};padding:6px 8px;`}>
             <span style={`width:6px;height:6px;border-radius:50%;background:${color};flex-shrink:0;`} />
             {label}
         </div>

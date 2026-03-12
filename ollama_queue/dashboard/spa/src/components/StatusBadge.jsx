@@ -1,4 +1,3 @@
-import { h } from 'preact';
 import { useEffect, useRef } from 'preact/hooks';
 import { glitchText } from 'superhot-ui';
 
@@ -44,9 +43,10 @@ export default function StatusBadge({ state }) {
       statusClass = 't-status-warning';
       break;
 
-    // Red — error/failure
+    // Red — error/failure/offline
     case 'failed':
     case 'killed':
+    case 'offline':
       statusClass = 't-status-error';
       break;
 
