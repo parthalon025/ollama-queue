@@ -3,11 +3,8 @@
 // No DOM — components are called as plain functions, vnode tree is walked directly.
 import { jest } from '@jest/globals';
 
-// Mock @preact/signals — useSignal returns a mutable object with a .value property.
-// Using jest.fn so individual tests can override with mockReturnValueOnce for state-specific tests.
-jest.mock('@preact/signals', () => ({
-    useSignal: jest.fn((v) => ({ value: v })),
-}));
+// @preact/signals is mocked via moduleNameMapper → preact-signals.cjs, which exports useSignal
+// as a jest.fn() so individual tests can call mockReturnValueOnce() for state-specific cases.
 
 import _OnboardingOverlay from './OnboardingOverlay.jsx';
 const OnboardingOverlay = _OnboardingOverlay.default || _OnboardingOverlay;

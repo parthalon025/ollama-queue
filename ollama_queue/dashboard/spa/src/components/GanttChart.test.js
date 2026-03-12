@@ -299,38 +299,38 @@ describe('runStatus', () => {
     const NOW = 2_000_000; // fixed reference
 
     it('returns never for null last_run', () => {
-        expect(runStatus(null, 3600, NOW)).toEqual({ label: 'never', color: 'var(--text-tertiary)' });
+        expect(runStatus(null, 3600, NOW)).toEqual({ label: 'never run yet', color: 'var(--text-tertiary)' });
     });
 
     it('returns never for undefined last_run', () => {
-        expect(runStatus(undefined, 3600, NOW)).toEqual({ label: 'never', color: 'var(--text-tertiary)' });
+        expect(runStatus(undefined, 3600, NOW)).toEqual({ label: 'never run yet', color: 'var(--text-tertiary)' });
     });
 
     it('returns on-time when drift is within 5% of interval', () => {
         const interval = 3600;
         // 3% drift — within threshold
         const lastRun = NOW - interval - interval * 0.03;
-        expect(runStatus(lastRun, interval, NOW).label).toBe('on time');
+        expect(runStatus(lastRun, interval, NOW).label).toBe('running on schedule');
     });
 
     it('returns late when drift exceeds 5% of interval', () => {
         const interval = 3600;
         // 10% drift — past threshold
         const lastRun = NOW - interval - interval * 0.10;
-        expect(runStatus(lastRun, interval, NOW).label).toBe('late');
+        expect(runStatus(lastRun, interval, NOW).label).toBe('running behind');
     });
 
     it('returns on-time when exactly at the boundary (5%)', () => {
         const interval = 3600;
         // Exactly at threshold — drift = 5% = threshold, so drift <= threshold is true
         const lastRun = NOW - interval - interval * 0.05;
-        expect(runStatus(lastRun, interval, NOW).label).toBe('on time');
+        expect(runStatus(lastRun, interval, NOW).label).toBe('running on schedule');
     });
 
     it('handles null interval_seconds with 3600 default', () => {
         // No interval — uses 3600 default; ran 3% late relative to 3600
         const lastRun = NOW - 3600 - 3600 * 0.03;
-        expect(runStatus(lastRun, null, NOW).label).toBe('on time');
+        expect(runStatus(lastRun, null, NOW).label).toBe('running on schedule');
     });
 });
 
