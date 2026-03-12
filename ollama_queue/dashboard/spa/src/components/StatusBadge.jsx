@@ -1,10 +1,16 @@
 import { useEffect, useRef } from 'preact/hooks';
 import { glitchText } from 'superhot-ui';
 
+// What it shows: A colored dot-and-label badge for a single job or daemon state
+//   (running, failed, killed, offline, paused, pending, etc.).
+// Decision it drives: Lets the user instantly recognize health at a glance — green means
+//   working, red means something needs attention. Glitch burst on error transition signals
+//   the exact moment a job failed or the daemon went offline.
+
 /**
  * Terminal-style status badge for queue job states.
  * Maps ollama-queue statuses to theme status classes.
- * Fires a SUPERHOT glitch burst when the state transitions into an error state (failed, killed).
+ * Fires a SUPERHOT glitch burst when the state transitions into an error state (failed, killed, offline).
  *
  * @param {{ state: string }} props
  */
