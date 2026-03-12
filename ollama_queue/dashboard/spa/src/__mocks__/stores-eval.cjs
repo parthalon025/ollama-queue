@@ -2,5 +2,5 @@
 const signal = (v) => ({ value: v });
 module.exports = {
     evalActiveRun: signal(null),
-    cancelEvalRun: jest.fn(),
+    cancelEvalRun: jest.fn().mockResolvedValue({ ok: true }),
 };

@@ -37,3 +37,18 @@ test('renders phase label text', () => {
   const vnode = ActiveEvalStrip();
   expect(findText(vnode)).toContain('Generating');
 });
+
+test('cancel button is rendered and has onClick', () => {
+  evalStoreMock.evalActiveRun.value = { run_id: 1, phase: 'judging', status: 'judging', progress_pct: 60 };
+  const vnode = ActiveEvalStrip();
+  function findButton(v) {
+    if (!v) return null;
+    if (v.type === 'button') return v;
+    if (Array.isArray(v)) { for (const c of v) { const r = findButton(c); if (r) return r; } }
+    if (v.props?.children) return findButton(v.props.children);
+    return null;
+  }
+  const btn = findButton(vnode);
+  expect(btn).toBeTruthy();
+  expect(typeof btn.props.onClick).toBe('function');
+});
