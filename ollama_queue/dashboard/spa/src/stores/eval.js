@@ -9,9 +9,9 @@ import { API } from './_shared.js';
 
 // ── Eval pipeline signals ─────────────────────────────────────────────────────
 
-// What it shows: Current sub-tab within the Eval page (Runs / Configurations / Trends / Settings)
+// What it shows: Current sub-tab within the Eval page (Campaign / Variants / Timeline / Config)
 // Decision it drives: Which eval view is displayed
-export const evalSubTab = signal('runs');
+export const evalSubTab = signal('campaign');
 
 // What it shows: List of all eval runs (summary)
 // Decision it drives: Run history table and active run tracking

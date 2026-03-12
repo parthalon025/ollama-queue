@@ -83,7 +83,7 @@ export default function RunRow({ run }) {
         let data = null;
         try { data = await res.json(); } catch { /* non-JSON body */ }
         if (!res.ok) throw new Error(data?.detail || `Repeat failed: ${res.status}`);
-        evalSubTab.value = 'runs';
+        evalSubTab.value = 'campaign';
         const activeState = { run_id: data.run_id, status: 'queued' };
         evalActiveRun.value = activeState;
         sessionStorage.setItem('evalActiveRun', JSON.stringify(activeState));

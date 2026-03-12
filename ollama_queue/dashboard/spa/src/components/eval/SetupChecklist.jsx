@@ -129,7 +129,7 @@ export default function SetupChecklist() {
               : `${runs.length} run${runs.length !== 1 ? 's' : ''} completed.`
         }
         actionLabel="Start first test →"
-        onAction={() => { evalSubTab.value = 'runs'; }}
+        onAction={() => { evalSubTab.value = 'campaign'; }}
       />
     </div>
   );
