@@ -1,7 +1,6 @@
-import { h } from 'preact';
-import { useState, useMemo, useEffect, useRef } from 'preact/hooks';
+import { useState, useMemo, useEffect } from 'preact/hooks';
 import { useSignal } from '@preact/signals';
-import { applyFreshness } from 'superhot-ui';
+import { ShFrozen } from 'superhot-ui/preact';
 import { queue, queueEtas, API, refreshQueue } from '../stores';
 import EmptyState from './EmptyState.jsx';
 import { formatDuration } from '../utils/time.js';
@@ -33,24 +32,6 @@ function priorityColor(p) {
   return PRIORITY_COLORS.background;
 }
 
-// What it shows: Visual freshness state on a queue row based on how long ago the job was submitted.
-// Decision it drives: Old jobs sitting in the queue stand out visually (cooling → frozen → stale),
-//   prompting the user to investigate why they haven't started.
-function FreshRow({ job, children }) {
-  const ref = useRef(null);
-
-  useEffect(() => {
-    if (!ref.current || !job.submitted_at) return;
-    const ts = job.submitted_at * 1000; // convert seconds to ms
-    applyFreshness(ref.current, ts, { cooling: 300, frozen: 1800, stale: 3600 });
-    const interval = setInterval(() => {
-      if (ref.current) applyFreshness(ref.current, ts, { cooling: 300, frozen: 1800, stale: 3600 });
-    }, 30000);
-    return () => clearInterval(interval);
-  }, [job.submitted_at]);
-
-  return <div ref={ref} data-fresh-row>{children}</div>;
-}
 
 export default function QueueList({ jobs, currentJob }) {
   const allItems = jobs || [];
@@ -210,8 +191,11 @@ export default function QueueList({ jobs, currentJob }) {
           const etaIndex = job._isRunning ? -1 : allItems.findIndex(j => j.id === job.id);
           const jobEta = (!job._isRunning && etaIndex >= 0) ? (queueEtas.value || [])[etaIndex] : null;
 
+          // What it shows: Visual freshness state on a queue row based on how long ago the job was submitted.
+          // Decision it drives: Old jobs sitting in the queue stand out visually (cooling → frozen → stale),
+          //   prompting the user to investigate why they haven't started.
           return (
-            <FreshRow key={job.id} job={job}>
+            <ShFrozen key={job.id} timestamp={job._isRunning ? null : job.submitted_at * 1000} thresholds={{ cooling: 300, frozen: 1800, stale: 3600 }}>
               {/* Row */}
               <div
                 draggable={!job._isRunning}
@@ -401,7 +385,7 @@ export default function QueueList({ jobs, currentJob }) {
                   )}
                 </div>
               )}
-            </FreshRow>
+            </ShFrozen>
           );
         })}
       </div>

@@ -1,4 +1,3 @@
-import { h } from 'preact';
 import { dlqSchedulePreview, deferredJobs } from '../stores';
 
 /**

@@ -1,4 +1,3 @@
-import { h } from 'preact';
 // What it shows: A single-line status bar summarising whether the eval system is getting
 //   better, stable, or regressing across all variants.
 // Decision it drives: Quick answer to "is the system improving?" — lets users decide

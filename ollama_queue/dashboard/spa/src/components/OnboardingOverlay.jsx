@@ -3,7 +3,6 @@
 //   core concepts — job queue, submit button, priority order, and tab navigation.
 // Decision it drives: User knows what the dashboard does and how to use it without
 //   reading docs. Dismissed permanently via localStorage so it never re-appears.
-import { h } from 'preact';
 import { useSignal } from '@preact/signals';
 
 const STORAGE_KEY = 'oq_onboarding_done';
@@ -87,7 +86,7 @@ export default function OnboardingOverlay() {
             }}
         >
             <div
-                class="onboarding-card"
+                class="onboarding-card sh-crt"
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="onboarding-title"

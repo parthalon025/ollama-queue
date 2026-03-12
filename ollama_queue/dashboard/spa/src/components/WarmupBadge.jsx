@@ -1,4 +1,3 @@
-import { h } from 'preact';
 
 // What it shows: Whether a running job is still loading the AI model (warming up)
 //   or actively generating output. For completed jobs, shows the warmup/generation breakdown.

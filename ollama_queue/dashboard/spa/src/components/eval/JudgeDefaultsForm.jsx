@@ -1,4 +1,3 @@
-import { h } from 'preact';
 import { useState, useRef, useEffect } from 'preact/hooks';
 // What it shows: Default judge (scorer) model configuration — which AI scores
 //   generated principles, from which provider, with what consistency setting.

@@ -1,5 +1,3 @@
-import { h } from 'preact';
-
 /**
  * What it shows: SUPERHOT-style CRT terminal page banner — section title with phosphor glow,
  *   a horizontal scan beam sweep, and CRT scanline texture overlay.

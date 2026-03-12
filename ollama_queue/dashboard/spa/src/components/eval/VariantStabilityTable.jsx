@@ -1,4 +1,3 @@
-import { h } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
 // What it shows: Per-variant stability and trend data in an expandable table.
 //   L2 now includes cross-run F1 stdev and stable/unstable badge from the

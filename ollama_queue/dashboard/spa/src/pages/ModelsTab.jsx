@@ -1,4 +1,3 @@
-import { h } from 'preact';
 import { useEffect, useState, useRef } from 'preact/hooks';
 import {
     models, modelCatalog, API,

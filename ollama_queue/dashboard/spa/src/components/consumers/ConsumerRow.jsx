@@ -3,7 +3,6 @@
 //   last seen time, patch status, and health status.
 // Decision it drives: User decides whether to include or ignore the service and whether to
 //   apply patch immediately or defer until next restart.
-import { h } from 'preact';
 import { useState } from 'preact/hooks';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
 import { includeConsumer, ignoreConsumer, revertConsumer } from '../../stores';

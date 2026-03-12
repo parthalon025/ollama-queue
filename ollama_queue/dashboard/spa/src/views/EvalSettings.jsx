@@ -1,4 +1,3 @@
-import { h } from 'preact';
 import { useEffect } from 'preact/hooks';
 // What it shows: Eval configuration settings — data source, scorer defaults,
 //   and general numeric thresholds. Shows the setup checklist for new users.

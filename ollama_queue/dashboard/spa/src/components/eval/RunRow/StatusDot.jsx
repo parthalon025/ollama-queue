@@ -1,4 +1,3 @@
-import { h } from 'preact';
 import { STATUS_DOT_COLORS } from './helpers.js';
 
 // What it shows: A small colored circle indicating the eval run's current status.

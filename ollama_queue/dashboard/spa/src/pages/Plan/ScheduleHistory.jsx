@@ -1,4 +1,3 @@
-import { h } from 'preact';
 import { relativeTimeLog } from './helpers.js';
 
 // What it shows: A reverse-chronological table of schedule mutations — rebalances,

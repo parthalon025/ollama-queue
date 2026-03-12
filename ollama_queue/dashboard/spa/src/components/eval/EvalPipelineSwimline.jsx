@@ -6,7 +6,6 @@
 // Decision it drives: User knows exactly where in the eval pipeline the run is,
 //   which AI model is active, and how many items remain in the current phase.
 
-import { h } from 'preact';
 
 // NOTE: .map() callbacks use descriptive param names — never 'h' (shadows JSX factory).
 

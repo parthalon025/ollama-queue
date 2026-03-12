@@ -1,4 +1,3 @@
-import { h } from 'preact';
 import { useEffect, useRef } from 'preact/hooks';
 import { useSignal } from '@preact/signals';
 import { applyMantra, removeMantra } from 'superhot-ui';
@@ -38,17 +37,19 @@ export default function CurrentJob({ daemon, currentJob, latestHealth, settings,
   const isRunning = state === 'running';
   const isStalled = isRunning && currentJob && !!currentJob.stall_detected_at;
 
-  // Mantra: stamp "RUNNING" watermark on the card while a job is active.
-  // Removes itself on idle/paused — the absence of the watermark is its own signal.
+  // Mantra: stamp "RUNNING" or "PAUSED" watermark on the card to reflect daemon state.
+  // Removes itself when idle — the absence of the watermark signals the queue is at rest.
   useEffect(() => {
     if (!cardRef.current) return;
     if (isRunning) {
       applyMantra(cardRef.current, 'RUNNING');
+    } else if (isPaused) {
+      applyMantra(cardRef.current, 'PAUSED');
     } else {
       removeMantra(cardRef.current);
     }
     return () => { if (cardRef.current) removeMantra(cardRef.current); };
-  }, [isRunning]);
+  }, [isRunning, isPaused]);
 
   // ThreatPulse: red glow pulse when stall detected.
   useEffect(() => {

@@ -1,4 +1,3 @@
-import { h } from 'preact';
 import { useRef, useEffect } from 'preact/hooks';
 import uPlot from 'uplot';
 // What it shows: Quality score over time for each eval variant as a line chart.

@@ -1,4 +1,4 @@
-import { h, Fragment } from 'preact';
+import { Fragment } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import {
     status, scheduleJobs, scheduleEvents, models, loadMap,

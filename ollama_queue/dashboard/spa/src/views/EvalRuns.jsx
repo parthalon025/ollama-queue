@@ -1,4 +1,3 @@
-import { h } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 import { evalActiveRun, fetchEvalRuns, fetchEvalVariants, fetchEvalSettings, startEvalPoll } from '../stores';
 import ActiveRunProgress from '../components/eval/ActiveRunProgress.jsx';

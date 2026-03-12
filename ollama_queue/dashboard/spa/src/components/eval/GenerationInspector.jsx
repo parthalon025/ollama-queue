@@ -1,4 +1,3 @@
-import { h } from 'preact';
 import { EVAL_TRANSLATIONS } from './translations.js';
 // What it shows: L3 deep inspection of a single scored pair — the principle text,
 //   target lesson, score grid, scorer reasoning (captured <think> blocks), and

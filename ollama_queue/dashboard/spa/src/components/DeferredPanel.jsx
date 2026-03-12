@@ -1,4 +1,3 @@
-import { h } from 'preact';
 import { deferredJobs, resumeDeferred } from '../stores';
 import { useActionFeedback } from '../hooks/useActionFeedback';
 

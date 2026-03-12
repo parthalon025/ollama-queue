@@ -1,5 +1,5 @@
-import { h } from 'preact';
-import { useEffect } from 'preact/hooks';
+import { useEffect, useRef } from 'preact/hooks';
+import { applyMantra, removeMantra } from 'superhot-ui';
 import {
     status, queue, history, healthData, durationData, settings,
     dlqCount, connectionStatus, currentTab, clearDLQ,
@@ -32,9 +32,25 @@ export default function Now({ onSubmitRequest }) {
     // Action feedback hook for "Dismiss all" — must precede any conditional return
     const [dismissFb, dismissAct] = useActionFeedback();
 
+    // Ref for the page container — target for the OFFLINE mantra overlay.
+    const pageRef = useRef(null);
+
     // Fetch schedule once on mount so disabled recurring job count is available
     // even if the Plan tab hasn't been visited yet.
     useEffect(() => { fetchSchedule(); }, []);
+
+    // OFFLINE mantra: stamp "OFFLINE" watermark on the page when the WebSocket
+    // connection to the server is lost. Removes itself when reconnected.
+    const isOffline = connectionStatus.value === 'disconnected';
+    useEffect(() => {
+        if (!pageRef.current) return;
+        if (isOffline) {
+            applyMantra(pageRef.current, 'OFFLINE');
+        } else {
+            removeMantra(pageRef.current);
+        }
+        return () => { if (pageRef.current) removeMantra(pageRef.current); };
+    }, [isOffline]);
 
     const daemon = st?.daemon ?? null;
     const kpis = st?.kpis ?? null;
@@ -62,7 +78,7 @@ export default function Now({ onSubmitRequest }) {
     const showProxyStat = proxyGenerate > 0 || proxyEmbed > 0;
 
     return (
-        <div class="flex flex-col gap-4 animate-page-enter">
+        <div ref={pageRef} class="flex flex-col gap-4 animate-page-enter">
             <PageBanner title="Now" subtitle="live queue status" />
             {/* Disconnected banner */}
             {connectionStatus.value === 'disconnected' && (

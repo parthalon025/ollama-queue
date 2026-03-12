@@ -1,4 +1,3 @@
-import { h } from 'preact';
 import { useState, useRef, useEffect } from 'preact/hooks';
 // What it shows: Numeric eval configuration fields — how much data each run
 //   generates and what quality thresholds trigger promotion.

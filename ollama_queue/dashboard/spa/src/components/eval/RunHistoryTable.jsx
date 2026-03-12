@@ -1,4 +1,3 @@
-import { h } from 'preact';
 import { evalRuns } from '../../stores';
 import RunRow from './RunRow';
 // What it shows: The full list of past and current eval runs, newest first.

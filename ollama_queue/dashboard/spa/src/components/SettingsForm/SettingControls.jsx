@@ -1,4 +1,3 @@
-import { h } from 'preact';
 import { useRef } from 'preact/hooks';
 
 // What it shows: Reusable form controls for the settings page — threshold pairs,

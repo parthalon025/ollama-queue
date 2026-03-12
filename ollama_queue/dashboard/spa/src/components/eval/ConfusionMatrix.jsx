@@ -1,4 +1,3 @@
-import { h } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
 import { API } from '../../stores';
 // What it shows: Cross-cluster transfer score heatmap for a completed eval run.

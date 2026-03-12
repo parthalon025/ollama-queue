@@ -1,4 +1,3 @@
-import { h } from 'preact';
 import { useEffect } from 'preact/hooks';
 import { fetchEvalVariants, fetchEvalTemplates } from '../stores';
 import VariantToolbar from '../components/eval/VariantToolbar.jsx';

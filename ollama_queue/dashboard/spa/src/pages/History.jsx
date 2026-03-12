@@ -1,4 +1,5 @@
-import { h } from 'preact';
+import { ShFrozen } from 'superhot-ui/preact';
+import { shatterElement } from 'superhot-ui';
 import {
     dlqEntries, dlqCount, durationData, heatmapData, history,
     fetchDLQ, rescheduleDLQEntry, API,
@@ -11,6 +12,12 @@ import TimeChart from '../components/TimeChart.jsx';
 import PageBanner from '../components/PageBanner.jsx';
 
 // NOTE: all .map() callbacks use descriptive names — never 'h' (shadows JSX factory)
+
+// Freshness thresholds for DLQ entries (in seconds):
+//   cooling = 1h (entry has been sitting a while), frozen = 6h (neglected),
+//   stale = 24h (long-ignored failure). DLQ entries that age toward stale
+//   are the highest-priority unaddressed failures.
+const DLQ_FRESHNESS = { cooling: 3600, frozen: 21600, stale: 86400 };
 
 // What it shows: The past — completed/failed job list, Dead Letter Queue (jobs that exhausted
 //   all retries and need manual intervention), GPU activity heatmap (7d × 24h), and duration
@@ -28,6 +35,7 @@ export default function History() {
     // Hooks must be called before any conditional early returns
     const [retryAllFb, retryAllAct] = useActionFeedback();
     const [clearFb, clearAct] = useActionFeedback();
+    const dlqListRef = useRef(null);
 
     useEffect(() => { fetchDLQ(); }, []);
 
@@ -51,6 +59,15 @@ export default function History() {
         await clearAct(
             'Clearing DLQ…',
             async () => {
+                // Stagger-shatter all visible DLQ row elements before clearing
+                if (dlqListRef.current) {
+                    const rows = Array.from(dlqListRef.current.children);
+                    rows.forEach((row, i) => {
+                        setTimeout(() => shatterElement(row), i * 80);
+                    });
+                }
+                // Wait for animations to be visible before making the API call
+                await new Promise(resolve => setTimeout(resolve, 300));
                 const res = await fetch(`${API}/dlq`, { method: 'DELETE' });
                 if (!res.ok) throw new Error(`Clear failed: ${res.status}`);
                 await fetchDLQ();
@@ -123,9 +140,13 @@ export default function History() {
                             </div>
                         </div>
                     </div>
-                    {dlq.map(entry => (
-                        <DLQRow key={entry.id} entry={entry} onAction={handleDLQAction} />
-                    ))}
+                    <div ref={dlqListRef}>
+                        {dlq.map(entry => (
+                            <ShFrozen key={entry.id} timestamp={entry.moved_at * 1000} thresholds={DLQ_FRESHNESS}>
+                                <DLQRow entry={entry} onAction={handleDLQAction} />
+                            </ShFrozen>
+                        ))}
+                    </div>
                 </div>
             )}
 
@@ -280,11 +301,14 @@ function DLQRow({ entry, onAction }) {
                             class="t-btn t-btn-secondary"
                             style="font-size: var(--type-label); padding: 2px 8px;"
                             disabled={dismissFb.phase === 'loading'}
-                            onClick={() => dismissAct(
-                                'Dismissing…',
-                                () => onAction('dismiss', entry.id),
-                                'Deleted from failed queue',
-                            )}
+                            onClick={() => {
+                                if (rowRef.current) shatterElement(rowRef.current);
+                                dismissAct(
+                                    'Dismissing…',
+                                    () => onAction('dismiss', entry.id),
+                                    `DLQ #${entry.id} dismissed`,
+                                );
+                            }}
                         >
                             {dismissFb.phase === 'loading' ? 'Dismissing…' : 'Delete'}
                         </button>
