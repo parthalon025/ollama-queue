@@ -670,7 +670,7 @@ body {
   .t3-orange-pulse { animation: none; box-shadow: 0 0 0 4px var(--accent-glow); }
   .t3-border-alert { animation: none; border-left-color: var(--accent); }
   .t3-badge-appear { animation: none; opacity: 1; }
-  .stagger-children > * { opacity: 1; }
+  .stagger-children > * { opacity: 1; animation: none; }
 }
 
 /* ── Sidebar layout system ── */
