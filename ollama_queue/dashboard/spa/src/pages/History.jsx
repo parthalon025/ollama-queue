@@ -3,7 +3,9 @@ import { shatterElement } from 'superhot-ui';
 import {
     dlqEntries, dlqCount, durationData, heatmapData, history,
     fetchDLQ, rescheduleDLQEntry, API,
+    highlightJobId,
 } from '../stores';
+import { currentTab } from '../stores/health.js';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { useActionFeedback } from '../hooks/useActionFeedback.js';
 import ActivityHeatmap from '../components/ActivityHeatmap.jsx';
@@ -323,6 +325,14 @@ function DLQRow({ entry, onAction }) {
                             onClick={() => setExpanded(prev => !prev)}
                         >
                             {expanded ? 'Hide' : 'Why?'}
+                        </button>
+                    )}
+                    {entry.job_id && (
+                        <button
+                            class="dlq-view-context"
+                            onClick={() => { highlightJobId.value = entry.job_id; currentTab.value = 'now'; }}
+                        >
+                            → View context
                         </button>
                     )}
                 </div>

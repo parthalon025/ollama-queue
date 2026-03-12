@@ -1,7 +1,7 @@
-import { useState, useMemo, useEffect } from 'preact/hooks';
+import { useState, useMemo, useEffect, useRef } from 'preact/hooks';
 import { useSignal } from '@preact/signals';
 import { ShFrozen } from 'superhot-ui/preact';
-import { queue, queueEtas, API, refreshQueue } from '../stores';
+import { queue, queueEtas, API, refreshQueue, highlightJobId } from '../stores';
 import EmptyState from './EmptyState.jsx';
 import { formatDuration } from '../utils/time.js';
 import { priorityBorderWidth, priorityBorderOpacity } from '../utils/priority.js';
@@ -40,6 +40,8 @@ export default function QueueList({ jobs, currentJob }) {
   const [dropIdx, setDropIdx] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
   const [cancelError, setCancelError] = useState(null);
+  // Tracks the active highlight-clear timeout so we don't stack multiple timers.
+  const highlightTimerRef = useRef(null);
 
   // What it shows: Tracks which jobs are in the 5-second undo window after the user clicks ×.
   // Decision it drives: Lets the user recover from an accidental cancel before the DELETE fires.
@@ -194,6 +196,15 @@ export default function QueueList({ jobs, currentJob }) {
           // What it shows: Visual freshness state on a queue row based on how long ago the job was submitted.
           // Decision it drives: Old jobs sitting in the queue stand out visually (cooling → frozen → stale),
           //   prompting the user to investigate why they haven't started.
+          //   A job navigated to from the History DLQ view pulses with a gold highlight for 3 seconds.
+          const isHighlighted = highlightJobId.value === job.id;
+          if (isHighlighted) {
+            if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+            highlightTimerRef.current = setTimeout(() => {
+              if (highlightJobId.value === job.id) highlightJobId.value = null;
+              highlightTimerRef.current = null;
+            }, 3000);
+          }
           return (
             <ShFrozen key={job.id} timestamp={job._isRunning ? null : job.submitted_at * 1000} thresholds={{ cooling: 300, frozen: 1800, stale: 3600 }}>
               {/* Row */}
@@ -206,7 +217,7 @@ export default function QueueList({ jobs, currentJob }) {
                 onClick={() => setExpandedId(expandedId === job.id ? null : job.id)}
                 role="button"
                 aria-expanded={expandedId === job.id}
-                class="flex items-center gap-2 py-1"
+                class={`flex items-center gap-2 py-1 job-row${isHighlighted ? ' job-row--highlight' : ''}`}
                 style={[
                   `border-bottom: 1px solid var(--border-subtle);`,
                   job._isRunning

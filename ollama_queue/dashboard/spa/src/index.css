@@ -1710,3 +1710,9 @@ kbd {
 .sidebar-summary { padding: 8px 12px; border-top: 1px solid var(--border, #374151); }
 @media (min-width: 768px) and (max-width: 1023px) { .sidebar-summary { display: none; } }
 @media (max-width: 768px)   { .cohesion-header { display: none; } }
+
+/* Job highlight + DLQ deep-link */
+.job-row--highlight { animation: highlight-pulse 3s ease-out; background: color-mix(in srgb, #f59e0b 15%, transparent); }
+@keyframes highlight-pulse { 0% { background: color-mix(in srgb, #f59e0b 25%, transparent); } 100% { background: transparent; } }
+.dlq-view-context { padding: 2px 8px; border-radius: 4px; border: 1px solid var(--border, #374151); background: none; color: var(--text-muted, #9ca3af); font-size: 0.75rem; cursor: pointer; }
+.model-filter-clear { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 6px; background: var(--surface-2, #1f2937); border: 1px solid var(--border, #374151); color: var(--text, #f3f4f6); font-size: 0.8rem; cursor: pointer; margin-bottom: 8px; }

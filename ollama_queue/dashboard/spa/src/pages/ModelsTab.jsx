@@ -3,6 +3,7 @@ import {
     models, modelCatalog, API,
     fetchModels, fetchModelCatalog,
     startModelPull, cancelModelPull,
+    modelFilter,
 } from '../stores';
 import { ModelBadge } from '../components/ModelBadge';
 import PageBanner from '../components/PageBanner.jsx';
@@ -99,6 +100,11 @@ export default function ModelsTab() {
 
     const installedNames = new Set(models.value.map(mdl => mdl.name));
 
+    // What it shows: Active model filter set from an external signal (e.g. ModelChip click).
+    // Decision it drives: Narrows the installed-models table to the selected model; shows a
+    //   "clear filter" button so the user can return to the full list.
+    const filter = modelFilter.value;
+
     const sortedModels = [...models.value].sort((a, b) => {
         let av = a[sortCol] ?? 0;
         let bv = b[sortCol] ?? 0;
@@ -107,6 +113,10 @@ export default function ModelsTab() {
         if (av > bv) return sortDir === 'asc' ? 1 : -1;
         return 0;
     });
+
+    const displayedModels = filter
+        ? sortedModels.filter(mdl => mdl.name === filter || mdl.name?.includes(filter))
+        : sortedModels;
 
     const curatedNames = new Set(modelCatalog.value.curated.map(m => m.name));
     const allCatalogModels = [
@@ -170,6 +180,11 @@ export default function ModelsTab() {
                              textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 0.5rem' }}>
                     Installed on This Machine ({models.value.length})
                 </h3>
+                {filter && (
+                    <button class="model-filter-clear" onClick={() => { modelFilter.value = null; }}>
+                        Showing: {filter} ✕
+                    </button>
+                )}
                 <div class="t-frame" style={{ padding: 0, overflow: 'hidden' }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--type-body)' }}>
                         <thead>
@@ -190,7 +205,7 @@ export default function ModelsTab() {
                             </tr>
                         </thead>
                         <tbody>
-                            {sortedModels.map(model => (
+                            {displayedModels.map(model => (
                                 <tr key={model.name} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                                     <td style={{ padding: '0.5rem 0.75rem', fontFamily: 'var(--font-mono)',
                                                  color: 'var(--text-primary)' }}>{model.name}</td>
