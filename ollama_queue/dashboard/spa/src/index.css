@@ -1683,3 +1683,17 @@ kbd {
 .live-indicator--queued   { background: var(--color-muted, #6b7280); }
 .live-indicator--eval     { background: #6366f1; }
 .live-indicator--pulse    { animation: pulse 1.5s ease-in-out infinite; }
+
+/* ActiveJobStrip */
+.active-job-strip        { display: flex; align-items: center; gap: 8px; padding: 4px 12px; background: var(--surface-2, #1f2937); border-bottom: 1px solid var(--border, #374151); font-size: 0.8rem; color: var(--text-muted, #9ca3af); }
+.active-job-strip__time  { font-variant-numeric: tabular-nums; }
+.active-job-strip__queue { margin-left: auto; }
+@media (max-width: 768px) { .active-job-strip { display: none; } }
+
+/* ActiveEvalStrip */
+.active-eval-strip         { display: flex; align-items: center; gap: 8px; padding: 4px 12px; background: color-mix(in srgb, #6366f1 10%, var(--surface-2, #1f2937)); border-bottom: 1px solid #6366f1; font-size: 0.8rem; }
+.active-eval-strip__label  { cursor: pointer; color: var(--text-muted, #9ca3af); }
+.active-eval-strip__bar    { flex: 1; height: 4px; background: var(--surface-3, #374151); border-radius: 2px; min-width: 60px; }
+.active-eval-strip__fill   { height: 100%; background: #6366f1; border-radius: 2px; transition: width 0.3s ease; }
+.active-eval-strip__cancel { padding: 0 6px; border: none; background: none; color: var(--text-muted, #9ca3af); cursor: pointer; }
+@media (max-width: 768px)  { .active-eval-strip { display: none; } }

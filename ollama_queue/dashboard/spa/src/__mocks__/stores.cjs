@@ -6,6 +6,7 @@ module.exports = {
     queue: signal([]),
     queueEtas: signal([]),
     currentJob: signal(null),
+    queueDepth: signal(0),
     currentTab: signal('queue'),
     heatmapData: signal([]),
     dlqSchedulePreview: signal([]),

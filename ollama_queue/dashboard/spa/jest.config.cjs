@@ -15,6 +15,9 @@ module.exports = {
         '^\\.\\./stores/index\\.js$': '<rootDir>/src/__mocks__/stores.cjs',
         '^\\.\\./stores/queue\\.js$': '<rootDir>/src/__mocks__/stores.cjs',
         '^\\.\\./stores/health\\.js$': '<rootDir>/src/__mocks__/stores.cjs',
+        '^\\.\\./stores/eval\\.js$': '<rootDir>/src/__mocks__/stores-eval.cjs',
+        '^\\.\\./hooks/useActionFeedback\\.js$': '<rootDir>/src/__mocks__/useActionFeedback.cjs',
+        '^\\.\\./utils/time\\.js$': '<rootDir>/src/__mocks__/utils-time.cjs',
     },
     testMatch: ['**/*.test.js'],
 };

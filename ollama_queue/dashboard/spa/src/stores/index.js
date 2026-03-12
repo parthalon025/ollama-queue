@@ -4,7 +4,7 @@
 // Decision it drives: Keeps the import surface identical to the old monolithic store.js —
 //   no component changes needed beyond updating the import path.
 
-import { signal } from '@preact/signals';
+import { signal, computed } from '@preact/signals';
 import { API } from './_shared.js';
 
 // Re-export API so components that import { API } from '../stores' still work
@@ -27,6 +27,18 @@ export * from './schedule.js';
 export * from './models.js';
 export * from './settings.js';
 export * from './health.js';
+
+// ── Cross-component derived signals ───────────────────────────────────────────
+
+// What it shows: The currently-running job object, or null if the queue is idle.
+// Decision it drives: ActiveJobStrip and any component outside the Now tab can show
+//   at-a-glance whether something is running without reading the full status signal.
+import { status as _status, queue as _queue } from './queue.js';
+export const currentJob = computed(() => _status.value?.current_job ?? null);
+
+// What it shows: How many jobs are waiting behind the currently-running one.
+// Decision it drives: "Is it safe to submit another job? Will it have to wait?"
+export const queueDepth = computed(() => (_queue.value?.length ?? 0));
 
 // ── Import individual signals/functions needed by the polling orchestrator ────
 import { status, queue, connectionStatus } from './queue.js';
