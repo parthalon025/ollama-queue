@@ -76,8 +76,8 @@ Installed via `file:` dependency in `package.json`. Import JS effects from `'sup
 | ASCII-framed card | `.t-frame` with `data-label`/`data-footer` | Universal card: CurrentJob, QueueList, ResourceGauges, HeroCard, DLQ, Heatmap, HistoryList, Settings, model cards |
 | Terminal status badge | `.t-status` + `.t-status-healthy/warning/error/waiting` | StatusBadge (daemon/job states) |
 | Monospace data | `.data-mono` (maps to `var(--font-mono)`) | All numeric values, source names, model names, timestamps |
-| Priority colors | `priorityColor()` / `PRIORITY_COLORS` / `CATEGORY_COLORS` | QueueList border-left, Plan table row borders |
-| Hero metric card | `HeroCard` (`.t-frame` + `cursor-active/working`) | 2x2 KPI grid: Jobs/24h, Avg Wait, Pause Time, Success Rate |
+| Priority colors + width | `priorityColor()` + `priorityBorderWidth()` + `priorityBorderOpacity()` from `utils/priority.js` | QueueList border-left (width encodes priority, colorblind-safe per Treisman 1980); Plan table row borders |
+| Hero metric card | `HeroCard` (`.t-frame` + `cursor-active/working`, `chroma` prop for `data-chroma`) | 2x2 KPI grid: Jobs/24h, Avg Wait, Pause Time, Success Rate — each card has a uPlot sparkline |
 | Resource gauge bars | `ResourceGauges` (inline div bars) | Now page (standalone + inside CurrentJob) |
 | Cursor state indicators | `.cursor-active` (1s blink), `.cursor-working` (0.5s), `.cursor-idle` (2s) | HeroCard loading/active state |
 | CRT page banner | `PageBanner` component → `.page-banner-sh` | Top of every page — title in VT323 with phosphor glow, scan beam sweep, CRT scanlines |
