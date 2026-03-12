@@ -7,6 +7,7 @@ module.exports = {
     // Mock preact + preact/hooks so JSX/hook imports resolve in CJS node env.
     // Also mock uplot to avoid canvas/DOM requirements in tests.
     moduleNameMapper: {
+        '^superhot-ui$': '<rootDir>/src/__mocks__/superhot-ui.cjs',
         '^preact$': '<rootDir>/src/__mocks__/preact.cjs',
         '^preact/hooks$': '<rootDir>/src/__mocks__/preact-hooks.cjs',
         '^@preact/signals$': '<rootDir>/src/__mocks__/preact-signals.cjs',

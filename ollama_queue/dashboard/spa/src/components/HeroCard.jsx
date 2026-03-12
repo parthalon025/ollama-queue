@@ -1,3 +1,4 @@
+import { h } from 'preact';
 import { useEffect, useRef } from 'preact/hooks';
 import { glitchText } from 'superhot-ui';
 import TimeChart from './TimeChart.jsx';
