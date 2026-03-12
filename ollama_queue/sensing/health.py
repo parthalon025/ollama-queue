@@ -11,7 +11,6 @@ recovered), or yield (a human is actively using Ollama right now)?
 from __future__ import annotations
 
 import logging
-import os
 import subprocess
 import time
 
@@ -54,8 +53,13 @@ class HealthMonitor:
             return 0.0
 
     def get_cpu_count(self) -> int:
-        """Return number of CPUs."""
-        return os.cpu_count() or 1
+        """Count logical CPUs from /proc/cpuinfo (one 'processor' entry per logical CPU)."""
+        try:
+            with open("/proc/cpuinfo") as f:
+                count = sum(1 for line in f if line.startswith("processor"))
+            return count or 1
+        except OSError:
+            return 1
 
     def get_vram_pct(self) -> float | None:
         """Query nvidia-smi for VRAM usage percentage, with TTL cache.
