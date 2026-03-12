@@ -79,7 +79,7 @@ class TestSweepNoEntries:
     def test_sweep_no_entries(self):
         """Empty DLQ returns empty list."""
         sched, db, _, _ = _make_scheduler(entries=[])
-        result = sched._sweep([])
+        result = sched._do_sweep([])
         assert result == []
         db.submit_job.assert_not_called()
         db.mark_dlq_scheduling.assert_not_called()
@@ -92,7 +92,7 @@ class TestSweepFindsSlotAndReschedules:
         entry = _make_entry()
         sched, db, _estimator, _load_map_fn = _make_scheduler(entries=[entry], submit_return=42)
 
-        result = sched._sweep([entry])
+        result = sched._do_sweep([entry])
 
         assert len(result) == 1
         assert result[0]["dlq_id"] == 1
@@ -123,7 +123,7 @@ class TestSweepSkipsChronicFailures:
         entry = _make_entry(auto_reschedule_count=5)
         sched, db, _, _ = _make_scheduler(entries=[entry])
 
-        result = sched._sweep([entry])
+        result = sched._do_sweep([entry])
 
         assert result == []
         db.submit_job.assert_not_called()
@@ -137,7 +137,7 @@ class TestSweepSkipsChronicFailures:
             "dlq.chronic_failure_threshold": 3,
         }.get(key)
 
-        result = sched._sweep([entry])
+        result = sched._do_sweep([entry])
 
         assert result == []
         db.submit_job.assert_not_called()
@@ -150,7 +150,7 @@ class TestSweepSkipsPermanentFailures:
         sched, db, _, _ = _make_scheduler(entries=[entry])
 
         with patch("ollama_queue.scheduling.dlq_scheduler.classify_failure", return_value="permanent"):
-            result = sched._sweep([entry])
+            result = sched._do_sweep([entry])
 
         assert result == []
         db.submit_job.assert_not_called()
@@ -169,7 +169,7 @@ class TestSweepPriorityOrdering:
         db.mark_dlq_scheduling.side_effect = lambda *a, **kw: mark_calls.append(a[0])
         db.update_dlq_reschedule.side_effect = lambda *a, **kw: finalize_calls.append(a[0])
 
-        result = sched._sweep([background, critical])
+        result = sched._do_sweep([background, critical])
 
         # Both should be rescheduled
         assert len(result) == 2
@@ -187,7 +187,7 @@ class TestSweepLockPreventsConcurrent:
         # Acquire the lock externally
         sched._sweep_lock.acquire()
         try:
-            result = sched._sweep([entry])
+            result = sched._sweep()  # _sweep() checks the lock; should bail immediately
             assert result == []
             db.submit_job.assert_not_called()
         finally:
@@ -248,7 +248,7 @@ class TestSweepNoSlotAvailable:
         # Return empty load map — no slots available
         load_map_fn.return_value = []
 
-        result = sched._sweep([entry])
+        result = sched._do_sweep([entry])
 
         assert result == []
         db.submit_job.assert_not_called()
