@@ -1,4 +1,4 @@
-import { h, Fragment } from 'preact';
+import { Fragment } from 'preact';
 import { useState } from 'preact/hooks';
 import { useSignal } from '@preact/signals';
 import { fetchJobRuns } from '../stores';
@@ -692,8 +692,9 @@ export function GanttChart({
                                 height: laneHeight - 8,
                                 opacity: isDimmed ? 0.15 : (isDisabled ? 0.4 : 1),
                                 // Past bars (estimated window fully elapsed) desaturate to signal
-                                // stale schedule data — the job window has passed without evidence of completion.
-                                filter: isPast ? 'saturate(0.2) opacity(0.6)' : undefined,
+                                // stale schedule data — skip when isDimmed (opacity already 0.15,
+                                // stacking filter:opacity would compound to ~9% — invisible).
+                                filter: isPast && !isDimmed ? 'saturate(0.2) opacity(0.6)' : undefined,
                                 transition: 'opacity 0.2s ease',
                                 outline: conflictIds.has(job.id) ? '2px solid var(--status-error)' : undefined,
                                 outlineOffset: conflictIds.has(job.id) ? '-1px' : undefined,
