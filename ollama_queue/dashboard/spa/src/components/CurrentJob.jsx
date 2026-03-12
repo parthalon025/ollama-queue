@@ -4,6 +4,7 @@ import { applyMantra, removeMantra } from 'superhot-ui';
 import StatusBadge from './StatusBadge.jsx';
 import ResourceGauges from './ResourceGauges.jsx';
 import EmptyState from './EmptyState.jsx';
+import ModelChip from './ModelChip.jsx';
 import { formatDuration } from '../utils/time.js';
 import { API, cpuCount } from '../stores';
 
@@ -124,9 +125,7 @@ export default function CurrentJob({ daemon, currentJob, latestHealth, settings,
                 </span>
               )}
               {currentJob && currentJob.model && (
-                <span class="data-mono" style="font-size: var(--type-label); color: var(--text-secondary);">
-                  {currentJob.model}
-                </span>
+                <ModelChip model={currentJob.model} />
               )}
               {/* Proxy call in progress for an eval session (current_job_id=-1 → no job row) */}
               {!currentJob && activeEval && (

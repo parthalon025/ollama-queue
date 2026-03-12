@@ -2,6 +2,7 @@ import { useState } from 'preact/hooks';
 import { API, fetchEvalVariants } from '../../stores';
 import { EVAL_TRANSLATIONS } from './translations.js';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
+import ModelChip from '../ModelChip.jsx';
 // What it shows: A single eval variant config with 3-level progressive disclosure.
 //   L1: ★ badge, variant ID/label, model, recommended/production badges, latest quality.
 //   L2: model, creativity, memory window, template, quality sparkline, edit/clone buttons.
@@ -99,9 +100,8 @@ export default function VariantRow({ variant }) {
           <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-secondary)' }}>
             {label}
           </span>
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)' }}>
-            · {model}
-          </span>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)' }}>·</span>
+          <ModelChip model={model} />
           {is_production ? <span class="eval-badge eval-badge-production">★ Production</span> : null}
           {is_recommended && !is_production ? <span class="eval-badge eval-badge-recommended">★ Recommended</span> : null}
           {latest_f1 != null && (
@@ -119,13 +119,11 @@ export default function VariantRow({ variant }) {
       {level >= 2 && (
         <div class="eval-variant-row-l2">
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', marginBottom: '0.5rem' }}>
-            <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)' }}>
                 Model:
               </span>
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-primary)', marginLeft: '0.4rem' }}>
-                {model}
-              </span>
+              <ModelChip model={model} />
             </div>
             <div>
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)' }}>

@@ -7,6 +7,7 @@ import { SystemHealth } from '../components/SystemHealth.jsx';
 import PerformanceCurveChart from '../components/PerformanceCurveChart.jsx';
 import LoadHeatmap from '../components/LoadHeatmap.jsx';
 import PageBanner from '../components/PageBanner.jsx';
+import ModelChip from '../components/ModelChip.jsx';
 
 // What it shows: Model-level performance data — how fast each model generates tokens,
 //   how long each takes to warm up, how many times each has run — plus a fitted regression
@@ -63,7 +64,7 @@ export default function Performance() {
                             <tbody>
                                 {models.map(model => (
                                     <tr key={model.name} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                                        <td style={tdStyle}>{model.name}</td>
+                                        <td style={tdStyle}><ModelChip model={model.name} /></td>
                                         <td style={tdRight}>{model.run_count}</td>
                                         <td style={tdRight}>
                                             {model.avg_tok_per_min != null
