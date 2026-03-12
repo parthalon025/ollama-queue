@@ -17,6 +17,12 @@ describe('PriorityPill', () => {
     expect(vnode.props.children).toBe('high');
   });
 
+  test('priority 4 is high', () => {
+    const vnode = PriorityPill({ priority: 4 });
+    expect(vnode.props.class).toContain('priority-high');
+    expect(vnode.props.children).toBe('high');
+  });
+
   test('priority 7 renders normal tier', () => {
     const vnode = PriorityPill({ priority: 7 });
     expect(vnode.type).toBe('span');

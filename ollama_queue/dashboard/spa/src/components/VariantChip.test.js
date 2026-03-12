@@ -1,6 +1,8 @@
 import { h } from 'preact';
 import _VariantChip from './VariantChip.jsx';
 const VariantChip = _VariantChip.default || _VariantChip;
+import _F1Score from './F1Score.jsx';
+const F1Score = _F1Score.default || _F1Score;
 
 // Helper: flatten children to an array (handles single child or array)
 function childArray(vnode) {
@@ -52,5 +54,14 @@ describe('VariantChip', () => {
     const providerSpan = findSpan(children, 'provider-badge');
     expect(providerSpan).toBeTruthy();
     expect(providerSpan.props.children).toBe('openai');
+  });
+
+  test('renders F1Score when f1 is provided', () => {
+    const vnode = VariantChip({ variantId: 'v1', f1: 0.85, isProduction: false, isRecommended: false, provider: null });
+    // children is an array; find the F1Score vnode
+    const children = [].concat(vnode.props.children).flat().filter(Boolean);
+    const f1Node = children.find(c => c && c.type && (c.type.name === 'F1Score' || c.type === F1Score));
+    expect(f1Node).toBeTruthy();
+    expect(f1Node.props.value).toBe(0.85);
   });
 });
