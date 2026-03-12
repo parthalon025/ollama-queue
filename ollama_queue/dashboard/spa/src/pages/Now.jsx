@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'preact/hooks';
 import { applyMantra, removeMantra } from 'superhot-ui';
 import {
-    status, queue, history, healthData, durationData, settings,
+    status, queue, history, healthData, cpuCount, durationData, settings,
     dlqCount, connectionStatus, currentTab, clearDLQ,
     scheduleJobs, fetchSchedule,
 } from '../stores';
@@ -208,7 +208,7 @@ export default function Now({ onSubmitRequest }) {
                             <ResourceGauges
                                 ram={latestHealth.ram_pct}
                                 vram={latestHealth.vram_pct}
-                                load={latestHealth.load_avg}
+                                load={(latestHealth.load_avg / (cpuCount.value || 1)) * 100}
                                 swap={latestHealth.swap_pct}
                                 settings={sett}
                             />

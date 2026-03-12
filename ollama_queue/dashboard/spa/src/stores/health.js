@@ -6,7 +6,8 @@
 import { signal } from '@preact/signals';
 import { API } from './_shared.js';
 
-export const healthData = signal([]);     // /api/health response
+export const healthData = signal([]);     // /api/health log array
+export const cpuCount = signal(1);        // cpu_count from /api/health — used to convert raw load_avg to %
 export const durationData = signal([]);   // /api/durations response
 export const heatmapData = signal([]);    // /api/heatmap response
 export const deferredJobs = signal([]);       // /api/deferred response

@@ -116,6 +116,16 @@ def test_health_includes_burst_regime(client):
     assert data["burst_regime"] in {"unknown", "subcritical", "moderate", "warning", "critical"}
 
 
+def test_health_includes_cpu_count(client):
+    """GET /api/health includes cpu_count for load gauge percentage conversion."""
+    resp = client.get("/api/health")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "cpu_count" in data
+    assert isinstance(data["cpu_count"], int)
+    assert data["cpu_count"] >= 1
+
+
 def test_get_durations(client):
     resp = client.get("/api/durations")
     assert resp.status_code == 200

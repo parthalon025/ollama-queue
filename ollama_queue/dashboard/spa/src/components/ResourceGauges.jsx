@@ -58,17 +58,20 @@ export default function ResourceGauges({ ram, vram, load, swap, settings }) {
   const gauges = [
     { label: 'RAM',  title: GAUGE_TOOLTIPS.ram,  value: ram,  pause: s.ram_pause_pct || 85,                              resume: s.ram_resume_pct || 75 },
     { label: 'GPU',  title: GAUGE_TOOLTIPS.vram, value: vram, pause: s.vram_pause_pct || 90,                             resume: s.vram_resume_pct || 80 },
-    { label: 'CPU',  title: GAUGE_TOOLTIPS.load, value: load, pause: (s.load_pause_multiplier || 2) * 50,                resume: (s.load_resume_multiplier || 1.5) * 50 },
+    { label: 'CPU',  title: GAUGE_TOOLTIPS.load, value: load, pause: (s.load_pause_multiplier || 2) * 100,              resume: (s.load_resume_multiplier || 1.5) * 100 },
     { label: 'Swap', title: GAUGE_TOOLTIPS.swap, value: swap, pause: s.swap_pause_pct || 50,                             resume: s.swap_resume_pct || 40 },
   ];
 
   return (
     <div ref={containerRef} class="flex gap-3 flex-wrap">
       {gauges.map((g) => {
-        const pct = Math.min(100, Math.max(0, g.value ?? 0));
+        const raw = g.value ?? 0;
+        const pct = Math.min(100, Math.max(0, raw));
         let color = 'var(--accent)';
-        if (pct >= g.pause) color = 'var(--status-error)';
-        else if (pct >= g.resume) color = 'var(--status-warning)';
+        // Use raw (unclamped) value for color — CPU load can exceed 100% of one core's worth,
+        // and the bar must turn warning/error even when the bar width is capped at 100%.
+        if (raw >= g.pause) color = 'var(--status-error)';
+        else if (raw >= g.resume) color = 'var(--status-warning)';
 
         return (
           <div key={g.label} title={g.title} class="flex items-center gap-1" style="min-width: 80px; flex: 1;">
