@@ -18,11 +18,11 @@ export default function EvalWinnerChip() {
     evalSubTab.value = 'timeline';
   }
 
-  const star = winner.is_production ? '★' : '☆';
+  const star = winner.is_production ? '★' : winner.is_recommended ? '☆' : null;
 
   return (
     <button class="eval-winner-chip" onClick={handleClick} title="View eval trends">
-      <span class={winner.is_production ? 'eval-winner-chip__star--gold' : 'eval-winner-chip__star'}>{star}</span>
+      {star && <span class={winner.is_production ? 'eval-winner-chip__star--gold' : 'eval-winner-chip__star--silver'}>{star}</span>}
       <span class="eval-winner-chip__label">{winner.label || winner.variant_id || winner.id}</span>
       {winner.latest_f1 != null && <F1Score value={winner.latest_f1} />}
     </button>

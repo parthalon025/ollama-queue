@@ -7,11 +7,11 @@ import { dlqCount } from '../stores/health.js';
 import SystemSummaryLine from './SystemSummaryLine.jsx';
 
 export default function CohesionHeader() {
-  const hasDlq = dlqCount.value > 0;
+  const hasDlq = dlqCount?.value > 0;
   return (
     <header class="cohesion-header">
       <SystemSummaryLine />
-      {hasDlq && <span class="cohesion-header__dlq-badge">{dlqCount.value} DLQ</span>}
+      {hasDlq && <span class="cohesion-header__dlq-badge">{dlqCount?.value} DLQ</span>}
     </header>
   );
 }
