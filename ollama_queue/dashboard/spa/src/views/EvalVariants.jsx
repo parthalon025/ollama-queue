@@ -36,7 +36,7 @@ export default function EvalVariants() {
         {selected.length >= 2 && <span>{selected.length} selected for compare</span>}
       </div>
 
-      <ConfigDiffPanel />
+      {selected.length >= 2 && <ConfigDiffPanel />}
 
       <div class="variant-grid">
         {variants.map(v => (
