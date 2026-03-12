@@ -1,4 +1,5 @@
-import { h } from 'preact';
+import { useEffect, useRef } from 'preact/hooks';
+import { glitchText } from 'superhot-ui';
 import TimeChart from './TimeChart.jsx';
 
 /**
@@ -22,10 +23,23 @@ import TimeChart from './TimeChart.jsx';
  * @param {string} [props.chroma] - Superhot-ui chroma token for this card (e.g. "gustave", "lune", "maelle", "sciel"). Omit for no chroma.
  */
 export default function HeroCard({ value, label, unit, delta, warning, loading, sparkData, sparkColor, tooltip, chroma }) {
+  const cardRef = useRef(null);
+  const prevWarning = useRef(warning);
   const cursorClass = loading ? 'cursor-working' : 'cursor-active';
+
+  // Glitch burst: fire when a KPI crosses into warning state (metric degraded).
+  // Edge-triggered — only fires on the transition, not on every render while warning.
+  useEffect(() => {
+    const was = prevWarning.current;
+    prevWarning.current = warning;
+    if (warning && !was && cardRef.current) {
+      glitchText(cardRef.current, { intensity: 'medium' });
+    }
+  }, [warning]);
 
   return (
     <div
+      ref={cardRef}
       class={`t-frame ${cursorClass}`}
       data-label={label}
       data-chroma={chroma || undefined}

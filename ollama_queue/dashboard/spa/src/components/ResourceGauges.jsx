@@ -1,4 +1,3 @@
-import { h } from 'preact';
 import { useEffect, useRef } from 'preact/hooks';
 
 /**
@@ -18,18 +17,35 @@ export default function ResourceGauges({ ram, vram, load, swap, settings }) {
 
   const ramPause = s.ram_pause_pct || 85;
   const vramPause = s.vram_pause_pct || 90;
-  const isOverThreshold = (ram ?? 0) >= ramPause || (vram ?? 0) >= vramPause;
+  const ramResume = s.ram_resume_pct || 75;
+  const vramResume = s.vram_resume_pct || 80;
+  const isCritical = (ram ?? 0) >= ramPause || (vram ?? 0) >= vramPause;
+  // warning = in the "caution zone" between resume and pause thresholds
+  const isWarning = !isCritical && ((ram ?? 0) >= ramResume || (vram ?? 0) >= vramResume);
 
-  // ThreatPulse: red glow when RAM or VRAM hits the pause threshold.
-  // Signals that the queue is about to auto-pause — this is urgent, not informational.
+  // Effect 1: Critical — persistent ThreatPulse while over pause threshold
   useEffect(() => {
     if (!containerRef.current) return;
-    if (isOverThreshold) {
+    if (isCritical) {
       containerRef.current.setAttribute('data-sh-effect', 'threat-pulse');
     } else {
       containerRef.current.removeAttribute('data-sh-effect');
     }
-  }, [isOverThreshold]);
+  }, [isCritical]);
+
+  // Effect 2: Warning — one-shot ThreatPulse on entering warning zone (edge-triggered, not level)
+  const prevWarning = useRef(false);
+  useEffect(() => {
+    const was = prevWarning.current;
+    prevWarning.current = isWarning;
+    if (!containerRef.current || isCritical || !isWarning || was) return;
+    // Entering warning state: fire one-shot, auto-remove after 2s
+    containerRef.current.setAttribute('data-sh-effect', 'threat-pulse');
+    const t = setTimeout(() => {
+      if (containerRef.current && !isCritical) containerRef.current.removeAttribute('data-sh-effect');
+    }, 2000);
+    return () => clearTimeout(t);
+  }, [isWarning, isCritical]);
 
   // Plain-English explanations for each resource gauge (ARIA "Explain like I'm 5")
   const GAUGE_TOOLTIPS = {
