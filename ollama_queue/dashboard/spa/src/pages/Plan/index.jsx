@@ -9,7 +9,7 @@ import {
 } from '../../stores';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
 import { GanttChart, runStatus } from '../../components/GanttChart';
-import { scheduledEvalRuns } from '../../stores/eval.js';
+import { scheduledEvalRuns, fetchScheduledEvalRuns } from '../../stores/eval.js';
 import { currentTab } from '../../stores/health.js';
 import { ModelBadge } from '../../components/ModelBadge';
 import LoadMapStrip from '../../components/LoadMapStrip.jsx';
@@ -81,11 +81,12 @@ export default function Plan() {
         fetchSchedule();
         fetchLoadMap();
         fetchModels();
+        fetchScheduledEvalRuns();
         const tickInterval = setInterval(() => setTick(t => t + 1), 1000);
         const refreshInterval = setInterval(() => {
             if (!refreshingRef.current) {
                 refreshingRef.current = true;
-                Promise.all([fetchSchedule(), fetchLoadMap()])
+                Promise.all([fetchSchedule(), fetchLoadMap(), fetchScheduledEvalRuns()])
                     .finally(() => { refreshingRef.current = false; });
             }
         }, 10000);
@@ -319,7 +320,9 @@ export default function Plan() {
     // What it shows: Scheduled eval runs as Gantt bars alongside regular recurring jobs.
     // Decision it drives: User can see at a glance when an eval will run so they can avoid
     //   scheduling conflicting heavy jobs at the same time.
-    const evalBlocks = (scheduledEvalRuns.value || []).map(run => ({
+    const evalBlocks = (scheduledEvalRuns.value || [])
+        .filter(run => run.scheduled_for != null)
+        .map(run => ({
         id: `eval-${run.run_id}`,
         name: `Eval: ${(run.variant_ids || []).slice(0, 3).join(',')}`,
         source: 'eval',
