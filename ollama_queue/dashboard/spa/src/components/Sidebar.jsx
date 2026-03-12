@@ -1,5 +1,7 @@
 import { healthData, settings, connectionStatus } from '../stores';
 import SystemHealthChip from './SystemHealthChip.jsx';
+import SystemSummaryLine from './SystemSummaryLine.jsx';
+import EvalWinnerChip from './EvalWinnerChip.jsx';
 
 // NOTE: callback params use descriptive names (item, etc.) — never 'h' (shadows JSX factory)
 const NAV_ITEMS = [
@@ -41,6 +43,11 @@ export default function Sidebar({ active, onNavigate, daemonState, dlqCount, the
                     settings={sett}
                     connectionStatus={connStatus}
                 />
+            </div>
+
+            <div class="sidebar-summary">
+                <SystemSummaryLine />
+                <EvalWinnerChip />
             </div>
 
             {/* Nav items */}

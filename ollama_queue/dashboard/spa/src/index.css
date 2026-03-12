@@ -1705,4 +1705,8 @@ kbd {
 .eval-winner-chip           { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 10px; border: 1px solid var(--border, #374151); background: none; color: var(--text, #f3f4f6); font-size: 0.75rem; cursor: pointer; }
 .eval-winner-chip__star--gold { color: #f59e0b; }
 .eval-winner-chip__star--silver { color: var(--text-muted, #9ca3af); }
+
+/* Sidebar summary section */
+.sidebar-summary { padding: 8px 12px; border-top: 1px solid var(--border, #374151); }
+@media (min-width: 768px) and (max-width: 1023px) { .sidebar-summary { display: none; } }
 @media (max-width: 768px)   { .cohesion-header { display: none; } }
