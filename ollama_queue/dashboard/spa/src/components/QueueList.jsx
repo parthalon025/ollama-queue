@@ -220,6 +220,8 @@ export default function QueueList({ jobs, currentJob }) {
                 onDragEnd={job._isRunning ? undefined : handleDragEnd}
                 onDrop={job._isRunning ? undefined : (e) => handleDrop(e, dragIndex)}
                 onClick={() => setExpandedId(expandedId === job.id ? null : job.id)}
+                role="button"
+                aria-expanded={expandedId === job.id}
                 class="flex items-center gap-2 py-1"
                 style={[
                   `border-bottom: 1px solid var(--border-subtle);`,
@@ -332,6 +334,14 @@ export default function QueueList({ jobs, currentJob }) {
                     ×
                   </button>
                 )}
+
+                {/* Expand chevron — flip ▾/▴ to signal row is clickable to reveal job detail */}
+                <span
+                  style={`color: var(--text-tertiary); font-size: var(--type-micro); flex-shrink: 0; user-select: none;`}
+                  aria-hidden="true"
+                >
+                  {expandedId === job.id ? '▴' : '▾'}
+                </span>
               </div>
 
               {/* What it shows: Expandable job detail — enqueued time, estimated duration, retry count,
@@ -375,10 +385,12 @@ export default function QueueList({ jobs, currentJob }) {
                       {job.prompt.slice(0, 120)}{job.prompt.length > 120 ? '…' : ''}
                     </div>
                   )}
-                  <div>
-                    <span style={{ color: 'var(--text-tertiary)' }}>command:</span>{' '}
-                    <span style={{ color: 'var(--text-primary)', wordBreak: 'break-all' }}>{job.command}</span>
-                  </div>
+                  {job.command && (
+                    <div>
+                      <span style={{ color: 'var(--text-tertiary)' }}>command:</span>{' '}
+                      <span style={{ color: 'var(--text-primary)', wordBreak: 'break-all' }}>{job.command}</span>
+                    </div>
+                  )}
                   {job.timeout && (
                     <div>
                       <span style={{ color: 'var(--text-tertiary)' }}>time limit:</span>{' '}
