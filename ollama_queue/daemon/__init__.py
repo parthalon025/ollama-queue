@@ -52,6 +52,11 @@ class Daemon(LoopMixin, ExecutorMixin):
         self._running: dict[int, Future] = {}  # job_id -> Future
         self._running_models: dict[int, str] = {}  # job_id -> model
         self._running_lock = threading.Lock()
+        # Set of job_ids that have been preempted (SIGTERM sent, process not yet
+        # confirmed exited).  These entries stay in _running so the slot remains
+        # occupied until the worker thread's finally block removes them — preventing
+        # the daemon from re-dequeuing the same job before the old process exits.
+        self._preempted: set[int] = set()
         self._executor = None
         self._concurrent_enabled_at: float | None = None  # for shadow mode
         self._ollama_models = OllamaModels()

@@ -401,6 +401,20 @@ class ExecutorMixin:
             stdout_tail = out[-500:].decode("utf-8", errors="replace")
             stderr_tail = err[-500:].decode("utf-8", errors="replace")
 
+            # If the job was preempted, _preempt_job has already set status='pending'
+            # and incremented preemption_count.  Skip complete_job to avoid overwriting
+            # that state.  The slot will be released when the finally block runs.
+            with self._running_lock:
+                was_preempted = job["id"] in self._preempted
+
+            if was_preempted:
+                _log.info(
+                    "Job #%d preempted and process exited (exit_code=%d) — skipping complete_job",
+                    job["id"],
+                    exit_code,
+                )
+                return
+
             outcome_reason = None
             if exit_code != 0:
                 outcome_reason = f"exit code {exit_code}"
@@ -550,6 +564,7 @@ class ExecutorMixin:
             with self._running_lock:
                 self._running.pop(job["id"], None)
                 self._running_models.pop(job["id"], None)
+                self._preempted.discard(job["id"])
 
     def _check_stalled_jobs(self, now: float) -> None:
         """Bayesian multi-signal stall detection for running LLM jobs.
@@ -702,9 +717,16 @@ class ExecutorMixin:
         )
         _log.warning("Preempted job #%d — requeued as pending", job_id)
 
+        # Do NOT pop from _running here.  The worker thread is still alive waiting
+        # for the process to exit.  Removing the entry early frees the concurrency
+        # slot before the process has terminated, allowing the daemon to re-dequeue
+        # this same job on the next poll cycle (double-execution).
+        #
+        # Instead, mark the job in _preempted so _run_job's finally block can skip
+        # the complete_job call (the DB status is already 'pending') while still
+        # holding the slot until the process actually exits.
         with self._running_lock:
-            self._running.pop(job_id, None)
-            self._running_models.pop(job_id, None)
+            self._preempted.add(job_id)
 
     def _run_check_command(self, job: dict, recurring_job: dict) -> str:
         """Run check_command for a recurring job before the main command.
