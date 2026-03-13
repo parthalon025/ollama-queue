@@ -1378,3 +1378,27 @@ def test_put_settings_accepts_numeric_for_numeric_key(client):
     """PUT /api/settings accepts a valid numeric value for a numeric setting."""
     resp = client.put("/api/settings", json={"poll_interval_seconds": 10})
     assert resp.status_code == 200
+
+
+def test_backend_metrics_empty(client):
+    """GET /api/metrics/backends returns empty list when no proxy requests made."""
+    resp = client.get("/api/metrics/backends")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_backend_metrics_with_data(client_and_db):
+    """GET /api/metrics/backends returns per-backend stats after storing metrics."""
+    client, db = client_and_db
+    db.store_backend_metrics(
+        backend_url="http://127.0.0.1:11434",
+        model="deepseek-r1:8b",
+        metrics={"eval_count": 60, "eval_duration": 3_000_000_000, "load_duration": 1_500_000_000},
+    )
+    resp = client.get("/api/metrics/backends")
+    assert resp.status_code == 200
+    rows = resp.json()
+    assert len(rows) == 1
+    assert rows[0]["model"] == "deepseek-r1:8b"
+    assert rows[0]["run_count"] == 1
+    assert rows[0]["avg_tok_per_min"] > 0

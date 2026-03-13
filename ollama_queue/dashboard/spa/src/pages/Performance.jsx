@@ -3,6 +3,7 @@ import {
     modelPerformance, performanceCurve,
     fetchModelPerformance, fetchPerformanceCurve,
 } from '../stores';
+import { backendMetrics, fetchBackendMetrics } from '../stores/health.js';
 import { evalVariants, fetchEvalVariants } from '../stores/eval.js';
 import { SystemHealth } from '../components/SystemHealth.jsx';
 import PerformanceCurveChart from '../components/PerformanceCurveChart.jsx';
@@ -20,6 +21,7 @@ import F1Score from '../components/F1Score.jsx';
 export default function Performance() {
     const stats = modelPerformance.value;
     const curve = performanceCurve.value;
+    const backends = backendMetrics.value;
 
     // What it shows: Which eval variant is currently in production and which model it uses as judge.
     // Decision it drives: User can see the eval judge model's performance context alongside
@@ -30,6 +32,7 @@ export default function Performance() {
     useEffect(() => {
         fetchModelPerformance();
         fetchPerformanceCurve();
+        fetchBackendMetrics();
         fetchEvalVariants(); // needed for judge model annotation when landing directly on this tab
     }, []);
 
@@ -111,6 +114,52 @@ export default function Performance() {
                 </div>
             )}
 
+            {/* Per-Backend Throughput — which GPU is serving each model, and how fast */}
+            {backends.length > 0 && (
+                <div class="t-frame" data-label="Per-Backend Throughput">
+                    {/* What it shows: How fast each configured GPU serves each model, measured in tokens/min.
+                        Decision it drives: Which model to run on which backend? Is the remote GPU
+                          worth routing to for a given model? Is a backend underperforming its size class? */}
+                    <div style="overflow-x: auto;">
+                        <table style={{
+                            width: '100%',
+                            borderCollapse: 'collapse',
+                            fontFamily: 'var(--font-mono)',
+                            fontSize: 'var(--type-label)',
+                        }}>
+                            <thead>
+                                <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                                    <th style={thStyle}>Backend</th>
+                                    <th style={thStyle}>Model</th>
+                                    <th style={{ ...thStyle, textAlign: 'right' }}>Runs</th>
+                                    <th style={{ ...thStyle, textAlign: 'right' }}>tok/min</th>
+                                    <th style={{ ...thStyle, textAlign: 'right' }}>Warmup</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {backends.map((row, i) => (
+                                    <tr key={i} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                                        <td style={tdStyle}>{_abbrevBackend(row.backend_url)}</td>
+                                        <td style={tdStyle}><ModelChip model={row.model} /></td>
+                                        <td style={tdRight}>{row.run_count}</td>
+                                        <td style={tdRight}>
+                                            {row.avg_tok_per_min != null
+                                                ? row.avg_tok_per_min.toFixed(0)
+                                                : '—'}
+                                        </td>
+                                        <td style={tdRight}>
+                                            {row.avg_warmup_s != null
+                                                ? `${row.avg_warmup_s.toFixed(1)}s`
+                                                : '—'}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
+
             {/* Load Heatmap — hour × day-of-week */}
             <p style="font-size: var(--type-label); color: var(--text-secondary); margin-bottom: 8px;">
                 Activity by hour of day and day of week. Darker cells mean more jobs ran during that window.
@@ -118,6 +167,16 @@ export default function Performance() {
             <LoadHeatmap />
         </div>
     );
+}
+
+function _abbrevBackend(url) {
+    try {
+        const u = new URL(url);
+        const host = u.hostname;
+        return (host === '127.0.0.1' || host === 'localhost') ? 'Local' : host;
+    } catch {
+        return url;
+    }
 }
 
 const thStyle = {

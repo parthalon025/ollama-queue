@@ -298,6 +298,14 @@ This applies to: component files, store transformations in `stores/`, computed v
 - **Cron scheduling is timezone-aware** — `_local_dt()` helper converts timestamps via `ZoneInfo("localtime")` with UTC fallback. Prevents DST-related double-fire or missed-fire for cron-scheduled jobs.
 - **Cron expressions validated at submission time** — `add_recurring_job()` validates via `croniter()` before INSERT. Invalid cron returns HTTP 400, not a 500 at promotion time.
 - **DLQ chronic threshold check is atomic** — re-reads `auto_reschedule_count` from DB inside `_sweep_lock` to prevent double-reschedule at the threshold boundary.
+- **`has_healthy_remote_backend()`** — sync read from `_health_cache` in `backend_router.py`; returns True when any non-127.0.0.1/localhost backend has a cached healthy status within the 30s TTL. Used by `executor._can_admit`.
+- **CPU gate bypass for remote GPU** — in `executor._can_admit`, when `health.evaluate()` says `should_pause` but the reason is CPU-load-only (no RAM/Swap/VRAM in reason string) and `has_healthy_remote_backend()` is True, the local CPU gate is bypassed and inference proxies to the remote GPU. Logs "bypassing local CPU load gate" at INFO.
+- **`_backend_gpu_name` TTL split** — HTTP 200 response caches for 600s (hardware stable); network exception caches for 30s (backend may be restarting). Previously a single 600s TTL caused null gpu_name to persist 10min after a restarting backend came back.
+- **DLQ `_do_sweep()` logs at DEBUG when `dlq.auto_reschedule` is disabled** — previously silent; now visible in debug logs without polluting INFO.
+- **`_safeJson(resp)` in SPA stores** — checks `Content-Type` includes `application/json` before calling `.json()`; applied to all fetch calls in `stores/index.js`. Prevents JSON parse errors on unexpected HTML error responses.
+- **`BackendsPanel` `isServing` indicator** — derives active-serving state by matching `currentJob.model` against `backend.loaded_models`; active backend gets green outline + "serving" label. All-unreachable state shows explicit error row. Requires `currentJob` signal import.
+- **`ganttInteractingRef` in Plan/index.jsx** — suppresses the 10s load-map refresh while user hovers Gantt or LoadMapStrip, preventing mid-interaction repaints.
+- **`normalizeTrends()` surfaces `no_cluster_data: true`** — F1LineChart shows a specific actionable message (not a generic empty state) when cluster labels are missing from the eval results.
 
 ## Design Doc
 

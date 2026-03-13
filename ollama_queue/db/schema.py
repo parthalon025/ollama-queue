@@ -490,6 +490,23 @@ class SchemaMixin:
                 PRIMARY KEY (principle_hash, target_hash, judge_model, judge_mode)
             );
 
+            CREATE TABLE IF NOT EXISTS backend_metrics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                backend_url TEXT NOT NULL,
+                model TEXT NOT NULL,
+                eval_count INTEGER,
+                eval_duration_ns INTEGER,
+                load_duration_ns INTEGER,
+                prompt_eval_count INTEGER,
+                prompt_eval_duration_ns INTEGER,
+                total_duration_ns INTEGER,
+                tok_per_min REAL,
+                recorded_at REAL NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_backend_metrics_backend_model
+                ON backend_metrics(backend_url, model);
+
             CREATE TABLE IF NOT EXISTS consumers (
                 id                  INTEGER PRIMARY KEY AUTOINCREMENT,
                 name                TEXT NOT NULL,

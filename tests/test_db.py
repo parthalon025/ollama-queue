@@ -36,6 +36,7 @@ class TestInitialize:
             "job_metrics",
             "deferrals",
             "eval_cache",
+            "backend_metrics",
         }
         assert expected == set(tables)
 
@@ -1574,3 +1575,42 @@ class TestRetryOnBusyIntegration:
         state = db.get_daemon_state()
         assert state["state"] == "paused"
         assert state["paused_reason"] == "test"
+
+
+class TestBackendMetrics:
+    """store_backend_metrics and get_backend_stats round-trip."""
+
+    def test_store_and_retrieve(self, db):
+        db.store_backend_metrics(
+            backend_url="http://127.0.0.1:11434",
+            model="deepseek-r1:8b",
+            metrics={
+                "eval_count": 120,
+                "eval_duration": 6_000_000_000,  # 6s → 1200 tok/min
+                "load_duration": 2_000_000_000,
+                "prompt_eval_count": 10,
+                "prompt_eval_duration": 500_000_000,
+                "total_duration": 8_000_000_000,
+            },
+        )
+        rows = db.get_backend_stats()
+        assert len(rows) == 1
+        row = rows[0]
+        assert row["backend_url"] == "http://127.0.0.1:11434"
+        assert row["model"] == "deepseek-r1:8b"
+        assert row["run_count"] == 1
+        assert row["avg_tok_per_min"] == pytest.approx(1200.0, rel=0.01)
+        assert row["avg_warmup_s"] == pytest.approx(2.0, rel=0.01)
+
+    def test_no_eval_count_skips_tok_per_min(self, db):
+        db.store_backend_metrics(
+            backend_url="http://127.0.0.1:11434",
+            model="nomic-embed-text",
+            metrics={"load_duration": 1_000_000_000},
+        )
+        rows = db.get_backend_stats()
+        assert rows[0]["avg_tok_per_min"] is None
+        assert rows[0]["avg_warmup_s"] == pytest.approx(1.0, rel=0.01)
+
+    def test_empty_returns_empty_list(self, db):
+        assert db.get_backend_stats() == []

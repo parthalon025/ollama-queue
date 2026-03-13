@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import time
@@ -37,11 +38,12 @@ _hop_by_hop = frozenset(
 )
 
 
-async def _iter_ndjson(rp_resp, release_fn=None):
+async def _iter_ndjson(rp_resp, release_fn=None, metrics_fn=None):
     """Yield complete NDJSON lines from a streaming httpx response.
 
     Buffers aiter_raw() output — chunks are NOT guaranteed line-aligned.
     Calls release_fn() when done=true final chunk is seen (releases proxy claim).
+    Calls metrics_fn(parsed_chunk) with the done=true chunk for backend metrics capture.
     """
     buffer = b""
     try:
@@ -54,9 +56,15 @@ async def _iter_ndjson(rp_resp, release_fn=None):
                     continue
                 yield line + b"\n"
                 try:
-                    if json.loads(line).get("done") and release_fn:
-                        release_fn()
-                        release_fn = None
+                    obj = json.loads(line)
+                    if obj.get("done"):
+                        if metrics_fn:
+                            with contextlib.suppress(Exception):
+                                metrics_fn(obj)
+                            metrics_fn = None
+                        if release_fn:
+                            release_fn()
+                            release_fn = None
                 except (ValueError, AttributeError):
                     pass
         if buffer.strip():
@@ -152,6 +160,11 @@ async def _proxy_ollama_request(
             stderr_tail="",
             outcome_reason=None,
         )
+        if result.get("eval_count"):
+            try:
+                db.store_backend_metrics(backend_url=backend, model=model, metrics=result)
+            except Exception:
+                _log.warning("store_backend_metrics failed for job %d", job_id, exc_info=True)
         result["_queue_job_id"] = job_id
         return result
     except httpx.ReadTimeout as e:
@@ -287,6 +300,13 @@ async def proxy_generate(body: dict = Body(...)):
         except Exception:
             _log.exception("release_proxy_claim failed for streaming job %d", job_id)
 
+    def _on_streaming_metrics(chunk):
+        if chunk.get("eval_count"):
+            try:
+                db.store_backend_metrics(backend_url=backend, model=model, metrics=chunk)
+            except Exception:
+                _log.warning("store_backend_metrics (streaming) failed for job %d", job_id, exc_info=True)
+
     headers = {k: v for k, v in rp_resp.headers.items() if k.lower() not in _hop_by_hop}
 
     async def _cleanup_streaming_resources():
@@ -310,7 +330,7 @@ async def proxy_generate(body: dict = Body(...)):
                 _log.exception("forced release_proxy_claim also failed for job %d", job_id)
 
     return StreamingResponse(
-        _iter_ndjson(rp_resp, release_fn=_release),
+        _iter_ndjson(rp_resp, release_fn=_release, metrics_fn=_on_streaming_metrics),
         status_code=rp_resp.status_code,
         headers=headers,
         media_type="application/x-ndjson",

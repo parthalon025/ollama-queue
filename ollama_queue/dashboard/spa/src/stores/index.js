@@ -57,7 +57,7 @@ import { status, queue, connectionStatus } from './queue.js';
 import { settings } from './settings.js';
 import { healthData, cpuCount, durationData, heatmapData, dlqSchedulePreview,
          fetchDLQ, fetchDeferred, fetchDLQSchedulePreview, fetchModelPerformance,
-         fetchPerformanceCurve, fetchBackends } from './health.js';
+         fetchPerformanceCurve, fetchBackends, fetchBackendMetrics } from './health.js';
 import { history } from './queue.js';
 
 // ── Polling loop ────────────────────────────────────────────────────────────
@@ -132,6 +132,7 @@ async function _fetchNonRealtime() {
         fetchDLQSchedulePreview();
         fetchModelPerformance();
         fetchPerformanceCurve();
+        fetchBackendMetrics();
     } catch (e) {
         console.error('Non-realtime refresh failed:', e);
     }

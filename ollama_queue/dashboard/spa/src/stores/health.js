@@ -14,6 +14,7 @@ export const heatmapData = signal([]);    // /api/heatmap response
 export const deferredJobs = signal([]);       // /api/deferred response
 export const modelPerformance = signal({});   // /api/metrics/models response
 export const performanceCurve = signal(null); // /api/metrics/performance-curve response
+export const backendMetrics = signal([]);     // /api/metrics/backends — per-backend per-model throughput
 export const dlqEntries = signal([]);
 export const dlqCount = signal(0);
 export const dlqSchedulePreview = signal({ entries: [], count: 0 }); // /api/dlq/schedule-preview
@@ -129,6 +130,17 @@ export async function fetchPerformanceCurve() {
         if (resp.ok) performanceCurve.value = await resp.json();
     } catch (e) {
         console.error('fetchPerformanceCurve failed:', e);
+    }
+}
+
+export async function fetchBackendMetrics() {
+    // What it fetches: Per-backend, per-model throughput data — which GPU is serving each model
+    //   and how fast it runs. Only populated after proxy requests have been made.
+    try {
+        const resp = await fetch(`${API}/metrics/backends`);
+        if (resp.ok) backendMetrics.value = await resp.json();
+    } catch (e) {
+        console.error('fetchBackendMetrics failed:', e);
     }
 }
 
