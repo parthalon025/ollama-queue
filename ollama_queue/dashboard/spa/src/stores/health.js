@@ -44,6 +44,7 @@ export function removeToast(id) {
 // What it shows: Per-backend CRUD signals for the new Backends tab.
 // Decision it drives: Users can add/remove/test backends from the dashboard.
 export const backendsLoading = signal(false);
+export const backendsError = signal(null); // null = ok, string = last fetch error message
 
 export async function addBackend(url, weight = 1) {
   const res = await fetch(`${API}/backends`, {
@@ -114,9 +115,16 @@ export const consumersScanning = signal(false);
 export async function fetchBackends() {
     try {
         const res = await fetch(`${API}/backends`);
-        if (res.ok) backendsData.value = await res.json();
+        if (res.ok) {
+            backendsData.value = await res.json();
+            backendsError.value = null;
+        } else {
+            console.error('fetchBackends: HTTP', res.status);
+            backendsError.value = `HTTP ${res.status}`;
+        }
     } catch (e) {
         console.error('fetchBackends failed:', e);
+        backendsError.value = e.message;
     }
 }
 

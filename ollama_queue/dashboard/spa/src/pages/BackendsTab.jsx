@@ -7,9 +7,9 @@
 import { useEffect, useState } from 'preact/hooks';
 import { ShFrozen, ShGlitch, ShShatter, ShThreatPulse } from 'superhot-ui/preact';
 import {
-  backendsData, fetchBackends,
+  backendsData, backendsError, fetchBackends,
   addBackend, removeBackend, updateBackendWeight, testBackend,
-  currentJob, API,
+  addToast, currentJob, API,
 } from '../stores';
 import { ShStatusBadge } from 'superhot-ui/preact';
 import { useActionFeedback } from '../hooks/useActionFeedback.js';
@@ -244,6 +244,7 @@ function AddBackendForm({ onAdded }) {
 
 export default function BackendsTab() {
   const backends = backendsData.value || [];
+  const fetchError = backendsError.value;
 
   useEffect(() => {
     fetchBackends();
@@ -252,7 +253,12 @@ export default function BackendsTab() {
   }, []);
 
   async function handleRemove(url) {
-    try { await removeBackend(url); } catch (e) { console.error('Remove backend failed:', e); }
+    try {
+      await removeBackend(url);
+    } catch (e) {
+      console.error('Remove backend failed:', e);
+      addToast(`Remove failed: ${e.message}`, 'error', true);
+    }
   }
 
   // Derive last selected backend for routing intelligence panel
@@ -265,7 +271,11 @@ export default function BackendsTab() {
 
       {/* 6.1 Fleet Overview */}
       <div class="t-frame" data-label="Fleet Overview">
-        {backends.length === 0 ? (
+        {fetchError ? (
+          <div class="data-mono" style={{ color: 'var(--status-error)', fontSize: 'var(--type-body)', textAlign: 'center', padding: '1rem' }}>
+            Failed to load backends: {fetchError}
+          </div>
+        ) : backends.length === 0 ? (
           <div class="data-mono" style={{ color: 'var(--text-tertiary)', fontSize: 'var(--type-body)', textAlign: 'center', padding: '1rem' }}>
             No backends configured. Add one below.
           </div>
