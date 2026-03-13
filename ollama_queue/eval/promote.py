@@ -203,30 +203,39 @@ def _check_auto_promote_inner(db: Database, run_id: int) -> None:  # noqa: PLR09
                 (prod_id,),
             ).fetchone()
 
-    if prod_row is not None:
-        if prod_run_row is not None:
-            try:
-                m = json.loads(prod_run_row["metrics"]) if isinstance(prod_run_row["metrics"], str) else {}
-                production_quality = (m.get(prod_id) or {}).get(quality_metric)
-            except (json.JSONDecodeError, TypeError):
-                _log.warning(
-                    "check_auto_promote: production metrics unparseable for variant %s — gate 2 skipped as unsafe",
-                    prod_id,
-                )
-                return
+    if prod_row is None:
+        # No production variant exists — this is the first-ever eval run.
+        # Block auto-promote to require manual promotion establishing the baseline.
+        _log.info(
+            "check_auto_promote: run %d — no production baseline exists. "
+            "First run requires manual promote to establish baseline.",
+            run_id,
+        )
+        return
 
-        if production_quality is not None and winner_quality <= production_quality + min_improvement:
-            _log.info(
-                "check_auto_promote: run %d winner %s=%.3f not enough improvement over "
-                "production %s=%.3f (need +%.3f), skipping",
-                run_id,
-                quality_metric,
-                winner_quality,
-                quality_metric,
-                production_quality,
-                min_improvement,
+    if prod_run_row is not None:
+        try:
+            m = json.loads(prod_run_row["metrics"]) if isinstance(prod_run_row["metrics"], str) else {}
+            production_quality = (m.get(prod_id) or {}).get(quality_metric)
+        except (json.JSONDecodeError, TypeError):
+            _log.warning(
+                "check_auto_promote: production metrics unparseable for variant %s — gate 2 skipped as unsafe",
+                prod_id,
             )
             return
+
+    if production_quality is not None and winner_quality <= production_quality + min_improvement:
+        _log.info(
+            "check_auto_promote: run %d winner %s=%.3f not enough improvement over "
+            "production %s=%.3f (need +%.3f), skipping",
+            run_id,
+            quality_metric,
+            winner_quality,
+            quality_metric,
+            production_quality,
+            min_improvement,
+        )
+        return
 
     # Gate 3: error_budget_used <= error_budget
     _eb = db.get_setting("eval.error_budget")
