@@ -3207,3 +3207,58 @@ def test_run_job_unhandled_exception_partial_metrics_store_fails(db, caplog):
 
     # Should log debug message about failed partial capture
     assert any("Failed to capture partial metrics" in r.message for r in caplog.records)
+
+
+# --- _can_admit: proxy sentinel blocks admission (#3) ---
+
+
+def test_can_admit_blocked_by_proxy_sentinel(db, monkeypatch):
+    """_can_admit returns False when proxy sentinel (-1) is set in daemon_state.
+
+    The proxy sentinel means an /api/generate or /api/embed request is in-flight
+    and holding the Ollama server.  Even though _running is empty (proxy jobs
+    aren't tracked there), _can_admit must refuse new jobs.
+    """
+    d = Daemon(db)
+    # Simulate proxy claim in-flight
+    db.update_daemon_state(current_job_id=-1)
+    job = {"id": 1, "model": "qwen2.5:7b", "resource_profile": "ollama", "priority": 5}
+    monkeypatch.setattr(d, "_model_pull_in_progress", lambda m: False)
+    monkeypatch.setattr(d, "_free_vram_mb", lambda: 16000.0)
+    monkeypatch.setattr(d, "_free_ram_mb", lambda: 32000.0)
+    # Mock health to pass all checks — the ONLY reason for refusal should be sentinel
+    with patch.object(
+        d.health,
+        "check",
+        return_value={
+            "ram_pct": 10.0,
+            "swap_pct": 5.0,
+            "load_avg": 0.1,
+            "cpu_count": 4,
+            "vram_pct": 10.0,
+            "ollama_model": None,
+        },
+    ):
+        assert d._can_admit(job) is False
+
+
+def test_can_admit_allowed_when_no_proxy_sentinel(db, monkeypatch):
+    """_can_admit is not blocked when current_job_id is None (no proxy claim)."""
+    d = Daemon(db)
+    job = {"id": 1, "model": "qwen2.5:7b", "resource_profile": "ollama", "priority": 5}
+    monkeypatch.setattr(d, "_model_pull_in_progress", lambda m: False)
+    monkeypatch.setattr(d, "_free_vram_mb", lambda: 16000.0)
+    monkeypatch.setattr(d, "_free_ram_mb", lambda: 32000.0)
+    with patch.object(
+        d.health,
+        "check",
+        return_value={
+            "ram_pct": 10.0,
+            "swap_pct": 5.0,
+            "load_avg": 0.1,
+            "cpu_count": 4,
+            "vram_pct": 10.0,
+            "ollama_model": None,
+        },
+    ):
+        assert d._can_admit(job) is True

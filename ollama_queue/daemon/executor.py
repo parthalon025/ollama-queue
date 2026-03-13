@@ -231,6 +231,13 @@ class ExecutorMixin:
         this is safe only because poll_once is single-threaded and never calls
         _can_admit from worker threads.
         """
+        # Check for in-flight proxy claim (sentinel -1 in daemon_state).
+        # Proxy jobs aren't in the in-memory _running dict, only in the DB.
+        state = self.db.get_daemon_state()
+        if state.get("current_job_id") == -1:
+            _log.debug("_can_admit: job #%d blocked — proxy claim in-flight (sentinel -1)", job["id"])
+            return False
+
         profile = self._ollama_models.classify(job.get("model") or "")["resource_profile"]
 
         # embed: up to 4 concurrent embed jobs, no VRAM gate
