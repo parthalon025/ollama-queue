@@ -28,27 +28,33 @@ class JobsMixin:
     ):
         with self._lock:
             conn = self._connect()
-            cur = conn.execute(
-                """INSERT INTO jobs
-                   (command, model, priority, timeout, source, submitted_at,
-                    tag, max_retries, resource_profile, recurring_job_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    command,
-                    model,
-                    priority,
-                    timeout,
-                    source,
-                    time.time(),
-                    tag,
-                    max_retries,
-                    resource_profile,
-                    recurring_job_id,
-                ),
-            )
-            conn.commit()
-            assert cur.lastrowid is not None
-            return cur.lastrowid
+            result = {}
+
+            def _do():
+                cur = conn.execute(
+                    """INSERT INTO jobs
+                       (command, model, priority, timeout, source, submitted_at,
+                        tag, max_retries, resource_profile, recurring_job_id)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        command,
+                        model,
+                        priority,
+                        timeout,
+                        source,
+                        time.time(),
+                        tag,
+                        max_retries,
+                        resource_profile,
+                        recurring_job_id,
+                    ),
+                )
+                conn.commit()
+                assert cur.lastrowid is not None
+                result["id"] = cur.lastrowid
+
+            self._retry_on_busy(_do)
+            return result["id"]
 
     def get_job(self, job_id):
         with self._lock:
@@ -102,14 +108,18 @@ class JobsMixin:
         status = "completed" if exit_code == 0 else "failed"
         with self._lock:
             conn = self._connect()
-            conn.execute(
-                """UPDATE jobs
-                   SET status = ?, exit_code = ?, stdout_tail = ?, stderr_tail = ?,
-                       outcome_reason = ?, completed_at = ?
-                   WHERE id = ?""",
-                (status, exit_code, stdout_tail, stderr_tail, outcome_reason, time.time(), job_id),
-            )
-            conn.commit()
+
+            def _do():
+                conn.execute(
+                    """UPDATE jobs
+                       SET status = ?, exit_code = ?, stdout_tail = ?, stderr_tail = ?,
+                           outcome_reason = ?, completed_at = ?
+                       WHERE id = ?""",
+                    (status, exit_code, stdout_tail, stderr_tail, outcome_reason, time.time(), job_id),
+                )
+                conn.commit()
+
+            self._retry_on_busy(_do)
 
     def kill_job(self, job_id, reason, stdout_tail="", stderr_tail=""):
         with self._lock:
@@ -240,6 +250,16 @@ class JobsMixin:
             conn.execute(
                 "UPDATE jobs SET stall_detected_at = ?, stall_signals = ? WHERE id = ?",
                 (now, json.dumps(signals), job_id),
+            )
+            conn.commit()
+
+    def clear_stall_detected(self, job_id):
+        """Clear stall detection flag when a job recovers (posterior drops below threshold)."""
+        with self._lock:
+            conn = self._connect()
+            conn.execute(
+                "UPDATE jobs SET stall_detected_at = NULL WHERE id = ?",
+                (job_id,),
             )
             conn.commit()
 

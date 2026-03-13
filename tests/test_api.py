@@ -226,8 +226,8 @@ class TestBatchScheduleAPI:
 
     def test_batch_toggle_unknown_tag(self, client):
         resp = client.post("/api/schedule/batch-toggle", json={"tag": "nonexistent", "enabled": True})
-        assert resp.status_code == 200
-        assert resp.json()["updated"] == 0
+        assert resp.status_code == 404
+        assert "No recurring jobs found" in resp.json()["detail"]
 
     def test_batch_run_submits_enabled_only(self, client):
         self._seed_jobs(client)
@@ -1270,3 +1270,85 @@ def test_spa_static_with_dist_directory(tmp_path):
         assert resp.status_code in (200, 307, 404)
     else:
         pytest.skip("spa dist directory not built")
+
+
+# ---------------------------------------------------------------------------
+# Task 15: Priority bounds (0-10) and query limit caps (#19)
+# ---------------------------------------------------------------------------
+
+
+def test_set_priority_below_range(client_and_db):
+    """PUT /api/queue/{job_id}/priority returns 400 for priority < 0."""
+    client, db = client_and_db
+    job_id = db.submit_job("echo hi", "test-model", priority=5, timeout=60, source="test")
+    resp = client.put(f"/api/queue/{job_id}/priority", json={"priority": -1})
+    assert resp.status_code == 400
+    assert "0-10" in resp.json()["detail"]
+
+
+def test_set_priority_above_range(client_and_db):
+    """PUT /api/queue/{job_id}/priority returns 400 for priority > 10."""
+    client, db = client_and_db
+    job_id = db.submit_job("echo hi", "test-model", priority=5, timeout=60, source="test")
+    resp = client.put(f"/api/queue/{job_id}/priority", json={"priority": 11})
+    assert resp.status_code == 400
+    assert "0-10" in resp.json()["detail"]
+
+
+def test_set_priority_boundary_zero(client_and_db):
+    """PUT /api/queue/{job_id}/priority accepts priority=0 (lower bound)."""
+    client, db = client_and_db
+    job_id = db.submit_job("echo hi", "test-model", priority=5, timeout=60, source="test")
+    resp = client.put(f"/api/queue/{job_id}/priority", json={"priority": 0})
+    assert resp.status_code == 200
+
+
+def test_set_priority_boundary_ten(client_and_db):
+    """PUT /api/queue/{job_id}/priority accepts priority=10 (upper bound)."""
+    client, db = client_and_db
+    job_id = db.submit_job("echo hi", "test-model", priority=5, timeout=60, source="test")
+    resp = client.put(f"/api/queue/{job_id}/priority", json={"priority": 10})
+    assert resp.status_code == 200
+
+
+def test_schedule_events_limit_capped_at_1000(client):
+    """GET /api/schedule/events?limit=9999 silently caps to 1000."""
+    resp = client.get("/api/schedule/events?limit=9999")
+    assert resp.status_code == 200
+
+
+def test_schedule_events_limit_floor_at_1(client):
+    """GET /api/schedule/events?limit=0 silently floors to 1."""
+    resp = client.get("/api/schedule/events?limit=0")
+    assert resp.status_code == 200
+
+
+def test_suggest_priority_clamped(client):
+    """GET /api/schedule/suggest?priority=99 silently clamps to 10."""
+    resp = client.get("/api/schedule/suggest?priority=99")
+    assert resp.status_code == 200
+
+
+def test_suggest_top_n_clamped(client):
+    """GET /api/schedule/suggest?top_n=100 silently clamps to 20."""
+    resp = client.get("/api/schedule/suggest?top_n=100")
+    assert resp.status_code == 200
+
+
+def test_suggest_top_n_floor(client):
+    """GET /api/schedule/suggest?top_n=0 silently floors to 1."""
+    resp = client.get("/api/schedule/suggest?top_n=0")
+    assert resp.status_code == 200
+    assert len(resp.json()["suggestions"]) <= 1
+
+
+# ---------------------------------------------------------------------------
+# Task 16: Batch operations return 404 for zero-match tag (#20)
+# ---------------------------------------------------------------------------
+
+
+def test_batch_run_unknown_tag_returns_404(client):
+    """POST /api/schedule/batch-run returns 404 when no jobs match tag."""
+    resp = client.post("/api/schedule/batch-run", json={"tag": "nonexistent"})
+    assert resp.status_code == 404
+    assert "No enabled recurring jobs found" in resp.json()["detail"]

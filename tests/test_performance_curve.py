@@ -1,5 +1,7 @@
 """Tests for cross-model performance curve regression."""
 
+import math
+
 from ollama_queue.models.performance_curve import PerformanceCurve
 
 
@@ -173,6 +175,56 @@ def test_warmup_not_fitted_returns_none():
         ]
     )
     assert curve.predict_warmup(7.5) is None
+
+
+def test_degenerate_fit_nearly_identical_x_values():
+    """Two points with nearly identical x-values should produce finite, positive predictions."""
+    curve = PerformanceCurve()
+    # Nearly identical model sizes produce extreme slope in log-log space
+    curve.fit(
+        [
+            {"model_size_gb": 5.0, "avg_tok_per_min": 80.0},
+            {"model_size_gb": 5.0001, "avg_tok_per_min": 45.0},
+        ]
+    )
+    assert curve.fitted
+    result = curve.predict_tok_per_min(7.0)
+    assert result is not None
+    assert math.isfinite(result)
+    assert result > 0
+    assert result <= 100_000  # capped
+
+
+def test_prediction_capped_at_100k_tok_per_min():
+    """predict_tok_per_min never returns more than 100k, even with extreme parameters."""
+    curve = PerformanceCurve()
+    curve.fit(
+        [
+            {"model_size_gb": 5.0, "avg_tok_per_min": 80.0},
+            {"model_size_gb": 10.0, "avg_tok_per_min": 45.0},
+        ]
+    )
+    # Force extreme intercept to test the cap
+    curve._tok_intercept = 50.0  # exp(50) >> 100k
+    result = curve.predict_tok_per_min(1.0)
+    assert result == 100_000
+
+
+def test_ci_capped_at_100k():
+    """CI prediction values are also capped at 100k."""
+    curve = PerformanceCurve()
+    curve.fit(
+        [
+            {"model_size_gb": 5.0, "avg_tok_per_min": 80.0},
+            {"model_size_gb": 10.0, "avg_tok_per_min": 45.0},
+        ]
+    )
+    curve._tok_intercept = 50.0
+    result = curve.predict_tok_per_min_ci(1.0)
+    assert result is not None
+    mean, lower, upper = result
+    assert mean <= 100_000
+    assert upper <= 100_000
 
 
 def test_warmup_clamped_to_minimum():

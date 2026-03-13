@@ -1,5 +1,6 @@
 """Tests for the SQLite database layer."""
 
+import sqlite3
 import time
 from typing import ClassVar
 from unittest.mock import patch
@@ -1432,3 +1433,144 @@ class TestResumeDeferredJobNotFound:
     def test_resume_nonexistent_deferral(self, db):
         # Should not raise — just returns silently
         db.resume_deferred_job(99999)
+
+
+class TestRetryOnBusy:
+    """SQLITE_BUSY retry logic for WAL checkpoint contention (#16)."""
+
+    def test_retry_succeeds_after_transient_busy(self, db):
+        """Operation succeeds on second attempt after SQLITE_BUSY."""
+        call_count = 0
+
+        def flaky():
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise sqlite3.OperationalError("database is locked")
+            return "ok"
+
+        result = db._retry_on_busy(flaky)
+        assert result == "ok"
+        assert call_count == 2
+
+    def test_retry_exhausted_raises(self, db):
+        """After max_retries, the error propagates."""
+
+        def always_locked():
+            raise sqlite3.OperationalError("database is locked")
+
+        with pytest.raises(sqlite3.OperationalError, match="locked"):
+            db._retry_on_busy(always_locked, max_retries=2)
+
+    def test_non_locked_error_not_retried(self, db):
+        """Non-locked OperationalErrors propagate immediately without retry."""
+        call_count = 0
+
+        def bad_sql():
+            nonlocal call_count
+            call_count += 1
+            raise sqlite3.OperationalError("no such table: bogus")
+
+        with pytest.raises(sqlite3.OperationalError, match="no such table"):
+            db._retry_on_busy(bad_sql)
+        assert call_count == 1  # no retry
+
+    def test_retry_returns_value(self, db):
+        """Return value from the wrapped function is propagated."""
+        result = db._retry_on_busy(lambda: 42)
+        assert result == 42
+
+    @patch("ollama_queue.db._time.sleep")
+    def test_retry_uses_exponential_backoff(self, mock_sleep, db):
+        """Backoff doubles on each retry attempt."""
+        attempt = 0
+
+        def fail_twice():
+            nonlocal attempt
+            attempt += 1
+            if attempt <= 2:
+                raise sqlite3.OperationalError("database is locked")
+            return "done"
+
+        result = db._retry_on_busy(fail_twice, max_retries=2, backoff=0.1)
+        assert result == "done"
+        assert mock_sleep.call_count == 2
+        # First retry: 0.1 * 2^0 = 0.1
+        assert mock_sleep.call_args_list[0][0][0] == pytest.approx(0.1)
+        # Second retry: 0.1 * 2^1 = 0.2
+        assert mock_sleep.call_args_list[1][0][0] == pytest.approx(0.2)
+
+
+class TestRetryOnBusyIntegration:
+    """Verify high-frequency write methods use _retry_on_busy (#16)."""
+
+    def test_log_health_calls_retry(self, db):
+        """log_health routes its write through _retry_on_busy."""
+        calls = []
+        original = db._retry_on_busy
+
+        def spy(fn, **kw):
+            calls.append(True)
+            return original(fn, **kw)
+
+        db._retry_on_busy = spy
+        db.log_health(50.0, 30.0, 1.5, 10.0, "llama2:7b", 3, "running")
+        assert len(calls) == 1
+
+        # Verify data was actually written
+        logs = db.get_health_log(hours=1)
+        assert len(logs) >= 1
+
+    def test_complete_job_calls_retry(self, db):
+        """complete_job routes its write through _retry_on_busy."""
+        job_id = db.submit_job("echo hi", "m", 5, 60, "test")
+        db.start_job(job_id)
+
+        calls = []
+        original = db._retry_on_busy
+
+        def spy(fn, **kw):
+            calls.append(True)
+            return original(fn, **kw)
+
+        db._retry_on_busy = spy
+        db.complete_job(job_id, 0, "output", "")
+        assert len(calls) == 1
+
+        job = db.get_job(job_id)
+        assert job["status"] == "completed"
+
+    def test_submit_job_calls_retry(self, db):
+        """submit_job routes its write through _retry_on_busy."""
+        calls = []
+        original = db._retry_on_busy
+
+        def spy(fn, **kw):
+            calls.append(True)
+            return original(fn, **kw)
+
+        db._retry_on_busy = spy
+        job_id = db.submit_job("echo hi", "m", 5, 60, "test")
+        assert len(calls) == 1
+
+        assert job_id is not None
+        assert job_id > 0
+        job = db.get_job(job_id)
+        assert job["command"] == "echo hi"
+
+    def test_update_daemon_state_calls_retry(self, db):
+        """update_daemon_state routes its write through _retry_on_busy."""
+        calls = []
+        original = db._retry_on_busy
+
+        def spy(fn, **kw):
+            calls.append(True)
+            return original(fn, **kw)
+
+        db._retry_on_busy = spy
+        db.update_daemon_state(state="paused", paused_reason="test")
+        assert len(calls) == 1
+
+        state = db.get_daemon_state()
+        assert state["state"] == "paused"
+        assert state["paused_reason"] == "test"

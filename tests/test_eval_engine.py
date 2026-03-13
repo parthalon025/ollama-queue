@@ -1384,6 +1384,16 @@ class TestCheckAutoPromote:
         db.set_setting("eval.stability_window", 0)  # disabled
         import json
 
+        # Establish a production baseline (variant B) with lower F1 —
+        # required since first-ever run blocks auto-promote (#8).
+        with db._lock:
+            conn = db._connect()
+            conn.execute("UPDATE eval_variants SET is_production = 1 WHERE id = 'B'")
+            conn.commit()
+        baseline_id = create_eval_run(db, variant_id="B")
+        baseline_metrics = json.dumps({"B": {"f1": 0.70, "precision": 0.75, "recall": 0.65, "actionability": 0.7}})
+        update_eval_run(db, baseline_id, status="complete", winner_variant="B", metrics=baseline_metrics)
+
         run_id = create_eval_run(db, variant_id="A")
         metrics = json.dumps({"A": {"f1": 0.85, "precision": 0.9, "recall": 0.8, "actionability": 0.8}})
         update_eval_run(
@@ -1478,6 +1488,20 @@ class TestCheckAutoPromoteBayesian:
         db.set_setting("eval.stability_window", 0)
         import json
 
+        # Establish production baseline (variant B) with lower AUC —
+        # required since first-ever run blocks auto-promote (#8).
+        with db._lock:
+            conn = db._connect()
+            conn.execute("UPDATE eval_variants SET is_production = 1 WHERE id = 'B'")
+            conn.commit()
+        baseline_id = create_eval_run(db, variant_id="B")
+        baseline_metrics = json.dumps(
+            {"B": {"auc": 0.75, "separation": 0.30, "same_mean_posterior": 0.70, "diff_mean_posterior": 0.40}}
+        )
+        update_eval_run(
+            db, baseline_id, status="complete", winner_variant="B", metrics=baseline_metrics, judge_mode="bayesian"
+        )
+
         run_id = create_eval_run(db, variant_id="A")
         metrics = json.dumps(
             {
@@ -1540,6 +1564,19 @@ class TestCheckAutoPromoteBayesian:
         db.set_setting("eval.auto_promote_min_improvement", 0.05)
         db.set_setting("eval.error_budget", 0.30)
         db.set_setting("eval.stability_window", 2)  # need 2 passing runs
+
+        # Establish production baseline (variant B) with lower AUC (#8)
+        with db._lock:
+            conn = db._connect()
+            conn.execute("UPDATE eval_variants SET is_production = 1 WHERE id = 'B'")
+            conn.commit()
+        baseline_id = create_eval_run(db, variant_id="B")
+        baseline_metrics = json.dumps(
+            {"B": {"auc": 0.70, "separation": 0.25, "same_mean_posterior": 0.65, "diff_mean_posterior": 0.40}}
+        )
+        update_eval_run(
+            db, baseline_id, status="complete", winner_variant="B", metrics=baseline_metrics, judge_mode="bayesian"
+        )
 
         bayesian_metrics = json.dumps(
             {"A": {"auc": 0.90, "separation": 0.50, "same_mean_posterior": 0.85, "diff_mean_posterior": 0.35}}
@@ -1609,6 +1646,15 @@ class TestCheckAutoPromoteBayesian:
         db.set_setting("eval.error_budget", 0.30)
         db.set_setting("eval.stability_window", 0)
         import json
+
+        # Establish production baseline (variant B) with lower F1 (#8)
+        with db._lock:
+            conn = db._connect()
+            conn.execute("UPDATE eval_variants SET is_production = 1 WHERE id = 'B'")
+            conn.commit()
+        baseline_id = create_eval_run(db, variant_id="B")
+        baseline_metrics = json.dumps({"B": {"f1": 0.70, "precision": 0.75, "recall": 0.65, "actionability": 0.7}})
+        update_eval_run(db, baseline_id, status="complete", winner_variant="B", metrics=baseline_metrics)
 
         run_id = create_eval_run(db, variant_id="A")
         # Legacy run: has F1 but no AUC — should use F1 path

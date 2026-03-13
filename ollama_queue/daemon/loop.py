@@ -121,10 +121,15 @@ class LoopMixin:
             ).fetchall()
             now = _dt.now(UTC).isoformat()
             for row in stuck:
+                result_count = conn.execute(
+                    "SELECT COUNT(*) as cnt FROM eval_results WHERE run_id = ?", (row["id"],)
+                ).fetchone()["cnt"]
+                error_msg = "daemon restart: session abandoned"
+                if result_count > 0:
+                    error_msg += f" ({result_count} partial results remain)"
                 conn.execute(
-                    "UPDATE eval_runs SET status='failed', error='daemon restart: session abandoned',"
-                    " completed_at=? WHERE id=?",
-                    (now, row["id"]),
+                    "UPDATE eval_runs SET status='failed', error=?," " completed_at=? WHERE id=?",
+                    (error_msg, now, row["id"]),
                 )
                 _log.warning("Abandoned eval run #%d on daemon restart", row["id"])
             if stuck:
@@ -151,8 +156,21 @@ class LoopMixin:
                     _log.info("Sent SIGTERM to orphaned pid=%d (job #%d)", job["pid"], job["id"])
                 except ProcessLookupError:
                     pass  # process already gone
+            else:
+                _log.warning(
+                    "Orphan job #%d has no PID — process may still be running. "
+                    "Resetting to pending; check for duplicate execution.",
+                    job["id"],
+                )
             self.db.reset_job_to_pending(job["id"])
             _log.warning("Reset orphaned job #%d to pending", job["id"])
+
+        # Clear orphaned proxy sentinel. If daemon crashed while a proxy held
+        # the sentinel (-1), it persists and blocks all future proxy requests.
+        with self.db._lock:
+            conn = self.db._connect()
+            conn.execute("UPDATE daemon_state SET current_job_id = NULL " "WHERE id = 1 AND current_job_id = -1")
+            conn.commit()
 
     # --- Circuit breaker ---
 
@@ -411,6 +429,7 @@ class LoopMixin:
             currently_paused=currently_paused,
             queued_model=job["model"],
             recent_job_models=recent_models_snapshot,
+            paused_since=state.get("paused_since"),
         )
 
         if evaluation["should_pause"]:

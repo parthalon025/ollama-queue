@@ -59,12 +59,16 @@ def _make_estimate():
 def _make_scheduler(entries=None, submit_return=100):
     """Build a DLQScheduler with mocked dependencies."""
     db = MagicMock()
-    db.list_dlq.return_value = entries or []
+    entries = entries or []
+    db.list_dlq.return_value = entries
     db.submit_job.return_value = submit_return
     db.get_setting.side_effect = lambda key: {
         "dlq.auto_reschedule": True,
         "dlq.chronic_failure_threshold": None,  # falls back to default of 5
     }.get(key)
+    # get_dlq_entry: return the matching entry from the entries list by id
+    _entries_by_id = {e["id"]: dict(e) for e in entries}
+    db.get_dlq_entry.side_effect = lambda dlq_id: _entries_by_id.get(dlq_id)
 
     estimator = MagicMock()
     estimator.estimate.return_value = _make_estimate()
@@ -161,7 +165,7 @@ class TestSweepPriorityOrdering:
         """Higher-importance entries (lower priority number) are processed first."""
         critical = _make_entry(id=1, priority=1)  # priority 1 = critical (most important)
         background = _make_entry(id=2, priority=10)  # priority 10 = background (least important)
-        sched, db, _, _ = _make_scheduler(submit_return=99)
+        sched, db, _, _ = _make_scheduler(entries=[critical, background], submit_return=99)
 
         # Track order via mark_dlq_scheduling (pre-submit) and update_dlq_reschedule (post-submit)
         mark_calls = []
@@ -284,3 +288,47 @@ class TestSweepPassesVramEstimate:
             # 14b model → ~8.5 GB VRAM — must be > 0
             vram = call_kwargs.kwargs.get("job_vram_needed_gb", call_kwargs[1].get("job_vram_needed_gb", 0))
             assert vram > 0, f"Expected positive VRAM estimate, got {vram}"
+
+
+class TestSweepAtomicChronicThresholdCheck:
+    def test_entry_at_threshold_minus_one_rescheduled_only_once(self):
+        """An entry at count=threshold-1 must only be rescheduled once, even
+        if _do_sweep processes it — the fresh DB re-read inside the lock
+        prevents a stale-list race from double-rescheduling (#9)."""
+        entry = _make_entry(id=10, auto_reschedule_count=2)
+        sched, db, _, _ = _make_scheduler(entries=[entry], submit_return=55)
+        # Threshold=3, entry count=2 → passes check on first sweep.
+        # get_dlq_entry returns the fresh entry (count=2 initially).
+        db.get_dlq_entry.return_value = dict(entry)
+
+        result = sched._do_sweep([entry])
+
+        assert len(result) == 1
+        assert result[0]["new_job_id"] == 55
+        db.submit_job.assert_called_once()
+
+    def test_entry_already_at_threshold_in_db_skipped(self):
+        """If a concurrent sweep already incremented the count to threshold,
+        the fresh DB re-read catches it and skips (#9)."""
+        entry = _make_entry(id=10, auto_reschedule_count=2)
+        sched, db, _, _ = _make_scheduler(entries=[entry], submit_return=55)
+        # Stale list says count=2, but DB already has count=3 (threshold reached)
+        db.get_dlq_entry.side_effect = None
+        db.get_dlq_entry.return_value = {**entry, "auto_reschedule_count": 3}
+
+        result = sched._do_sweep([entry])
+
+        assert result == []
+        db.submit_job.assert_not_called()
+
+    def test_entry_deleted_between_list_and_reread_skipped(self):
+        """If a DLQ entry is deleted between listing and re-read, skip it."""
+        entry = _make_entry(id=10, auto_reschedule_count=0)
+        sched, db, _, _ = _make_scheduler(entries=[entry], submit_return=55)
+        db.get_dlq_entry.side_effect = None
+        db.get_dlq_entry.return_value = None
+
+        result = sched._do_sweep([entry])
+
+        assert result == []
+        db.submit_job.assert_not_called()

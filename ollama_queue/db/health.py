@@ -25,13 +25,17 @@ class HealthMixin:
     ):
         with self._lock:
             conn = self._connect()
-            conn.execute(
-                """INSERT INTO health_log
-                   (timestamp, ram_pct, vram_pct, load_avg, swap_pct, ollama_model, queue_depth, daemon_state)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (time.time(), ram_pct, vram_pct, load_avg, swap_pct, ollama_model, queue_depth, daemon_state),
-            )
-            conn.commit()
+
+            def _do():
+                conn.execute(
+                    """INSERT INTO health_log
+                       (timestamp, ram_pct, vram_pct, load_avg, swap_pct, ollama_model, queue_depth, daemon_state)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (time.time(), ram_pct, vram_pct, load_avg, swap_pct, ollama_model, queue_depth, daemon_state),
+                )
+                conn.commit()
+
+            self._retry_on_busy(_do)
 
     def get_health_log(self, hours=24):
         with self._lock:
@@ -71,8 +75,12 @@ class HealthMixin:
             conn = self._connect()
             sets = ", ".join(f"{k} = ?" for k in kwargs)
             vals = list(kwargs.values())
-            conn.execute(f"UPDATE daemon_state SET {sets} WHERE id = 1", vals)
-            conn.commit()
+
+            def _do():
+                conn.execute(f"UPDATE daemon_state SET {sets} WHERE id = 1", vals)
+                conn.commit()
+
+            self._retry_on_busy(_do)
 
     def get_daemon_state(self):
         with self._lock:

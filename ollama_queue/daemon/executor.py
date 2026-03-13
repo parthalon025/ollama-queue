@@ -231,6 +231,13 @@ class ExecutorMixin:
         this is safe only because poll_once is single-threaded and never calls
         _can_admit from worker threads.
         """
+        # Check for in-flight proxy claim (sentinel -1 in daemon_state).
+        # Proxy jobs aren't in the in-memory _running dict, only in the DB.
+        state = self.db.get_daemon_state()
+        if state.get("current_job_id") == -1:
+            _log.debug("_can_admit: job #%d blocked — proxy claim in-flight (sentinel -1)", job["id"])
+            return False
+
         profile = self._ollama_models.classify(job.get("model") or "")["resource_profile"]
 
         # embed: up to 4 concurrent embed jobs, no VRAM gate
@@ -368,7 +375,13 @@ class ExecutorMixin:
             # Non-LLM jobs: communicate() with hard timeout
             if job.get("resource_profile") == "ollama":
                 out, err = _drain_pipes_with_tracking(proc, job["id"], self.stall_detector)
-                proc.wait()  # ensure returncode is set (drain loop exits on proc.poll())
+                try:
+                    proc.wait(timeout=30)
+                except subprocess.TimeoutExpired:
+                    _log.warning("Job #%d proc.wait() timed out after drain — sending SIGKILL", job["id"])
+                    with contextlib.suppress(ProcessLookupError):
+                        proc.kill()
+                    proc.wait(timeout=5)  # reap zombie
             else:
                 try:
                     out, err = proc.communicate(timeout=job["timeout"])
@@ -611,6 +624,17 @@ class ExecutorMixin:
                         )
                         with contextlib.suppress(ProcessLookupError, PermissionError):
                             os.kill(pid, _signal.SIGTERM)
+            elif stall_detected_at:
+                # Job recovered: posterior dropped below threshold since stall was
+                # first flagged. Clear the flag so a future spike starts a fresh
+                # grace period instead of inheriting the old (already-elapsed) one.
+                _log.info(
+                    "Job #%d stall recovered: posterior=%.2f < threshold=%.2f — clearing stall",
+                    job_id,
+                    posterior,
+                    threshold,
+                )
+                self.db.clear_stall_detected(job_id)
 
     def _check_retryable_jobs(self, now: float) -> None:
         """Clear retry_after for pending jobs whose backoff window has elapsed."""

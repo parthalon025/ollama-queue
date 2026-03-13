@@ -618,3 +618,45 @@ class TestRebalanceCoverageGaps:
         db.add_recurring_job("cron1", "echo hi", cron_expression="0 6 * * *", next_run=time.time() + 100)
         changes = scheduler.rebalance(time.time())
         assert changes == []
+
+
+class TestTimezoneAwareCron:
+    def test_next_run_computed_from_timezone_aware_datetime(self, db):
+        """next_run for cron jobs is computed using timezone-aware datetime (#10)."""
+        rj_id = db.add_recurring_job("tz-cron", "echo hi", cron_expression="0 7 * * *")
+        rj = db.get_recurring_job(rj_id)
+        # next_run should be a valid positive timestamp (in the future or at least > 0)
+        assert rj["next_run"] is not None
+        assert rj["next_run"] > 0
+
+    def test_update_next_run_uses_timezone_aware_datetime(self, db):
+        """update_recurring_next_run uses timezone-aware datetime for cron eval (#10)."""
+        from ollama_queue.scheduling.scheduler import Scheduler
+
+        scheduler = Scheduler(db)
+        rj_id = db.add_recurring_job("tz-update", "echo hi", cron_expression="30 8 * * *")
+        completed_at = time.time()
+        scheduler.update_next_run(rj_id, completed_at, job_id=1)
+        rj = db.get_recurring_job(rj_id)
+        # next_run should be after completed_at
+        assert rj["next_run"] > completed_at
+
+    def test_local_dt_helper_returns_aware_datetime(self):
+        """_local_dt returns a timezone-aware datetime, not naive."""
+        from ollama_queue.db.schedule import _local_dt
+
+        dt = _local_dt(time.time())
+        assert dt.tzinfo is not None
+
+    def test_local_dt_falls_back_to_utc(self):
+        """_local_dt falls back to UTC if ZoneInfo('localtime') fails."""
+        import datetime
+        from unittest.mock import patch
+
+        with patch("ollama_queue.db.schedule.ZoneInfo", side_effect=Exception("no tz")):
+            # Need to re-import to get the patched version
+            from ollama_queue.db import schedule
+
+            dt = schedule._local_dt(1_700_000_000.0)
+            assert dt.tzinfo is not None
+            assert dt.tzinfo == datetime.UTC

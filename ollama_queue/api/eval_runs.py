@@ -170,8 +170,20 @@ def trigger_eval_run(body: dict = Body(...)):
     def _run_session_in_background() -> None:
         try:
             run_eval_session(_captured_run_id, db)
-        except Exception:
+        except Exception as exc:
             _log.exception("run_eval_session failed for run_id=%d", _captured_run_id)
+            try:
+                import time as _time_bg
+
+                update_eval_run(
+                    db,
+                    _captured_run_id,
+                    status="failed",
+                    error=f"background thread crash: {type(exc).__name__}: {exc}",
+                    completed_at=_time_bg.time(),
+                )
+            except Exception:
+                _log.exception("Failed to mark run %d as failed", _captured_run_id)
 
     _threading.Thread(target=_run_session_in_background, daemon=True).start()
 
@@ -594,8 +606,20 @@ def repeat_eval_run(run_id: int):
     def _run_repeat_in_background() -> None:
         try:
             run_eval_session(_captured_new_id, db)
-        except Exception:
+        except Exception as exc:
             _log.exception("run_eval_session failed for repeat run_id=%d", _captured_new_id)
+            try:
+                import time as _time_repeat
+
+                update_eval_run(
+                    db,
+                    _captured_new_id,
+                    status="failed",
+                    error=f"background thread crash: {type(exc).__name__}: {exc}",
+                    completed_at=_time_repeat.time(),
+                )
+            except Exception:
+                _log.exception("Failed to mark repeat run %d as failed", _captured_new_id)
 
     _threading.Thread(target=_run_repeat_in_background, daemon=True).start()
 

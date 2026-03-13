@@ -282,6 +282,22 @@ This applies to: component files, store transformations in `stores/`, computed v
 - **Falsy-zero antipattern in settings** — `db.get_setting()` returns strings or `None`. `x or default` treats `"0"` as truthy (correct) but `int(x) or default` treats `0` as falsy (wrong). Always use `int(x) if x is not None else default` for numeric settings that can legitimately be 0 (e.g. `error_budget=0` meaning zero tolerance, `poll_interval=0`).
 - **DLQ priority sort is ascending** — lower number = higher importance (1=critical, 10=background). `sorted(entries, key=lambda e: e.get("priority", 0))` is correct. The inverted sort (descending) processed background jobs before critical ones.
 - **`GET /api/health` returns `cpu_count`** — read from `/proc/cpuinfo` via `sensing/health.py:get_cpu_count()` (not `os.cpu_count()`), cached at module level in `api/health.py` as `_CPU_COUNT`. SPA `stores/health.js` exposes a `cpuCount` signal; `Now.jsx` and `CurrentJob.jsx` use `load_avg / cpuCount * 100` to convert load average to a percentage before passing to `ResourceGauges`. CPU pause/resume thresholds are `multiplier × 100` (not `× 50`).
+- **`max_pause_duration_seconds` setting** — default 600 (10 min). If the health monitor stays paused longer than this, it force-resumes regardless of metric values. Prevents indefinite pause when a single metric sits in the hysteresis band. `evaluate()` accepts `paused_since` parameter.
+- **`SystemSnapshot.vram_known` field** — `bool`, default `True`. Set to `False` when `get_vram_pct()` returns `None` or raises. When `vram_known=False`, slot scoring skips VRAM hard gates and resource headroom checks to avoid phantom-zero scheduling.
+- **First-ever eval run requires manual promote** — `check_auto_promote` returns early (no promotion) when no production variant exists. The first eval run must be manually promoted to establish a baseline. This prevents auto-promoting a mediocre variant with no comparison data.
+- **Model list cache TTL is 15s** — reduced from 60s. `_invalidate_list_cache()` forces fresh fetch on next call.
+- **Priority bounds enforced: 0-10** — `set_priority` returns HTTP 400 for out-of-range values. `GET /api/schedule/events` limit capped at 1000. `suggest_schedule_time` top_n capped at 20.
+- **Batch operations return 404 for unknown tags** — `batch_toggle_schedule` and `batch_run_schedule` return 404 when no recurring jobs match the tag, instead of 200 with `updated: 0`.
+- **`judge_parse_failures` column on `eval_runs`** — `INTEGER DEFAULT 0`. Counts how many judge responses failed to parse during an eval run. Logged as WARNING when > 0.
+- **`_retry_on_busy()` wraps high-frequency DB writes** — `log_health()`, `update_daemon_state()`, `submit_job()`, `complete_job()` retry up to 2 times on `SQLITE_BUSY` with exponential backoff (0.1s, 0.2s). Retries happen inside `_lock`.
+- **`clear_stall_detected(job_id)`** — new DB method. Called when stall posterior drops below threshold, clearing `stall_detected_at` so any future spike gets a fresh grace period instead of inheriting an expired one.
+- **RuntimeEstimator excludes negative durations** — non-positive durations (from clock skew) are excluded, not clamped to 0.1. Logs WARNING with count. Falls back to prior if all durations are invalid.
+- **PerformanceCurve predictions capped at 100k tok/min** — prevents `math.exp(huge)` → `inf` on degenerate fits (nearly identical x-values). Falls back to single-point slope (-0.7) when `abs(slope) > 10`.
+- **Consumer config TOCTOU guard** — `patch_consumer()` checks `scanned_mtime` against current mtime before patching. Raises `ValueError` if file was modified between scan and patch.
+- **BurstDetector activates after 5 samples** — reduced from 10. On low-traffic systems (1-2 jobs/day), detection activates in 2-3 days instead of 5-10.
+- **Cron scheduling is timezone-aware** — `_local_dt()` helper converts timestamps via `ZoneInfo("localtime")` with UTC fallback. Prevents DST-related double-fire or missed-fire for cron-scheduled jobs.
+- **Cron expressions validated at submission time** — `add_recurring_job()` validates via `croniter()` before INSERT. Invalid cron returns HTTP 400, not a 500 at promotion time.
+- **DLQ chronic threshold check is atomic** — re-reads `auto_reschedule_count` from DB inside `_sweep_lock` to prevent double-reschedule at the threshold boundary.
 
 ## Design Doc
 

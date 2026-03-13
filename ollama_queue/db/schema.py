@@ -63,6 +63,7 @@ DEFAULTS = {
     "defer.burst_priority_threshold": 3,
     "defer.thermal_threshold_c": 85,
     "defer.resource_wait_timeout_s": 120,
+    "max_pause_duration_seconds": 600,
 }
 
 EVAL_SETTINGS_DEFAULTS = {
@@ -101,7 +102,7 @@ EVAL_SETTINGS_DEFAULTS = {
 class SchemaMixin:
     """Schema creation, migrations, and seed data."""
 
-    def _run_migrations(self, conn):
+    def _run_migrations(self, conn):  # noqa: PLR0915
         """Apply all incremental schema migrations (idempotent)."""
         self._add_column_if_missing(conn, "recurring_jobs", "cron_expression", "TEXT")
         self._add_column_if_missing(conn, "recurring_jobs", "pinned", "INTEGER DEFAULT 0")
@@ -154,6 +155,8 @@ class SchemaMixin:
         self._add_column_if_missing(conn, "eval_runs", "cost_json", "TEXT")
         self._add_column_if_missing(conn, "eval_runs", "oracle_json", "TEXT")
         self._add_column_if_missing(conn, "eval_runs", "suggestions_json", "TEXT")
+        # Judge parse failure tracking (#22)
+        self._add_column_if_missing(conn, "eval_runs", "judge_parse_failures", "INTEGER DEFAULT 0")
         # Backfill pre-existing rows
         conn.execute("UPDATE eval_variants SET params = '{}' WHERE params IS NULL")
         conn.execute("UPDATE eval_variants SET provider = 'ollama' WHERE provider IS NULL")

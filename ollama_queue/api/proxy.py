@@ -273,28 +273,48 @@ async def proxy_generate(body: dict = Body(...)):
         db.release_proxy_claim()
         raise HTTPException(status_code=502, detail=f"Ollama request failed: {e}") from e
 
+    _released = False
+
     def _release():
+        nonlocal _released
         try:
             db.complete_job(job_id, exit_code=0, stdout_tail="(streaming)", stderr_tail="", outcome_reason=None)
         except Exception:
             _log.exception("complete_job failed for streaming job %d", job_id)
         try:
             db.release_proxy_claim()
+            _released = True
         except Exception:
             _log.exception("release_proxy_claim failed for streaming job %d", job_id)
 
     headers = {k: v for k, v in rp_resp.headers.items() if k.lower() not in _hop_by_hop}
 
-    async def _close_streaming_resources():
-        await rp_resp.aclose()
-        await async_client.aclose()
+    async def _cleanup_streaming_resources():
+        """Guaranteed cleanup: close httpx resources + force-release if generator didn't."""
+        try:
+            await rp_resp.aclose()
+        except Exception:
+            _log.debug("rp_resp.aclose() failed during cleanup", exc_info=True)
+        try:
+            await async_client.aclose()
+        except Exception:
+            _log.debug("async_client.aclose() failed during cleanup", exc_info=True)
+        if not _released:
+            _log.warning(
+                "Streaming proxy release not confirmed for job %d — forcing cleanup",
+                job_id,
+            )
+            try:
+                db.release_proxy_claim()
+            except Exception:
+                _log.exception("forced release_proxy_claim also failed for job %d", job_id)
 
     return StreamingResponse(
         _iter_ndjson(rp_resp, release_fn=_release),
         status_code=rp_resp.status_code,
         headers=headers,
         media_type="application/x-ndjson",
-        background=BackgroundTask(_close_streaming_resources),
+        background=BackgroundTask(_cleanup_streaming_resources),
     )
 
 

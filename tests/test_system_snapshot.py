@@ -185,6 +185,48 @@ class TestClassifyUnknownFailure:
 # ── Coverage gap tests: SystemSnapshot.capture() exception branches ───────
 
 
+class TestSnapshotVramKnown:
+    """Verify vram_known field distinguishes 'VRAM is 0%' from 'VRAM is unknown'."""
+
+    def test_snapshot_vram_known_true_by_default(self):
+        """A fresh snapshot defaults to vram_known=True."""
+        snap = SystemSnapshot()
+        assert snap.vram_known is True
+
+    def test_snapshot_marks_vram_known_true_on_success(self):
+        """When VRAM read succeeds, vram_known stays True."""
+        hm = MagicMock()
+        hm.get_ram_pct.return_value = 50.0
+        hm.get_swap_pct.return_value = 5.0
+        hm.get_load_avg.return_value = 1.0
+        hm.get_vram_pct.return_value = 42.0
+        snap = SystemSnapshot.capture(health_monitor=hm)
+        assert snap.vram_known is True
+        assert snap.vram_used_pct == 42.0
+
+    def test_snapshot_marks_vram_unknown_when_none(self):
+        """VRAM returns None (no GPU) -> vram_known=False."""
+        hm = MagicMock()
+        hm.get_ram_pct.return_value = 50.0
+        hm.get_swap_pct.return_value = 5.0
+        hm.get_load_avg.return_value = 1.0
+        hm.get_vram_pct.return_value = None
+        snap = SystemSnapshot.capture(health_monitor=hm)
+        assert snap.vram_known is False
+        assert snap.vram_used_pct == 0.0  # default, not a real reading
+
+    def test_snapshot_marks_vram_unknown_on_exception(self):
+        """VRAM raises exception -> vram_known=False."""
+        hm = MagicMock()
+        hm.get_ram_pct.return_value = 50.0
+        hm.get_swap_pct.return_value = 5.0
+        hm.get_load_avg.return_value = 1.0
+        hm.get_vram_pct.side_effect = RuntimeError("nvidia-smi not found")
+        snap = SystemSnapshot.capture(health_monitor=hm)
+        assert snap.vram_known is False
+        assert snap.vram_used_pct == 0.0
+
+
 class TestSnapshotCaptureExceptionBranches:
     """Lines 53-54, 57-58, 61-62, 67-68: each health monitor method raising."""
 

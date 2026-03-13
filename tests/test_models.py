@@ -135,6 +135,28 @@ class TestEstimateVram:
         OllamaModels._list_local_cache = None
         assert vram == pytest.approx(4000.0)
 
+    def test_estimate_vram_logs_warning_for_unknown_model(self, tmp_path, caplog):
+        """Fallback to 4000MB logs a warning identifying the unknown model."""
+        import logging
+
+        from ollama_queue.db import Database
+        from ollama_queue.models import OllamaModels
+
+        db = Database(str(tmp_path / "q.db"))
+        db.initialize()
+        OllamaModels._list_local_cache = None
+        mock = MagicMock()
+        mock.returncode = 1
+        mock.stdout = ""
+        with (
+            caplog.at_level(logging.WARNING, logger="ollama_queue.models.client"),
+            patch("subprocess.run", return_value=mock),
+        ):
+            vram = OllamaModels().estimate_vram_mb("totally-unknown:latest", db)
+        OllamaModels._list_local_cache = None
+        assert vram == pytest.approx(4000.0)
+        assert any("totally-unknown:latest" in r.message and "4000MB default" in r.message for r in caplog.records)
+
 
 class TestMinEstimatedVram:
     def test_min_estimated_vram_mb_returns_minimum(self, tmp_path):
@@ -221,6 +243,44 @@ def test_list_local_cached(monkeypatch):
     assert call_count == 1, "ollama list should be called once within TTL window"
 
     # Cleanup: reset cache so other tests get a fresh fetch
+    OllamaModels._list_local_cache = None
+
+
+def test_cache_ttl_is_15_seconds():
+    """Cache TTL should be 15 seconds (reduced from 60)."""
+    from ollama_queue.models import OllamaModels
+
+    assert OllamaModels._LIST_LOCAL_TTL == 15.0
+
+
+def test_invalidate_list_cache_returns_fresh_data(monkeypatch):
+    """After _invalidate_list_cache(), list_local() returns new data, not stale cache."""
+    from ollama_queue.models import OllamaModels
+
+    OllamaModels._list_local_cache = None
+    generation = [0]
+
+    def fake_run(*args, **kwargs):
+        generation[0] += 1
+        # Each call returns a different model name
+        name = f"model-gen{generation[0]}:7b"
+        return type("R", (), {"returncode": 0, "stdout": f"NAME  ID  SIZE  MOD\n{name}  abc  4.7 GB  now\n"})()
+
+    monkeypatch.setattr("ollama_queue.models.client.subprocess.run", fake_run)
+    om = OllamaModels()
+    first = om.list_local()
+    assert any("gen1" in m["name"] for m in first)
+
+    # Without invalidation, cached data is returned
+    second = om.list_local()
+    assert any("gen1" in m["name"] for m in second)
+
+    # After invalidation, fresh data is returned
+    OllamaModels._invalidate_list_cache()
+    third = om.list_local()
+    assert any("gen2" in m["name"] for m in third)
+    assert not any("gen1" in m["name"] for m in third)
+
     OllamaModels._list_local_cache = None
 
 

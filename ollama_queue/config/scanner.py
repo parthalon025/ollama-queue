@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import pathlib
 import platform
 import re
@@ -205,6 +206,11 @@ def _check_config_file(path: pathlib.Path) -> dict | None:
         ctype = "config_yaml" if suffix in (".yaml", ".yml") else "config_toml"
         name = str(path)
 
+    try:
+        scanned_mtime = os.path.getmtime(path)
+    except OSError:
+        scanned_mtime = None
+
     return {
         "name": name,
         "type": ctype,
@@ -212,6 +218,7 @@ def _check_config_file(path: pathlib.Path) -> dict | None:
         "is_system_path": is_system,
         "last_seen": int(time.time()),
         "detected_at": int(time.time()),
+        "scanned_mtime": scanned_mtime,
     }
 
 

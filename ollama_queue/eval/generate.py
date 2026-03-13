@@ -551,6 +551,17 @@ def run_eval_generate(  # noqa: PLR0911
             if not ok:
                 failed += 1
 
+            # Post-HTTP cancellation re-check: the blocking _generate_one() call
+            # may have taken minutes. If the run was cancelled during that window,
+            # stop immediately instead of processing remaining items.
+            _post = _eng.get_eval_run(db, run_id)
+            if _post is None or _post.get("status") in ("failed", "cancelled"):
+                _log.info(
+                    "run_eval_generate: cancelled during HTTP call for run_id=%d",
+                    run_id,
+                )
+                return
+
     # Guard: if run was cancelled (e.g. during the last throttle sleep), don't overwrite status
     _final = _eng.get_eval_run(db, run_id)
     if _final is not None and _final.get("status") in ("failed", "cancelled"):
