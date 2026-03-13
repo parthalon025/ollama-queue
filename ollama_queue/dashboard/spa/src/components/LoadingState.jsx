@@ -1,8 +1,8 @@
 // What it shows: Skeleton placeholder while data loads — prevents blank flashes.
 // Decision it drives: User knows data is on the way, not broken.
-// B6: All loading states unified to ShSkeletonNative (one pattern everywhere).
+// B6: All loading states unified to ShSkeleton (one pattern everywhere).
 
-import ShSkeletonNative from './ShSkeletonNative.jsx';
+import { ShSkeleton } from 'superhot-ui/preact';
 
 export default function LoadingState({ type = 'full' }) {
   if (type === 'stats') {
@@ -10,7 +10,7 @@ export default function LoadingState({ type = 'full' }) {
       <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
         {[...Array(5)].map((_, i) => (
           <div key={i} class="t-card" style="padding: 16px;">
-            <ShSkeletonNative rows={2} />
+            <ShSkeleton rows={2} />
           </div>
         ))}
       </div>
@@ -20,7 +20,7 @@ export default function LoadingState({ type = 'full' }) {
   if (type === 'table') {
     return (
       <div class="t-card" style="overflow: hidden; padding: 1rem;">
-        <ShSkeletonNative rows={6} />
+        <ShSkeleton rows={6} />
       </div>
     );
   }
@@ -30,7 +30,7 @@ export default function LoadingState({ type = 'full' }) {
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {[...Array(3)].map((_, i) => (
           <div key={i} class="t-card" style="padding: 16px;">
-            <ShSkeletonNative rows={3} />
+            <ShSkeleton rows={3} />
           </div>
         ))}
       </div>
@@ -43,12 +43,12 @@ export default function LoadingState({ type = 'full' }) {
       <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
         {[...Array(5)].map((_, i) => (
           <div key={i} class="t-card" style="padding: 16px;">
-            <ShSkeletonNative rows={2} />
+            <ShSkeleton rows={2} />
           </div>
         ))}
       </div>
       <div class="t-card" style="overflow: hidden; padding: 1rem;">
-        <ShSkeletonNative rows={4} />
+        <ShSkeleton rows={4} />
       </div>
     </div>
   );

@@ -11,7 +11,7 @@ import {
   addBackend, removeBackend, updateBackendWeight, testBackend,
   currentJob, API,
 } from '../stores';
-import ShStatusBadgeNative from '../components/ShStatusBadgeNative.jsx';
+import { ShStatusBadge } from 'superhot-ui/preact';
 import { useActionFeedback } from '../hooks/useActionFeedback.js';
 import PageBanner from '../components/PageBanner.jsx';
 
@@ -32,9 +32,8 @@ function BackendCard({ backend, onRemove, onUpdateWeight }) {
   const isUnhealthy = !backend.healthy;
   const vramPct = backend.vram_pct ?? 0;
   const vramHigh = vramPct > 90;
-  const vramFill = Math.round(vramPct * 100); // vram_pct is 0-1 from backend; some backends return 0-100
-  // Detect: if vram_pct > 1 it's already a percent; if <= 1 it's a ratio
-  const fillVal = vramPct > 1 ? Math.round(vramPct) : Math.round(vramPct * 100);
+  // vram_pct is always 0-100 from API (round(used/total*100, 1) in sensing/health.py)
+  const fillVal = Math.round(vramPct);
 
   let hostLabel = backend.url;
   try { hostLabel = new URL(backend.url).hostname; } catch (_) {}
@@ -80,7 +79,7 @@ function BackendCard({ backend, onRemove, onUpdateWeight }) {
 
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-          <ShStatusBadgeNative
+          <ShStatusBadge
             status={backend.healthy ? 'healthy' : 'error'}
             label={backend.healthy ? 'online' : 'offline'}
           />

@@ -33,7 +33,7 @@ import BottomNav from './components/BottomNav.jsx';
 import SubmitJobModal from './components/SubmitJobModal.jsx';
 import OnboardingOverlay from './components/OnboardingOverlay.jsx';
 import ShToastContainer from './components/ShToastContainer.jsx';
-import ShCommandPaletteNative from './components/ShCommandPaletteNative.jsx';
+import { ShCommandPalette } from 'superhot-ui/preact';
 import Now from './pages/Now.jsx';
 import Plan from './pages/Plan';
 import History from './pages/History.jsx';
@@ -174,10 +174,12 @@ export function App() {
     const isDaemonPaused = (daemonState?.state || '').startsWith('paused');
 
     // Build command palette items from current signals
+    // DS ShCommandPalette requires an 'id' field per item for ARIA/key.
     const paletteItems = [
-        { icon: '●', label: 'Submit job', group: 'Actions', action: handleSubmitRequest },
-        { icon: '⊡', label: 'Trigger eval run', group: 'Actions', action: () => handleNavigate('eval') },
+        { id: 'action-submit', icon: '●', label: 'Submit job', group: 'Actions', action: handleSubmitRequest },
+        { id: 'action-eval', icon: '⊡', label: 'Trigger eval run', group: 'Actions', action: () => handleNavigate('eval') },
         ...ALL_TABS.map((tabId, i) => ({
+            id: `nav-${tabId}`,
             icon: ['●','◫','◷','⊞','⚙','⊡','⇄','⊘','⊟'][i] || '→',
             label: `Go to ${tabId.charAt(0).toUpperCase() + tabId.slice(1)}`,
             group: 'Navigate',
@@ -226,9 +228,10 @@ export function App() {
             {/* Toast notification container — action feedback from any tab */}
             <ShToastContainer />
             {/* Cmd+K command palette */}
-            <ShCommandPaletteNative
+            <ShCommandPalette
                 open={paletteOpen.value}
                 onClose={() => { paletteOpen.value = false; }}
+                onSelect={item => { paletteOpen.value = false; if (item.action) item.action(); }}
                 items={paletteItems}
             />
         </div>
