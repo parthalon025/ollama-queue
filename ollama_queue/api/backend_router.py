@@ -29,13 +29,18 @@ import httpx
 
 _log = logging.getLogger(__name__)
 
+# Module-level DB reference — set by register_routes() at startup.
+# Used to merge DB-registered backends with env-var backends.
+_db = None
+
 # Parse backends once at import time. Tests may patch BACKENDS directly.
 _raw = os.environ.get("OLLAMA_BACKENDS", "")
-BACKENDS: list[str] = (
+_ENV_BACKENDS: list[str] = (
     [b.strip().rstrip("/") for b in _raw.split(",") if b.strip()]
     if _raw
     else [os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")]
 )
+BACKENDS: list[str] = list(_ENV_BACKENDS)
 
 # Port where ollama-queue health endpoint is reachable on each backend host.
 # Used to derive queue URL from Ollama backend URL for VRAM pressure checks.
@@ -319,3 +324,33 @@ def has_healthy_remote_backend() -> bool:
         if cached and now - cached[0] < _HEALTH_TTL and cached[1]:
             return True
     return False
+
+
+def invalidate_backend_caches(url: str) -> None:
+    """Remove a specific URL from all backend caches after add/remove operations.
+
+    Plain English: When a backend is added or removed via the API, stale cache
+    entries for that URL must be evicted so the next routing decision reflects
+    the current backend list rather than a cached state from before the change.
+    """
+    for cache in [_health_cache, _models_cache, _loaded_cache, _hw_cache, _gpu_name_cache]:
+        cache.pop(url, None)
+
+
+def refresh_backends_from_db() -> None:
+    """Rebuild BACKENDS list from env-var baseline + DB-registered additions.
+
+    Plain English: Called after add/remove operations so the in-process BACKENDS
+    list (used by select_backend and get_backends) stays in sync with the DB.
+    Env-var backends are always included as the read-only baseline; DB entries
+    are runtime additions. Order is preserved; duplicates are deduplicated.
+    """
+    global BACKENDS
+    db_urls: list[str] = []
+    if _db is not None:
+        try:
+            db_urls = [b["url"] for b in _db.list_backends()]
+        except Exception as e:
+            _log.warning("refresh_backends_from_db: DB read failed: %s", e)
+    # Merge: env-var first, then DB additions. dict.fromkeys preserves insertion order + dedupes.
+    BACKENDS = list(dict.fromkeys(_ENV_BACKENDS + db_urls))

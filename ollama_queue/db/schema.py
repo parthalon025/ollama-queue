@@ -530,6 +530,16 @@ class SchemaMixin:
                 detected_at         INTEGER NOT NULL,
                 onboarded_at        INTEGER
             );
+
+            -- Backends table — dynamically registered Ollama backends (API-managed; env-var
+            -- backends are always included separately via backend_router.py BACKENDS list)
+            CREATE TABLE IF NOT EXISTS backends (
+                url      TEXT PRIMARY KEY,
+                weight   REAL NOT NULL DEFAULT 1.0,
+                enabled  INTEGER NOT NULL DEFAULT 1,
+                added_at REAL NOT NULL,
+                label    TEXT
+            );
         """)
 
             self._run_migrations(conn)
