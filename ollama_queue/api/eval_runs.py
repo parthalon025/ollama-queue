@@ -39,6 +39,10 @@ def list_eval_runs(limit: int = 20, offset: int = 0):
     """
     db = _api.db
 
+    if offset < 0:
+        raise HTTPException(status_code=400, detail="offset must be >= 0")
+    limit = max(1, min(limit, 1000))
+
     with db._lock:
         conn = db._connect()
         rows = conn.execute(

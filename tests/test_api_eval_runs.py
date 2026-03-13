@@ -1600,3 +1600,17 @@ def test_results_classification_exception_uses_default_threshold(client_and_db):
         conn.commit()
     resp = client.get("/api/eval/runs/1/results?classification=fp")
     assert resp.status_code == 200
+
+
+def test_list_eval_runs_negative_offset_returns_400(client):
+    """GET /api/eval/runs with negative offset returns 400."""
+    resp = client.get("/api/eval/runs?offset=-1")
+    assert resp.status_code == 400
+    assert "offset" in resp.json()["detail"]
+
+
+def test_list_eval_runs_limit_is_capped(client_and_db):
+    """GET /api/eval/runs with limit > 1000 is capped to 1000 (no error)."""
+    client, db = client_and_db
+    resp = client.get("/api/eval/runs?limit=999999")
+    assert resp.status_code == 200

@@ -1352,3 +1352,29 @@ def test_batch_run_unknown_tag_returns_404(client):
     resp = client.post("/api/schedule/batch-run", json={"tag": "nonexistent"})
     assert resp.status_code == 404
     assert "No enabled recurring jobs found" in resp.json()["detail"]
+
+
+def test_get_history_negative_offset_returns_400(client):
+    """GET /api/history with negative offset returns 400."""
+    resp = client.get("/api/history?offset=-1")
+    assert resp.status_code == 400
+    assert "offset" in resp.json()["detail"]
+
+
+def test_get_history_limit_is_capped(client):
+    """GET /api/history with limit > 200 is silently capped to 200."""
+    resp = client.get("/api/history?limit=99999")
+    assert resp.status_code == 200  # no error — just capped
+
+
+def test_put_settings_rejects_string_for_numeric_key(client):
+    """PUT /api/settings rejects non-numeric values for numeric settings."""
+    resp = client.put("/api/settings", json={"poll_interval_seconds": "not-a-number"})
+    assert resp.status_code == 422
+    assert "must be a number" in resp.json()["detail"]
+
+
+def test_put_settings_accepts_numeric_for_numeric_key(client):
+    """PUT /api/settings accepts a valid numeric value for a numeric setting."""
+    resp = client.put("/api/settings", json={"poll_interval_seconds": 10})
+    assert resp.status_code == 200

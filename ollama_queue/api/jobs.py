@@ -150,6 +150,9 @@ def get_queue_etas():
 @router.get("/api/history")
 def get_history(limit: int = 20, offset: int = 0, source: str | None = None):
     db = _api.db
+    if offset < 0:
+        raise HTTPException(status_code=400, detail="offset must be >= 0")
+    limit = max(1, min(limit, 200))
     return db.get_history(limit=limit, offset=offset, source=source)
 
 

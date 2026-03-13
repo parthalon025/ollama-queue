@@ -242,6 +242,19 @@ def test_try_claim_for_proxy(db):
     assert db.try_claim_for_proxy() is False
 
 
+def test_try_claim_for_proxy_reads_max_concurrent_jobs_inline(db):
+    """try_claim_for_proxy respects max_concurrent_jobs without reentrant get_setting."""
+    # Set max_concurrent_jobs = 1 (default) — claim should work then block
+    db.set_setting("max_concurrent_jobs", 1)
+    assert db.try_claim_for_proxy() is True
+    assert db.try_claim_for_proxy() is False
+    db.release_proxy_claim()
+    # Now set to 0 (disallow all) — claim should always fail
+    db.set_setting("max_concurrent_jobs", 0)
+    # running count is 0 but 0 >= 0 is True so claim should fail
+    assert db.try_claim_for_proxy() is False
+
+
 def test_release_proxy_claim(db):
     """release_proxy_claim resets state to idle."""
     db.try_claim_for_proxy()

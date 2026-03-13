@@ -20,10 +20,23 @@ def get_settings():
 @router.put("/api/settings")
 def put_settings(body: dict):
     db = _api.db
-    known = set(db.get_all_settings().keys())
-    unknown = [k for k in body if k not in known]
+    current = db.get_all_settings()
+    unknown = [k for k in body if k not in current]
     if unknown:
         raise HTTPException(status_code=422, detail=f"Unknown setting keys: {unknown}")
+    errors = []
+    for key, value in body.items():
+        existing = current[key]
+        # Reject non-numeric strings for settings that must be numeric.
+        # SIM102: combined into one condition per ruff's requirement.
+        if (
+            isinstance(existing, int | float)
+            and not isinstance(existing, bool)
+            and (not isinstance(value, int | float) or isinstance(value, bool))
+        ):
+            errors.append(f"'{key}' must be a number (got {type(value).__name__})")
+    if errors:
+        raise HTTPException(status_code=422, detail="; ".join(errors))
     for key, value in body.items():
         db.set_setting(key, value)
     return {"ok": True}

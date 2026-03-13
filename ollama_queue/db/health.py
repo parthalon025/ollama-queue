@@ -5,6 +5,7 @@ cycle, manages the singleton daemon state row, and handles proxy claim/release
 for the /api/generate pass-through endpoint.
 """
 
+import json
 import time
 
 
@@ -96,10 +97,16 @@ class HealthMixin:
         """Claim a queue slot for a proxy /api/generate request.
 
         Respects max_concurrent_jobs. Returns True if claimed.
+        All reads are performed on the same connection to maintain a consistent
+        snapshot — avoids the reentrant-lock + second-connection race from
+        calling self.get_setting() while self._lock is already held.
         """
         with self._lock:
             conn = self._connect()
-            max_slots = int(self.get_setting("max_concurrent_jobs") or 1)
+            # Read max_concurrent_jobs directly (not via get_setting) to keep
+            # all reads on one connection within this atomic check-and-claim.
+            setting_row = conn.execute("SELECT value FROM settings WHERE key = 'max_concurrent_jobs'").fetchone()
+            max_slots = int(json.loads(setting_row["value"])) if setting_row else 1
             # Count running jobs from jobs table
             running = conn.execute("SELECT COUNT(*) as cnt FROM jobs WHERE status = 'running'").fetchone()["cnt"]
             if running >= max_slots:
