@@ -281,16 +281,19 @@ async def select_backend(model: str = "") -> str:
     Fast path: returns immediately for single-backend setups.
     Multi-backend: runs health + model + hardware checks in parallel via asyncio.gather.
     """
-    if len(BACKENDS) == 1:
-        return BACKENDS[0]
+    # Capture once — refresh_backends_from_db() may reassign the module-level name
+    # at any asyncio await point, causing zip() length mismatches if we re-read BACKENDS.
+    backends = BACKENDS
+    if len(backends) == 1:
+        return backends[0]
 
     # 1. Filter to healthy backends (parallel health checks)
-    health = await asyncio.gather(*(_backend_healthy(b) for b in BACKENDS))
-    healthy = [b for b, ok in zip(BACKENDS, health, strict=False) if ok]
+    health = await asyncio.gather(*(_backend_healthy(b) for b in backends))
+    healthy = [b for b, ok in zip(backends, health, strict=False) if ok]
 
     if not healthy:
-        _log.warning("all Ollama backends unreachable — falling back to %s", BACKENDS[0])
-        return BACKENDS[0]
+        _log.warning("all Ollama backends unreachable — falling back to %s", backends[0])
+        return backends[0]
 
     if len(healthy) == 1:
         return healthy[0]
