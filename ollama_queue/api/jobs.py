@@ -126,6 +126,8 @@ def set_priority(job_id: int, body: dict = Body(...)):
     priority = body.get("priority")
     if not isinstance(priority, int):
         raise HTTPException(status_code=400, detail="priority must be an integer")
+    if priority < 0 or priority > 10:
+        raise HTTPException(status_code=400, detail="priority must be 0-10")
     updated = db.set_job_priority(job_id, priority)
     if not updated:
         raise HTTPException(status_code=404, detail="Job not found or not pending")
