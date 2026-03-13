@@ -23,21 +23,24 @@ def score_slot(
     historical_quiet: bool,
     failure_category: str | None,
     queue_depth: int,
+    vram_known: bool = True,
 ) -> float:
     """Score a time slot for scheduling a job. Higher is better.
 
     Returns -1 if slot is infeasible (VRAM hard gate or pinned).
+    When vram_known is False, VRAM-based gates are skipped to avoid
+    rejecting slots based on phantom-zero VRAM readings.
     """
     # Factor 9: Pinned slot — never schedule into pinned slots
     if is_pinned:
         return -1.0
 
-    # Factor 1: VRAM hard gate
-    if job_vram_needed_gb + slot_vram_committed_gb > total_vram_gb:
+    # Factor 1: VRAM hard gate (skip when VRAM data is unknown)
+    if vram_known and job_vram_needed_gb + slot_vram_committed_gb > total_vram_gb:
         return -1.0
 
-    # Factor 6: Resource failure — require 30% extra VRAM headroom
-    if failure_category == "resource":
+    # Factor 6: Resource failure — require 30% extra VRAM headroom (skip when VRAM unknown)
+    if vram_known and failure_category == "resource":
         headroom = total_vram_gb - (job_vram_needed_gb + slot_vram_committed_gb)
         required_headroom = job_vram_needed_gb * _RESOURCE_FAILURE_HEADROOM
         if headroom < required_headroom:
@@ -78,12 +81,16 @@ def find_fitting_slot(
     failure_category: str | None = None,
     loaded_models: list[str] | None = None,
     job_model: str | None = None,
+    vram_known: bool = True,
 ) -> dict | None:
     """Find the best time slot for a job from the load map.
 
     Returns dict with slot_index, score, scheduled_time or None if no fit.
     Scans for contiguous runs of ``estimated_slots`` slots where all pass
     the VRAM gate.  Returns the window with the highest average score.
+
+    When vram_known is False, VRAM-based gates are bypassed to avoid
+    rejecting slots based on phantom-zero VRAM readings (Ollama down, no GPU).
     """
     if not load_map or estimated_slots <= 0:
         return None
@@ -105,6 +112,7 @@ def find_fitting_slot(
             historical_quiet=entry.get("historical_quiet", False),
             failure_category=failure_category,
             queue_depth=entry.get("queue_depth", 0),
+            vram_known=vram_known,
         )
         scores.append(s)
 
