@@ -222,6 +222,53 @@ def test_records_duration_on_success(daemon):
     assert len(history) == 1
 
 
+def test_record_duration_skips_none_model(daemon):
+    """Command-only jobs (model=None) must not write a null-model row to duration_history (H6).
+
+    Before the fix: record_duration was called unconditionally with job["model"]=None,
+    inserting a corrupt NULL-model row into duration_history that poisons duration estimates.
+    After the fix: the call is guarded and no row is written for None-model jobs.
+    """
+    daemon.db.submit_job("echo cmd-only", None, 5, 60, "cmd-src", resource_profile="any")
+    with (
+        patch.object(
+            daemon.health,
+            "check",
+            return_value={
+                "ram_pct": 50.0,
+                "swap_pct": 10.0,
+                "load_avg": 1.0,
+                "cpu_count": 4,
+                "vram_pct": 50.0,
+                "ollama_model": None,
+            },
+        ),
+        patch("ollama_queue.daemon.executor.subprocess") as mock_sub,
+        patch.object(daemon.db, "record_duration", wraps=daemon.db.record_duration) as mock_record,
+    ):
+        proc = MagicMock()
+        proc.pid = 1234
+        proc.returncode = 0
+        proc.communicate.return_value = (b"done", b"")
+        mock_sub.Popen.return_value = proc
+
+        daemon.poll_once()
+        _drain(daemon)
+
+    # record_duration must NOT be called with model=None
+    for call in mock_record.call_args_list:
+        model_arg = call.kwargs.get("model") or (call.args[1] if len(call.args) > 1 else None)
+        assert (
+            model_arg is not None
+        ), "record_duration was called with model=None — corrupt null-model row would be written"
+
+    # No null-model rows in duration_history
+    history = daemon.db.get_duration_history("cmd-src")
+    assert all(
+        row["model"] is not None for row in history
+    ), "duration_history contains a null-model row from a command-only job"
+
+
 class TestDaemonSchedulerIntegration:
     def test_poll_once_promotes_due_recurring_job(self, db):
         now = time.time()

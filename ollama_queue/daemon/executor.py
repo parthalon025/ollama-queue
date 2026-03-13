@@ -478,8 +478,9 @@ class ExecutorMixin:
                 except Exception:
                     _log.exception("Failed to store metrics for job #%d", job["id"])
 
-            # Record duration if successful
-            if exit_code == 0:
+            # Record duration if successful — skip command-only jobs (model=None)
+            # to avoid inserting corrupt null-model rows into duration_history (H6)
+            if exit_code == 0 and job.get("model"):
                 self.db.record_duration(
                     source=job["source"],
                     model=job["model"],
