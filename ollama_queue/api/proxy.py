@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import time
 import uuid
 
@@ -15,13 +14,13 @@ from starlette.background import BackgroundTask
 from starlette.responses import StreamingResponse
 
 import ollama_queue.api as _api
+from ollama_queue.api.backend_router import select_backend
 from ollama_queue.models.client import OllamaModels
 
 _log = logging.getLogger(__name__)
 
 router = APIRouter()
 
-OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
 PROXY_WAIT_TIMEOUT = 600
 PROXY_POLL_INTERVAL = 0.5
 
@@ -141,8 +140,9 @@ async def _proxy_ollama_request(
     db.start_job(job_id)
 
     try:
+        backend = await select_backend(model)
         async with httpx.AsyncClient(timeout=httpx.Timeout(float(req_timeout))) as client:
-            resp = await client.post(f"{OLLAMA_URL}{endpoint}", json=body)
+            resp = await client.post(f"{backend}{endpoint}", json=body)
             result = resp.json()
 
         db.complete_job(
@@ -260,8 +260,9 @@ async def proxy_generate(body: dict = Body(...)):
 
     try:
         # Use build_request + send(stream=True) so httpx doesn't buffer the body.
+        backend = await select_backend(model)
         async_client = httpx.AsyncClient(timeout=httpx.Timeout(None, connect=10.0))
-        rp_req = async_client.build_request("POST", f"{OLLAMA_URL}/api/generate", json=body)
+        rp_req = async_client.build_request("POST", f"{backend}/api/generate", json=body)
         rp_resp = await async_client.send(rp_req, stream=True)
     except Exception as e:
         _log.error("proxy:/api/generate streaming setup failed for job %d: %s", job_id, e, exc_info=True)
