@@ -63,6 +63,7 @@ DEFAULTS = {
     "defer.burst_priority_threshold": 3,
     "defer.thermal_threshold_c": 85,
     "defer.resource_wait_timeout_s": 120,
+    "max_pause_duration_seconds": 600,
 }
 
 EVAL_SETTINGS_DEFAULTS = {

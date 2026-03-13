@@ -418,6 +418,7 @@ class LoopMixin:
             currently_paused=currently_paused,
             queued_model=job["model"],
             recent_job_models=recent_models_snapshot,
+            paused_since=state.get("paused_since"),
         )
 
         if evaluation["should_pause"]:
