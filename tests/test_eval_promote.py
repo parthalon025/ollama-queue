@@ -70,3 +70,127 @@ class TestGate2ProdNoBaseline:
             check_auto_promote(db, run_id, "http://localhost:7683")
 
         mock_promote.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# H1: Gate 3 — error budget denominator must be judge_row_count, not item_count
+# ---------------------------------------------------------------------------
+
+
+class TestGate3JudgeRowCountDenominator:
+    """H1: Gate 3 must use the count of judged rows, not source item_count, as denominator."""
+
+    def test_gate3_uses_judge_row_count_not_source_items(self, tmp_path):
+        """Gate 3 must NOT auto-promote when errors / judge_row_count exceeds the budget,
+        even if errors / source_item_count would appear within budget.
+
+        Setup:
+          - source_item_count = 100  (stored as item_count on the run)
+          - judge_row_count   =  40  (only 40 rows written to eval_results)
+          - error_count       =   5  (5 rows with score_transfer IS NULL)
+          - error_budget      = 0.10 (10%)
+
+        With old (buggy) denominator:  5 / 100 = 0.05 <= 0.10  → gate passes → promotes
+        With correct denominator:      5 / 40  = 0.125 > 0.10  → gate blocks  → no promote
+        """
+        from ollama_queue.eval.engine import create_eval_run, insert_eval_result, update_eval_run
+
+        db = _make_db(tmp_path)
+        db.set_setting("eval.error_budget", 0.10)
+
+        # Create a run with item_count=100 (full dataset size) but only 40 judge rows
+        run_id = create_eval_run(db, variant_id="A")
+        metrics = json.dumps({"A": {"f1": 0.88, "precision": 0.90, "recall": 0.86}})
+        update_eval_run(
+            db,
+            run_id,
+            status="complete",
+            winner_variant="A",
+            metrics=metrics,
+            item_count=100,  # full source dataset — this is the WRONG denominator
+        )
+
+        # Insert 40 judge rows for this run: 35 successful, 5 failed (score_transfer IS NULL)
+        for i in range(35):
+            insert_eval_result(
+                db,
+                run_id=run_id,
+                variant="A",
+                source_item_id=f"src_{i}",
+                target_item_id=f"tgt_{i}",
+                row_type="judge",
+                is_same_cluster=1,
+                score_transfer=4,  # valid score
+            )
+        for i in range(35, 40):
+            insert_eval_result(
+                db,
+                run_id=run_id,
+                variant="A",
+                source_item_id=f"src_{i}",
+                target_item_id=f"tgt_{i}",
+                row_type="judge",
+                is_same_cluster=1,
+                score_transfer=None,  # failed / missing score
+            )
+
+        # No production variant — Gate 2 passes (no prod baseline to compare against)
+        # Gate 3: 5 errors / 40 judged = 12.5% > 10% budget → must block
+        with patch("ollama_queue.eval.promote.do_promote_eval_run") as mock_promote:
+            check_auto_promote(db, run_id, "http://localhost:7683")
+
+        mock_promote.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Gate 3 — zero judge rows must block promotion
+# ---------------------------------------------------------------------------
+
+
+class TestGate3BlocksWhenNoJudgeRows:
+    """Gate 3 must block auto-promotion when there are zero judged rows.
+
+    A run with no judge rows has an undefined error rate — it is a pipeline
+    failure, not a clean pass.  The original code silently skipped Gate 3
+    entirely when judge_row_count == 0, allowing promotion to proceed.
+    """
+
+    def test_gate3_blocks_when_no_judge_rows(self, tmp_path):
+        """Gate 3 must NOT auto-promote when there are zero eval_results rows
+        with row_type='judge' for the run.
+
+        Setup:
+          - Completed run with winner_variant 'A', F1=0.88 (passes Gate 1)
+          - No production variant (Gate 2 passes — nothing to compare against)
+          - Zero judge rows inserted into eval_results
+          - error_budget = 0.30 (default)
+
+        With old guard (`if judge_row_count > 0:`): Gate 3 body is skipped
+        entirely → promotion proceeds → do_promote_eval_run IS called (wrong).
+
+        With fix (`if judge_row_count == 0: return`): function returns early
+        → do_promote_eval_run is NOT called (correct).
+        """
+        from ollama_queue.eval.engine import create_eval_run, update_eval_run
+
+        db = _make_db(tmp_path)
+
+        # Create a completed run with a winner that satisfies Gates 1 and 2
+        run_id = create_eval_run(db, variant_id="A")
+        metrics = json.dumps({"A": {"f1": 0.88, "precision": 0.90, "recall": 0.86}})
+        update_eval_run(
+            db,
+            run_id,
+            status="complete",
+            winner_variant="A",
+            metrics=metrics,
+            item_count=50,
+        )
+
+        # Insert NO eval_results rows — judge_row_count == 0
+        # (no production variant either — Gate 2 is a clean pass)
+
+        with patch("ollama_queue.eval.promote.do_promote_eval_run") as mock_promote:
+            check_auto_promote(db, run_id, "http://localhost:7683")
+
+        mock_promote.assert_not_called()

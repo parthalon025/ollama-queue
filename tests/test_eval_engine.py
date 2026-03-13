@@ -1389,6 +1389,18 @@ class TestCheckAutoPromote:
         update_eval_run(
             db, run_id, status="complete", winner_variant="A", metrics=metrics, item_count=10, error_budget=0.30
         )
+        # Gate 3 now requires at least one judge row; insert a clean one so the
+        # happy-path tests reach do_promote_eval_run.
+        insert_eval_result(
+            db,
+            run_id=run_id,
+            variant="A",
+            source_item_id="src-0",
+            target_item_id="tgt-0",
+            is_same_cluster=1,
+            row_type="judge",
+            score_transfer=4,
+        )
         return db, run_id
 
     def test_skips_if_auto_promote_disabled(self, db_with_complete_run):
@@ -1500,6 +1512,18 @@ class TestCheckAutoPromoteBayesian:
             error_budget=0.30,
             judge_mode="bayesian",
         )
+        # Gate 3 now requires at least one judge row; insert a clean one so the
+        # happy-path tests reach do_promote_eval_run.
+        insert_eval_result(
+            db,
+            run_id=run_id,
+            variant="A",
+            source_item_id="src-0",
+            target_item_id="tgt-0",
+            is_same_cluster=1,
+            row_type="judge",
+            score_transfer=4,
+        )
         return db, run_id
 
     def test_bayesian_promotes_when_auc_and_separation_pass(self, db_with_bayesian_run):
@@ -1545,7 +1569,7 @@ class TestCheckAutoPromoteBayesian:
             {"A": {"auc": 0.90, "separation": 0.50, "same_mean_posterior": 0.85, "diff_mean_posterior": 0.35}}
         )
         # Create two complete runs with same winner + passing AUC
-        for _ in range(2):
+        for i in range(2):
             rid = create_eval_run(db, variant_id="A")
             update_eval_run(
                 db,
@@ -1556,6 +1580,17 @@ class TestCheckAutoPromoteBayesian:
                 item_count=10,
                 error_budget=0.30,
                 judge_mode="bayesian",
+            )
+            # Gate 3 requires at least one judge row per run
+            insert_eval_result(
+                db,
+                run_id=rid,
+                variant="A",
+                source_item_id=f"src-{i}",
+                target_item_id=f"tgt-{i}",
+                is_same_cluster=1,
+                row_type="judge",
+                score_transfer=4,
             )
 
         with patch("ollama_queue.eval.promote.do_promote_eval_run") as mock_promote:
@@ -1622,6 +1657,17 @@ class TestCheckAutoPromoteBayesian:
             item_count=10,
             error_budget=0.30,
             # No judge_mode set — defaults to 'rubric'
+        )
+        # Gate 3 now requires at least one judge row
+        insert_eval_result(
+            db,
+            run_id=run_id,
+            variant="A",
+            source_item_id="src-0",
+            target_item_id="tgt-0",
+            is_same_cluster=1,
+            row_type="judge",
+            score_transfer=4,
         )
         with patch("ollama_queue.eval.promote.do_promote_eval_run") as mock_promote:
             mock_promote.return_value = {"ok": True, "run_id": run_id, "variant_id": "A", "label": "Config A"}
