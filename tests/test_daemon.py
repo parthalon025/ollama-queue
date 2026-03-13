@@ -477,6 +477,29 @@ def test_heavy_jobs_serialize(db):
     assert d._can_admit(job) is False
 
 
+def test_heavy_job_not_blocked_by_embed_only(db):
+    """Heavy-profile job is admitted when only embed-profile jobs are running (H7).
+
+    Embed jobs use negligible VRAM and should not count against the heavy job's
+    serialization gate.  Before the fix, len(self._running) == 0 blocked the
+    heavy job whenever *any* job was running — including cheap embed jobs.
+    """
+    d = Daemon(db)
+    # Simulate one embed job running
+    d._running[99] = MagicMock()
+    d._running_models[99] = "nomic-embed-text"
+    job = {
+        "id": 2,
+        "model": "deepseek-r1:70b",
+        "resource_profile": "heavy",
+        "command": "echo",
+        "source": "test",
+        "timeout": 60,
+        "priority": 5,
+    }
+    assert d._can_admit(job) is True
+
+
 def test_same_model_blocks_second(db):
     """Two jobs with same model cannot run concurrently."""
     d = Daemon(db)

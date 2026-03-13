@@ -243,10 +243,16 @@ class ExecutorMixin:
                 )
                 return embed_count < 4
 
-        # heavy: serialize — never concurrent
+        # heavy: serialize — never concurrent with other heavy/ollama jobs.
+        # Embed jobs consume negligible VRAM and must not block a heavy job.
         if profile == "heavy":
             with self._running_lock:
-                return len(self._running) == 0
+                non_embed = sum(
+                    1
+                    for jid in self._running
+                    if self._ollama_models.classify(self._running_models.get(jid, ""))["resource_profile"] != "embed"
+                )
+                return non_embed == 0
 
         # Same model already running → serialize
         model = job.get("model") or ""
