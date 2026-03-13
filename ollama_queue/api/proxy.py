@@ -258,44 +258,61 @@ async def proxy_generate(body: dict = Body(...)):
     )
     db.start_job(job_id)
 
+    # Guard the entire pre-StreamingResponse window against BaseException (including
+    # CancelledError, which inherits from BaseException not Exception in Python 3.8+).
+    # If anything prevents us from returning the StreamingResponse, release the claim
+    # immediately — otherwise it is held permanently and blocks all future proxy requests.
+    _streaming_response_returned = False
     try:
-        # Use build_request + send(stream=True) so httpx doesn't buffer the body.
-        backend = await select_backend(model)
-        async_client = httpx.AsyncClient(timeout=httpx.Timeout(None, connect=10.0))
-        rp_req = async_client.build_request("POST", f"{backend}/api/generate", json=body)
-        rp_resp = await async_client.send(rp_req, stream=True)
-    except Exception as e:
-        _log.error("proxy:/api/generate streaming setup failed for job %d: %s", job_id, e, exc_info=True)
-        await async_client.aclose()
-        db.complete_job(
-            job_id, exit_code=1, stdout_tail="", stderr_tail=str(e)[:500], outcome_reason=f"proxy error: {e}"
-        )
-        db.release_proxy_claim()
-        raise HTTPException(status_code=502, detail=f"Ollama request failed: {e}") from e
-
-    def _release():
         try:
-            db.complete_job(job_id, exit_code=0, stdout_tail="(streaming)", stderr_tail="", outcome_reason=None)
-        except Exception:
-            _log.exception("complete_job failed for streaming job %d", job_id)
-        try:
+            # Use build_request + send(stream=True) so httpx doesn't buffer the body.
+            backend = await select_backend(model)
+            async_client = httpx.AsyncClient(timeout=httpx.Timeout(None, connect=10.0))
+            rp_req = async_client.build_request("POST", f"{backend}/api/generate", json=body)
+            rp_resp = await async_client.send(rp_req, stream=True)
+        except Exception as e:
+            _log.error("proxy:/api/generate streaming setup failed for job %d: %s", job_id, e, exc_info=True)
+            await async_client.aclose()
+            db.complete_job(
+                job_id, exit_code=1, stdout_tail="", stderr_tail=str(e)[:500], outcome_reason=f"proxy error: {e}"
+            )
             db.release_proxy_claim()
-        except Exception:
-            _log.exception("release_proxy_claim failed for streaming job %d", job_id)
+            raise HTTPException(status_code=502, detail=f"Ollama request failed: {e}") from e
 
-    headers = {k: v for k, v in rp_resp.headers.items() if k.lower() not in _hop_by_hop}
+        def _release():
+            try:
+                db.complete_job(job_id, exit_code=0, stdout_tail="(streaming)", stderr_tail="", outcome_reason=None)
+            except Exception:
+                _log.exception("complete_job failed for streaming job %d", job_id)
+            try:
+                db.release_proxy_claim()
+            except Exception:
+                _log.exception("release_proxy_claim failed for streaming job %d", job_id)
 
-    async def _close_streaming_resources():
-        await rp_resp.aclose()
-        await async_client.aclose()
+        headers = {k: v for k, v in rp_resp.headers.items() if k.lower() not in _hop_by_hop}
 
-    return StreamingResponse(
-        _iter_ndjson(rp_resp, release_fn=_release),
-        status_code=rp_resp.status_code,
-        headers=headers,
-        media_type="application/x-ndjson",
-        background=BackgroundTask(_close_streaming_resources),
-    )
+        async def _close_streaming_resources():
+            await rp_resp.aclose()
+            await async_client.aclose()
+
+        response = StreamingResponse(
+            _iter_ndjson(rp_resp, release_fn=_release),
+            status_code=rp_resp.status_code,
+            headers=headers,
+            media_type="application/x-ndjson",
+            background=BackgroundTask(_close_streaming_resources),
+        )
+        _streaming_response_returned = True
+        return response
+    finally:
+        # If we never successfully handed off the response (e.g. CancelledError between
+        # claim acquisition and StreamingResponse construction), release the claim here.
+        # The BackgroundTask/_release path handles cleanup after streaming starts.
+        if not _streaming_response_returned:
+            try:
+                db.release_proxy_claim()
+            except Exception:
+                _log.exception("release_proxy_claim failed in pre-StreamingResponse finally for job %d", job_id)
 
 
 @router.post("/api/embed")
