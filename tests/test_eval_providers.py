@@ -106,6 +106,35 @@ class TestOllamaProvider:
         assert body["options"]["top_k"] == 40
 
 
+def test_call_proxy_raw_returns_queue_job_id():
+    """_call_proxy_raw must read _queue_job_id (with underscore) from proxy response."""
+    from unittest.mock import MagicMock, patch
+
+    from ollama_queue.eval.providers import _call_proxy_raw
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "response": "hello world",
+        "_queue_job_id": 42,
+        "prompt_eval_count": 10,
+        "eval_count": 5,
+    }
+    mock_resp.raise_for_status = MagicMock()
+
+    with patch("httpx.Client") as mock_client_cls:
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__.return_value = mock_client
+        mock_client.post.return_value = mock_resp
+        text, usage, job_id = _call_proxy_raw(
+            {"model": "qwen2.5:7b", "prompt": "test", "stream": False},
+            "http://127.0.0.1:7683",
+            60,
+        )
+
+    assert job_id == 42, f"Expected job_id=42, got {job_id!r}"
+
+
 class TestGetProvider:
     def test_ollama_returns_ollama_provider(self):
         p = get_provider("ollama", http_base="http://localhost:7683")
