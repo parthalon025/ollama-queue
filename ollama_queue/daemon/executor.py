@@ -624,6 +624,17 @@ class ExecutorMixin:
                         )
                         with contextlib.suppress(ProcessLookupError, PermissionError):
                             os.kill(pid, _signal.SIGTERM)
+            elif stall_detected_at:
+                # Job recovered: posterior dropped below threshold since stall was
+                # first flagged. Clear the flag so a future spike starts a fresh
+                # grace period instead of inheriting the old (already-elapsed) one.
+                _log.info(
+                    "Job #%d stall recovered: posterior=%.2f < threshold=%.2f — clearing stall",
+                    job_id,
+                    posterior,
+                    threshold,
+                )
+                self.db.clear_stall_detected(job_id)
 
     def _check_retryable_jobs(self, now: float) -> None:
         """Clear retry_after for pending jobs whose backoff window has elapsed."""

@@ -718,6 +718,75 @@ def test_stall_no_kill_within_grace(daemon):
     mock_kill.assert_not_called()
 
 
+def test_stall_recovered_clears_flag(daemon):
+    """_check_stalled_jobs clears stall_detected_at when posterior drops below threshold."""
+    job_id = daemon.db.submit_job("sleep 9999", "qwen2.5:7b", 5, 600, "test")
+    stall_time = time.time() - 120
+    with daemon.db._lock:
+        conn = daemon.db._connect()
+        conn.execute(
+            "UPDATE jobs SET status='running', started_at=?, pid=9999, stall_detected_at=? WHERE id=?",
+            (time.time() - 400, stall_time, job_id),
+        )
+        conn.commit()
+
+    with daemon._running_lock:
+        daemon._running[job_id] = MagicMock()
+
+    # Posterior drops below threshold (0.3 < 0.8) — job has recovered
+    with (
+        patch.object(daemon.stall_detector, "compute_posterior", return_value=(0.30, {"posterior": 0.30})),
+        patch.object(daemon.stall_detector, "get_ollama_ps_models", return_value=set()),
+    ):
+        daemon._check_stalled_jobs(time.time())
+
+    job = daemon.db.get_job(job_id)
+    assert job["stall_detected_at"] is None, "stall_detected_at should be cleared on recovery"
+
+
+def test_stall_recovered_prevents_kill_on_next_spike(daemon):
+    """After stall recovery, a new spike must start a fresh grace period (no immediate kill)."""
+    daemon.db.set_setting("stall_action", "kill")
+    daemon.db.set_setting("stall_kill_grace_seconds", "60")
+    job_id = daemon.db.submit_job("sleep 9999", "qwen2.5:7b", 5, 600, "test")
+
+    # Step 1: Stall detected 120s ago (grace period already exceeded)
+    stall_time = time.time() - 120
+    with daemon.db._lock:
+        conn = daemon.db._connect()
+        conn.execute(
+            "UPDATE jobs SET status='running', started_at=?, pid=9999, stall_detected_at=? WHERE id=?",
+            (time.time() - 400, stall_time, job_id),
+        )
+        conn.commit()
+
+    with daemon._running_lock:
+        daemon._running[job_id] = MagicMock()
+
+    # Step 2: Job recovers (posterior drops below threshold)
+    with (
+        patch.object(daemon.stall_detector, "compute_posterior", return_value=(0.30, {"posterior": 0.30})),
+        patch.object(daemon.stall_detector, "get_ollama_ps_models", return_value=set()),
+    ):
+        daemon._check_stalled_jobs(time.time())
+
+    job = daemon.db.get_job(job_id)
+    assert job["stall_detected_at"] is None
+
+    # Step 3: New stall spike — should set NEW stall_detected_at (not kill immediately)
+    with (
+        patch.object(daemon.stall_detector, "compute_posterior", return_value=(0.95, {"posterior": 0.95})),
+        patch.object(daemon.stall_detector, "get_ollama_ps_models", return_value=set()),
+        patch("ollama_queue.daemon.executor.os.kill") as mock_kill,
+    ):
+        daemon._check_stalled_jobs(time.time())
+
+    # Should NOT have been killed — the fresh stall_detected_at is only moments old
+    mock_kill.assert_not_called()
+    job = daemon.db.get_job(job_id)
+    assert job["stall_detected_at"] is not None, "new stall should be flagged"
+
+
 # --- check_command pre-flight gate ---
 
 import subprocess as _subprocess_mod

@@ -243,6 +243,16 @@ class JobsMixin:
             )
             conn.commit()
 
+    def clear_stall_detected(self, job_id):
+        """Clear stall detection flag when a job recovers (posterior drops below threshold)."""
+        with self._lock:
+            conn = self._connect()
+            conn.execute(
+                "UPDATE jobs SET stall_detected_at = NULL WHERE id = ?",
+                (job_id,),
+            )
+            conn.commit()
+
     # --- Duration History ---
 
     def record_duration(self, source, model, duration, exit_code):
