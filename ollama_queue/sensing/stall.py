@@ -111,7 +111,7 @@ class StallDetector:
                 data = _json.loads(resp.read())
             return {m.get("name", "").split(":")[0] for m in data.get("models", [])}
         except Exception as exc:
-            _log.debug("get_ollama_ps_models failed: %s", exc)
+            _log.warning("get_ollama_ps_models failed — stall detection signal disabled: %s", exc)
             return set()
 
     # ── log-likelihood ratios per group ──────────────────────────────────────

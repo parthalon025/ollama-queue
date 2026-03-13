@@ -278,3 +278,22 @@ def test_silence_group_lr_120_to_300(det):
 
 
 from unittest.mock import mock_open
+
+
+def test_get_ollama_ps_models_logs_warning_on_failure(caplog):
+    """Ollama ps failure must log at WARNING — debug is invisible in production."""
+    import logging
+    from unittest.mock import patch
+
+    from ollama_queue.sensing.stall import StallDetector
+
+    detector = StallDetector()
+    with (
+        patch("urllib.request.urlopen", side_effect=Exception("connection refused")),
+        caplog.at_level(logging.WARNING, logger="ollama_queue.sensing.stall"),
+    ):
+        result = detector.get_ollama_ps_models()
+    assert result == set()
+    assert any(
+        r.levelno >= logging.WARNING for r in caplog.records
+    ), "Must log WARNING on ps failure — not just debug (invisible in production)"
