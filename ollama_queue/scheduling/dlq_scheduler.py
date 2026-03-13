@@ -71,6 +71,7 @@ class DLQScheduler:
     def _do_sweep(self, entries: list[dict]) -> list[dict]:
         """Process DLQ entries by priority, find slots, create new jobs."""
         if not self.db.get_setting("dlq.auto_reschedule"):
+            logger.debug("DLQ auto-reschedule is disabled — skipping sweep")
             return []
 
         rescheduled = []

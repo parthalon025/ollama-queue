@@ -164,7 +164,14 @@ async def _backend_gpu_name(url: str) -> str | None:
 
     Queries the ollama-queue health endpoint on the same host (port OLLAMA_QUEUE_PORT).
     Returns None on any error or when the backend has no GPU.
-    Result cached 600s — GPU names are static hardware identifiers.
+
+    Cache TTL strategy:
+    - HTTP 200 with name  → cache 600s (hardware doesn't change)
+    - HTTP 200, name=null → cache 600s (WSL2/Docker quirk — legitimate null)
+    - Network error       → cache 30s (backend may be restarting; retry sooner)
+
+    Without this distinction, a container restart leaves BackendsPanel showing
+    "unknown" for 10 minutes even after the backend comes back up.
     """
     now = time.monotonic()
     cached = _gpu_name_cache.get(url)
@@ -180,9 +187,12 @@ async def _backend_gpu_name(url: str) -> str | None:
             r = await c.get(f"{queue_url}/api/health")
             if r.status_code == 200:
                 name = r.json().get("gpu_name")
+        # Successful response (name may still be None for no-GPU machines) — cache full TTL
+        _gpu_name_cache[url] = (now, name)
     except Exception as e:
         _log.debug("gpu name %s failed: %s", url, e)
-    _gpu_name_cache[url] = (now, name)
+        # Network failure — cache with short TTL so we retry after the backend recovers
+        _gpu_name_cache[url] = (now - _GPU_NAME_TTL + 30.0, None)
     return name
 
 
