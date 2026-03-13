@@ -101,8 +101,8 @@ EVAL_SETTINGS_DEFAULTS = {
 class SchemaMixin:
     """Schema creation, migrations, and seed data."""
 
-    def _run_migrations(self, conn):  # noqa: PLR0915
-        """Apply all incremental schema migrations atomically."""
+    def _run_migrations(self, conn):
+        """Apply all incremental schema migrations (idempotent)."""
         self._add_column_if_missing(conn, "recurring_jobs", "cron_expression", "TEXT")
         self._add_column_if_missing(conn, "recurring_jobs", "pinned", "INTEGER DEFAULT 0")
         self._add_column_if_missing(conn, "jobs", "pid", "INTEGER")
@@ -196,7 +196,6 @@ class SchemaMixin:
                 "UPDATE eval_variants SET description = ? WHERE id = ? AND description IS NULL",
                 (_desc, _var_id),
             )
-        conn.commit()
 
     def initialize(self):
         """Create all tables and seed defaults."""
