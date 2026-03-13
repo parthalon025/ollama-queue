@@ -5,12 +5,15 @@
 //   going and can spot capacity problems at a glance.
 
 import { useEffect } from 'preact/hooks';
-import { backendsData, fetchBackends } from '../stores';
+import { backendsData, fetchBackends, currentJob } from '../stores';
 
 // NOTE: all .map() callbacks use descriptive names — never 'h' (shadows JSX factory)
 
 export default function BackendsPanel() {
     const backends = backendsData.value;
+    // What it shows: the model currently executing (or null if idle).
+    // Decision it drives: which backend row gets the "serving" badge.
+    const activeModel = currentJob.value?.model ?? null;
 
     // Self-managed 15s refresh — independent of the main 5s status poll so
     // backend latency (2× remote HTTP per backend) doesn't slow the hot path.
@@ -23,6 +26,19 @@ export default function BackendsPanel() {
     // Only show when multiple backends are configured — single-backend users
     // already see their machine's health in the Resource Gauges above.
     if (!backends || backends.length <= 1) return null;
+
+    // If every backend is unreachable, surface that clearly instead of rendering
+    // a panel full of red dots — helps the user know the routing layer itself is down.
+    const allUnhealthy = backends.length > 0 && backends.every(b => !b.healthy);
+    if (allUnhealthy) {
+        return (
+            <div class="t-frame" data-label="Backends" data-chroma="lune">
+                <span style={{ color: 'var(--status-error)', fontSize: 'var(--type-label)', fontFamily: 'var(--font-mono)' }}>
+                    All backends unreachable — routing unavailable
+                </span>
+            </div>
+        );
+    }
 
     return (
         <div class="t-frame" data-label="Backends" data-chroma="lune">
@@ -45,6 +61,12 @@ export default function BackendsPanel() {
                         ? `● ${backend.loaded_models[0].split(':')[0]}${backend.loaded_models.length > 1 ? ` +${backend.loaded_models.length - 1}` : ''}`
                         : null;
 
+                    // "Serving" badge: this backend has the active model loaded in VRAM.
+                    // Heuristic — model could be warm on multiple backends, but the one
+                    // whose loaded_models includes the current job's model is the likely server.
+                    const isServing = activeModel && backend.healthy &&
+                        (backend.loaded_models || []).some(m => m === activeModel || m.startsWith(activeModel.split(':')[0] + ':'));
+
                     return (
                         <div
                             key={backend.url}
@@ -54,10 +76,11 @@ export default function BackendsPanel() {
                                 alignItems: 'center',
                                 gap: '0.5rem',
                                 padding: '0.375rem 0.5rem',
-                                background: 'var(--bg-elevated)',
+                                background: isServing ? 'var(--bg-elevated)' : 'var(--bg-elevated)',
                                 borderRadius: 'var(--radius-sm)',
                                 fontSize: 'var(--type-label)',
                                 fontFamily: 'var(--font-mono)',
+                                outline: isServing ? '1px solid var(--status-ok)' : 'none',
                             }}
                         >
                             {/* Health indicator dot */}
@@ -80,6 +103,19 @@ export default function BackendsPanel() {
                             }}>
                                 {label}
                             </span>
+
+                            {/* "serving" badge: shows when this backend is executing the current job */}
+                            {isServing && (
+                                <span style={{
+                                    color: 'var(--status-ok)',
+                                    fontSize: 'var(--type-micro)',
+                                    fontFamily: 'var(--font-mono)',
+                                    letterSpacing: '0.04em',
+                                    flexShrink: 0,
+                                }}>
+                                    serving
+                                </span>
+                            )}
 
                             {/* Model count */}
                             <span style={{ color: 'var(--text-tertiary)', flex: '0 0 auto' }}>

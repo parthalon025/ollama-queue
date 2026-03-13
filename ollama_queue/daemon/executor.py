@@ -16,6 +16,7 @@ import subprocess as _subprocess  # real module — not replaced by test mocks t
 import time
 from subprocess import TimeoutExpired as _TimeoutExpired
 
+from ollama_queue.api.backend_router import has_healthy_remote_backend
 from ollama_queue.metrics_parser import parse_ollama_metrics
 from ollama_queue.sensing.health import HealthMonitor
 
@@ -304,13 +305,36 @@ class ExecutorMixin:
         _settings = settings if settings is not None else self.db.get_all_settings()
         health_eval = self.health.evaluate(snap, _settings, currently_paused=False)
 
-        if not resource_ok or health_eval["should_pause"]:
+        should_pause = health_eval["should_pause"]
+        pause_reason = health_eval.get("reason", "")
+
+        # CPU-load bypass: if the only reason we'd pause is local CPU load, and a
+        # healthy remote backend is cached, let the job through.  The subprocess
+        # itself is lightweight (just HTTP calls); inference runs on the remote GPU.
+        # RAM/Swap/VRAM exhaustion still blocks — those affect the local machine
+        # regardless of where inference happens.
+        if should_pause and has_healthy_remote_backend():
+            cpu_only = (
+                "Load" in pause_reason
+                and "RAM" not in pause_reason
+                and "Swap" not in pause_reason
+                and "VRAM" not in pause_reason
+            )
+            if cpu_only:
+                _log.info(
+                    "_can_admit: job #%d — bypassing local CPU load gate "
+                    "(remote backend healthy, inference will proxy away)",
+                    job["id"],
+                )
+                should_pause = False
+
+        if not resource_ok or should_pause:
             _log.debug(
                 "_can_admit: job #%d blocked — resource_ok=%s health_pause=%s reason=%s",
                 job["id"],
                 resource_ok,
-                health_eval["should_pause"],
-                health_eval.get("reason", ""),
+                should_pause,
+                pause_reason,
             )
             # Proactive deferral: if resources won't fit and deferral is enabled,
             # defer the job so the scheduler can place it in a better time slot

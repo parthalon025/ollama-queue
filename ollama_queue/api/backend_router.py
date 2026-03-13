@@ -164,7 +164,14 @@ async def _backend_gpu_name(url: str) -> str | None:
 
     Queries the ollama-queue health endpoint on the same host (port OLLAMA_QUEUE_PORT).
     Returns None on any error or when the backend has no GPU.
-    Result cached 600s — GPU names are static hardware identifiers.
+
+    Cache TTL strategy:
+    - HTTP 200 with name  → cache 600s (hardware doesn't change)
+    - HTTP 200, name=null → cache 600s (WSL2/Docker quirk — legitimate null)
+    - Network error       → cache 30s (backend may be restarting; retry sooner)
+
+    Without this distinction, a container restart leaves BackendsPanel showing
+    "unknown" for 10 minutes even after the backend comes back up.
     """
     now = time.monotonic()
     cached = _gpu_name_cache.get(url)
@@ -180,9 +187,12 @@ async def _backend_gpu_name(url: str) -> str | None:
             r = await c.get(f"{queue_url}/api/health")
             if r.status_code == 200:
                 name = r.json().get("gpu_name")
+        # Successful response (name may still be None for no-GPU machines) — cache full TTL
+        _gpu_name_cache[url] = (now, name)
     except Exception as e:
         _log.debug("gpu name %s failed: %s", url, e)
-    _gpu_name_cache[url] = (now, name)
+        # Network failure — cache with short TTL so we retry after the backend recovers
+        _gpu_name_cache[url] = (now - _GPU_NAME_TTL + 30.0, None)
     return name
 
 
@@ -282,3 +292,30 @@ async def select_backend(model: str = "") -> str:
     # 5. Weighted random among remaining candidates — higher weight = more traffic share
     weights = _get_weights(healthy)
     return random.choices(healthy, weights=weights, k=1)[0]  # noqa: S311
+
+
+def has_healthy_remote_backend() -> bool:
+    """Return True if at least one non-local backend is cached as healthy.
+
+    Plain English: Reads the health cache without making any network calls.
+    Used by the admission gate (_can_admit) to decide whether to bypass the
+    local CPU load check — if inference will happen on a remote machine, the
+    local CPU load shouldn't block the job.
+
+    Decision it drives: When True, _can_admit skips the CPU-load pause for jobs
+    that will proxy to the remote backend.  RAM/VRAM/Swap gates still apply.
+
+    A backend is considered 'remote' if its URL doesn't point to localhost or
+    127.0.0.1 (i.e. it's not the same machine running the daemon).
+    """
+    if len(BACKENDS) <= 1:
+        return False  # single-backend — no remote to route to
+    now = time.monotonic()
+    for url in BACKENDS:
+        # Skip local backends — they share CPU with the daemon
+        if "127.0.0.1" in url or "localhost" in url:
+            continue
+        cached = _health_cache.get(url)
+        if cached and now - cached[0] < _HEALTH_TTL and cached[1]:
+            return True
+    return False

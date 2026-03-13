@@ -10,6 +10,18 @@ import { API } from './_shared.js';
 // Re-export API so components that import { API } from '../stores' still work
 export { API } from './_shared.js';
 
+// What it does: Guards against HTML error pages masquerading as ok responses.
+// If a reverse proxy (nginx, Tailscale Serve) returns a 200 HTML error page,
+// resp.ok is true but resp.json() throws, causing a silent poll failure that
+// shows stale data. This check surfaces the content-type mismatch explicitly.
+async function _safeJson(resp) {
+    const ct = resp.headers.get('content-type') || '';
+    if (!ct.includes('application/json')) {
+        throw new Error(`Expected JSON, got ${ct || 'no content-type'} (HTTP ${resp.status})`);
+    }
+    return resp.json();
+}
+
 // ── Cross-tab navigation signals ──────────────────────────────────────────────
 
 // What it shows: Which job ID to highlight when navigating from History to Now.
@@ -81,7 +93,7 @@ async function fetchStatus() {
     try {
         const resp = await fetch(`${API}/status`);
         if (resp.ok) {
-            const data = await resp.json();
+            const data = await _safeJson(resp);
             status.value = data;
             if (Array.isArray(data.queue)) queue.value = data.queue;
             _pollFailures = 0;
@@ -111,10 +123,10 @@ async function _fetchNonRealtime() {
             fetch(`${API}/heatmap`),
             fetch(`${API}/history`),
         ]);
-        if (hResp.ok) { const d = await hResp.json(); healthData.value = Array.isArray(d) ? d : (d.log ?? []); if (d.cpu_count) cpuCount.value = d.cpu_count; }
-        if (durResp.ok) durationData.value = await durResp.json();
-        if (heatResp.ok) heatmapData.value = await heatResp.json();
-        if (histResp.ok) history.value = await histResp.json();
+        if (hResp.ok) { const d = await _safeJson(hResp); healthData.value = Array.isArray(d) ? d : (d.log ?? []); if (d.cpu_count) cpuCount.value = d.cpu_count; }
+        if (durResp.ok) durationData.value = await _safeJson(durResp);
+        if (heatResp.ok) heatmapData.value = await _safeJson(heatResp);
+        if (histResp.ok) history.value = await _safeJson(histResp);
         // DLQ/deferral/performance non-realtime refresh
         fetchDeferred();
         fetchDLQSchedulePreview();
@@ -139,12 +151,12 @@ async function fetchAll() {
             fetch(`${API}/heatmap`),
             fetch(`${API}/settings`),
         ]);
-        if (qResp.ok) queue.value = await qResp.json();
-        if (hResp.ok) history.value = await hResp.json();
-        if (healthResp.ok) { const d = await healthResp.json(); healthData.value = Array.isArray(d) ? d : (d.log ?? []); }
-        if (durResp.ok) durationData.value = await durResp.json();
-        if (heatResp.ok) heatmapData.value = await heatResp.json();
-        if (setResp.ok) settings.value = await setResp.json();
+        if (qResp.ok) queue.value = await _safeJson(qResp);
+        if (hResp.ok) history.value = await _safeJson(hResp);
+        if (healthResp.ok) { const d = await _safeJson(healthResp); healthData.value = Array.isArray(d) ? d : (d.log ?? []); }
+        if (durResp.ok) durationData.value = await _safeJson(durResp);
+        if (heatResp.ok) heatmapData.value = await _safeJson(heatResp);
+        if (setResp.ok) settings.value = await _safeJson(setResp);
         const pi = settings.value.poll_interval_seconds;
         if (pi && pi * 1000 !== POLL_INTERVAL) {
             POLL_INTERVAL = pi * 1000;
