@@ -140,11 +140,16 @@ export async function fetchRunAnalysis(runId) {
 }
 
 // Normalize raw /eval/trends response so components receive consistent shapes:
+//  - no_cluster_data: true when backend has no cluster labels (early-stage project)
 //  - variants: object keyed by id → array with id field attached
 //  - each run: started_at ISO string → timestamp (unix seconds) added
 //  - trend_direction: aggregated across variants (regressing > stable > improving)
 //  - completed_runs, judge_reliability, item_count_growing: aggregated at top level
 function normalizeTrends(raw) {
+  // Surface the no_cluster_data sentinel so F1LineChart can show a specific
+  // explanation instead of the generic "complete 2 runs to see trends" message.
+  const noClusterData = raw.status === 'no_cluster_data';
+
   const variantsArr = Object.entries(raw.variants || {}).map(([id, v]) => ({
     id,
     ...v,
@@ -181,6 +186,7 @@ function normalizeTrends(raw) {
     completed_runs: completedRuns,
     judge_reliability: judgeReliability,
     item_count_growing: itemCountGrowing,
+    no_cluster_data: noClusterData,
   };
 }
 
