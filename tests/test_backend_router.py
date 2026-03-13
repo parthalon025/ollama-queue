@@ -23,11 +23,13 @@ def clear_caches():
     router._models_cache.clear()
     router._loaded_cache.clear()
     router._hw_cache.clear()
+    router._gpu_name_cache.clear()
     yield
     router._health_cache.clear()
     router._models_cache.clear()
     router._loaded_cache.clear()
     router._hw_cache.clear()
+    router._gpu_name_cache.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -269,6 +271,50 @@ def test_backend_vram_pct_returns_zero_on_empty_log():
         result = run(router._backend_vram_pct("http://host:11434"))
 
     assert result == 0.0
+
+
+# ---------------------------------------------------------------------------
+# _backend_gpu_name — GPU model name from queue health endpoint
+# ---------------------------------------------------------------------------
+
+
+def test_gpu_name_cache_hit():
+    """Cached GPU name is returned without making a new HTTP call."""
+    now = time.monotonic()
+    router._gpu_name_cache["http://cached:11434"] = (now, "RTX 4090")
+    result = run(router._backend_gpu_name("http://cached:11434"))
+    assert result == "RTX 4090"
+
+
+def test_backend_gpu_name_parses_health_response():
+    """_backend_gpu_name extracts gpu_name from the /api/health JSON response."""
+    health_response = {"gpu_name": "NVIDIA GeForce RTX 4090", "log": [], "cpu_count": 16}
+
+    with patch("ollama_queue.api.backend_router.httpx.AsyncClient", _fake_async_client(json_data=health_response)):
+        result = run(router._backend_gpu_name("http://host:11434"))
+
+    assert result == "NVIDIA GeForce RTX 4090"
+
+
+def test_backend_gpu_name_returns_none_on_error():
+    """_backend_gpu_name returns None on connection failure (no penalty)."""
+    with patch(
+        "ollama_queue.api.backend_router.httpx.AsyncClient",
+        _fake_async_client(side_effect=Exception("connection refused")),
+    ):
+        result = run(router._backend_gpu_name("http://dead:11434"))
+
+    assert result is None
+
+
+def test_backend_gpu_name_returns_none_when_absent():
+    """_backend_gpu_name returns None when gpu_name key is missing (non-GPU machine)."""
+    health_response = {"log": [], "cpu_count": 8}
+
+    with patch("ollama_queue.api.backend_router.httpx.AsyncClient", _fake_async_client(json_data=health_response)):
+        result = run(router._backend_gpu_name("http://cpu-only:11434"))
+
+    assert result is None
 
 
 # ---------------------------------------------------------------------------

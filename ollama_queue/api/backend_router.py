@@ -67,12 +67,14 @@ _HEALTH_TTL = 30.0
 _MODELS_TTL = 60.0
 _LOADED_TTL = 5.0
 _HW_TTL = 10.0
+_GPU_NAME_TTL = 600.0  # GPU names don't change — refresh every 10 minutes
 
 # Module-level caches: url -> (timestamp, data)
 _health_cache: dict[str, tuple[float, bool]] = {}
 _models_cache: dict[str, tuple[float, frozenset[str]]] = {}
 _loaded_cache: dict[str, tuple[float, frozenset[str]]] = {}
 _hw_cache: dict[str, tuple[float, float]] = {}
+_gpu_name_cache: dict[str, tuple[float, str | None]] = {}
 
 
 async def _backend_healthy(url: str) -> bool:
@@ -155,6 +157,33 @@ async def _backend_vram_pct(url: str) -> float:
         vram = 0.0
     _hw_cache[url] = (now, vram)
     return vram
+
+
+async def _backend_gpu_name(url: str) -> str | None:
+    """Return the GPU model name for this backend's host machine.
+
+    Queries the ollama-queue health endpoint on the same host (port OLLAMA_QUEUE_PORT).
+    Returns None on any error or when the backend has no GPU.
+    Result cached 600s — GPU names are static hardware identifiers.
+    """
+    now = time.monotonic()
+    cached = _gpu_name_cache.get(url)
+    if cached and now - cached[0] < _GPU_NAME_TTL:
+        return cached[1]
+    name: str | None = None
+    try:
+        from urllib.parse import urlparse, urlunparse
+
+        parsed = urlparse(url)
+        queue_url = urlunparse(parsed._replace(netloc=f"{parsed.hostname}:{_QUEUE_PORT}"))
+        async with httpx.AsyncClient(timeout=2.0) as c:
+            r = await c.get(f"{queue_url}/api/health")
+            if r.status_code == 200:
+                name = r.json().get("gpu_name")
+    except Exception as e:
+        _log.debug("gpu name %s failed: %s", url, e)
+    _gpu_name_cache[url] = (now, name)
+    return name
 
 
 async def fetch_all_backend_models() -> list[dict]:

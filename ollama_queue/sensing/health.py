@@ -78,6 +78,22 @@ class HealthMonitor:
 
     _VRAM_TOTAL_FALLBACK_GB = 24.0
 
+    def get_gpu_name(self) -> str | None:
+        """Return the GPU model name from nvidia-smi, or None if unavailable."""
+        try:
+            result = subprocess.run(
+                ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode != 0:
+                return None
+            name = result.stdout.strip().split("\n")[0].strip()
+            return name if name else None
+        except (OSError, subprocess.TimeoutExpired, ValueError, IndexError, UnicodeDecodeError):
+            return None
+
     def get_vram_total_gb(self) -> float:
         """Return total GPU VRAM in GB from nvidia-smi, or 24.0 as fallback.
 

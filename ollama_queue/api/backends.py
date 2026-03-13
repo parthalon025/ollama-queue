@@ -24,11 +24,12 @@ async def get_backends():
     """Return health and resource status for all configured Ollama backends."""
     results = []
     for url in _router.BACKENDS:
-        healthy, models, loaded, vram_pct = await asyncio.gather(
+        healthy, models, loaded, vram_pct, gpu_name = await asyncio.gather(
             _router._backend_healthy(url),
             _router._available_models(url),
             _router._loaded_models(url),
             _router._backend_vram_pct(url),
+            _router._backend_gpu_name(url),
         )
         results.append(
             {
@@ -37,6 +38,7 @@ async def get_backends():
                 "model_count": len(models),
                 "loaded_models": sorted(loaded),
                 "vram_pct": round(vram_pct, 1),
+                "gpu_name": gpu_name,
             }
         )
     return results

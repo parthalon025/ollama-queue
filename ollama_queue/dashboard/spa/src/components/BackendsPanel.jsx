@@ -28,9 +28,11 @@ export default function BackendsPanel() {
         <div class="t-frame" data-label="Backends" data-chroma="lune">
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
                 {backends.map((backend) => {
-                    // Extract just the hostname for a compact label
+                    // Prefer GPU name (e.g. "RTX 4090") over hostname — more meaningful to the user.
+                    // Fall back to hostname if gpu_name is null (non-GPU machine or unreachable queue).
                     let host = backend.url;
                     try { host = new URL(backend.url).hostname; } catch (_) { /* keep full url */ }
+                    const label = backend.gpu_name || host;
 
                     const vramColor = backend.vram_pct > 80
                         ? 'var(--status-error)'
@@ -67,7 +69,7 @@ export default function BackendsPanel() {
                                 flexShrink: 0,
                             }} />
 
-                            {/* Hostname */}
+                            {/* GPU name (falls back to hostname) */}
                             <span style={{
                                 color: 'var(--text-primary)',
                                 flex: '0 0 auto',
@@ -76,7 +78,7 @@ export default function BackendsPanel() {
                                 textOverflow: 'ellipsis',
                                 whiteSpace: 'nowrap',
                             }}>
-                                {host}
+                                {label}
                             </span>
 
                             {/* Model count */}

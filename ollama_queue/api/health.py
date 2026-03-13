@@ -9,9 +9,10 @@ from ollama_queue.sensing import HealthMonitor
 
 router = APIRouter()
 
-# CPU count is a hardware constant — read once at startup via HealthMonitor
-# (same path used by the daemon's pause/resume logic)
-_CPU_COUNT = HealthMonitor().get_cpu_count()
+# Hardware constants — read once at startup (GPU name and CPU count don't change at runtime)
+_monitor = HealthMonitor()
+_CPU_COUNT = _monitor.get_cpu_count()
+_GPU_NAME = _monitor.get_gpu_name()  # None on non-GPU machines
 
 
 @router.get("/api/health")
@@ -23,4 +24,5 @@ def get_health(hours: int = 24):
         "log": db.get_health_log(hours=hours),
         "burst_regime": burst_regime,
         "cpu_count": _CPU_COUNT,
+        "gpu_name": _GPU_NAME,
     }

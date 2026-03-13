@@ -389,6 +389,37 @@ def test_fetch_vram_pct_zero_total():
         assert m._fetch_vram_pct() == 0.0
 
 
+def test_get_gpu_name_returns_name():
+    """get_gpu_name returns the GPU model string from nvidia-smi."""
+    m = HealthMonitor()
+    mock_result = MagicMock(returncode=0, stdout="NVIDIA GeForce RTX 4090\n")
+    with patch("ollama_queue.sensing.health.subprocess.run", return_value=mock_result):
+        assert m.get_gpu_name() == "NVIDIA GeForce RTX 4090"
+
+
+def test_get_gpu_name_nonzero_returncode():
+    """get_gpu_name returns None when nvidia-smi exits non-zero."""
+    m = HealthMonitor()
+    mock_result = MagicMock(returncode=1, stdout="", stderr="NVIDIA-SMI has failed")
+    with patch("ollama_queue.sensing.health.subprocess.run", return_value=mock_result):
+        assert m.get_gpu_name() is None
+
+
+def test_get_gpu_name_exception():
+    """get_gpu_name returns None when nvidia-smi is not installed."""
+    m = HealthMonitor()
+    with patch("ollama_queue.sensing.health.subprocess.run", side_effect=OSError("not found")):
+        assert m.get_gpu_name() is None
+
+
+def test_get_gpu_name_empty_output():
+    """get_gpu_name returns None when nvidia-smi returns an empty string."""
+    m = HealthMonitor()
+    mock_result = MagicMock(returncode=0, stdout="\n")
+    with patch("ollama_queue.sensing.health.subprocess.run", return_value=mock_result):
+        assert m.get_gpu_name() is None
+
+
 def test_get_ollama_active_model_nonzero_returncode():
     """Line 110: ollama ps non-zero returncode returns None."""
     m = HealthMonitor()
