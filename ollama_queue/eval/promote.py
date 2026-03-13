@@ -204,16 +204,22 @@ def _check_auto_promote_inner(db: Database, run_id: int) -> None:  # noqa: PLR09
             ).fetchone()
 
     if prod_row is not None:
-        if prod_run_row is not None:
-            try:
-                m = json.loads(prod_run_row["metrics"]) if isinstance(prod_run_row["metrics"], str) else {}
-                production_quality = (m.get(prod_id) or {}).get(quality_metric)
-            except (json.JSONDecodeError, TypeError):
-                _log.warning(
-                    "check_auto_promote: production metrics unparseable for variant %s — gate 2 skipped as unsafe",
-                    prod_id,
-                )
-                return
+        if prod_run_row is None:
+            _log.info(
+                "check_auto_promote: production variant %s has no eval baseline — skipping Gate 2 as unsafe",
+                prod_id,
+            )
+            return
+
+        try:
+            m = json.loads(prod_run_row["metrics"]) if isinstance(prod_run_row["metrics"], str) else {}
+            production_quality = (m.get(prod_id) or {}).get(quality_metric)
+        except (json.JSONDecodeError, TypeError):
+            _log.warning(
+                "check_auto_promote: production metrics unparseable for variant %s — gate 2 skipped as unsafe",
+                prod_id,
+            )
+            return
 
         if production_quality is not None and winner_quality <= production_quality + min_improvement:
             _log.info(
