@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import pathlib
 import re
 import shutil
@@ -25,6 +26,14 @@ def patch_consumer(consumer: dict) -> dict:
         }
 
     path = pathlib.Path(patch_path)
+
+    # TOCTOU guard: reject patch if file was modified since scan
+    scanned_mtime = consumer.get("scanned_mtime")
+    if scanned_mtime is not None:
+        current_mtime = os.path.getmtime(path)
+        if current_mtime != scanned_mtime:
+            raise ValueError(f"Config file '{path}' modified since scan (re-scan before patching)")
+
     _backup(path)
 
     ctype = consumer.get("type", "unknown")
