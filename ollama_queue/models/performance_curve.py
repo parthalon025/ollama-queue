@@ -63,13 +63,25 @@ class PerformanceCurve:
         if len(valid_tok) >= 2:
             log_sizes = [math.log(s["model_size_gb"]) for s in valid_tok]
             log_rates = [math.log(s["avg_tok_per_min"]) for s in valid_tok]
-            self._tok_slope, self._tok_intercept = _linear_regression(log_sizes, log_rates)
-            # Residual std for confidence intervals
-            predicted = [self._tok_slope * x + self._tok_intercept for x in log_sizes]
-            residuals = [a - p for a, p in zip(log_rates, predicted, strict=False)]
-            self._tok_residual_std = (
-                math.sqrt(sum(r**2 for r in residuals) / max(len(residuals) - 2, 1)) if len(residuals) >= 2 else 0.3
-            )
+            slope, intercept = _linear_regression(log_sizes, log_rates)
+
+            # Guard against degenerate fits (nearly identical x-values produce extreme slopes)
+            if abs(slope) > 10.0:
+                logger.warning("Degenerate fit (slope=%.2f) — using single-point fallback", slope)
+                # Fall back to typical slope with single-point intercept from first valid point
+                s = valid_tok[0]
+                self._tok_slope = -0.7
+                self._tok_intercept = math.log(s["avg_tok_per_min"]) - self._tok_slope * math.log(s["model_size_gb"])
+                self._tok_residual_std = 0.5
+            else:
+                self._tok_slope = slope
+                self._tok_intercept = intercept
+                # Residual std for confidence intervals
+                predicted = [self._tok_slope * x + self._tok_intercept for x in log_sizes]
+                residuals = [a - p for a, p in zip(log_rates, predicted, strict=False)]
+                self._tok_residual_std = (
+                    math.sqrt(sum(r**2 for r in residuals) / max(len(residuals) - 2, 1)) if len(residuals) >= 2 else 0.3
+                )
             self.fitted = True
         elif len(valid_tok) == 1:
             # Single point — use typical slope
@@ -88,12 +100,15 @@ class PerformanceCurve:
             warmups = [s["avg_warmup_s"] for s in valid_warmup]
             self._warmup_slope, self._warmup_intercept = _linear_regression(sizes, warmups)
 
+    # Sanity cap: no model produces more than 100k tok/min on consumer hardware
+    _MAX_TOK_PER_MIN = 100_000
+
     def predict_tok_per_min(self, model_size_gb: float) -> float | None:
         """Predict tok/min for a model size."""
         if self._tok_slope is None or model_size_gb <= 0:
             return None
         log_rate = self._tok_slope * math.log(model_size_gb) + self._tok_intercept
-        return math.exp(log_rate)
+        return min(math.exp(log_rate), self._MAX_TOK_PER_MIN)
 
     def predict_tok_per_min_ci(self, model_size_gb: float, z: float = 1.28) -> tuple[float, float, float] | None:
         """Predict tok/min with confidence interval (default 90%)."""
@@ -103,9 +118,9 @@ class PerformanceCurve:
         std = self._tok_residual_std or 0.3
         if not self._tok_residual_std:
             logger.debug("Using fallback residual_std=0.3 (zero or missing)")
-        mean = math.exp(log_rate)
-        lower = math.exp(log_rate - z * std)
-        upper = math.exp(log_rate + z * std)
+        mean = min(math.exp(log_rate), self._MAX_TOK_PER_MIN)
+        lower = min(math.exp(log_rate - z * std), self._MAX_TOK_PER_MIN)
+        upper = min(math.exp(log_rate + z * std), self._MAX_TOK_PER_MIN)
         return mean, lower, upper
 
     def predict_warmup(self, model_size_gb: float) -> float | None:
