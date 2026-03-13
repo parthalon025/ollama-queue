@@ -154,6 +154,13 @@ class LoopMixin:
             self.db.reset_job_to_pending(job["id"])
             _log.warning("Reset orphaned job #%d to pending", job["id"])
 
+        # Clear orphaned proxy sentinel. If daemon crashed while a proxy held
+        # the sentinel (-1), it persists and blocks all future proxy requests.
+        with self.db._lock:
+            conn = self.db._connect()
+            conn.execute("UPDATE daemon_state SET current_job_id = NULL " "WHERE id = 1 AND current_job_id = -1")
+            conn.commit()
+
     # --- Circuit breaker ---
 
     def _compute_cb_cooldown(self, attempt: int) -> float:

@@ -1811,6 +1811,18 @@ def test_recover_orphans_sigterm_orphaned_pid(db):
     assert job["status"] == "pending"
 
 
+def test_recover_orphans_clears_proxy_sentinel(db):
+    """Orphaned proxy sentinel (-1) in daemon_state must be cleared on restart."""
+    d = Daemon(db)
+    # Simulate crash-during-proxy: sentinel left in DB
+    db.update_daemon_state(state="running", current_job_id=-1)
+
+    d._recover_orphans()
+
+    state = db.get_daemon_state()
+    assert state["current_job_id"] is None, "Proxy sentinel should be cleared on restart"
+
+
 # --- _record_ollama_success log (line 548) ---
 
 
