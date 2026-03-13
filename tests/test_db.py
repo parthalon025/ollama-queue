@@ -37,6 +37,7 @@ class TestInitialize:
             "deferrals",
             "eval_cache",
             "backend_metrics",
+            "backends",
         }
         assert expected == set(tables)
 

@@ -16,6 +16,7 @@ import sqlite3
 import threading
 import time as _time
 
+from ollama_queue.db.backends import BackendsMixin
 from ollama_queue.db.dlq import DLQMixin
 from ollama_queue.db.eval import EvalMixin
 from ollama_queue.db.health import HealthMixin
@@ -35,6 +36,7 @@ class Database(
     HealthMixin,
     DLQMixin,
     EvalMixin,
+    BackendsMixin,
 ):
     """Synchronous SQLite database for the ollama-queue daemon.
 
