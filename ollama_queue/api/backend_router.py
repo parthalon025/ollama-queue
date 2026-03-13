@@ -282,3 +282,30 @@ async def select_backend(model: str = "") -> str:
     # 5. Weighted random among remaining candidates — higher weight = more traffic share
     weights = _get_weights(healthy)
     return random.choices(healthy, weights=weights, k=1)[0]  # noqa: S311
+
+
+def has_healthy_remote_backend() -> bool:
+    """Return True if at least one non-local backend is cached as healthy.
+
+    Plain English: Reads the health cache without making any network calls.
+    Used by the admission gate (_can_admit) to decide whether to bypass the
+    local CPU load check — if inference will happen on a remote machine, the
+    local CPU load shouldn't block the job.
+
+    Decision it drives: When True, _can_admit skips the CPU-load pause for jobs
+    that will proxy to the remote backend.  RAM/VRAM/Swap gates still apply.
+
+    A backend is considered 'remote' if its URL doesn't point to localhost or
+    127.0.0.1 (i.e. it's not the same machine running the daemon).
+    """
+    if len(BACKENDS) <= 1:
+        return False  # single-backend — no remote to route to
+    now = time.monotonic()
+    for url in BACKENDS:
+        # Skip local backends — they share CPU with the daemon
+        if "127.0.0.1" in url or "localhost" in url:
+            continue
+        cached = _health_cache.get(url)
+        if cached and now - cached[0] < _HEALTH_TTL and cached[1]:
+            return True
+    return False
