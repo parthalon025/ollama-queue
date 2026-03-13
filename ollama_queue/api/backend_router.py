@@ -108,7 +108,10 @@ async def _available_models(url: str) -> frozenset[str]:
     try:
         async with httpx.AsyncClient(timeout=3.0) as c:
             r = await c.get(f"{url}/api/tags")
-            models: frozenset[str] = frozenset(m["name"] for m in r.json().get("models", []))
+            if r.status_code == 200:
+                models: frozenset[str] = frozenset(m["name"] for m in r.json().get("models", []))
+            else:
+                models = frozenset()
     except Exception as e:
         _log.debug("model list %s failed: %s", url, e)
         models = frozenset()
@@ -125,7 +128,10 @@ async def _loaded_models(url: str) -> frozenset[str]:
     try:
         async with httpx.AsyncClient(timeout=2.0) as c:
             r = await c.get(f"{url}/api/ps")
-            loaded: frozenset[str] = frozenset(m["name"] for m in r.json().get("models", []))
+            if r.status_code == 200:
+                loaded: frozenset[str] = frozenset(m["name"] for m in r.json().get("models", []))
+            else:
+                loaded = frozenset()
     except Exception as e:
         _log.debug("loaded models %s failed: %s", url, e)
         loaded = frozenset()

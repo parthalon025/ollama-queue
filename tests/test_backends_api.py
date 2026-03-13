@@ -1,11 +1,14 @@
 """API tests for dynamic backend management endpoints (POST/DELETE/PUT/GET /api/backends/*)."""
 
+import urllib.parse
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+import ollama_queue.api as _api
+import ollama_queue.api.backend_router as _router
 from ollama_queue.app import create_app
 from ollama_queue.db import Database
 
@@ -215,3 +218,93 @@ def test_test_backend_never_raises(client):
 
     assert resp.status_code == 200
     assert resp.json()["healthy"] is False
+
+
+# ── Gap 1: BACKENDS list updated after add/remove ────────────────────────────
+
+
+def test_add_backend_updates_backends_list(client, db):
+    """POST /api/backends adds the URL to _router.BACKENDS for routing."""
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.get = AsyncMock(return_value=_mock_tags_response(["llama3:8b"]))
+
+    with patch("ollama_queue.api.backends.httpx.AsyncClient", return_value=mock_client):
+        resp = client.post("/api/backends", json={"url": "http://newhost:11434"})
+
+    assert resp.status_code == 200
+    assert "http://newhost:11434" in _router.BACKENDS
+
+
+def test_remove_backend_updates_backends_list(client, db):
+    """DELETE /api/backends/{url} removes the URL from _router.BACKENDS."""
+    db.add_backend("http://newhost:11434", weight=1.0)
+    _router.refresh_backends_from_db()
+    assert "http://newhost:11434" in _router.BACKENDS
+
+    resp = client.delete("/api/backends/http://newhost:11434")
+
+    assert resp.status_code == 200
+    assert "http://newhost:11434" not in _router.BACKENDS
+
+
+# ── Gap 2: DB=None returns 503 ────────────────────────────────────────────────
+
+
+def test_add_backend_returns_503_when_db_unavailable(client):
+    """POST /api/backends returns 503 when database is None."""
+    with patch.object(_api, "db", None):
+        resp = client.post("/api/backends", json={"url": "http://host:11434"})
+    assert resp.status_code == 503
+    assert "database not available" in resp.json()["detail"]
+
+
+def test_remove_backend_returns_503_when_db_unavailable(client):
+    """DELETE /api/backends/{url} returns 503 when database is None."""
+    with patch.object(_api, "db", None):
+        resp = client.delete("/api/backends/http://host:11434")
+    assert resp.status_code == 503
+    assert "database not available" in resp.json()["detail"]
+
+
+def test_update_weight_returns_503_when_db_unavailable(client):
+    """PUT /api/backends/{url}/weight returns 503 when database is None."""
+    with patch.object(_api, "db", None):
+        resp = client.put("/api/backends/http://host:11434/weight", params={"weight": 2.0})
+    assert resp.status_code == 503
+    assert "database not available" in resp.json()["detail"]
+
+
+# ── Gap 3: URL-encoded path parameter round-trip ─────────────────────────────
+
+
+def test_update_weight_url_encoded_path(client, db):
+    """PUT weight route correctly unquotes URL-encoded backend URL in path."""
+    db.add_backend("http://testhost:11434", weight=1.0)
+
+    encoded = urllib.parse.quote("http://testhost:11434", safe="")
+    resp = client.put(f"/api/backends/{encoded}/weight", params={"weight": 3.5})
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["url"] == "http://testhost:11434"
+    assert data["weight"] == 3.5
+
+
+# ── Gap 4: NaN / Infinity weight rejection ────────────────────────────────────
+
+
+def test_update_weight_rejects_nan(client, db):
+    """PUT weight returns non-200 for NaN — bounds check catches it."""
+    db.add_backend("http://testhost:11434", weight=1.0)
+    resp = client.put("/api/backends/http://testhost:11434/weight", params={"weight": "nan"})
+    # 400 from our bounds check or 422 from FastAPI validation are both acceptable
+    assert resp.status_code in (400, 422)
+
+
+def test_update_weight_rejects_infinity(client, db):
+    """PUT weight returns non-200 for infinity — 0.1 <= inf but inf <= 10.0 is False."""
+    db.add_backend("http://testhost:11434", weight=1.0)
+    resp = client.put("/api/backends/http://testhost:11434/weight", params={"weight": "inf"})
+    assert resp.status_code in (400, 422)

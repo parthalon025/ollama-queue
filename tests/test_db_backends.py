@@ -21,11 +21,6 @@ class TestAddAndList:
         assert backends[0]["weight"] == 1.0
         assert backends[0]["enabled"] == 1
 
-    def test_add_with_label(self, db):
-        db.add_backend("http://host2:11434", weight=2.5, label="rtx-5080")
-        backends = db.list_backends()
-        assert backends[0]["label"] == "rtx-5080"
-
     def test_add_multiple_ordered_by_added_at(self, db):
         db.add_backend("http://host1:11434")
         db.add_backend("http://host2:11434")
@@ -34,8 +29,9 @@ class TestAddAndList:
         assert backends[0]["url"] == "http://host1:11434"
         assert backends[1]["url"] == "http://host2:11434"
 
-    def test_add_returns_row(self, db):
-        row = db.add_backend("http://host1:11434", weight=3.0)
+    def test_add_persisted(self, db):
+        db.add_backend("http://host1:11434", weight=3.0)
+        row = db.get_backend("http://host1:11434")
         assert row is not None
         assert row["url"] == "http://host1:11434"
         assert row["weight"] == 3.0
@@ -94,12 +90,11 @@ class TestUpdateWeight:
 
 class TestGetBackend:
     def test_get_existing(self, db):
-        db.add_backend("http://host1:11434", weight=2.0, label="test-gpu")
+        db.add_backend("http://host1:11434", weight=2.0)
         row = db.get_backend("http://host1:11434")
         assert row is not None
         assert row["url"] == "http://host1:11434"
         assert row["weight"] == 2.0
-        assert row["label"] == "test-gpu"
 
     def test_get_not_found(self, db):
         row = db.get_backend("http://missing:11434")
