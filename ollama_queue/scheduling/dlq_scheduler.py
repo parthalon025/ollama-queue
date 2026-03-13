@@ -84,12 +84,17 @@ class DLQScheduler:
         load_map = self.load_map_fn()
 
         for entry in sorted_entries:
-            # Skip chronic failures
-            if (entry.get("auto_reschedule_count") or 0) >= chronic_threshold:
+            # Re-read from DB inside the lock to prevent two concurrent sweeps both
+            # seeing count=threshold-1 and both rescheduling (race #9).
+            fresh = self.db.get_dlq_entry(entry["id"])
+            if fresh is None:
+                continue
+            # Skip chronic failures (atomic with lock — no stale-read race)
+            if (fresh.get("auto_reschedule_count") or 0) >= chronic_threshold:
                 logger.info(
                     "DLQ #%s: skipping chronic failure (count=%s, threshold=%s)",
                     entry.get("id"),
-                    entry.get("auto_reschedule_count"),
+                    fresh.get("auto_reschedule_count"),
                     chronic_threshold,
                 )
                 continue
