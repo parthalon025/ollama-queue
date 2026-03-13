@@ -6,13 +6,24 @@ from ollama_queue.sensing.burst import BurstDetector
 
 
 class TestBurstDetector:
-    def test_starts_unknown_before_10_samples(self):
-        """Returns 'unknown' until 10 inter-arrival samples are collected."""
+    def test_starts_unknown_before_5_samples(self):
+        """Returns 'unknown' until 5 inter-arrival samples are collected."""
         detector = BurstDetector()
         now = time.time()
-        for i in range(9):
+        for i in range(4):
             detector.record_submission(now + i * 10)
+        # 4 submissions = 3 intervals, still below threshold of 5
         assert detector.regime(now + 100) == "unknown"
+
+    def test_activates_after_5_samples(self):
+        """After 5 inter-arrival samples, regime() should NOT return 'unknown' (#26)."""
+        detector = BurstDetector()
+        now = time.time()
+        # 6 submissions = 5 intervals — meets the threshold
+        for i in range(6):
+            detector.record_submission(now + i * 10)
+        regime = detector.regime(now + 100)
+        assert regime != "unknown", f"Expected non-unknown regime after 5 samples, got {regime}"
 
     def test_subcritical_on_slow_steady_arrivals(self):
         """Slow, regular arrivals (100s apart) produce subcritical regime."""

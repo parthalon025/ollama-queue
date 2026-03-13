@@ -14,10 +14,81 @@ export const heatmapData = signal([]);    // /api/heatmap response
 export const deferredJobs = signal([]);       // /api/deferred response
 export const modelPerformance = signal({});   // /api/metrics/models response
 export const performanceCurve = signal(null); // /api/metrics/performance-curve response
+export const backendMetrics = signal([]);     // /api/metrics/backends — per-backend per-model throughput
 export const dlqEntries = signal([]);
 export const dlqCount = signal(0);
 export const dlqSchedulePreview = signal({ entries: [], count: 0 }); // /api/dlq/schedule-preview
 export const currentTab = signal('now'); // 'now' | 'plan' | 'history' | 'models' | 'settings'
+
+// ── Toast notification system ─────────────────────────────────────────────────
+// What it shows: Transient feedback messages (success/error/info) stacked at top-right.
+// Decision it drives: All action buttons push toasts here instead of inline text.
+//   Error toasts persist until dismissed; success toasts auto-dismiss after 3s.
+export const toasts = signal([]); // Array<{ id, type, msg, persistent }>
+
+let _toastId = 0;
+export function addToast(msg, type = 'info', persistent = false) {
+  const id = ++_toastId;
+  toasts.value = [...toasts.value, { id, type, msg, persistent }];
+  if (!persistent && type !== 'error') {
+    setTimeout(() => removeToast(id), 3000);
+  }
+  return id;
+}
+
+export function removeToast(id) {
+  toasts.value = toasts.value.filter(t => t.id !== id);
+}
+
+// ── Backends management ────────────────────────────────────────────────────────
+// What it shows: Per-backend CRUD signals for the new Backends tab.
+// Decision it drives: Users can add/remove/test backends from the dashboard.
+export const backendsLoading = signal(false);
+export const backendsError = signal(null); // null = ok, string = last fetch error message
+
+export async function addBackend(url, weight = 1) {
+  const res = await fetch(`${API}/backends`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url, weight }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  await fetchBackends();
+  return res.json();
+}
+
+export async function removeBackend(url) {
+  const res = await fetch(`${API}/backends/${encodeURIComponent(url)}`, { method: 'DELETE' });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  await fetchBackends();
+}
+
+export async function updateBackendWeight(url, weight) {
+  // weight is a query param, not a body param — matches PUT /api/backends/{url}/weight?weight=N
+  const res = await fetch(`${API}/backends/${encodeURIComponent(url)}/weight?weight=${weight}`, {
+    method: 'PUT',
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  await fetchBackends();
+}
+
+export async function testBackend(url) {
+  const res = await fetch(`${API}/backends/${encodeURIComponent(url)}/test`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
 
 // ── Intercept mode state ──────────────────────────────────────────────────────
 
@@ -42,9 +113,16 @@ export const consumersScanning = signal(false);
 export async function fetchBackends() {
     try {
         const res = await fetch(`${API}/backends`);
-        if (res.ok) backendsData.value = await res.json();
+        if (res.ok) {
+            backendsData.value = await res.json();
+            backendsError.value = null;
+        } else {
+            console.error('fetchBackends: HTTP', res.status);
+            backendsError.value = `HTTP ${res.status}`;
+        }
     } catch (e) {
         console.error('fetchBackends failed:', e);
+        backendsError.value = e.message;
     }
 }
 
@@ -129,6 +207,17 @@ export async function fetchPerformanceCurve() {
         if (resp.ok) performanceCurve.value = await resp.json();
     } catch (e) {
         console.error('fetchPerformanceCurve failed:', e);
+    }
+}
+
+export async function fetchBackendMetrics() {
+    // What it fetches: Per-backend, per-model throughput data — which GPU is serving each model
+    //   and how fast it runs. Only populated after proxy requests have been made.
+    try {
+        const resp = await fetch(`${API}/metrics/backends`);
+        if (resp.ok) backendMetrics.value = await resp.json();
+    } catch (e) {
+        console.error('fetchBackendMetrics failed:', e);
     }
 }
 

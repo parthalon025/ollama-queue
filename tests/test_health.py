@@ -1,3 +1,5 @@
+import time
+
 import pytest
 
 from ollama_queue.sensing.health import HealthMonitor
@@ -548,6 +550,86 @@ def test_parse_meminfo_oserror():
     with patch("builtins.open", side_effect=OSError("permission denied")):
         result = HealthMonitor._parse_meminfo()
     assert result == {}
+
+
+def test_evaluate_escapes_stuck_pause_after_max_duration():
+    """If paused longer than max_pause_duration_seconds, force resume."""
+    m = HealthMonitor()
+    snap = {
+        "ram_pct": 80.0,
+        "swap_pct": 10.0,
+        "load_avg": 2.0,
+        "cpu_count": 8,
+        "vram_pct": 50.0,
+        "ollama_model": None,
+        "ollama_loaded_models": [],
+    }
+    settings = {
+        "ram_pause_pct": 85,
+        "ram_resume_pct": 75,  # RAM at 80 — in hysteresis band
+        "swap_pause_pct": 80,
+        "swap_resume_pct": 60,
+        "load_pause_multiplier": 3.0,
+        "load_resume_multiplier": 2.0,
+        "yield_to_interactive": False,
+        "max_pause_duration_seconds": 300,
+    }
+    result = m.evaluate(snap, settings, currently_paused=True, paused_since=time.time() - 600)
+    assert result["should_pause"] is False, "Should escape stuck pause after max_pause_duration"
+    assert "Force resume" in result["reason"]
+
+
+def test_evaluate_no_escape_when_within_max_duration():
+    """If paused shorter than max_pause_duration_seconds, normal hysteresis applies."""
+    m = HealthMonitor()
+    snap = {
+        "ram_pct": 80.0,
+        "swap_pct": 10.0,
+        "load_avg": 2.0,
+        "cpu_count": 8,
+        "vram_pct": 50.0,
+        "ollama_model": None,
+        "ollama_loaded_models": [],
+    }
+    settings = {
+        "ram_pause_pct": 85,
+        "ram_resume_pct": 75,
+        "swap_pause_pct": 80,
+        "swap_resume_pct": 60,
+        "load_pause_multiplier": 3.0,
+        "load_resume_multiplier": 2.0,
+        "yield_to_interactive": False,
+        "max_pause_duration_seconds": 300,
+    }
+    result = m.evaluate(snap, settings, currently_paused=True, paused_since=time.time() - 100)
+    # RAM at 80% is above resume threshold of 75%, so should stay paused
+    assert result["should_pause"] is True
+
+
+def test_evaluate_no_escape_when_setting_missing():
+    """Without max_pause_duration_seconds, no escape hatch fires."""
+    m = HealthMonitor()
+    snap = {
+        "ram_pct": 80.0,
+        "swap_pct": 10.0,
+        "load_avg": 2.0,
+        "cpu_count": 8,
+        "vram_pct": 50.0,
+        "ollama_model": None,
+        "ollama_loaded_models": [],
+    }
+    settings = {
+        "ram_pause_pct": 85,
+        "ram_resume_pct": 75,
+        "swap_pause_pct": 80,
+        "swap_resume_pct": 60,
+        "load_pause_multiplier": 3.0,
+        "load_resume_multiplier": 2.0,
+        "yield_to_interactive": False,
+    }
+    result = m.evaluate(snap, settings, currently_paused=True, paused_since=time.time() - 99999)
+    # No max_pause_duration_seconds in settings, so normal hysteresis: stay paused
+    assert result["should_pause"] is True
 
 
 def test_parse_meminfo_valueerror():

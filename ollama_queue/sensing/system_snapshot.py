@@ -26,6 +26,7 @@ class SystemSnapshot:
     ram_available_gb: float = 0.0
     vram_used_pct: float = 0.0
     vram_available_gb: float = 0.0
+    vram_known: bool = True
     gpu_temp_c: float | None = None
     load_avg_1m: float = 0.0
     swap_used_pct: float = 0.0
@@ -64,8 +65,11 @@ class SystemSnapshot:
                 vram = health_monitor.get_vram_pct()  # type: ignore[attr-defined]
                 if vram is not None:
                     snap.vram_used_pct = vram
+                else:
+                    snap.vram_known = False
             except Exception:
                 _log.debug("Failed to read VRAM pct from health monitor", exc_info=True)
+                snap.vram_known = False
 
         return snap
 

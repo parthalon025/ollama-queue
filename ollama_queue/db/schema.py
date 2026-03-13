@@ -63,6 +63,7 @@ DEFAULTS = {
     "defer.burst_priority_threshold": 3,
     "defer.thermal_threshold_c": 85,
     "defer.resource_wait_timeout_s": 120,
+    "max_pause_duration_seconds": 600,
 }
 
 EVAL_SETTINGS_DEFAULTS = {
@@ -101,7 +102,7 @@ EVAL_SETTINGS_DEFAULTS = {
 class SchemaMixin:
     """Schema creation, migrations, and seed data."""
 
-    def _run_migrations(self, conn):
+    def _run_migrations(self, conn):  # noqa: PLR0915
         """Apply all incremental schema migrations (idempotent)."""
         self._add_column_if_missing(conn, "recurring_jobs", "cron_expression", "TEXT")
         self._add_column_if_missing(conn, "recurring_jobs", "pinned", "INTEGER DEFAULT 0")
@@ -154,6 +155,8 @@ class SchemaMixin:
         self._add_column_if_missing(conn, "eval_runs", "cost_json", "TEXT")
         self._add_column_if_missing(conn, "eval_runs", "oracle_json", "TEXT")
         self._add_column_if_missing(conn, "eval_runs", "suggestions_json", "TEXT")
+        # Judge parse failure tracking (#22)
+        self._add_column_if_missing(conn, "eval_runs", "judge_parse_failures", "INTEGER DEFAULT 0")
         # Backfill pre-existing rows
         conn.execute("UPDATE eval_variants SET params = '{}' WHERE params IS NULL")
         conn.execute("UPDATE eval_variants SET provider = 'ollama' WHERE provider IS NULL")
@@ -487,6 +490,23 @@ class SchemaMixin:
                 PRIMARY KEY (principle_hash, target_hash, judge_model, judge_mode)
             );
 
+            CREATE TABLE IF NOT EXISTS backend_metrics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                backend_url TEXT NOT NULL,
+                model TEXT NOT NULL,
+                eval_count INTEGER,
+                eval_duration_ns INTEGER,
+                load_duration_ns INTEGER,
+                prompt_eval_count INTEGER,
+                prompt_eval_duration_ns INTEGER,
+                total_duration_ns INTEGER,
+                tok_per_min REAL,
+                recorded_at REAL NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_backend_metrics_backend_model
+                ON backend_metrics(backend_url, model);
+
             CREATE TABLE IF NOT EXISTS consumers (
                 id                  INTEGER PRIMARY KEY AUTOINCREMENT,
                 name                TEXT NOT NULL,
@@ -509,6 +529,16 @@ class SchemaMixin:
                 last_live_seen      INTEGER,
                 detected_at         INTEGER NOT NULL,
                 onboarded_at        INTEGER
+            );
+
+            -- Backends table — dynamically registered Ollama backends (API-managed; env-var
+            -- backends are always included separately via backend_router.py BACKENDS list)
+            CREATE TABLE IF NOT EXISTS backends (
+                url      TEXT PRIMARY KEY,
+                weight   REAL NOT NULL DEFAULT 1.0,
+                enabled  INTEGER NOT NULL DEFAULT 1,
+                added_at REAL NOT NULL,
+                label    TEXT
             );
         """)
 

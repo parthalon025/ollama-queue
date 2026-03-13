@@ -60,7 +60,7 @@ class OllamaModels:
 
     # Class-level cache shared across instances — models change rarely
     _list_local_cache: tuple[float, list[dict]] | None = None
-    _LIST_LOCAL_TTL = 60.0  # seconds
+    _LIST_LOCAL_TTL = 15.0  # seconds
     _list_local_lock = threading.Lock()
 
     @classmethod
@@ -258,6 +258,9 @@ class OllamaModels:
             if m["name"] == model_name and m["size_bytes"]:
                 return (m["size_bytes"] / 1_000_000) * safety
 
+        _log.warning(
+            "VRAM estimate for model '%s' using 4000MB default — model not in registry or local list", model_name
+        )
         return 4000.0  # 4 GB unknown default
 
     def record_observed_vram(self, model_name: str, vram_mb: float, db: Database) -> None:

@@ -199,6 +199,7 @@ def trigger_rebalance():
 @router.get("/api/schedule/events")
 def get_schedule_events(limit: int = 100):
     db = _api.db
+    limit = max(1, min(limit, 1000))
     return db.get_schedule_events(limit=limit)
 
 
@@ -214,6 +215,8 @@ def get_load_map():
 @router.get("/api/schedule/suggest")
 def suggest_schedule_time(priority: int = 5, top_n: int = 3):
     db = _api.db
+    priority = max(0, min(priority, 10))
+    top_n = max(1, min(top_n, 20))
     from ollama_queue.scheduling.scheduler import Scheduler
 
     suggestions = Scheduler(db).suggest_time(priority=priority, top_n=top_n)
@@ -235,6 +238,8 @@ def batch_toggle_schedule(body: dict = Body(...)):
         raise HTTPException(status_code=400, detail="tag and enabled are required")
     jobs = db.list_recurring_jobs()
     matched = [rj for rj in jobs if rj.get("tag") == tag]
+    if not matched:
+        raise HTTPException(status_code=404, detail=f"No recurring jobs found with tag '{tag}'")
     for rj in matched:
         db.update_recurring_job(rj["id"], enabled=bool(enabled))
     return {"updated": len(matched)}
@@ -248,6 +253,8 @@ def batch_run_schedule(body: dict = Body(...)):
         raise HTTPException(status_code=400, detail="tag is required")
     jobs = db.list_recurring_jobs()
     matched = [rj for rj in jobs if rj.get("tag") == tag and rj.get("enabled")]
+    if not matched:
+        raise HTTPException(status_code=404, detail=f"No enabled recurring jobs found with tag '{tag}'")
     job_ids = []
     for rj in matched:
         job_id = db.submit_job(
@@ -272,7 +279,10 @@ def add_schedule(body: RecurringJobCreate):
 
     from ollama_queue.scheduling.scheduler import Scheduler
 
-    rj_id = db.add_recurring_job(**body.model_dump())
+    try:
+        rj_id = db.add_recurring_job(**body.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     Scheduler(db).rebalance()
     rj = db.get_recurring_job(rj_id)
     # Auto-generate description in background if not already provided

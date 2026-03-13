@@ -1,6 +1,6 @@
 """Multi-backend Ollama router for the proxy layer.
 
-Selects the best backend for each request using a four-tier strategy:
+Selects the best backend for each request using a five-tier strategy:
   1. Health check — skip unreachable backends (2s timeout, 30s cache)
   2. Model availability — prefer backends that have the requested model (60s cache)
   3. Warm model — prefer backends with the model already loaded in VRAM (5s cache)
@@ -29,13 +29,18 @@ import httpx
 
 _log = logging.getLogger(__name__)
 
+# Module-level DB reference — set by register_routes() at startup.
+# Used to merge DB-registered backends with env-var backends.
+_db = None
+
 # Parse backends once at import time. Tests may patch BACKENDS directly.
 _raw = os.environ.get("OLLAMA_BACKENDS", "")
-BACKENDS: list[str] = (
+_ENV_BACKENDS: list[str] = (
     [b.strip().rstrip("/") for b in _raw.split(",") if b.strip()]
     if _raw
     else [os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")]
 )
+BACKENDS: list[str] = list(_ENV_BACKENDS)
 
 # Port where ollama-queue health endpoint is reachable on each backend host.
 # Used to derive queue URL from Ollama backend URL for VRAM pressure checks.
@@ -103,7 +108,10 @@ async def _available_models(url: str) -> frozenset[str]:
     try:
         async with httpx.AsyncClient(timeout=3.0) as c:
             r = await c.get(f"{url}/api/tags")
-            models: frozenset[str] = frozenset(m["name"] for m in r.json().get("models", []))
+            if r.status_code == 200:
+                models: frozenset[str] = frozenset(m["name"] for m in r.json().get("models", []))
+            else:
+                models = frozenset()
     except Exception as e:
         _log.debug("model list %s failed: %s", url, e)
         models = frozenset()
@@ -120,7 +128,10 @@ async def _loaded_models(url: str) -> frozenset[str]:
     try:
         async with httpx.AsyncClient(timeout=2.0) as c:
             r = await c.get(f"{url}/api/ps")
-            loaded: frozenset[str] = frozenset(m["name"] for m in r.json().get("models", []))
+            if r.status_code == 200:
+                loaded: frozenset[str] = frozenset(m["name"] for m in r.json().get("models", []))
+            else:
+                loaded = frozenset()
     except Exception as e:
         _log.debug("loaded models %s failed: %s", url, e)
         loaded = frozenset()
@@ -164,7 +175,14 @@ async def _backend_gpu_name(url: str) -> str | None:
 
     Queries the ollama-queue health endpoint on the same host (port OLLAMA_QUEUE_PORT).
     Returns None on any error or when the backend has no GPU.
-    Result cached 600s — GPU names are static hardware identifiers.
+
+    Cache TTL strategy:
+    - HTTP 200 with name  → cache 600s (hardware doesn't change)
+    - HTTP 200, name=null → cache 600s (WSL2/Docker quirk — legitimate null)
+    - Network error       → cache 30s (backend may be restarting; retry sooner)
+
+    Without this distinction, a container restart leaves BackendsPanel showing
+    "unknown" for 10 minutes even after the backend comes back up.
     """
     now = time.monotonic()
     cached = _gpu_name_cache.get(url)
@@ -180,9 +198,12 @@ async def _backend_gpu_name(url: str) -> str | None:
             r = await c.get(f"{queue_url}/api/health")
             if r.status_code == 200:
                 name = r.json().get("gpu_name")
+        # Successful response (name may still be None for no-GPU machines) — cache full TTL
+        _gpu_name_cache[url] = (now, name)
     except Exception as e:
         _log.debug("gpu name %s failed: %s", url, e)
-    _gpu_name_cache[url] = (now, name)
+        # Network failure — cache with short TTL so we retry after the backend recovers
+        _gpu_name_cache[url] = (now - _GPU_NAME_TTL + 30.0, None)
     return name
 
 
@@ -260,16 +281,19 @@ async def select_backend(model: str = "") -> str:
     Fast path: returns immediately for single-backend setups.
     Multi-backend: runs health + model + hardware checks in parallel via asyncio.gather.
     """
-    if len(BACKENDS) == 1:
-        return BACKENDS[0]
+    # Capture once — refresh_backends_from_db() may reassign the module-level name
+    # at any asyncio await point, causing zip() length mismatches if we re-read BACKENDS.
+    backends = BACKENDS
+    if len(backends) == 1:
+        return backends[0]
 
     # 1. Filter to healthy backends (parallel health checks)
-    health = await asyncio.gather(*(_backend_healthy(b) for b in BACKENDS))
-    healthy = [b for b, ok in zip(BACKENDS, health, strict=False) if ok]
+    health = await asyncio.gather(*(_backend_healthy(b) for b in backends))
+    healthy = [b for b, ok in zip(backends, health, strict=False) if ok]
 
     if not healthy:
-        _log.warning("all Ollama backends unreachable — falling back to %s", BACKENDS[0])
-        return BACKENDS[0]
+        _log.warning("all Ollama backends unreachable — falling back to %s", backends[0])
+        return backends[0]
 
     if len(healthy) == 1:
         return healthy[0]
@@ -282,3 +306,60 @@ async def select_backend(model: str = "") -> str:
     # 5. Weighted random among remaining candidates — higher weight = more traffic share
     weights = _get_weights(healthy)
     return random.choices(healthy, weights=weights, k=1)[0]  # noqa: S311
+
+
+def has_healthy_remote_backend() -> bool:
+    """Return True if at least one non-local backend is cached as healthy.
+
+    Plain English: Reads the health cache without making any network calls.
+    Used by the admission gate (_can_admit) to decide whether to bypass the
+    local CPU load check — if inference will happen on a remote machine, the
+    local CPU load shouldn't block the job.
+
+    Decision it drives: When True, _can_admit skips the CPU-load pause for jobs
+    that will proxy to the remote backend.  RAM/VRAM/Swap gates still apply.
+
+    A backend is considered 'remote' if its URL doesn't point to localhost or
+    127.0.0.1 (i.e. it's not the same machine running the daemon).
+    """
+    if len(BACKENDS) <= 1:
+        return False  # single-backend — no remote to route to
+    now = time.monotonic()
+    for url in BACKENDS:
+        # Skip local backends — they share CPU with the daemon
+        if "127.0.0.1" in url or "localhost" in url:
+            continue
+        cached = _health_cache.get(url)
+        if cached and now - cached[0] < _HEALTH_TTL and cached[1]:
+            return True
+    return False
+
+
+def invalidate_backend_caches(url: str) -> None:
+    """Remove a specific URL from all backend caches after add/remove operations.
+
+    Plain English: When a backend is added or removed via the API, stale cache
+    entries for that URL must be evicted so the next routing decision reflects
+    the current backend list rather than a cached state from before the change.
+    """
+    for cache in (_health_cache, _models_cache, _loaded_cache, _hw_cache, _gpu_name_cache):
+        cache.pop(url, None)  # type: ignore[union-attr]  # all caches are dicts; mypy infers object from list
+
+
+def refresh_backends_from_db() -> None:
+    """Rebuild BACKENDS list from env-var baseline + DB-registered additions.
+
+    Plain English: Called after add/remove operations so the in-process BACKENDS
+    list (used by select_backend and get_backends) stays in sync with the DB.
+    Env-var backends are always included as the read-only baseline; DB entries
+    are runtime additions. Order is preserved; duplicates are deduplicated.
+    """
+    global BACKENDS
+    db_urls: list[str] = []
+    if _db is not None:
+        try:
+            db_urls = [b["url"] for b in _db.list_backends()]
+        except Exception as e:
+            _log.warning("refresh_backends_from_db: DB read failed: %s", e)
+    # Merge: env-var first, then DB additions. dict.fromkeys preserves insertion order + dedupes.
+    BACKENDS = list(dict.fromkeys(_ENV_BACKENDS + db_urls))

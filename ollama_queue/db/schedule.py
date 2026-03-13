@@ -5,11 +5,25 @@ delete, enable/disable, compute next run times, log schedule events, and manage
 batch next-run updates for rebalancing.
 """
 
+import datetime
 import json
 import logging
 import time
+from zoneinfo import ZoneInfo
 
 _log = logging.getLogger(__name__)
+
+
+def _local_dt(ts: float) -> datetime.datetime:
+    """Convert unix timestamp to timezone-aware local datetime for cron evaluation.
+
+    Uses the system's local timezone so that cron expressions like '0 7 * * *'
+    fire at 07:00 local time regardless of DST transitions (#10).
+    """
+    try:
+        return datetime.datetime.fromtimestamp(ts, tz=ZoneInfo("localtime"))
+    except Exception:
+        return datetime.datetime.fromtimestamp(ts, tz=datetime.UTC)
 
 
 class ScheduleMixin:
@@ -36,15 +50,22 @@ class ScheduleMixin:
     ):
         if interval_seconds is None and cron_expression is None:
             raise ValueError("Either interval_seconds or cron_expression must be provided")
-        with self._lock:
-            conn = self._connect()
-            now = time.time()
-            if next_run is None and cron_expression:
+        if cron_expression:
+            try:
                 import datetime
 
                 from croniter import croniter
 
-                start_dt = datetime.datetime.fromtimestamp(now)
+                croniter(cron_expression, datetime.datetime.now())
+            except (ValueError, KeyError) as e:
+                raise ValueError(f"Invalid cron expression '{cron_expression}': {e}") from e
+        with self._lock:
+            conn = self._connect()
+            now = time.time()
+            if next_run is None and cron_expression:
+                from croniter import croniter
+
+                start_dt = _local_dt(now)
                 next_run = croniter(cron_expression, start_dt).get_next(datetime.datetime).timestamp()
             elif next_run is None:
                 next_run = now
@@ -117,11 +138,9 @@ class ScheduleMixin:
             rj = dict(rj_row)
             cron_expr = rj.get("cron_expression")
             if cron_expr:
-                import datetime
-
                 from croniter import croniter
 
-                start_dt = datetime.datetime.fromtimestamp(completed_at)
+                start_dt = _local_dt(completed_at)
                 next_run = croniter(cron_expr, start_dt).get_next(datetime.datetime).timestamp()
             else:
                 next_run = completed_at + rj["interval_seconds"]

@@ -99,21 +99,57 @@ def test_estimate_dataclass_fields():
     assert e.n_observations == 0
 
 
-def test_estimate_clamps_negative_durations(mock_db):
-    """Non-positive durations should be clamped, not crash."""
+def test_estimate_excludes_negative_durations(mock_db):
+    """Non-positive durations are excluded (not clamped to 0.1)."""
     mock_db.get_job_durations.return_value = [0.0, -1.0, 30.0, 60.0]
     mock_db.get_load_durations.return_value = []
     est = RuntimeEstimator(mock_db)
     result = est.estimate("test-model", "echo test", "ollama")
     assert result.total_mean > 0
     assert result.confidence in ("low", "medium", "high")
+    # Estimate should be based only on [30.0, 60.0], not polluted by clamped 0.1 values
+    assert result.generation_mean > 10
 
 
-def test_warmup_clamps_non_positive_values(mock_db):
-    """Non-positive warmup durations trigger warning log and get clamped (line 133)."""
+def test_estimate_all_negative_durations_falls_back_to_prior(mock_db):
+    """When all durations are non-positive, falls back to resource profile prior."""
+    mock_db.get_job_durations.return_value = [-1.0, -5.0, 0.0]
+    mock_db.get_load_durations.return_value = []
+    est = RuntimeEstimator(mock_db)
+    result = est.estimate("test-model", "echo test", "ollama")
+    assert result.total_mean > 0
+    # n_obs=3 (raw count) → confidence is "medium", but all durations were excluded
+    # so the generation estimate comes from the prior
+    assert result.confidence in ("low", "medium")
+
+
+def test_negative_durations_logged_as_excluded(mock_db, caplog):
+    """Excluded non-positive durations are logged with a warning."""
+    import logging
+
+    mock_db.get_job_durations.return_value = [-1.0, 30.0]
+    mock_db.get_load_durations.return_value = []
+    est = RuntimeEstimator(mock_db)
+    with caplog.at_level(logging.WARNING, logger="ollama_queue.models.runtime_estimator"):
+        est.estimate("test-model", None, "ollama")
+    assert any("Excluded 1 non-positive durations" in r.message for r in caplog.records)
+
+
+def test_warmup_excludes_non_positive_values(mock_db):
+    """Non-positive warmup durations are excluded, not clamped."""
     mock_db.get_job_durations.return_value = []
     mock_db.get_load_durations.return_value = [0.0, -0.5, 2.0, 3.0]
     est = RuntimeEstimator(mock_db)
     result = est.estimate("test-model", None, "ollama", loaded_models=[])
     assert result.warmup_mean > 0
     assert result.warmup_upper > 0
+
+
+def test_warmup_all_negative_falls_back_to_prior(mock_db):
+    """When all warmup values are non-positive, falls back to warmup prior."""
+    mock_db.get_job_durations.return_value = []
+    mock_db.get_load_durations.return_value = [-1.0, 0.0, -3.0]
+    est = RuntimeEstimator(mock_db)
+    result = est.estimate("test-model", None, "ollama", loaded_models=[])
+    assert result.warmup_mean > 0
+    assert result.warmup_upper > result.warmup_mean

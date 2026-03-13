@@ -186,6 +186,7 @@ class HealthMonitor:
         currently_paused: bool,
         queued_model: str | None = None,
         recent_job_models: set[str] | None = None,
+        paused_since: float | None = None,
     ) -> dict:
         """Evaluate a health snapshot against threshold settings.
 
@@ -207,11 +208,27 @@ class HealthMonitor:
         - If NOT paused: pause when any metric exceeds its pause threshold.
         - If paused: only resume when ALL metrics are below their resume thresholds.
 
+        Max-pause escape hatch:
+        - If paused longer than max_pause_duration_seconds, force resume
+          regardless of current metrics. Prevents indefinite stalls when
+          metrics hover in the hysteresis band.
+
         Yield logic:
         - If an ollama model is loaded, yield_to_interactive is on,
           and the loaded model differs from queued_model and is not a
           recently-completed queue job model, yield.
         """
+        # --- Max-pause escape hatch ---
+        max_pause = settings.get("max_pause_duration_seconds")
+        if currently_paused and max_pause and paused_since:
+            pause_duration = time.time() - paused_since
+            if pause_duration >= float(max_pause):
+                return {
+                    "should_pause": False,
+                    "should_yield": False,
+                    "reason": f"Force resume: paused {pause_duration:.0f}s >= max {max_pause}s",
+                }
+
         reasons: list[str] = []
 
         # Guard against None values in settings (e.g. fresh install before defaults are seeded,

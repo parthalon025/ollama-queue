@@ -104,15 +104,28 @@ class StallDetector:
     # ── Ollama /api/ps ────────────────────────────────────────────────────────
 
     def get_ollama_ps_models(self) -> set[str]:
-        """Return set of base model names currently loaded in Ollama.
-        Returns empty set if Ollama is unreachable (treated as unknown)."""
-        try:
-            with urllib.request.urlopen("http://localhost:11434/api/ps", timeout=2) as resp:
-                data = _json.loads(resp.read())
-            return {m.get("name", "").split(":")[0] for m in data.get("models", [])}
-        except Exception as exc:
-            _log.warning("get_ollama_ps_models failed — stall detection signal disabled: %s", exc)
-            return set()
+        """Return set of base model names currently loaded across all configured Ollama backends.
+
+        Queries /api/ps on every backend in OLLAMA_BACKENDS (or OLLAMA_URL fallback) and
+        unions the results. A model is "loaded" if it's in VRAM on any backend — since the
+        proxy doesn't record which backend handled a given job, checking all is the only
+        safe approach. Returns empty set if all backends are unreachable (treated as unknown).
+        """
+        raw = os.environ.get("OLLAMA_BACKENDS", "")
+        backends = (
+            [b.strip().rstrip("/") for b in raw.split(",") if b.strip()]
+            if raw
+            else [os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")]
+        )
+        loaded: set[str] = set()
+        for backend in backends:
+            try:
+                with urllib.request.urlopen(f"{backend}/api/ps", timeout=2) as resp:
+                    data = _json.loads(resp.read())
+                loaded.update(m.get("name", "").split(":")[0] for m in data.get("models", []))
+            except Exception as exc:
+                _log.debug("get_ollama_ps_models %s failed: %s", backend, exc)
+        return loaded
 
     # ── log-likelihood ratios per group ──────────────────────────────────────
 

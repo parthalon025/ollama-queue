@@ -242,6 +242,19 @@ def test_try_claim_for_proxy(db):
     assert db.try_claim_for_proxy() is False
 
 
+def test_try_claim_for_proxy_reads_max_concurrent_jobs_inline(db):
+    """try_claim_for_proxy respects max_concurrent_jobs without reentrant get_setting."""
+    # Set max_concurrent_jobs = 1 (default) — claim should work then block
+    db.set_setting("max_concurrent_jobs", 1)
+    assert db.try_claim_for_proxy() is True
+    assert db.try_claim_for_proxy() is False
+    db.release_proxy_claim()
+    # Now set to 0 (disallow all) — claim should always fail
+    db.set_setting("max_concurrent_jobs", 0)
+    # running count is 0 but 0 >= 0 is True so claim should fail
+    assert db.try_claim_for_proxy() is False
+
+
 def test_release_proxy_claim(db):
     """release_proxy_claim resets state to idle."""
     db.try_claim_for_proxy()
@@ -991,3 +1004,55 @@ def test_streaming_proxy_cancelled_error_releases_claim(db):
     assert (
         state["current_job_id"] is None
     ), f"current_job_id not cleared after CancelledError: {state['current_job_id']}"
+
+
+def test_streaming_background_task_forces_release_on_generator_release_failure(client, db):
+    """BackgroundTask safety net must release proxy claim if _release() threw in generator.
+
+    Scenario: _iter_ndjson's finally block calls _release(), but both
+    complete_job AND release_proxy_claim raise.  Without the BackgroundTask
+    safety net, the proxy sentinel stays stuck at -1 forever.
+    """
+    chunks = [
+        json.dumps({"response": "ok", "done": True}).encode() + b"\n",
+    ]
+
+    async def fake_aiter_raw():
+        for chunk in chunks:
+            yield chunk
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.aiter_raw = fake_aiter_raw
+    mock_resp.aclose = AsyncMock()
+    mock_resp.headers = {"content-type": "application/x-ndjson"}
+
+    release_calls = {"count": 0}
+    original_release = db.release_proxy_claim
+
+    def counting_release():
+        release_calls["count"] += 1
+        if release_calls["count"] == 1:
+            raise RuntimeError("first release failed")
+        original_release()
+
+    with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
+        mock_client = AsyncMock()
+        mock_client.send = AsyncMock(return_value=mock_resp)
+        mock_client.build_request = MagicMock(return_value=MagicMock())
+        mock_client.aclose = AsyncMock()
+        mock_cls.return_value = mock_client
+
+        with (
+            patch.object(db, "complete_job", side_effect=RuntimeError("DB error")),
+            patch.object(db, "release_proxy_claim", side_effect=counting_release),
+            contextlib.suppress(Exception),
+        ):
+            resp = client.post(
+                "/api/generate",
+                json={"model": "llama3.2:3b", "prompt": "hi", "stream": True},
+            )
+
+    # The BackgroundTask safety net should have retried release_proxy_claim
+    # Total calls: 1 from _release() in generator finally + 1 from BackgroundTask
+    assert release_calls["count"] >= 2, f"Expected BackgroundTask to retry release; got {release_calls['count']} calls"

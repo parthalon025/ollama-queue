@@ -28,27 +28,33 @@ class JobsMixin:
     ):
         with self._lock:
             conn = self._connect()
-            cur = conn.execute(
-                """INSERT INTO jobs
-                   (command, model, priority, timeout, source, submitted_at,
-                    tag, max_retries, resource_profile, recurring_job_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    command,
-                    model,
-                    priority,
-                    timeout,
-                    source,
-                    time.time(),
-                    tag,
-                    max_retries,
-                    resource_profile,
-                    recurring_job_id,
-                ),
-            )
-            conn.commit()
-            assert cur.lastrowid is not None
-            return cur.lastrowid
+            result = {}
+
+            def _do():
+                cur = conn.execute(
+                    """INSERT INTO jobs
+                       (command, model, priority, timeout, source, submitted_at,
+                        tag, max_retries, resource_profile, recurring_job_id)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        command,
+                        model,
+                        priority,
+                        timeout,
+                        source,
+                        time.time(),
+                        tag,
+                        max_retries,
+                        resource_profile,
+                        recurring_job_id,
+                    ),
+                )
+                conn.commit()
+                assert cur.lastrowid is not None
+                result["id"] = cur.lastrowid
+
+            self._retry_on_busy(_do)
+            return result["id"]
 
     def get_job(self, job_id):
         with self._lock:
@@ -102,14 +108,18 @@ class JobsMixin:
         status = "completed" if exit_code == 0 else "failed"
         with self._lock:
             conn = self._connect()
-            conn.execute(
-                """UPDATE jobs
-                   SET status = ?, exit_code = ?, stdout_tail = ?, stderr_tail = ?,
-                       outcome_reason = ?, completed_at = ?
-                   WHERE id = ?""",
-                (status, exit_code, stdout_tail, stderr_tail, outcome_reason, time.time(), job_id),
-            )
-            conn.commit()
+
+            def _do():
+                conn.execute(
+                    """UPDATE jobs
+                       SET status = ?, exit_code = ?, stdout_tail = ?, stderr_tail = ?,
+                           outcome_reason = ?, completed_at = ?
+                       WHERE id = ?""",
+                    (status, exit_code, stdout_tail, stderr_tail, outcome_reason, time.time(), job_id),
+                )
+                conn.commit()
+
+            self._retry_on_busy(_do)
 
     def kill_job(self, job_id, reason, stdout_tail="", stderr_tail=""):
         with self._lock:
@@ -252,6 +262,16 @@ class JobsMixin:
             conn.execute(
                 "UPDATE jobs SET stall_detected_at = ?, stall_signals = ? WHERE id = ?",
                 (now, json.dumps(signals), job_id),
+            )
+            conn.commit()
+
+    def clear_stall_detected(self, job_id):
+        """Clear stall detection flag when a job recovers (posterior drops below threshold)."""
+        with self._lock:
+            conn = self._connect()
+            conn.execute(
+                "UPDATE jobs SET stall_detected_at = NULL WHERE id = ?",
+                (job_id,),
             )
             conn.commit()
 
@@ -469,6 +489,66 @@ class JobsMixin:
                     "model_size_gb": r[4],
                 }
             return result
+
+    def store_backend_metrics(self, backend_url: str, model: str, metrics: dict) -> None:
+        """Record per-backend inference metrics from a successful proxy response."""
+        eval_count = metrics.get("eval_count")
+        eval_duration_ns = metrics.get("eval_duration")
+        load_duration_ns = metrics.get("load_duration")
+        prompt_eval_count = metrics.get("prompt_eval_count")
+        prompt_eval_duration_ns = metrics.get("prompt_eval_duration")
+        total_duration_ns = metrics.get("total_duration")
+        tok_per_min = None
+        if eval_count and eval_duration_ns and eval_duration_ns > 0:
+            tok_per_min = (eval_count / (eval_duration_ns / 1e9)) * 60
+        with self._lock:
+            conn = self._connect()
+            conn.execute(
+                """INSERT INTO backend_metrics
+                   (backend_url, model, eval_count, eval_duration_ns, load_duration_ns,
+                    prompt_eval_count, prompt_eval_duration_ns, total_duration_ns,
+                    tok_per_min, recorded_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    backend_url,
+                    model,
+                    eval_count,
+                    eval_duration_ns,
+                    load_duration_ns,
+                    prompt_eval_count,
+                    prompt_eval_duration_ns,
+                    total_duration_ns,
+                    tok_per_min,
+                    time.time(),
+                ),
+            )
+            conn.commit()
+
+    def get_backend_stats(self) -> list:
+        """Aggregate per-backend, per-model throughput stats."""
+        with self._lock:
+            conn = self._connect()
+            rows = conn.execute(
+                """SELECT backend_url, model,
+                          COUNT(*) as run_count,
+                          AVG(CASE WHEN tok_per_min IS NOT NULL THEN tok_per_min ELSE NULL END)
+                              as avg_tok_per_min,
+                          AVG(CASE WHEN load_duration_ns IS NOT NULL THEN load_duration_ns / 1e9
+                              ELSE NULL END) as avg_warmup_s
+                   FROM backend_metrics
+                   GROUP BY backend_url, model
+                   ORDER BY backend_url, avg_tok_per_min DESC"""
+            ).fetchall()
+            return [
+                {
+                    "backend_url": r[0],
+                    "model": r[1],
+                    "run_count": r[2],
+                    "avg_tok_per_min": r[3],
+                    "avg_warmup_s": r[4],
+                }
+                for r in rows
+            ]
 
     def has_pulling_model(self, model_name):
         """Return True if any pull for model_name is currently in 'pulling' status."""

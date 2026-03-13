@@ -5,8 +5,7 @@
  * Decision it drives: "Which variant should I promote? Which one to clone for
  *   the next round of testing? Which ones to compare side-by-side?"
  */
-import { h } from 'preact';
-import { useState, useEffect } from 'preact/hooks';
+import { useState, useEffect, useRef } from 'preact/hooks';
 import { evalVariants, fetchEvalVariants, focusVariantId } from '../stores/eval.js';
 import { API } from '../stores/_shared.js';
 import VariantCard from '../components/eval/VariantCard.jsx';
@@ -71,9 +70,51 @@ export default function EvalVariants() {
     }
   }
 
+  // C26: Export/Import handlers
+  const fileInputRef = useRef(null);
+
+  async function handleExport() {
+    try {
+      const res = await fetch(`${API}/eval/variants/export`);
+      if (!res.ok) throw new Error(`Export failed: HTTP ${res.status}`);
+      const data = await res.json();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `eval-variants-${new Date().toISOString().slice(0,10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setSweepFb(`Export error: ${e.message}`);
+    }
+  }
+
+  async function handleImport(evt) {
+    const file = evt.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const body = JSON.parse(text);
+      const res = await fetch(`${API}/eval/variants/import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(`Import failed: HTTP ${res.status}`);
+      const data = await res.json();
+      setSweepFb(`Imported ${data.created ?? '?'} variant(s)`);
+      await fetchEvalVariants();
+    } catch (e) {
+      setSweepFb(`Import error: ${e.message}`);
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  }
+
   return (
     <div class="eval-variants">
-      <div class="eval-variants__toolbar">
+      <div class="eval-variants__toolbar" style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.75rem', alignItems: 'center' }}>
         <button onClick={() => { /* open create form */ }}>+ Create</button>
         <button
           class="t-btn t-btn-secondary"
@@ -82,7 +123,16 @@ export default function EvalVariants() {
         >
           {showSweep ? '✕ Cancel sweep' : '⤢ Sweep'}
         </button>
+        {/* C26: Export/Import */}
+        <button class="t-btn t-btn-secondary" style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }} onClick={handleExport} title="Export all variants as JSON">
+          ↓ Export
+        </button>
+        <button class="t-btn t-btn-secondary" style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }} onClick={() => fileInputRef.current?.click()} title="Import variants from JSON">
+          ↑ Import
+        </button>
+        <input ref={fileInputRef} type="file" accept=".json" style={{ display: 'none' }} onChange={handleImport} />
         {selected.length >= 2 && <span>{selected.length} selected for compare</span>}
+        {sweepFb && <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: sweepFb.startsWith('Error') || sweepFb.startsWith('Import error') || sweepFb.startsWith('Export error') ? 'var(--status-error)' : 'var(--text-secondary)' }}>{sweepFb}</span>}
       </div>
 
       {/* Parameter sweep form — creates N clones of a base variant varying one dimension */}
@@ -120,11 +170,6 @@ export default function EvalVariants() {
             <button type="submit" class="t-btn t-btn-primary" style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }}>
               Run sweep
             </button>
-            {sweepFb && (
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: sweepFb.startsWith('Error') ? 'var(--status-error)' : 'var(--text-secondary)' }}>
-                {sweepFb}
-              </span>
-            )}
           </div>
         </form>
       )}

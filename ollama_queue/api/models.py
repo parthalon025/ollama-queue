@@ -159,6 +159,13 @@ def get_model_metrics():
     return db.get_model_stats()
 
 
+@router.get("/api/metrics/backends")
+def get_backend_metrics():
+    """Per-backend, per-model throughput stats from stored proxy metrics."""
+    db = _api.db
+    return db.get_backend_stats()
+
+
 @router.get("/api/metrics/performance-curve")
 def get_performance_curve():
     """Fitted cross-model performance curve."""

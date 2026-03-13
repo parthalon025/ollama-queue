@@ -74,6 +74,12 @@ export default function Plan() {
     const [pendingDeleteId, setPendingDeleteId] = useState(null);
 
     const refreshingRef = useRef(false);
+    // What it tracks: whether the user is actively interacting with the Gantt chart
+    //   (hovering for slot detail, dragging the zoom slider). When true, the 10s
+    //   load-map refresh is suppressed so bucket bars don't shift under the cursor.
+    // Decision it drives: prevents the load-map from jumping mid-interaction while
+    //   the user is targeting a specific time slot (Finding #23).
+    const ganttInteractingRef = useRef(false);
     const jobRowRefs = useRef({});
     const debouncedSearch = useDebounce(search, 300);
 
@@ -84,7 +90,10 @@ export default function Plan() {
         fetchScheduledEvalRuns();
         const tickInterval = setInterval(() => setTick(t => t + 1), 1000);
         const refreshInterval = setInterval(() => {
-            if (!refreshingRef.current) {
+            // Skip the load-map refresh while the user is interacting with the Gantt —
+            // shifting buckets mid-hover disrupts slot targeting. Schedule data still
+            // refreshes on the next cycle once interaction ends.
+            if (!refreshingRef.current && !ganttInteractingRef.current) {
                 refreshingRef.current = true;
                 Promise.all([fetchSchedule(), fetchLoadMap(), fetchScheduledEvalRuns()])
                     .finally(() => { refreshingRef.current = false; });
@@ -1035,11 +1044,21 @@ export default function Plan() {
                 );
             })()}
 
-            {/* Load map density strip — 48-slot daily load visualization */}
-            <LoadMapStrip data={loadMap.value} />
+            {/* Load map density strip — 48-slot daily load visualization.
+                onMouseEnter/Leave set ganttInteractingRef so the 10s background
+                refresh doesn't shift bars while the user is hovering for slot details. */}
+            <div
+                onMouseEnter={() => { ganttInteractingRef.current = true; }}
+                onMouseLeave={() => { ganttInteractingRef.current = false; }}
+            >
+                <LoadMapStrip data={loadMap.value} />
+            </div>
 
             {/* Gantt timeline — tap/click bars for details; expands to full screen on mobile */}
-            <div class="t-frame" data-label="Next 24 hours">
+            <div class="t-frame" data-label="Next 24 hours"
+                onMouseEnter={() => { ganttInteractingRef.current = true; }}
+                onMouseLeave={() => { ganttInteractingRef.current = false; }}
+            >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
                     <p style={{ margin: 0, fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', lineHeight: 1.5, flex: 1 }}>
                         Each bar is a scheduled job. Bar width shows how long it&apos;s expected to run.
@@ -1071,6 +1090,8 @@ export default function Plan() {
                 <div
                     style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'var(--bg-base)', overflowY: 'auto', padding: '1rem' }}
                     onClick={evt => { if (evt.target === evt.currentTarget) setGanttExpanded(false); }}
+                    onMouseEnter={() => { ganttInteractingRef.current = true; }}
+                    onMouseLeave={() => { ganttInteractingRef.current = false; }}
                 >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
                         <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 'var(--type-headline)', color: 'var(--text-primary)' }}>

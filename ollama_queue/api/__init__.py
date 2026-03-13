@@ -22,6 +22,13 @@ def register_routes(app, db_instance: Database) -> None:
     global db
     db = db_instance
 
+    # Wire the DB reference into backend_router so select_backend and
+    # refresh_backends_from_db can merge DB-registered backends at runtime.
+    import ollama_queue.api.backend_router as _backend_router
+
+    _backend_router._db = db_instance
+    _backend_router.refresh_backends_from_db()
+
     # Import route modules (each defines a ``router`` APIRouter)
     from ollama_queue.api import (
         backends,

@@ -16,6 +16,7 @@ import subprocess as _subprocess  # real module — not replaced by test mocks t
 import time
 from subprocess import TimeoutExpired as _TimeoutExpired
 
+from ollama_queue.api.backend_router import has_healthy_remote_backend
 from ollama_queue.metrics_parser import parse_ollama_metrics
 from ollama_queue.sensing.health import HealthMonitor
 
@@ -231,6 +232,13 @@ class ExecutorMixin:
         this is safe only because poll_once is single-threaded and never calls
         _can_admit from worker threads.
         """
+        # Check for in-flight proxy claim (sentinel -1 in daemon_state).
+        # Proxy jobs aren't in the in-memory _running dict, only in the DB.
+        state = self.db.get_daemon_state()
+        if state.get("current_job_id") == -1:
+            _log.debug("_can_admit: job #%d blocked — proxy claim in-flight (sentinel -1)", job["id"])
+            return False
+
         profile = self._ollama_models.classify(job.get("model") or "")["resource_profile"]
 
         # embed: up to 4 concurrent embed jobs, no VRAM gate
@@ -303,13 +311,36 @@ class ExecutorMixin:
         _settings = settings if settings is not None else self.db.get_all_settings()
         health_eval = self.health.evaluate(snap, _settings, currently_paused=False)
 
-        if not resource_ok or health_eval["should_pause"]:
+        should_pause = health_eval["should_pause"]
+        pause_reason = health_eval.get("reason", "")
+
+        # CPU-load bypass: if the only reason we'd pause is local CPU load, and a
+        # healthy remote backend is cached, let the job through.  The subprocess
+        # itself is lightweight (just HTTP calls); inference runs on the remote GPU.
+        # RAM/Swap/VRAM exhaustion still blocks — those affect the local machine
+        # regardless of where inference happens.
+        if should_pause and has_healthy_remote_backend():
+            cpu_only = (
+                "Load" in pause_reason
+                and "RAM" not in pause_reason
+                and "Swap" not in pause_reason
+                and "VRAM" not in pause_reason
+            )
+            if cpu_only:
+                _log.info(
+                    "_can_admit: job #%d — bypassing local CPU load gate "
+                    "(remote backend healthy, inference will proxy away)",
+                    job["id"],
+                )
+                should_pause = False
+
+        if not resource_ok or should_pause:
             _log.debug(
                 "_can_admit: job #%d blocked — resource_ok=%s health_pause=%s reason=%s",
                 job["id"],
                 resource_ok,
-                health_eval["should_pause"],
-                health_eval.get("reason", ""),
+                should_pause,
+                pause_reason,
             )
             # Proactive deferral: if resources won't fit and deferral is enabled,
             # defer the job so the scheduler can place it in a better time slot
@@ -374,7 +405,13 @@ class ExecutorMixin:
             # Non-LLM jobs: communicate() with hard timeout
             if job.get("resource_profile") == "ollama":
                 out, err = _drain_pipes_with_tracking(proc, job["id"], self.stall_detector)
-                proc.wait()  # ensure returncode is set (drain loop exits on proc.poll())
+                try:
+                    proc.wait(timeout=30)
+                except subprocess.TimeoutExpired:
+                    _log.warning("Job #%d proc.wait() timed out after drain — sending SIGKILL", job["id"])
+                    with contextlib.suppress(ProcessLookupError):
+                        proc.kill()
+                    proc.wait(timeout=5)  # reap zombie
             else:
                 try:
                     out, err = proc.communicate(timeout=job["timeout"])
@@ -633,6 +670,17 @@ class ExecutorMixin:
                         )
                         with contextlib.suppress(ProcessLookupError, PermissionError):
                             os.kill(pid, _signal.SIGTERM)
+            elif stall_detected_at:
+                # Job recovered: posterior dropped below threshold since stall was
+                # first flagged. Clear the flag so a future spike starts a fresh
+                # grace period instead of inheriting the old (already-elapsed) one.
+                _log.info(
+                    "Job #%d stall recovered: posterior=%.2f < threshold=%.2f — clearing stall",
+                    job_id,
+                    posterior,
+                    threshold,
+                )
+                self.db.clear_stall_detected(job_id)
 
     def _check_retryable_jobs(self, now: float) -> None:
         """Clear retry_after for pending jobs whose backoff window has elapsed."""

@@ -95,7 +95,7 @@ scripts/
   migrate_timers.py            # Migrate 8 of 10 systemd timers to recurring jobs
   migrate_dlq_max_retries.py   # Add max_retries column to existing dlq table (idempotent)
 
-tests/                           # 1,677 tests, 100% line coverage
+tests/                           # 1,788 tests, 100% line coverage
 ```
 
 ## How to Run
@@ -105,7 +105,7 @@ tests/                           # 1,677 tests, 100% line coverage
 cd ~/Documents/projects/ollama-queue
 source .venv/bin/activate
 
-# Run tests (1,677 total, 100% line coverage)
+# Run tests (1,788 total, 100% line coverage)
 pytest
 
 # Start the server (daemon + API + dashboard)
@@ -192,6 +192,11 @@ This applies to: component files, store transformations in `stores/`, computed v
 
 ## Gotchas
 
+- **Multi-backend setup** — configured via `OLLAMA_BACKENDS` in `~/.env` (sourced by the systemd service). Current config: `http://127.0.0.1:11434` (GTX 1650, local) + `http://100.114.197.57:11434` (RTX 5080, `desktop-fbl9e0c`). Weights in `OLLAMA_BACKEND_WEIGHTS`. The remote Windows PC runs ollama-queue in Docker (`docker run -d --name ollama-queue -p 7683:7683 -e OLLAMA_URL=http://host.docker.internal:11434 --restart unless-stopped ollama-queue:latest`) for VRAM-aware routing. `Dockerfile` is in the project root.
+- **`_gpu_name_cache` is populated lazily with a 600s TTL** — if the remote ollama-queue container wasn't up when the first `/api/backends` request fired, `gpu_name` will be cached as `null` for 10 minutes. Restart the `ollama-queue.service` to flush all in-process caches immediately.
+- **`gpu_name: null` from Docker container = WSL2 GPU name quirk, not missing data** — `nvidia-smi --query-gpu=memory.used,memory.total` works inside Docker Desktop (VRAM % correct), but `--query-gpu=name` may return null. VRAM pressure routing works correctly; only the label in BackendsPanel falls back to hostname.
+- **Stall detector queries all OLLAMA_BACKENDS** — `sensing/stall.py:get_ollama_ps_models()` unions `/api/ps` from every configured backend. Before this fix it hardcoded `localhost:11434`, causing remote-backend jobs to always get a false-positive `+1.61` stall penalty (model "not loaded" on wrong host).
+- **ActiveGpuBadge in CurrentJob** — infers which GPU is running the current job by cross-referencing `currentJob.model` against each backend's `loaded_models` list. Only renders when multiple backends are configured. GPU name is abbreviated (`"NVIDIA GeForce RTX 5080"` → `"RTX 5080"`). Badge disappears if model isn't warm on any backend yet (still loading).
 - **SPA dist/ is gitignored** — must `npm run build` after cloning
 - **Worktree + `expedition33-ui` `file:` dep** — `npm install` in a worktree creates a relative symlink for the `file:` local dep. The path is valid from the main repo depth but silently broken from `.worktrees/<branch>/`. Fix: `rm node_modules/expedition33-ui && ln -s /home/justin/Documents/projects/expedition33-ui node_modules/expedition33-ui` in the worktree's spa dir. Permanent fix: run this in `postinstall`. See global `~/CLAUDE.md` gotcha (Lesson #1461).
 - **check_same_thread=False** on SQLite — required for FastAPI worker threads, safe with WAL mode
@@ -267,6 +272,7 @@ This applies to: component files, store transformations in `stores/`, computed v
 - **`deferral_scheduler._do_sweep()` is two-phase** — Phase 1 fetches ALL deferred entries and resumes any whose `scheduled_for` has passed. Phase 2 fetches unscheduled-only entries and finds fitting slots. The original single-call design (`list_deferred(unscheduled_only=True)`) filtered out entries WITH `scheduled_for`, making scheduled resumptions impossible. Tests must assert `list_deferred` is called twice: once with no args (phase 1), once with `unscheduled_only=True` (phase 2).
 - **`_estimate_model_vram(model)` regex extracts param count from model name** — parses patterns like `7b`, `14b`, `0.5b` from the model string. The `_PARAM_TO_VRAM` lookup table maps common sizes to Q4-quantized VRAM estimates (e.g. `7b` → 4.5GB). Models without a recognizable size pattern default to 4.0GB. This is a heuristic — actual VRAM depends on quantization level and context size.
 - **`job_metrics` table** — stores per-job Ollama response metrics (tokens/sec, eval duration, model). Populated by `metrics_parser.py` which extracts metrics from job stdout if it contains Ollama JSON. The `model_performance` API endpoint aggregates these into per-model stats.
+- **`backend_metrics` table** — per-backend inference metrics captured from proxy responses (`backend_url, model, eval_count, eval_duration_ns, load_duration_ns, tok_per_min, recorded_at`). Only populated when `eval_count` is present (generate requests, not embed). `store_backend_metrics()` is called after `resp.json()` on the non-streaming path and via `metrics_fn` callback on the `done=true` chunk on the streaming path. `get_backend_stats()` aggregates by `(backend_url, model)`. `GET /api/metrics/backends` exposes it. The Performance tab's "Per-Backend Throughput" section is hidden until the first proxy generate request completes.
 - **`deferrals` table** — tracks job deferral lifecycle. Jobs move `pending → deferred` via `db.defer_job()` and back to `pending` via `db.resume_deferred_job()`. The `scheduled_for` column is set by `update_deferral_schedule()` when the deferral scheduler finds a fitting slot.
 - **DLQ auto-reschedule columns** — `auto_reschedule_count`, `rescheduled_job_id`, `reschedule_reasoning`, `last_reschedule_at` on the `dlq` table. `set_setting("dlq.auto_reschedule", True)` enables automatic sweep. `dlq.chronic_failure_threshold` (default 3) prevents infinite reschedule loops.
 - **`mark_dlq_scheduling` is the crash-safety marker** — does NOT increment `auto_reschedule_count`. Only `update_dlq_reschedule` increments the count and sets resolution. The two-step pattern (mark → submit job → finalize) prevents double-counting if the process crashes between submit and finalize.
@@ -282,6 +288,30 @@ This applies to: component files, store transformations in `stores/`, computed v
 - **`_add_column_if_missing` and `_run_migrations` must NOT commit internally** — `initialize()` in `db/schema.py` is the sole commit owner for the full init flow. Any future helper added to the init chain must omit internal `conn.commit()` calls.
 - **`cancel_job` 409 detail is `"Job is not in a cancellable state"`** — not `"already_terminal"`. Update any test or integration code that checks the exact 409 message string.
 - **`health.evaluate()` returns a safe result on missing settings keys** — previously raised `KeyError` when a settings key was absent; now falls back to defaults. Callers no longer need to guard against `KeyError` from `evaluate()`.
+- **`max_pause_duration_seconds` setting** — default 600 (10 min). If the health monitor stays paused longer than this, it force-resumes regardless of metric values. Prevents indefinite pause when a single metric sits in the hysteresis band. `evaluate()` accepts `paused_since` parameter.
+- **`SystemSnapshot.vram_known` field** — `bool`, default `True`. Set to `False` when `get_vram_pct()` returns `None` or raises. When `vram_known=False`, slot scoring skips VRAM hard gates and resource headroom checks to avoid phantom-zero scheduling.
+- **First-ever eval run requires manual promote** — `check_auto_promote` returns early (no promotion) when no production variant exists. The first eval run must be manually promoted to establish a baseline. This prevents auto-promoting a mediocre variant with no comparison data.
+- **Model list cache TTL is 15s** — reduced from 60s. `_invalidate_list_cache()` forces fresh fetch on next call.
+- **Priority bounds enforced: 0-10** — `set_priority` returns HTTP 400 for out-of-range values. `GET /api/schedule/events` limit capped at 1000. `suggest_schedule_time` top_n capped at 20.
+- **Batch operations return 404 for unknown tags** — `batch_toggle_schedule` and `batch_run_schedule` return 404 when no recurring jobs match the tag, instead of 200 with `updated: 0`.
+- **`judge_parse_failures` column on `eval_runs`** — `INTEGER DEFAULT 0`. Counts how many judge responses failed to parse during an eval run. Logged as WARNING when > 0.
+- **`_retry_on_busy()` wraps high-frequency DB writes** — `log_health()`, `update_daemon_state()`, `submit_job()`, `complete_job()` retry up to 2 times on `SQLITE_BUSY` with exponential backoff (0.1s, 0.2s). Retries happen inside `_lock`.
+- **`clear_stall_detected(job_id)`** — new DB method. Called when stall posterior drops below threshold, clearing `stall_detected_at` so any future spike gets a fresh grace period instead of inheriting an expired one.
+- **RuntimeEstimator excludes negative durations** — non-positive durations (from clock skew) are excluded, not clamped to 0.1. Logs WARNING with count. Falls back to prior if all durations are invalid.
+- **PerformanceCurve predictions capped at 100k tok/min** — prevents `math.exp(huge)` → `inf` on degenerate fits (nearly identical x-values). Falls back to single-point slope (-0.7) when `abs(slope) > 10`.
+- **Consumer config TOCTOU guard** — `patch_consumer()` checks `scanned_mtime` against current mtime before patching. Raises `ValueError` if file was modified between scan and patch.
+- **BurstDetector activates after 5 samples** — reduced from 10. On low-traffic systems (1-2 jobs/day), detection activates in 2-3 days instead of 5-10.
+- **Cron scheduling is timezone-aware** — `_local_dt()` helper converts timestamps via `ZoneInfo("localtime")` with UTC fallback. Prevents DST-related double-fire or missed-fire for cron-scheduled jobs.
+- **Cron expressions validated at submission time** — `add_recurring_job()` validates via `croniter()` before INSERT. Invalid cron returns HTTP 400, not a 500 at promotion time.
+- **DLQ chronic threshold check is atomic** — re-reads `auto_reschedule_count` from DB inside `_sweep_lock` to prevent double-reschedule at the threshold boundary.
+- **`has_healthy_remote_backend()`** — sync read from `_health_cache` in `backend_router.py`; returns True when any non-127.0.0.1/localhost backend has a cached healthy status within the 30s TTL. Used by `executor._can_admit`.
+- **CPU gate bypass for remote GPU** — in `executor._can_admit`, when `health.evaluate()` says `should_pause` but the reason is CPU-load-only (no RAM/Swap/VRAM in reason string) and `has_healthy_remote_backend()` is True, the local CPU gate is bypassed and inference proxies to the remote GPU. Logs "bypassing local CPU load gate" at INFO.
+- **`_backend_gpu_name` TTL split** — HTTP 200 response caches for 600s (hardware stable); network exception caches for 30s (backend may be restarting). Previously a single 600s TTL caused null gpu_name to persist 10min after a restarting backend came back.
+- **DLQ `_do_sweep()` logs at DEBUG when `dlq.auto_reschedule` is disabled** — previously silent; now visible in debug logs without polluting INFO.
+- **`_safeJson(resp)` in SPA stores** — checks `Content-Type` includes `application/json` before calling `.json()`; applied to all fetch calls in `stores/index.js`. Prevents JSON parse errors on unexpected HTML error responses.
+- **`BackendsPanel` `isServing` indicator** — derives active-serving state by matching `currentJob.model` against `backend.loaded_models`; active backend gets green outline + "serving" label. All-unreachable state shows explicit error row. Requires `currentJob` signal import.
+- **`ganttInteractingRef` in Plan/index.jsx** — suppresses the 10s load-map refresh while user hovers Gantt or LoadMapStrip, preventing mid-interaction repaints.
+- **`normalizeTrends()` surfaces `no_cluster_data: true`** — F1LineChart shows a specific actionable message (not a generic empty state) when cluster labels are missing from the eval results.
 
 ## Design Doc
 

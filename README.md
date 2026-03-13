@@ -32,14 +32,14 @@ Running multiple services against a local Ollama instance creates a resource con
 | Category | What it does |
 |---|---|
 | **Priority queue** | Jobs run highest-priority-first (integer priority; higher = sooner). SJF dequeue with Age-of-Information weighting prevents starvation. |
-| **Health gating** | Checks RAM, VRAM, and system load before each job. Pauses at high threshold, resumes below a lower threshold (hysteresis). Rejects submissions with 429 when queue depth exceeds limit. |
+| **Health gating** | Checks RAM, VRAM, and system load before each job. Pauses at high threshold, resumes below a lower threshold (hysteresis). Configurable max-pause escape hatch prevents indefinite stalls. Rejects submissions with 429 when queue depth exceeds limit. |
 | **Recurring jobs** | Cron or interval scheduling. 48-slot load map with pin slots, automatic rebalancing, and skip-on-busy logic. CLI suggests low-load windows. |
 | **Dead-letter queue** | Failed jobs retry with exponential backoff up to `max_retries`, then move to the DLQ. Auto-reschedule classifies failures, finds optimal time slots, and creates new jobs — with chronic failure detection to prevent infinite loops. Retry or clear from CLI or dashboard. |
 | **Proactive deferral** | Defer jobs when resources are tight; two-phase sweep resumes them when conditions improve or scheduled times pass. |
 | **Stall detection** | Bayesian detection of jobs that started but stopped producing output. |
 | **Circuit breaker** | Isolates Ollama failures automatically; exponential backoff before retry; prevents cascading failures. |
 | **Burst detection** | Classifies traffic regime (burst / steady / trough) and adapts dequeue rate accordingly. |
-| **Ollama proxy** | Drop-in `/api/generate` and `/api/embed` proxy — point existing apps at `localhost:7683` and they queue automatically. |
+| **Ollama proxy** | Drop-in `/api/generate` and `/api/embed` proxy — point existing apps at `localhost:7683` and they queue automatically. Routes requests across multiple Ollama backends and captures per-backend throughput metrics. |
 | **Consumer detection** | 4-phase scanner finds every service calling Ollama directly. Config patcher rewrites them to route through the queue. Optional iptables REDIRECT intercept catches unpatched callers at the network layer. |
 | **Eval pipeline** | Run A/B–E prompt variant evaluations with an LLM judge (F1/recall/precision). Auto-promote the winning config when quality gates pass. Thompson Sampling routes production traffic to the recommended variant. |
 | **Intelligence layer** | Bayesian log-normal runtime estimation (4-tier hierarchy), log-linear cross-model performance curves, 10-factor slot scoring with VRAM hard gates, hourly/daily load pattern learning. |
@@ -239,7 +239,7 @@ Eight views served from `http://localhost:7683/ui/`:
 | **Plan** | 24h Gantt timeline with "now" needle, 48-bucket load-map strip with DLQ/deferral slot markers, traffic intensity badge, "Suggest slot" button, tag-grouped recurring jobs |
 | **History** | Job history, DLQ entries with reschedule status badges and reasoning, deferred jobs panel, duration trends, activity heatmap |
 | **Models** | Model table with active model tracking |
-| **Perf** | Per-model performance table, cross-model performance curve chart (SVG scatter, log-scale), 24h×7d load heatmap, system health gauges |
+| **Perf** | Per-model performance table, cross-model performance curve chart (SVG scatter, log-scale), 24h×7d load heatmap, system health gauges, per-backend throughput table showing tok/min per GPU |
 | **Settings** | Thresholds, defaults, retention, DLQ auto-reschedule, proactive deferral, daemon controls (14+ tunable parameters) |
 | **Eval** | Runs, Variants, Trends, Settings sub-views for the prompt eval pipeline |
 | **Consumers** | Scan results, consumer cards with status badges, include/ignore/revert actions, intercept toggle |
@@ -257,7 +257,7 @@ The REST API runs at `http://localhost:7683/api/`. Key endpoint groups:
 | **Schedule** | `GET/POST /api/schedule`, `DELETE /api/schedule/{id}`, `GET /api/schedule/load-map`, `POST /api/schedule/suggest` |
 | **DLQ** | `GET /api/dlq`, `POST /api/dlq/{id}/retry`, `DELETE /api/dlq`, `GET /api/dlq/schedule-preview`, `POST /api/dlq/{id}/reschedule` |
 | **Deferral** | `POST /api/defer/{job_id}`, `GET /api/deferred`, `POST /api/deferred/{id}/resume` |
-| **Metrics** | `GET /api/metrics/model-performance`, `GET /api/metrics/performance-curve` |
+| **Metrics** | `GET /api/metrics/models`, `GET /api/metrics/performance-curve`, `GET /api/metrics/backends` |
 | **Settings** | `GET/PUT /api/settings` |
 | **Eval** | `GET/POST /api/eval/runs`, `POST /api/eval/runs/{id}/promote`, `GET/POST /api/eval/variants`, `GET /api/eval/trends`, `GET/PUT /api/eval/settings` |
 | **Consumers** | `POST /api/consumers/scan`, `POST /api/consumers/{id}/include`, `POST /api/consumers/intercept/enable` |
@@ -325,7 +325,7 @@ systemd timers / apps / proxy clients
 | **Scheduling** | croniter, custom 48-slot load map |
 | **Dashboard** | Preact 10, @preact/signals, Tailwind v4, uPlot |
 | **CLI** | Click |
-| **Tests** | pytest, pytest-xdist (1,677 tests, 100% line coverage) |
+| **Tests** | pytest, pytest-xdist (1,801 tests, 100% line coverage) |
 
 ---
 
@@ -352,7 +352,7 @@ ollama_queue/
 scripts/
   migrate_timers.py              # Migrate systemd timers to recurring jobs
   migrate_dlq_max_retries.py     # Schema migration (idempotent)
-tests/                           # 1,677 tests, 100% line coverage (pytest-xdist parallel)
+tests/                           # 1,801 tests, 100% line coverage (pytest-xdist parallel)
 ```
 
 ---
@@ -382,7 +382,7 @@ Dev/test: `pip install -r requirements-dev.txt`
 
 ```bash
 source .venv/bin/activate
-pytest  # 1,677 tests, 100% line coverage, parallel by default
+pytest  # 1,801 tests, 100% line coverage, parallel by default
 ```
 
 ---
@@ -406,6 +406,8 @@ Implementation plans and design decisions are in [`docs/plans/`](docs/plans/):
 | [UX design philosophy](docs/plans/2026-03-11-ux-design-philosophy-improvements-design.md) | SUPERHOT aesthetic, animation discipline, interaction depth strategy |
 | [UX Phase 3 — SUPERHOT effects](docs/plans/2026-03-11-ux-phase3-superhot-philosophy-plan.md) | ThreatPulse gauges, KPI glitch, StatusBadge beat, typed cursor states |
 | [UX Phase 4 — Visualization Science](docs/plans/2026-03-11-ux-phase4-viz-science-plan.md) | Treisman priority encoding, Shneiderman disclosure, Tufte sparklines, animation tiers |
+| [Edge case audit & fixes](docs/plans/2026-03-13-edge-case-fixes.md) | 27 edge cases across 6 subsystems — proxy deadlock, SQLITE_BUSY retry, health pause escape hatch, eval safety gates |
+| [Bug audit fixes](docs/plans/2026-03-13-bug-audit-fixes.md) | API input validation: offset bounds, limit caps, settings type enforcement |
 
 ---
 

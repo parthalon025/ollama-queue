@@ -79,16 +79,16 @@ class BurstDetector:
         """Return current burst regime classification.
 
         Returns:
-            "unknown"     — insufficient data (< 10 samples)
+            "unknown"     — insufficient data (< 5 samples)
             "subcritical" — normal traffic
             "moderate"    — elevated submission rate
             "warning"     — approaching saturation
             "critical"    — burst in progress; consider engaging 429 gate
 
-        Requires at least 10 inter-arrival samples for a reliable baseline.
+        Requires at least 5 inter-arrival samples for a reliable baseline.
         """
         with self._lock:
-            if len(self._baseline_samples) < 10 or self._ewma is None:
+            if len(self._baseline_samples) < 5 or self._ewma is None:
                 return "unknown"
             # Copy under lock — avoids RuntimeError: deque mutated during iteration
             # when record_submission() appends concurrently from FastAPI worker threads.
