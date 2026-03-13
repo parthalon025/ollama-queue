@@ -573,14 +573,15 @@ def repeat_eval_run(run_id: int):
         conn = db._connect()
         cur = conn.execute(
             """INSERT INTO eval_runs
-               (data_source_url, variants, per_cluster, status, run_mode,
+               (data_source_url, data_source_token, variants, per_cluster, status, run_mode,
                 item_ids, seed, judge_model, judge_backend, error_budget,
                 judge_mode, started_at)
-               VALUES (?, ?, ?, 'queued', ?,
+               VALUES (?, ?, ?, ?, 'queued', ?,
                        ?, ?, ?, ?, ?,
                        ?, ?)""",
             (
                 orig["data_source_url"],
+                orig.get("data_source_token"),
                 orig["variants"],
                 orig["per_cluster"],
                 orig.get("run_mode") or "batch",

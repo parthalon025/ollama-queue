@@ -2,6 +2,7 @@
 
 import statistics
 import time
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -174,6 +175,55 @@ def test_handle_failure_job_not_found(db):
     dlq_mgr = DLQManager(db)
     result = dlq_mgr.handle_failure(999999, "job vanished")
     assert result == "dlq"
+
+
+def test_dlq_handle_failure_prevents_double_retry_under_concurrency():
+    """handle_failure concurrent calls must retry at most once — not once per thread.
+
+    The fix wraps the get_job + decision in a single lock acquisition. We simulate
+    state mutation inside _set_job_retry so that the second/third threads see
+    retry_count >= max_retries after the first thread commits its retry.
+    """
+    import threading
+
+    from ollama_queue.dlq import DLQManager
+
+    retry_calls = []
+    _state = {"retry_count": 0}
+    lock = threading.RLock()
+
+    def fake_get_job(_job_id):
+        return {
+            "id": 1,
+            "retry_count": _state["retry_count"],
+            "max_retries": 1,  # only one retry allowed
+            "last_retry_delay": 30,
+            "command": "echo",
+            "model": None,
+            "timeout": 60,
+            "source": "test",
+        }
+
+    def fake_set_job_retry(*a, **k):
+        _state["retry_count"] += 1
+        retry_calls.append(1)
+
+    mock_db = MagicMock()
+    mock_db._lock = lock
+    mock_db.get_job.side_effect = fake_get_job
+    mock_db.get_all_settings.return_value = {}
+    mock_db._set_job_retry = fake_set_job_retry
+    mock_db.log_schedule_event = MagicMock()
+    mock_db.move_to_dlq = MagicMock(return_value=99)
+
+    manager = DLQManager(mock_db)
+    threads = [threading.Thread(target=manager.handle_failure, args=(1, "test error")) for _ in range(3)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert len(retry_calls) <= 1, f"Expected at most 1 retry, got {len(retry_calls)}"
 
 
 def test_list_dlq_unscheduled_only(db):

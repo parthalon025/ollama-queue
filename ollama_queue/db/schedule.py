@@ -95,9 +95,9 @@ class ScheduleMixin:
                     now,
                 ),
             )
+            assert cur.lastrowid is not None
             conn.commit()
-        assert cur.lastrowid is not None
-        return cur.lastrowid
+            return cur.lastrowid
 
     def get_recurring_job(self, rj_id):
         with self._lock:

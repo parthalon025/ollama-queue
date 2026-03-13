@@ -94,11 +94,7 @@ def reschedule_dlq_entry(dlq_id: int):
     db = _api.db
     from ollama_queue.sensing.system_snapshot import classify_failure
 
-    entry = None
-    for e in db.list_dlq():
-        if e["id"] == dlq_id:
-            entry = e
-            break
+    entry = db.get_dlq_entry(dlq_id)
     if not entry:
         raise HTTPException(404, "DLQ entry not found")
 

@@ -1,7 +1,8 @@
 """Tests for the Bayesian multi-signal stall detector."""
 
+import logging
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
 
@@ -277,4 +278,15 @@ def test_silence_group_lr_120_to_300(det):
     assert lr == pytest.approx(1.79, abs=0.01)
 
 
-from unittest.mock import mock_open
+def test_get_ollama_ps_models_logs_warning_on_failure(caplog):
+    """Ollama ps failure must log at WARNING — debug is invisible in production."""
+    detector = StallDetector()
+    with (
+        patch("urllib.request.urlopen", side_effect=Exception("connection refused")),
+        caplog.at_level(logging.WARNING, logger="ollama_queue.sensing.stall"),
+    ):
+        result = detector.get_ollama_ps_models()
+    assert result == set()
+    assert any(
+        r.levelno >= logging.WARNING for r in caplog.records
+    ), "Must log WARNING on ps failure — not just debug (invisible in production)"

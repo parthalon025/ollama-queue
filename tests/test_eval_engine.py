@@ -1399,6 +1399,18 @@ class TestCheckAutoPromote:
         update_eval_run(
             db, run_id, status="complete", winner_variant="A", metrics=metrics, item_count=10, error_budget=0.30
         )
+        # Gate 3 now requires at least one judge row; insert a clean one so the
+        # happy-path tests reach do_promote_eval_run.
+        insert_eval_result(
+            db,
+            run_id=run_id,
+            variant="A",
+            source_item_id="src-0",
+            target_item_id="tgt-0",
+            is_same_cluster=1,
+            row_type="judge",
+            score_transfer=4,
+        )
         return db, run_id
 
     def test_skips_if_auto_promote_disabled(self, db_with_complete_run):
@@ -1524,6 +1536,18 @@ class TestCheckAutoPromoteBayesian:
             error_budget=0.30,
             judge_mode="bayesian",
         )
+        # Gate 3 now requires at least one judge row; insert a clean one so the
+        # happy-path tests reach do_promote_eval_run.
+        insert_eval_result(
+            db,
+            run_id=run_id,
+            variant="A",
+            source_item_id="src-0",
+            target_item_id="tgt-0",
+            is_same_cluster=1,
+            row_type="judge",
+            score_transfer=4,
+        )
         return db, run_id
 
     def test_bayesian_promotes_when_auc_and_separation_pass(self, db_with_bayesian_run):
@@ -1582,7 +1606,7 @@ class TestCheckAutoPromoteBayesian:
             {"A": {"auc": 0.90, "separation": 0.50, "same_mean_posterior": 0.85, "diff_mean_posterior": 0.35}}
         )
         # Create two complete runs with same winner + passing AUC
-        for _ in range(2):
+        for i in range(2):
             rid = create_eval_run(db, variant_id="A")
             update_eval_run(
                 db,
@@ -1593,6 +1617,17 @@ class TestCheckAutoPromoteBayesian:
                 item_count=10,
                 error_budget=0.30,
                 judge_mode="bayesian",
+            )
+            # Gate 3 requires at least one judge row per run
+            insert_eval_result(
+                db,
+                run_id=rid,
+                variant="A",
+                source_item_id=f"src-{i}",
+                target_item_id=f"tgt-{i}",
+                is_same_cluster=1,
+                row_type="judge",
+                score_transfer=4,
             )
 
         with patch("ollama_queue.eval.promote.do_promote_eval_run") as mock_promote:
@@ -1668,6 +1703,17 @@ class TestCheckAutoPromoteBayesian:
             item_count=10,
             error_budget=0.30,
             # No judge_mode set — defaults to 'rubric'
+        )
+        # Gate 3 now requires at least one judge row
+        insert_eval_result(
+            db,
+            run_id=run_id,
+            variant="A",
+            source_item_id="src-0",
+            target_item_id="tgt-0",
+            is_same_cluster=1,
+            row_type="judge",
+            score_transfer=4,
         )
         with patch("ollama_queue.eval.promote.do_promote_eval_run") as mock_promote:
             mock_promote.return_value = {"ok": True, "run_id": run_id, "variant_id": "A", "label": "Config A"}
@@ -3330,7 +3376,10 @@ class TestCallProxyRetryAndErrorPaths:
         assert text is None  # exhausted retries
 
     def test_timeout_returns_none(self):
-        with patch("httpx.Client") as mock_cls:
+        with (
+            patch("httpx.Client") as mock_cls,
+            patch("time.sleep"),
+        ):
             mock_client = MagicMock()
             mock_client.__enter__ = MagicMock(return_value=mock_client)
             mock_client.__exit__ = MagicMock(return_value=False)
@@ -3347,6 +3396,39 @@ class TestCallProxyRetryAndErrorPaths:
             )
         assert text is None
         assert job_id is None
+
+    def test_call_proxy_retries_on_timeout(self):
+        """TimeoutException on first attempt must trigger retry, not immediate (None, None)."""
+        mock_resp_ok = MagicMock()
+        mock_resp_ok.status_code = 200
+        mock_resp_ok.raise_for_status = MagicMock()
+        mock_resp_ok.json.return_value = {"response": "success after timeout", "_queue_job_id": 7}
+
+        with (
+            patch("httpx.Client") as mock_cls,
+            patch("time.sleep"),
+        ):
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            # First call raises TimeoutException, second returns success
+            mock_client.post.side_effect = [
+                httpx.TimeoutException("timed out"),
+                mock_resp_ok,
+            ]
+            mock_cls.return_value = mock_client
+            text, job_id = _call_proxy(
+                http_base="http://localhost:7683",
+                model="m",
+                prompt="p",
+                temperature=0.5,
+                num_ctx=4096,
+                timeout=30,
+                source="test",
+            )
+        assert mock_client.post.call_count == 2, "retry must happen — call_count should be 2"
+        assert text == "success after timeout"
+        assert job_id == 7
 
     def test_unexpected_error_returns_none(self):
         with patch("httpx.Client") as mock_cls:

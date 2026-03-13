@@ -158,6 +158,66 @@ class TestSweepPhase1SkipsNonDeferred:
         db.resume_deferred_job.assert_not_called()
 
 
+class TestSweepContinuesAfterEntryRaises:
+    def test_do_sweep_continues_after_entry_raises(self):
+        """_do_sweep must skip failing entries and process the rest (M1)."""
+        call_log = []
+
+        db = MagicMock()
+        db.get_setting.return_value = True
+
+        # Phase 1 returns nothing; phase 2 returns two entries
+        entries = [
+            {
+                "id": 1,
+                "job_id": 10,
+                "model": "bad_model",
+                "command": "echo",
+                "resource_profile": "ollama",
+                "scheduled_for": None,
+            },
+            {
+                "id": 2,
+                "job_id": 20,
+                "model": "qwen2.5:7b",
+                "command": "echo",
+                "resource_profile": "ollama",
+                "scheduled_for": None,
+            },
+        ]
+        db.list_deferred.side_effect = [
+            [],  # Phase 1: list_deferred() — no past-scheduled entries
+            entries,  # Phase 2: list_deferred(unscheduled_only=True)
+        ]
+
+        jobs = {
+            10: {"id": 10, "model": "bad_model", "command": "echo", "resource_profile": "ollama", "status": "deferred"},
+            20: {
+                "id": 20,
+                "model": "qwen2.5:7b",
+                "command": "echo",
+                "resource_profile": "ollama",
+                "status": "deferred",
+            },
+        }
+        db.get_job.side_effect = lambda jid: jobs.get(jid)
+
+        estimator = MagicMock()
+
+        def patched_estimate(model, command, resource_profile):
+            if model == "bad_model":
+                raise RuntimeError("DB error during estimate")
+            call_log.append(model)
+            return Estimate(total_mean=300.0, total_upper=600.0, confidence="medium")
+
+        estimator.estimate.side_effect = patched_estimate
+
+        sched = DeferralScheduler(db, estimator, lambda: [])
+        result = sched._do_sweep()  # must not raise
+
+        assert "qwen2.5:7b" in call_log, "Second entry must be processed after first raises"
+
+
 class TestSweepPassesVramEstimate:
     def test_sweep_passes_vram_estimate(self):
         """find_fitting_slot should receive a non-zero VRAM estimate for known models."""

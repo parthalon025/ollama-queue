@@ -72,6 +72,8 @@ class Scheduler:
         # AoI sort: lower score = higher urgency. Ensures stale jobs promoted first
         # when multiple become due simultaneously.
         due.sort(key=lambda rj: self._aoi_sort_key(rj, now, aoi_weight, last_success_cache.get(rj["id"])))
+        from croniter import CroniterBadCronError
+
         new_ids = []
         next_run_updates: dict[int, float] = {}  # rj_id → new next_run; batched at end
         for rj in due:
@@ -116,7 +118,17 @@ class Scheduler:
                     recurring_job_id=rj["id"],
                     details={"name": rj["name"], "reason": "already pending or running"},
                 )
-                next_run_updates[rj["id"]] = _compute_next_run()
+                try:
+                    next_run_updates[rj["id"]] = _compute_next_run()
+                except CroniterBadCronError as exc:
+                    _log.warning(
+                        "promote_due_jobs: skipping next_run update for recurring job %r (id=%s)"
+                        " — bad cron expression %r: %s",
+                        rj.get("name"),
+                        rj.get("id"),
+                        rj.get("cron_expression"),
+                        exc,
+                    )
                 continue
 
             job_id = self.db.submit_job(

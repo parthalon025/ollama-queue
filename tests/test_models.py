@@ -59,6 +59,33 @@ class TestListLocal:
         OllamaModels._list_local_cache = None  # Reset so other tests aren't affected
         assert result == []
 
+    def test_list_local_cache_only_fetches_once_on_concurrent_miss(self):
+        """Concurrent list_local() calls on a cold cache must only call _fetch_list_local once."""
+        import threading
+        import time
+        from unittest.mock import patch
+
+        from ollama_queue.models.client import OllamaModels
+
+        OllamaModels._invalidate_list_cache()
+
+        fetch_count = {"n": 0}
+
+        def slow_fetch():
+            fetch_count["n"] += 1
+            time.sleep(0.05)
+            return [{"name": "qwen2.5:7b", "size_bytes": 0, "modified": ""}]
+
+        with patch.object(OllamaModels, "_fetch_list_local", slow_fetch):
+            threads = [threading.Thread(target=OllamaModels.list_local) for _ in range(5)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+        OllamaModels._invalidate_list_cache()
+        assert fetch_count["n"] == 1, f"Expected 1 fetch, got {fetch_count['n']}"
+
 
 class TestClassify:
     def test_classify_embed_profile(self):

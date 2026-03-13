@@ -70,60 +70,76 @@ class DeferralScheduler:
         load_map = self.load_map_fn()
 
         for entry in unscheduled:
-            job = self.db.get_job(entry["job_id"])
-            if not job or job["status"] != "deferred":
-                continue
-
-            # Try to find a slot
-            est = self.estimator.estimate(
-                job.get("model", ""),
-                job.get("command", ""),
-                job.get("resource_profile", "ollama"),
-            )
-
-            model = job.get("model", "")
-            job_vram = _estimate_model_vram(model)
-            estimated_slots = max(1, int(est.total_upper / 1800) + 1)
-            slot = find_fitting_slot(
-                load_map,
-                job_vram_needed_gb=job_vram,
-                total_vram_gb=self.vram_total_fn(),
-                estimated_slots=estimated_slots,
-                job_model=model,
-            )
-
-            if slot is None:
-                continue
-
-            # If the best slot is NOW (slot_index == 0), resume immediately
-            if slot["slot_index"] == 0:
-                self.db.resume_deferred_job(entry["id"])
-                resumed.append({"deferral_id": entry["id"], "job_id": entry["job_id"]})
-                logger.info(
-                    "Resumed deferred job %s (deferral %s) — slot available now",
-                    entry["job_id"],
-                    entry["id"],
-                )
-            else:
-                # Schedule for later
-                scoring = json.dumps(
-                    {
-                        "slot_index": slot["slot_index"],
-                        "score": slot["score"],
-                        "estimate": {"mean": est.total_mean, "upper": est.total_upper},
-                    }
-                )
-                self.db.update_deferral_schedule(
-                    entry["id"],
-                    scheduled_for=slot["scheduled_time"],
-                    scoring_snapshot=scoring,
-                )
-                logger.debug(
-                    "Scheduled deferred job %s (deferral %s) for slot %d at %.0f",
-                    entry["job_id"],
-                    entry["id"],
-                    slot["slot_index"],
-                    slot["scheduled_time"],
+            try:
+                result = self._process_unscheduled_entry(entry, load_map)
+                if result is not None:
+                    resumed.append(result)
+            except Exception as exc:
+                logger.warning(
+                    "_do_sweep: skipping deferral entry %s due to error: %s",
+                    entry.get("id", "?"),
+                    exc,
                 )
 
         return resumed
+
+    def _process_unscheduled_entry(self, entry: dict, load_map: list) -> dict | None:
+        """Attempt to find and apply a slot for a single unscheduled deferral entry.
+
+        Returns a resumed-job dict if the job was resumed immediately, or None otherwise.
+        Raises on any error — caller wraps in try/except to continue the sweep loop.
+        """
+        job = self.db.get_job(entry["job_id"])
+        if not job or job["status"] != "deferred":
+            return None
+
+        est = self.estimator.estimate(
+            job.get("model", ""),
+            job.get("command", ""),
+            job.get("resource_profile", "ollama"),
+        )
+
+        model = job.get("model", "")
+        job_vram = _estimate_model_vram(model)
+        estimated_slots = max(1, int(est.total_upper / 1800) + 1)
+        slot = find_fitting_slot(
+            load_map,
+            job_vram_needed_gb=job_vram,
+            total_vram_gb=self.vram_total_fn(),
+            estimated_slots=estimated_slots,
+            job_model=model,
+        )
+
+        if slot is None:
+            return None
+
+        if slot["slot_index"] == 0:
+            self.db.resume_deferred_job(entry["id"])
+            logger.info(
+                "Resumed deferred job %s (deferral %s) — slot available now",
+                entry["job_id"],
+                entry["id"],
+            )
+            return {"deferral_id": entry["id"], "job_id": entry["job_id"]}
+
+        # Schedule for later
+        scoring = json.dumps(
+            {
+                "slot_index": slot["slot_index"],
+                "score": slot["score"],
+                "estimate": {"mean": est.total_mean, "upper": est.total_upper},
+            }
+        )
+        self.db.update_deferral_schedule(
+            entry["id"],
+            scheduled_for=slot["scheduled_time"],
+            scoring_snapshot=scoring,
+        )
+        logger.debug(
+            "Scheduled deferred job %s (deferral %s) for slot %d at %.0f",
+            entry["job_id"],
+            entry["id"],
+            slot["slot_index"],
+            slot["scheduled_time"],
+        )
+        return None

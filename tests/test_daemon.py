@@ -222,6 +222,53 @@ def test_records_duration_on_success(daemon):
     assert len(history) == 1
 
 
+def test_record_duration_skips_none_model(daemon):
+    """Command-only jobs (model=None) must not write a null-model row to duration_history (H6).
+
+    Before the fix: record_duration was called unconditionally with job["model"]=None,
+    inserting a corrupt NULL-model row into duration_history that poisons duration estimates.
+    After the fix: the call is guarded and no row is written for None-model jobs.
+    """
+    daemon.db.submit_job("echo cmd-only", None, 5, 60, "cmd-src", resource_profile="any")
+    with (
+        patch.object(
+            daemon.health,
+            "check",
+            return_value={
+                "ram_pct": 50.0,
+                "swap_pct": 10.0,
+                "load_avg": 1.0,
+                "cpu_count": 4,
+                "vram_pct": 50.0,
+                "ollama_model": None,
+            },
+        ),
+        patch("ollama_queue.daemon.executor.subprocess") as mock_sub,
+        patch.object(daemon.db, "record_duration", wraps=daemon.db.record_duration) as mock_record,
+    ):
+        proc = MagicMock()
+        proc.pid = 1234
+        proc.returncode = 0
+        proc.communicate.return_value = (b"done", b"")
+        mock_sub.Popen.return_value = proc
+
+        daemon.poll_once()
+        _drain(daemon)
+
+    # record_duration must NOT be called with model=None
+    for call in mock_record.call_args_list:
+        model_arg = call.kwargs.get("model") or (call.args[1] if len(call.args) > 1 else None)
+        assert (
+            model_arg is not None
+        ), "record_duration was called with model=None — corrupt null-model row would be written"
+
+    # No null-model rows in duration_history
+    history = daemon.db.get_duration_history("cmd-src")
+    assert all(
+        row["model"] is not None for row in history
+    ), "duration_history contains a null-model row from a command-only job"
+
+
 class TestDaemonSchedulerIntegration:
     def test_poll_once_promotes_due_recurring_job(self, db):
         now = time.time()
@@ -428,6 +475,29 @@ def test_heavy_jobs_serialize(db):
         "priority": 5,
     }
     assert d._can_admit(job) is False
+
+
+def test_heavy_job_not_blocked_by_embed_only(db):
+    """Heavy-profile job is admitted when only embed-profile jobs are running (H7).
+
+    Embed jobs use negligible VRAM and should not count against the heavy job's
+    serialization gate.  Before the fix, len(self._running) == 0 blocked the
+    heavy job whenever *any* job was running — including cheap embed jobs.
+    """
+    d = Daemon(db)
+    # Simulate one embed job running
+    d._running[99] = MagicMock()
+    d._running_models[99] = "nomic-embed-text"
+    job = {
+        "id": 2,
+        "model": "deepseek-r1:70b",
+        "resource_profile": "heavy",
+        "command": "echo",
+        "source": "test",
+        "timeout": 60,
+        "priority": 5,
+    }
+    assert d._can_admit(job) is True
 
 
 def test_same_model_blocks_second(db):
@@ -3276,6 +3346,76 @@ def test_run_job_unhandled_exception_partial_metrics_store_fails(db, caplog):
 
     # Should log debug message about failed partial capture
     assert any("Failed to capture partial metrics" in r.message for r in caplog.records)
+
+
+# --- H2: preempted job stays in _running until process exits ---
+
+
+def test_preempted_job_stays_in_running_until_exit(db):
+    """After _preempt_job, the job must remain in _running until the process
+    fully exits (poll() returns non-None).  The slot must not be freed while
+    the process is still alive, or the daemon will re-dequeue the same job
+    before the previous execution has terminated (double-execution bug)."""
+    from concurrent.futures import Future
+
+    from ollama_queue.daemon import Daemon
+
+    daemon = Daemon(db)
+    db.set_setting("preemption_enabled", True)
+
+    job_id = db.submit_job("echo low", "qwen2.5:7b", 5, 600, "test")
+    db.start_job(job_id)
+    with db._lock:
+        conn = db._connect()
+        conn.execute("UPDATE jobs SET pid=99999 WHERE id=?", (job_id,))
+        conn.commit()
+
+    # Plant the job in _running (as it would be when the worker thread is live)
+    fake_future = Future()
+    with daemon._running_lock:
+        daemon._running[job_id] = fake_future
+        daemon._running_models[job_id] = "qwen2.5:7b"
+
+    # Preempt the job — SIGTERM sent, job re-queued to pending
+    with patch("ollama_queue.daemon.executor.os.kill", return_value=None):
+        daemon._preempt_job(job_id)
+
+    # --- KEY ASSERTION 1: slot must still be held after kill ---
+    # The process hasn't exited yet (process still alive); _running must still
+    # contain the job_id so _can_admit does not grant the freed slot prematurely.
+    with daemon._running_lock:
+        assert job_id in daemon._running, (
+            "Job was removed from _running immediately after kill — "
+            "slot freed before process exited (double-execution risk)"
+        )
+
+    # --- Simulate process exit: resolve the Future (worker thread finished) ---
+    fake_future.set_result(None)
+    # The finally block in _run_job pops from _running.  We simulate that here
+    # since we bypassed _run_job in this unit test.
+    with daemon._running_lock:
+        daemon._running.pop(job_id, None)
+        daemon._running_models.pop(job_id, None)
+
+    # --- KEY ASSERTION 2: slot is free after process exited ---
+    with daemon._running_lock:
+        assert job_id not in daemon._running, "Job still in _running after process exited"
+
+
+def test_shutdown_waits_for_threads(daemon):
+    """shutdown() must call executor.shutdown(wait=True) so in-flight threads finish
+    before the daemon exits. wait=False leaves background threads dangling — they can
+    write to a closed DB connection or update state after shutdown."""
+    from concurrent.futures import ThreadPoolExecutor
+    from unittest.mock import MagicMock
+
+    # Install a mock executor so we can inspect the shutdown call.
+    mock_executor = MagicMock(spec=ThreadPoolExecutor)
+    daemon._executor = mock_executor
+
+    daemon.shutdown()
+
+    mock_executor.shutdown.assert_called_once_with(wait=True)
 
 
 # --- _can_admit: proxy sentinel blocks admission (#3) ---

@@ -271,71 +271,89 @@ async def proxy_generate(body: dict = Body(...)):
     )
     db.start_job(job_id)
 
+    # Guard the entire pre-StreamingResponse window against BaseException (including
+    # CancelledError, which inherits from BaseException not Exception in Python 3.8+).
+    # If anything prevents us from returning the StreamingResponse, release the claim
+    # immediately — otherwise it is held permanently and blocks all future proxy requests.
+    _streaming_response_returned = False
     try:
-        # Use build_request + send(stream=True) so httpx doesn't buffer the body.
-        backend = await select_backend(model)
-        async_client = httpx.AsyncClient(timeout=httpx.Timeout(None, connect=10.0))
-        rp_req = async_client.build_request("POST", f"{backend}/api/generate", json=body)
-        rp_resp = await async_client.send(rp_req, stream=True)
-    except Exception as e:
-        _log.error("proxy:/api/generate streaming setup failed for job %d: %s", job_id, e, exc_info=True)
-        await async_client.aclose()
-        db.complete_job(
-            job_id, exit_code=1, stdout_tail="", stderr_tail=str(e)[:500], outcome_reason=f"proxy error: {e}"
-        )
-        db.release_proxy_claim()
-        raise HTTPException(status_code=502, detail=f"Ollama request failed: {e}") from e
-
-    _released = False
-
-    def _release():
-        nonlocal _released
         try:
-            db.complete_job(job_id, exit_code=0, stdout_tail="(streaming)", stderr_tail="", outcome_reason=None)
-        except Exception:
-            _log.exception("complete_job failed for streaming job %d", job_id)
-        try:
-            db.release_proxy_claim()
-            _released = True
-        except Exception:
-            _log.exception("release_proxy_claim failed for streaming job %d", job_id)
-
-    def _on_streaming_metrics(chunk):
-        if chunk.get("eval_count"):
-            try:
-                db.store_backend_metrics(backend_url=backend, model=model, metrics=chunk)
-            except Exception:
-                _log.warning("store_backend_metrics (streaming) failed for job %d", job_id, exc_info=True)
-
-    headers = {k: v for k, v in rp_resp.headers.items() if k.lower() not in _hop_by_hop}
-
-    async def _cleanup_streaming_resources():
-        """Guaranteed cleanup: close httpx resources + force-release if generator didn't."""
-        try:
-            await rp_resp.aclose()
-        except Exception:
-            _log.debug("rp_resp.aclose() failed during cleanup", exc_info=True)
-        try:
+            # Use build_request + send(stream=True) so httpx doesn't buffer the body.
+            backend = await select_backend(model)
+            async_client = httpx.AsyncClient(timeout=httpx.Timeout(None, connect=10.0))
+            rp_req = async_client.build_request("POST", f"{backend}/api/generate", json=body)
+            rp_resp = await async_client.send(rp_req, stream=True)
+        except Exception as e:
+            _log.error("proxy:/api/generate streaming setup failed for job %d: %s", job_id, e, exc_info=True)
             await async_client.aclose()
-        except Exception:
-            _log.debug("async_client.aclose() failed during cleanup", exc_info=True)
-        if not _released:
-            _log.warning(
-                "Streaming proxy release not confirmed for job %d — forcing cleanup",
-                job_id,
+            db.complete_job(
+                job_id, exit_code=1, stdout_tail="", stderr_tail=str(e)[:500], outcome_reason=f"proxy error: {e}"
             )
+            db.release_proxy_claim()
+            raise HTTPException(status_code=502, detail=f"Ollama request failed: {e}") from e
+
+        _released = False
+
+        def _release():
+            nonlocal _released
+            try:
+                db.complete_job(job_id, exit_code=0, stdout_tail="(streaming)", stderr_tail="", outcome_reason=None)
+            except Exception:
+                _log.exception("complete_job failed for streaming job %d", job_id)
             try:
                 db.release_proxy_claim()
             except Exception:
-                _log.exception("forced release_proxy_claim also failed for job %d", job_id)
+                _log.exception("release_proxy_claim failed for streaming job %d", job_id)
+                return
+            _released = True
 
-    return StreamingResponse(
-        _iter_ndjson(rp_resp, release_fn=_release, metrics_fn=_on_streaming_metrics),
-        status_code=rp_resp.status_code,
-        headers=headers,
-        media_type="application/x-ndjson",
-        background=BackgroundTask(_cleanup_streaming_resources),
-    )
+        def _on_streaming_metrics(chunk):
+            if chunk.get("eval_count"):
+                try:
+                    db.store_backend_metrics(backend_url=backend, model=model, metrics=chunk)
+                except Exception:
+                    _log.warning("store_backend_metrics (streaming) failed for job %d", job_id, exc_info=True)
+
+        headers = {k: v for k, v in rp_resp.headers.items() if k.lower() not in _hop_by_hop}
+
+        async def _cleanup_streaming_resources():
+            """Guaranteed cleanup: close httpx resources + force-release if generator didn't."""
+            try:
+                await rp_resp.aclose()
+            except Exception:
+                _log.debug("rp_resp.aclose() failed during cleanup", exc_info=True)
+            try:
+                await async_client.aclose()
+            except Exception:
+                _log.debug("async_client.aclose() failed during cleanup", exc_info=True)
+            if not _released:
+                _log.warning(
+                    "Streaming proxy release not confirmed for job %d — forcing cleanup",
+                    job_id,
+                )
+                try:
+                    db.release_proxy_claim()
+                except Exception:
+                    _log.exception("forced release_proxy_claim also failed for job %d", job_id)
+
+        response = StreamingResponse(
+            _iter_ndjson(rp_resp, release_fn=_release, metrics_fn=_on_streaming_metrics),
+            status_code=rp_resp.status_code,
+            headers=headers,
+            media_type="application/x-ndjson",
+            background=BackgroundTask(_cleanup_streaming_resources),
+        )
+        _streaming_response_returned = True
+        return response
+    finally:
+        # If we never successfully handed off the response (e.g. CancelledError between
+        # claim acquisition and StreamingResponse construction), release the claim here.
+        # The BackgroundTask/_release path handles cleanup after streaming starts.
+        if not _streaming_response_returned:
+            try:
+                db.release_proxy_claim()
+            except Exception:
+                _log.exception("release_proxy_claim failed in pre-StreamingResponse finally for job %d", job_id)
 
 
 @router.post("/api/embed")

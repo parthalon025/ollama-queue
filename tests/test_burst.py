@@ -117,3 +117,48 @@ class TestBurstDetector:
         detector._ewma = -0.1  # negative ratio, no bracket matches
         result = detector.regime(time.time())
         assert result == "subcritical"
+
+    def test_burst_detector_regime_releases_lock_after_call(self):
+        """regime() must not hold the lock after returning — regression for concurrent sort/append."""
+        detector = BurstDetector()
+        ts = time.time()
+        for i in range(100):
+            detector.record_submission(ts + i * 0.5)
+
+        result = detector.regime()
+        assert result in ("unknown", "subcritical", "moderate", "warning", "critical")
+        # Verify lock is not held (would deadlock if sort were still happening inside)
+        acquired = detector._lock.acquire(blocking=False)
+        assert acquired, "Lock held after regime() returned — this would block record_submission()"
+        detector._lock.release()
+
+    def test_burst_detector_no_deque_mutation_error_under_concurrency(self):
+        """regime() + record_submission() must not cause RuntimeError: deque mutated during iteration."""
+        import threading
+
+        detector = BurstDetector()
+        ts = time.time()
+        for i in range(100):
+            detector.record_submission(ts + i * 0.5)
+
+        errors = []
+
+        def run_regime():
+            try:
+                for _ in range(50):
+                    detector.regime()
+            except RuntimeError as e:
+                errors.append(str(e))
+
+        def run_submissions():
+            for _ in range(50):
+                detector.record_submission(time.time())
+
+        t1 = threading.Thread(target=run_regime)
+        t2 = threading.Thread(target=run_submissions)
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+        assert not errors, f"Concurrent regime()+record_submission() raised: {errors}"

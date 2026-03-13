@@ -960,6 +960,52 @@ def test_iter_ndjson_release_on_error(client, db):
     assert state["state"] == "idle"
 
 
+def test_streaming_proxy_cancelled_error_releases_claim(db):
+    """CancelledError raised after claim acquisition but before StreamingResponse setup
+    must release the proxy claim (C5, H8).
+
+    CancelledError inherits from BaseException, not Exception — so the existing
+    except Exception block in the streaming path cannot catch it.  The claim must
+    still be released so future proxy requests are not permanently blocked.
+    """
+    import asyncio
+
+    app = create_app(db)
+
+    release_called = []
+    original_release = db.release_proxy_claim
+
+    def tracking_release():
+        release_called.append(True)
+        original_release()
+
+    # Patch select_backend (called after claim+submit_job+start_job) to raise CancelledError.
+    # This simulates the client disconnecting mid-request before streaming starts.
+    with (
+        patch.object(db, "release_proxy_claim", side_effect=tracking_release),
+        patch(
+            "ollama_queue.api.proxy.select_backend",
+            side_effect=asyncio.CancelledError("client disconnected"),
+        ),
+        TestClient(app, raise_server_exceptions=False) as tc,
+        contextlib.suppress(Exception),
+    ):
+        tc.post(
+            "/api/generate",
+            json={"model": "llama3.2:3b", "prompt": "hello", "stream": True},
+        )
+
+    # The proxy claim must have been released — the daemon must not be permanently blocked.
+    assert (
+        len(release_called) >= 1
+    ), "release_proxy_claim was never called — claim is permanently held after CancelledError"
+    state = db.get_daemon_state()
+    assert state["state"] == "idle", f"Daemon stuck in non-idle state after CancelledError: {state['state']}"
+    assert (
+        state["current_job_id"] is None
+    ), f"current_job_id not cleared after CancelledError: {state['current_job_id']}"
+
+
 def test_streaming_background_task_forces_release_on_generator_release_failure(client, db):
     """BackgroundTask safety net must release proxy claim if _release() threw in generator.
 

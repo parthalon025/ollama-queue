@@ -71,6 +71,28 @@ def test_cancel_job(client):
     job_id = resp.json()["job_id"]
     resp = client.post(f"/api/queue/cancel/{job_id}")
     assert resp.status_code == 200
+    assert resp.json() == {"ok": True}
+
+
+def test_cancel_job_returns_404_for_unknown_id(client):
+    """Cancelling a job ID that does not exist must return HTTP 404."""
+    resp = client.post("/api/queue/cancel/99999")
+    assert resp.status_code == 404
+
+
+def test_cancel_job_returns_409_for_terminal_job(client):
+    """Cancelling a job already in a terminal state must return HTTP 409."""
+    # Submit a job, then mark it completed via the DB
+    resp = client.post(
+        "/api/queue/submit", json={"command": "echo test", "source": "test", "model": "m", "priority": 5, "timeout": 60}
+    )
+    job_id = resp.json()["job_id"]
+    # Cancel it once (moves to 'cancelled' terminal state)
+    first = client.post(f"/api/queue/cancel/{job_id}")
+    assert first.status_code == 200
+    # Second cancel attempt on a terminal job must return 409
+    second = client.post(f"/api/queue/cancel/{job_id}")
+    assert second.status_code == 409
 
 
 def test_get_settings(client):
@@ -1108,6 +1130,32 @@ def test_dlq_reschedule_permanent_failure(client_and_db):
     entries = db.list_dlq()
     resp = client.post(f"/api/dlq/{entries[0]['id']}/reschedule")
     assert resp.status_code == 400
+
+
+def test_reschedule_dlq_uses_direct_lookup(client_and_db):
+    """reschedule_dlq_entry must call get_dlq_entry(id) not scan list_dlq().
+
+    Verifies the fix for M5: if list_dlq() were used for lookup, mocking it to
+    return [] would cause a 404 even when the entry exists. With the direct PK
+    lookup via get_dlq_entry(), the entry is found correctly regardless of
+    list_dlq()'s return value.
+    """
+    client, db = client_and_db
+    job_id = db.submit_job("echo hi", "test-model", priority=5, timeout=60, source="test")
+    db.start_job(job_id)
+    db.complete_job(job_id, exit_code=1, stdout_tail="", stderr_tail="", outcome_reason="exit code 1")
+    db.move_to_dlq(job_id, "connection refused")
+    entries = db.list_dlq()
+    dlq_id = entries[0]["id"]
+
+    # Patch list_dlq to return empty — a scan-based lookup would silently 404.
+    # The correct implementation calls get_dlq_entry(dlq_id) directly and ignores list_dlq.
+    with patch.object(db, "list_dlq", return_value=[]):
+        resp = client.post(f"/api/dlq/{dlq_id}/reschedule")
+
+    # Must succeed: entry exists, found via direct PK lookup
+    assert resp.status_code == 200, f"Expected 200 but got {resp.status_code} — endpoint is still using list_dlq() scan"
+    assert "new_job_id" in resp.json()
 
 
 def test_defer_job_not_pending(client_and_db):

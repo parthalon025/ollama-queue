@@ -213,16 +213,22 @@ def _check_auto_promote_inner(db: Database, run_id: int) -> None:  # noqa: PLR09
         )
         return
 
-    if prod_run_row is not None:
-        try:
-            m = json.loads(prod_run_row["metrics"]) if isinstance(prod_run_row["metrics"], str) else {}
-            production_quality = (m.get(prod_id) or {}).get(quality_metric)
-        except (json.JSONDecodeError, TypeError):
-            _log.warning(
-                "check_auto_promote: production metrics unparseable for variant %s — gate 2 skipped as unsafe",
-                prod_id,
-            )
-            return
+    if prod_run_row is None:
+        _log.info(
+            "check_auto_promote: production variant %s has no eval baseline — skipping Gate 2 as unsafe",
+            prod_id,
+        )
+        return
+
+    try:
+        m = json.loads(prod_run_row["metrics"]) if isinstance(prod_run_row["metrics"], str) else {}
+        production_quality = (m.get(prod_id) or {}).get(quality_metric)
+    except (json.JSONDecodeError, TypeError):
+        _log.warning(
+            "check_auto_promote: production metrics unparseable for variant %s — gate 2 skipped as unsafe",
+            prod_id,
+        )
+        return
 
     if production_quality is not None and winner_quality <= production_quality + min_improvement:
         _log.info(
@@ -238,25 +244,36 @@ def _check_auto_promote_inner(db: Database, run_id: int) -> None:  # noqa: PLR09
         return
 
     # Gate 3: error_budget_used <= error_budget
+    # Denominator is judge_row_count (rows actually judged in this run), NOT item_count
+    # (total source dataset size).  Using item_count under-counts the error rate when
+    # judging is partial: e.g. 5 errors / 100 items = 5% but 5 errors / 40 judged = 12.5%.
     _eb = db.get_setting("eval.error_budget")
     error_budget = float(_eb) if _eb is not None else 0.30
-    item_count = run.get("item_count") or 0
-    if item_count > 0:
-        with db._lock:
-            conn = db._connect()
-            failed_count = conn.execute(
-                "SELECT COUNT(*) FROM eval_results WHERE run_id = ? AND score_transfer IS NULL AND row_type = 'judge'",
-                (run_id,),
-            ).fetchone()[0]
-        error_budget_used = failed_count / item_count
-        if error_budget_used > error_budget:
-            _log.info(
-                "check_auto_promote: run %d error_budget_used=%.3f > %.3f, skipping",
-                run_id,
-                error_budget_used,
-                error_budget,
-            )
-            return
+    with db._lock:
+        conn = db._connect()
+        judge_row_count = conn.execute(
+            "SELECT COUNT(*) FROM eval_results WHERE run_id = ? AND row_type = 'judge'",
+            (run_id,),
+        ).fetchone()[0]
+        failed_count = conn.execute(
+            "SELECT COUNT(*) FROM eval_results WHERE run_id = ? AND score_transfer IS NULL AND row_type = 'judge'",
+            (run_id,),
+        ).fetchone()[0]
+    if judge_row_count == 0:
+        _log.info(
+            "check_auto_promote: run %d has no judge rows — blocking Gate 3 (error rate undefined)",
+            run_id,
+        )
+        return
+    error_budget_used = failed_count / judge_row_count
+    if error_budget_used > error_budget:
+        _log.info(
+            "check_auto_promote: run %d error_budget_used=%.3f > %.3f, skipping",
+            run_id,
+            error_budget_used,
+            error_budget,
+        )
+        return
 
     # Stability window gate (optional)
     stability_window = int(db.get_setting("eval.stability_window") or 0)

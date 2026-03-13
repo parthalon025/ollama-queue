@@ -49,10 +49,20 @@ def _call_proxy_raw(
                 "completion_tokens": data.get("eval_count", 0),
                 "total_duration_ns": data.get("total_duration", 0),
             }
-            job_id = data.get("queue_job_id")
+            job_id = data.get("_queue_job_id")
             return raw if raw else None, usage, job_id
-        except httpx.HTTPStatusError:
-            _log.exception("proxy call failed (HTTP error)")
+        except httpx.HTTPStatusError as exc:
+            code = exc.response.status_code
+            if code in _RETRYABLE_CODES:
+                # all retries exhausted — retryable codes are handled before raise_for_status,
+                # so we only reach here when attempt == _MAX_RETRIES
+                _log.warning(
+                    "proxy HTTP %d — retries exhausted after %d attempts",
+                    code,
+                    _MAX_RETRIES + 1,
+                )
+            else:
+                _log.warning("proxy call failed (HTTP %d)", code)
             return None, {}, None
         except Exception:
             _log.exception("proxy call failed")

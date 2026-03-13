@@ -171,15 +171,27 @@ class JobsMixin:
             conn.commit()
 
     def cancel_job(self, job_id):
+        """Cancel a pending job. Returns a status string:
+        - "cancelled"        — job was pending and is now cancelled
+        - "not_found"        — no job with this ID exists
+        - "not_cancellable"  — job exists but is not in a cancellable state
+        """
         with self._lock:
             conn = self._connect()
-            conn.execute(
+            cur = conn.execute(
                 """UPDATE jobs
                    SET status = 'cancelled', outcome_reason = 'user cancelled', completed_at = ?
                    WHERE id = ? AND status = 'pending'""",
                 (time.time(), job_id),
             )
             conn.commit()
+            if cur.rowcount > 0:
+                return "cancelled"
+            # Distinguish: job doesn't exist vs job exists but not pending
+            row = conn.execute("SELECT id FROM jobs WHERE id = ?", (job_id,)).fetchone()
+            if row is None:
+                return "not_found"
+            return "not_cancellable"
 
     def set_job_priority(self, job_id, priority):
         """Update priority of a pending job. Returns True if updated."""
@@ -588,8 +600,40 @@ class JobsMixin:
 
     # --- Consumers ---
 
+    # Whitelist of all valid column names for the consumers table.
+    # Guards upsert_consumer and update_consumer against SQL injection via
+    # f-string column interpolation (parameterized VALUES don't protect column names).
+    _CONSUMER_ALLOWED_COLUMNS = frozenset(
+        {
+            "id",
+            "name",
+            "type",
+            "platform",
+            "source_label",
+            "status",
+            "streaming_confirmed",
+            "streaming_suspect",
+            "is_managed_job",
+            "patch_type",
+            "restart_policy",
+            "patch_applied",
+            "patch_path",
+            "patch_snippet",
+            "health_status",
+            "health_checked_at",
+            "request_count",
+            "last_seen",
+            "last_live_seen",
+            "detected_at",
+            "onboarded_at",
+        }
+    )
+
     def upsert_consumer(self, data):
         """Insert or update a consumer by (name, platform). Returns id."""
+        unknown = set(data.keys()) - self._CONSUMER_ALLOWED_COLUMNS
+        if unknown:
+            raise ValueError(f"upsert_consumer: unknown columns {unknown!r}")
         with self._lock:
             conn = self._connect()
             existing = conn.execute(
@@ -626,6 +670,9 @@ class JobsMixin:
             return dict(row) if row else None
 
     def update_consumer(self, consumer_id, **kwargs):
+        unknown = set(kwargs.keys()) - self._CONSUMER_ALLOWED_COLUMNS
+        if unknown:
+            raise ValueError(f"update_consumer: unknown columns {unknown!r}")
         with self._lock:
             conn = self._connect()
             sets = ", ".join(f"{k} = ?" for k in kwargs)
