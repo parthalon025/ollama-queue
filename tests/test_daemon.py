@@ -3398,3 +3398,90 @@ def test_proc_wait_timeout_expired_kills_process(db, caplog):
 
     proc.kill.assert_called_once()
     assert any("timed out after drain" in r.message for r in caplog.records)
+
+
+# --- Orphan recovery: partial eval results annotation (#23) ---
+
+
+def test_recover_orphans_annotates_partial_eval_results(db):
+    """Orphaned eval runs with partial results get annotated error message (#23)."""
+    d = Daemon(db)
+    with db._lock:
+        conn = db._connect()
+        conn.execute(
+            "INSERT INTO eval_runs (id, data_source_url, variants, per_cluster, status, run_mode, started_at) "
+            "VALUES (100, 'http://test', '[]', 4, 'generating', 'batch', ?)",
+            (time.time(),),
+        )
+        # Insert 3 partial results for run 100
+        for i in range(3):
+            conn.execute(
+                "INSERT INTO eval_results (run_id, variant, source_item_id, target_item_id, is_same_cluster) "
+                "VALUES (100, 'A', ?, ?, 1)",
+                (f"src_{i}", f"tgt_{i}"),
+            )
+        conn.commit()
+    d._recover_orphans()
+    with db._lock:
+        conn = db._connect()
+        run = conn.execute("SELECT error FROM eval_runs WHERE id = 100").fetchone()
+    assert "3 partial results remain" in run["error"]
+
+
+def test_recover_orphans_no_partial_results_clean_message(db):
+    """Orphaned eval runs with zero results get clean error message (#23)."""
+    d = Daemon(db)
+    with db._lock:
+        conn = db._connect()
+        conn.execute(
+            "INSERT INTO eval_runs (id, data_source_url, variants, per_cluster, status, run_mode, started_at) "
+            "VALUES (101, 'http://test', '[]', 4, 'judging', 'batch', ?)",
+            (time.time(),),
+        )
+        conn.commit()
+    d._recover_orphans()
+    with db._lock:
+        conn = db._connect()
+        run = conn.execute("SELECT error FROM eval_runs WHERE id = 101").fetchone()
+    assert run["error"] == "daemon restart: session abandoned"
+    assert "partial" not in run["error"]
+
+
+# --- Orphan recovery: NULL-PID warning log (#24) ---
+
+
+def test_recover_orphans_logs_warning_for_null_pid(db, caplog):
+    """Orphan jobs with no PID emit a warning about possible duplicate execution (#24)."""
+    d = Daemon(db)
+    job_id = db.submit_job("echo hi", "", 5, 60, "test")
+    db.start_job(job_id)
+    # pid column is NULL (not set yet) — default state after start_job
+
+    with caplog.at_level(logging.WARNING):
+        d._recover_orphans()
+
+    job = db.get_job(job_id)
+    assert job["status"] == "pending"
+    assert any(
+        f"Orphan job #{job_id} has no PID" in r.message and "duplicate execution" in r.message for r in caplog.records
+    )
+
+
+def test_recover_orphans_no_null_pid_warning_for_valid_pid(db, caplog):
+    """Orphan jobs with a valid PID do not get the NULL-PID warning (#24)."""
+    d = Daemon(db)
+    job_id = db.submit_job("echo hi", "", 5, 60, "test")
+    db.start_job(job_id)
+    with db._lock:
+        conn = db._connect()
+        conn.execute("UPDATE jobs SET pid = 999999 WHERE id = ?", (job_id,))
+        conn.commit()
+
+    with (
+        caplog.at_level(logging.WARNING),
+        patch("ollama_queue.daemon.loop.os.kill") as mock_kill,
+    ):
+        mock_kill.side_effect = ProcessLookupError
+        d._recover_orphans()
+
+    assert not any("has no PID" in r.message for r in caplog.records)
