@@ -622,6 +622,47 @@ def test_repeat_run_404_for_missing_original(client):
     assert resp.status_code == 404
 
 
+def test_repeat_eval_run_propagates_data_source_token(client_and_db):
+    """Repeated run inherits data_source_token from the original run."""
+    client, db = client_and_db
+    token = "test-bearer-token-abc123"
+
+    # Insert an original run with a data_source_token set directly in the DB
+    import datetime
+
+    with db._lock:
+        conn = db._connect()
+        cur = conn.execute(
+            """INSERT INTO eval_runs
+               (data_source_url, data_source_token, variants, per_cluster, status, run_mode,
+                item_ids, seed, started_at)
+               VALUES (?, ?, ?, ?, 'complete', 'batch',
+                       ?, ?, ?)""",
+            (
+                "http://127.0.0.1:7685",
+                token,
+                json.dumps(["A", "B"]),
+                4,
+                json.dumps([["101", "201"]]),
+                42,
+                datetime.datetime.now(datetime.UTC).isoformat(),
+            ),
+        )
+        conn.commit()
+        orig_id = cur.lastrowid
+
+    with patch("ollama_queue.api.eval_runs.run_eval_session"):
+        resp = client.post(f"/api/eval/runs/{orig_id}/repeat")
+    assert resp.status_code == 201
+    new_id = resp.json()["run_id"]
+
+    with db._lock:
+        conn = db._connect()
+        row = conn.execute("SELECT data_source_token FROM eval_runs WHERE id = ?", (new_id,)).fetchone()
+    assert row is not None
+    assert row["data_source_token"] == token
+
+
 # ---------------------------------------------------------------------------
 # Seed persistence — run_eval_generate() writes seed when none present
 # ---------------------------------------------------------------------------
