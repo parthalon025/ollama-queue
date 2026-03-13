@@ -64,10 +64,9 @@ class Database(
         return self._conn
 
     def _add_column_if_missing(self, conn: sqlite3.Connection, table: str, col: str, defn: str) -> None:
-        """ALTER TABLE ... ADD COLUMN, ignoring duplicate-column errors."""
+        """ALTER TABLE ... ADD COLUMN, ignoring duplicate-column errors. Caller owns the commit."""
         try:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {defn}")
-            conn.commit()
         except sqlite3.OperationalError as e:
             if "duplicate column" in str(e).lower():
                 _log.debug("%s.%s already exists — skipping migration", table, col)
