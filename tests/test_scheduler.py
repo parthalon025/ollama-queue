@@ -618,3 +618,49 @@ class TestRebalanceCoverageGaps:
         db.add_recurring_job("cron1", "echo hi", cron_expression="0 6 * * *", next_run=time.time() + 100)
         changes = scheduler.rebalance(time.time())
         assert changes == []
+
+
+class TestPromoteDueJobsBadCronSkip:
+    def test_promote_due_jobs_skips_bad_cron_entries(self, db, scheduler):
+        """H3: a malformed cron expression on one job must not abort promotion of others.
+
+        The bad-cron job is first promoted (creating a pending duplicate), then
+        its cron expression is corrupted in the DB and next_run reset to due.
+        The second promote_due_jobs call hits the duplicate-coalesce path for
+        that job, which calls _compute_next_run(cron_expr) and raises
+        CroniterBadCronError.  Without the fix this exception propagates and
+        aborts the loop, preventing the valid job from being promoted.
+        """
+        now = time.time()
+
+        # Bad-cron job: add with valid expr, promote to create a pending duplicate
+        rj_bad_id = db.add_recurring_job(
+            "bad-cron-job",
+            "echo bad",
+            cron_expression="0 7 * * *",
+            next_run=now - 1,
+        )
+        # First promotion creates the pending job (sets up duplicate state)
+        scheduler.promote_due_jobs(now)
+
+        # Corrupt cron expression and reset next_run so it appears due again
+        conn = db._connect()
+        conn.execute(
+            "UPDATE recurring_jobs SET cron_expression = ?, next_run = ? WHERE id = ?",
+            ("NOT_A_VALID_CRON *** bad", now - 1, rj_bad_id),
+        )
+        conn.commit()
+        scheduler._invalidate_jobs_cache()
+
+        # Valid job — due and should be promoted even when the bad-cron job
+        # is encountered in the same loop iteration
+        db.add_recurring_job("valid-job", "echo valid", interval_seconds=3600, next_run=now - 1)
+        scheduler._invalidate_jobs_cache()
+
+        # Should not raise; bad-cron entry is logged+skipped, valid job is promoted
+        new_ids = scheduler.promote_due_jobs(now)
+
+        # The valid interval job must have been promoted
+        assert len(new_ids) >= 1
+        promoted_commands = [db.get_job(jid)["command"] for jid in new_ids]
+        assert "echo valid" in promoted_commands
