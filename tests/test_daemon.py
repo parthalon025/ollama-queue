@@ -3262,3 +3262,70 @@ def test_can_admit_allowed_when_no_proxy_sentinel(db, monkeypatch):
         },
     ):
         assert d._can_admit(job) is True
+
+
+# --- proc.wait() timeout after drain (#4) ---
+
+
+def test_proc_wait_uses_timeout_after_drain(db):
+    """proc.wait() after _drain_pipes_with_tracking must use a timeout, not bare wait().
+
+    A bare proc.wait() can deadlock the worker thread if the process is a zombie
+    or stuck in an uninterruptible state.
+    """
+
+    d = Daemon(db)
+    job_id = db.submit_job("echo hi", "qwen2.5:7b", 5, 60, "test")
+    db.start_job(job_id)
+    job = db.get_job(job_id)
+
+    with (
+        patch("ollama_queue.daemon.executor.subprocess") as mock_sub,
+        patch("ollama_queue.daemon.executor._drain_pipes_with_tracking") as mock_drain,
+    ):
+        proc = MagicMock()
+        proc.pid = 1234
+        proc.returncode = 0
+        mock_sub.Popen.return_value = proc
+        mock_drain.return_value = (b"ok", b"")
+        d._run_job(dict(job))
+
+    # Verify wait was called with a timeout argument (not bare)
+    proc.wait.assert_called()
+    args, kwargs = proc.wait.call_args
+    timeout_val = kwargs.get("timeout") or (args[0] if args else None)
+    assert (
+        timeout_val is not None and timeout_val > 0
+    ), f"proc.wait() must be called with a positive timeout, got args={args} kwargs={kwargs}"
+
+
+def test_proc_wait_timeout_expired_kills_process(db, caplog):
+    """When proc.wait(timeout=30) raises TimeoutExpired, the process is killed."""
+    import subprocess
+
+    d = Daemon(db)
+    job_id = db.submit_job("echo hi", "qwen2.5:7b", 5, 60, "test")
+    db.start_job(job_id)
+    job = db.get_job(job_id)
+
+    with (
+        patch("ollama_queue.daemon.executor.subprocess") as mock_sub,
+        patch("ollama_queue.daemon.executor._drain_pipes_with_tracking") as mock_drain,
+        caplog.at_level(logging.WARNING),
+    ):
+        proc = MagicMock()
+        proc.pid = 1234
+        mock_sub.Popen.return_value = proc
+        mock_sub.TimeoutExpired = subprocess.TimeoutExpired
+        mock_drain.return_value = (b"ok", b"")
+
+        # First wait(timeout=30) raises TimeoutExpired; second wait(timeout=5) succeeds
+        proc.wait.side_effect = [
+            subprocess.TimeoutExpired("cmd", 30),
+            None,
+        ]
+        proc.returncode = -9  # killed
+        d._run_job(dict(job))
+
+    proc.kill.assert_called_once()
+    assert any("timed out after drain" in r.message for r in caplog.records)

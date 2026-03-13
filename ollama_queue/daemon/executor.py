@@ -375,7 +375,13 @@ class ExecutorMixin:
             # Non-LLM jobs: communicate() with hard timeout
             if job.get("resource_profile") == "ollama":
                 out, err = _drain_pipes_with_tracking(proc, job["id"], self.stall_detector)
-                proc.wait()  # ensure returncode is set (drain loop exits on proc.poll())
+                try:
+                    proc.wait(timeout=30)
+                except subprocess.TimeoutExpired:
+                    _log.warning("Job #%d proc.wait() timed out after drain — sending SIGKILL", job["id"])
+                    with contextlib.suppress(ProcessLookupError):
+                        proc.kill()
+                    proc.wait(timeout=5)  # reap zombie
             else:
                 try:
                     out, err = proc.communicate(timeout=job["timeout"])
