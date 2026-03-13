@@ -70,17 +70,15 @@ export async function removeBackend(url) {
 }
 
 export async function updateBackendWeight(url, weight) {
-  const res = await fetch(`${API}/backends/${encodeURIComponent(url)}/weight`, {
+  // weight is a query param, not a body param — matches PUT /api/backends/{url}/weight?weight=N
+  const res = await fetch(`${API}/backends/${encodeURIComponent(url)}/weight?weight=${weight}`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ weight }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || `HTTP ${res.status}`);
   }
   await fetchBackends();
-  return res.json();
 }
 
 export async function testBackend(url) {
