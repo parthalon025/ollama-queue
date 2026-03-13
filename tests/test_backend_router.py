@@ -22,10 +22,12 @@ def clear_caches():
     router._health_cache.clear()
     router._models_cache.clear()
     router._loaded_cache.clear()
+    router._hw_cache.clear()
     yield
     router._health_cache.clear()
     router._models_cache.clear()
     router._loaded_cache.clear()
+    router._hw_cache.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -223,6 +225,158 @@ def test_loaded_models_parses_ps_response():
         result = run(router._loaded_models("http://host:11434"))
 
     assert result == frozenset(["qwen3:14b"])
+
+
+# ---------------------------------------------------------------------------
+# _backend_vram_pct — hardware load check
+# ---------------------------------------------------------------------------
+
+
+def test_hw_cache_hit():
+    """Cached VRAM result is returned without making a new HTTP call."""
+    now = time.monotonic()
+    router._hw_cache["http://cached:11434"] = (now, 42.5)
+    result = run(router._backend_vram_pct("http://cached:11434"))
+    assert result == 42.5
+
+
+def test_backend_vram_pct_parses_health_response():
+    """_backend_vram_pct extracts vram_pct from the first health log entry."""
+    health_response = {"log": [{"vram_pct": 67.3, "ram_pct": 40.0}]}
+
+    with patch("ollama_queue.api.backend_router.httpx.AsyncClient", _fake_async_client(json_data=health_response)):
+        result = run(router._backend_vram_pct("http://host:11434"))
+
+    assert result == pytest.approx(67.3)
+
+
+def test_backend_vram_pct_returns_zero_on_error():
+    """_backend_vram_pct returns 0.0 (no penalty) on connection failure."""
+    with patch(
+        "ollama_queue.api.backend_router.httpx.AsyncClient",
+        _fake_async_client(side_effect=Exception("connection refused")),
+    ):
+        result = run(router._backend_vram_pct("http://dead:11434"))
+
+    assert result == 0.0
+
+
+def test_backend_vram_pct_returns_zero_on_empty_log():
+    """_backend_vram_pct returns 0.0 when the health log is empty."""
+    health_response = {"log": []}
+
+    with patch("ollama_queue.api.backend_router.httpx.AsyncClient", _fake_async_client(json_data=health_response)):
+        result = run(router._backend_vram_pct("http://host:11434"))
+
+    assert result == 0.0
+
+
+# ---------------------------------------------------------------------------
+# select_backend — hardware load tiebreaker
+# ---------------------------------------------------------------------------
+
+
+def test_routes_to_lower_vram_backend():
+    """Both warm; local has 80% VRAM, remote has 20% — routes to remote (lower pressure)."""
+    backends = ["http://local:11434", "http://remote:11434"]
+    model_name = "qwen3:14b"
+
+    vram_vals = {
+        "http://local:11434": 80.0,
+        "http://remote:11434": 20.0,
+    }
+
+    async def fake_vram(url):
+        return vram_vals[url]
+
+    with (
+        patch.object(router, "BACKENDS", backends),
+        patch.object(router, "_backend_healthy", new=AsyncMock(return_value=True)),
+        patch.object(router, "_available_models", new=AsyncMock(return_value=frozenset([model_name]))),
+        patch.object(router, "_loaded_models", new=AsyncMock(return_value=frozenset([model_name]))),
+        patch.object(router, "_backend_vram_pct", new=AsyncMock(side_effect=fake_vram)),
+    ):
+        result = run(router.select_backend(model_name))
+
+    assert result == "http://remote:11434"
+
+
+def test_hw_check_skipped_when_no_model():
+    """When no model is specified, the HW check is skipped — falls through to random."""
+    backends = ["http://local:11434", "http://remote:11434"]
+    vram_mock = AsyncMock(return_value=80.0)
+
+    with (
+        patch.object(router, "BACKENDS", backends),
+        patch.object(router, "_backend_healthy", new=AsyncMock(return_value=True)),
+        patch.object(router, "_backend_vram_pct", new=vram_mock),
+    ):
+        result = run(router.select_backend(""))
+
+    vram_mock.assert_not_called()
+    assert result in backends
+
+
+# ---------------------------------------------------------------------------
+# fetch_all_backend_models
+# ---------------------------------------------------------------------------
+
+
+def test_fetch_all_backend_models_merges_deduplicates():
+    """Models on both backends appear once with both URLs in 'backends'."""
+    backends = ["http://local:11434", "http://remote:11434"]
+
+    responses = {
+        "http://local:11434": {
+            "models": [{"name": "qwen3:14b", "size": 8000000000}, {"name": "nomic-embed-text", "size": 274000000}]
+        },
+        "http://remote:11434": {
+            "models": [{"name": "qwen3:14b", "size": 8000000000}, {"name": "deepseek-r1:70b", "size": 39000000000}]
+        },
+    }
+
+    call_idx = [0]
+
+    def _fake_client_for_url(json_data=None, side_effect=None):
+        class _FakeResp:
+            status_code = 200
+
+            def json(self):
+                return json_data or {}
+
+        class _FakeClient:
+            def __init__(self, **_):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_):
+                pass
+
+            async def get(self, url):
+                # Map /api/tags URL back to the backend
+                for b in backends:
+                    if url.startswith(b):
+                        return type("R", (), {"status_code": 200, "json": lambda self, d=responses[b]: d})()
+                return _FakeResp()
+
+        return _FakeClient
+
+    with (
+        patch.object(router, "BACKENDS", backends),
+        patch("ollama_queue.api.backend_router.httpx.AsyncClient", _fake_client_for_url()),
+    ):
+        result = run(router.fetch_all_backend_models())
+
+    by_name = {m["name"]: m for m in result}
+    assert set(by_name.keys()) == {"qwen3:14b", "nomic-embed-text", "deepseek-r1:70b"}
+    # qwen3:14b appears on both backends
+    assert set(by_name["qwen3:14b"]["backends"]) == {"http://local:11434", "http://remote:11434"}
+    # nomic-embed-text only on local
+    assert by_name["nomic-embed-text"]["backends"] == ["http://local:11434"]
+    # deepseek only on remote
+    assert by_name["deepseek-r1:70b"]["backends"] == ["http://remote:11434"]
 
 
 # ---------------------------------------------------------------------------

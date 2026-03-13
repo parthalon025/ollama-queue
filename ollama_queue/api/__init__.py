@@ -24,6 +24,7 @@ def register_routes(app, db_instance: Database) -> None:
 
     # Import route modules (each defines a ``router`` APIRouter)
     from ollama_queue.api import (
+        backends,
         consumers,
         dlq,
         eval_runs,
@@ -40,6 +41,7 @@ def register_routes(app, db_instance: Database) -> None:
 
     app.include_router(jobs.router)
     app.include_router(health.router)
+    app.include_router(backends.router)
     app.include_router(settings.router)
     app.include_router(proxy.router)
     app.include_router(schedule.router)

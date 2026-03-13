@@ -8,6 +8,7 @@ import { API } from './_shared.js';
 
 export const healthData = signal([]);     // /api/health log array
 export const cpuCount = signal(1);        // cpu_count from /api/health — used to convert raw load_avg to %
+export const backendsData = signal([]);   // /api/backends — per-backend health, model count, VRAM%
 export const durationData = signal([]);   // /api/durations response
 export const heatmapData = signal([]);    // /api/heatmap response
 export const deferredJobs = signal([]);       // /api/deferred response
@@ -31,6 +32,21 @@ export const interceptStatus = signal({ enabled: false, rule_present: false });
 // Decision it drives: User sees which services need to be routed through the queue.
 export const consumers = signal([]);
 export const consumersScanning = signal(false);
+
+// ── Backend status ───────────────────────────────────────────────────────────
+
+// What it shows: Health, model count, loaded models, and VRAM% for each configured
+//   Ollama backend. Only meaningful when OLLAMA_BACKENDS has more than one URL.
+// Decision it drives: BackendsPanel on the Now tab shows which machine is handling
+//   inference and whether any backend is overloaded or unreachable.
+export async function fetchBackends() {
+    try {
+        const res = await fetch(`${API}/backends`);
+        if (res.ok) backendsData.value = await res.json();
+    } catch (e) {
+        console.error('fetchBackends failed:', e);
+    }
+}
 
 // ── Dead Letter Queue ────────────────────────────────────────────────────────
 // Fetched on initial load + after any retry/dismiss. dlqCount drives the alert badge.

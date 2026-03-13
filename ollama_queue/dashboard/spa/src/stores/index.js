@@ -45,7 +45,7 @@ import { status, queue, connectionStatus } from './queue.js';
 import { settings } from './settings.js';
 import { healthData, cpuCount, durationData, heatmapData, dlqSchedulePreview,
          fetchDLQ, fetchDeferred, fetchDLQSchedulePreview, fetchModelPerformance,
-         fetchPerformanceCurve } from './health.js';
+         fetchPerformanceCurve, fetchBackends } from './health.js';
 import { history } from './queue.js';
 
 // ── Polling loop ────────────────────────────────────────────────────────────
@@ -127,7 +127,8 @@ async function _fetchNonRealtime() {
 
 async function fetchAll() {
     fetchStatus();
-    fetchDLQ(); // populate DLQ badge on first load
+    fetchDLQ();      // populate DLQ badge on first load
+    fetchBackends(); // populate backend health panel on first load
     // Fetch non-realtime data (charts, history) once on load
     try {
         const [qResp, hResp, healthResp, durResp, heatResp, setResp] = await Promise.all([

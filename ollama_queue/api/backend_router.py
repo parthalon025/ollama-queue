@@ -1,14 +1,16 @@
 """Multi-backend Ollama router for the proxy layer.
 
-Selects the best backend for each request using a three-tier strategy:
+Selects the best backend for each request using a four-tier strategy:
   1. Health check — skip unreachable backends (2s timeout, 30s cache)
   2. Model availability — prefer backends that have the requested model (60s cache)
   3. Warm model — prefer backends with the model already loaded in VRAM (5s cache)
-  4. Random choice among remaining tied candidates
+  4. Hardware load — prefer backends with lower VRAM pressure (10s cache)
+  5. Random choice among remaining tied candidates
 
 Configure via env vars:
   OLLAMA_BACKENDS=http://host1:11434,http://host2:11434  (multi-backend)
   OLLAMA_URL=http://127.0.0.1:11434                      (single-backend fallback)
+  OLLAMA_QUEUE_PORT=7683                                  (queue health port for HW checks)
 
 Single-backend setups (or no OLLAMA_BACKENDS set) skip all routing logic.
 """
@@ -33,15 +35,21 @@ BACKENDS: list[str] = (
     else [os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")]
 )
 
+# Port where ollama-queue health endpoint is reachable on each backend host.
+# Used to derive queue URL from Ollama backend URL for VRAM pressure checks.
+_QUEUE_PORT = int(os.environ.get("OLLAMA_QUEUE_PORT", "7683"))
+
 # Cache TTLs (seconds)
 _HEALTH_TTL = 30.0
 _MODELS_TTL = 60.0
 _LOADED_TTL = 5.0
+_HW_TTL = 10.0
 
 # Module-level caches: url -> (timestamp, data)
 _health_cache: dict[str, tuple[float, bool]] = {}
 _models_cache: dict[str, tuple[float, frozenset[str]]] = {}
 _loaded_cache: dict[str, tuple[float, frozenset[str]]] = {}
+_hw_cache: dict[str, tuple[float, float]] = {}
 
 
 async def _backend_healthy(url: str) -> bool:
@@ -95,11 +103,110 @@ async def _loaded_models(url: str) -> frozenset[str]:
     return loaded
 
 
+async def _backend_vram_pct(url: str) -> float:
+    """Return VRAM utilisation % for this backend's host machine.
+
+    Queries the ollama-queue health endpoint on the same host (port OLLAMA_QUEUE_PORT).
+    Returns 0.0 (no penalty) on any error — prefer known-good over unknown.
+    Result cached 10s.
+    """
+    now = time.monotonic()
+    cached = _hw_cache.get(url)
+    if cached and now - cached[0] < _HW_TTL:
+        return cached[1]
+    try:
+        from urllib.parse import urlparse, urlunparse
+
+        parsed = urlparse(url)
+        queue_url = urlunparse(parsed._replace(netloc=f"{parsed.hostname}:{_QUEUE_PORT}"))
+        async with httpx.AsyncClient(timeout=2.0) as c:
+            r = await c.get(f"{queue_url}/api/health")
+            if r.status_code == 200:
+                log = r.json().get("log", [])
+                vram = float(log[0]["vram_pct"]) if log else 0.0
+            else:
+                _log.debug("vram check %s: HTTP %d", url, r.status_code)
+                vram = 0.0
+    except Exception as e:
+        _log.debug("vram check %s failed: %s", url, e)
+        vram = 0.0
+    _hw_cache[url] = (now, vram)
+    return vram
+
+
+async def fetch_all_backend_models() -> list[dict]:
+    """Fetch /api/tags from all backends and return a merged, deduplicated model list.
+
+    Each entry: {name, size_bytes, backends: [url, ...]}
+    Models available on multiple backends list all backend URLs in 'backends'.
+    """
+
+    async def _fetch_one(url: str) -> list[dict]:
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as c:
+                r = await c.get(f"{url}/api/tags")
+                if r.status_code != 200:
+                    _log.debug("fetch models %s: HTTP %d", url, r.status_code)
+                    return []
+                return [
+                    {"name": m["name"], "size_bytes": m.get("size", 0), "backend_url": url}
+                    for m in r.json().get("models", [])
+                ]
+        except Exception as e:
+            _log.debug("fetch models %s failed: %s", url, e)
+            return []
+
+    results = await asyncio.gather(*(_fetch_one(b) for b in BACKENDS))
+
+    seen: dict[str, dict] = {}
+    for backend_models in results:
+        for m in backend_models:
+            name = m["name"]
+            if name not in seen:
+                seen[name] = {"name": name, "size_bytes": m["size_bytes"], "backends": [m["backend_url"]]}
+            elif m["backend_url"] not in seen[name]["backends"]:
+                seen[name]["backends"].append(m["backend_url"])
+
+    return list(seen.values())
+
+
+async def _route_by_model(healthy: list[str], model: str) -> list[str]:
+    """Apply model-aware tiers (availability → warm → HW pressure) to a healthy list.
+
+    Returns a narrowed list of candidates. Caller picks from this list (random or first).
+    Extracted to keep select_backend under the PLR0911 return-statement limit.
+    """
+    # 2. Prefer backends that have the requested model (parallel model list checks)
+    avail = await asyncio.gather(*(_available_models(b) for b in healthy))
+    with_model = [b for b, ms in zip(healthy, avail, strict=False) if model in ms]
+    if with_model:
+        healthy = with_model
+
+    if len(healthy) == 1:
+        return healthy
+
+    # 3. Prefer warm — model already loaded in VRAM (parallel /api/ps checks)
+    loaded = await asyncio.gather(*(_loaded_models(b) for b in healthy))
+    warm = [b for b, ls in zip(healthy, loaded, strict=False) if model in ls]
+    if warm:
+        healthy = warm  # narrow to warm candidates; HW check breaks ties below
+
+    if len(healthy) == 1:
+        return healthy
+
+    # 4. Prefer backend with lower VRAM pressure (parallel queue health checks, 10s cache)
+    hw = await asyncio.gather(*(_backend_vram_pct(b) for b in healthy))
+    min_vram = min(hw)
+    # 5% tolerance — avoids penalising a backend for trivial measurement jitter
+    low_vram = [b for b, v in zip(healthy, hw, strict=False) if v <= min_vram + 5.0]
+    return low_vram if low_vram else healthy
+
+
 async def select_backend(model: str = "") -> str:
     """Return the best Ollama backend URL for this request.
 
     Fast path: returns immediately for single-backend setups.
-    Multi-backend: runs health + model checks in parallel via asyncio.gather.
+    Multi-backend: runs health + model + hardware checks in parallel via asyncio.gather.
     """
     if len(BACKENDS) == 1:
         return BACKENDS[0]
@@ -115,22 +222,10 @@ async def select_backend(model: str = "") -> str:
     if len(healthy) == 1:
         return healthy[0]
 
-    # 2. Prefer backends that have the requested model (parallel model list checks)
     if model:
-        avail = await asyncio.gather(*(_available_models(b) for b in healthy))
-        with_model = [b for b, ms in zip(healthy, avail, strict=False) if model in ms]
-        if with_model:
-            healthy = with_model
+        healthy = await _route_by_model(healthy, model)
+        if len(healthy) == 1:
+            return healthy[0]
 
-    if len(healthy) == 1:
-        return healthy[0]
-
-    # 3. Prefer warm — model already loaded in VRAM (parallel /api/ps checks)
-    if model:
-        loaded = await asyncio.gather(*(_loaded_models(b) for b in healthy))
-        warm = [b for b, ls in zip(healthy, loaded, strict=False) if model in ls]
-        if warm:
-            return warm[0]
-
-    # 4. Random among remaining candidates (distributes load over time; not crypto use)
+    # 5. Random among remaining candidates (distributes load over time; not crypto use)
     return random.choice(healthy)  # noqa: S311

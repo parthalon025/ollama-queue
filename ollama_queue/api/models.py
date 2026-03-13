@@ -66,13 +66,21 @@ _CURATED_MODELS = [
 
 
 @router.get("/api/models")
-def get_models():
+async def get_models():
+    from ollama_queue.api.backend_router import BACKENDS, fetch_all_backend_models
+
     db = _api.db
     om = OllamaModels()
-    local = om.list_local()
     loaded_names = {m["name"] for m in om.get_loaded()}
+
+    if len(BACKENDS) > 1:
+        # Multi-backend: merge /api/tags from all backends via HTTP
+        raw = await fetch_all_backend_models()
+    else:
+        raw = [{"name": m["name"], "size_bytes": m["size_bytes"], "backends": [BACKENDS[0]]} for m in om.list_local()]
+
     result = []
-    for m in local:
+    for m in raw:
         classification = om.classify(m["name"])
         vram_mb = om.estimate_vram_mb(m["name"], db)
         est = DurationEstimator(db).estimate(m["name"], model=m["name"])
@@ -85,6 +93,7 @@ def get_models():
                 "type_tag": classification["type_tag"],
                 "loaded": m["name"] in loaded_names,
                 "avg_duration_seconds": est,
+                "backends": m.get("backends", [BACKENDS[0]]),
             }
         )
     return result
