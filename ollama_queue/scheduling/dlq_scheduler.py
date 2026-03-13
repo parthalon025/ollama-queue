@@ -108,13 +108,13 @@ class DLQScheduler:
 
             # Estimate runtime
             est = self.estimator.estimate(
-                entry.get("model", ""),
+                entry.get("model") or "",
                 entry.get("command", ""),
                 entry.get("resource_profile", "ollama"),
             )
 
             # Find fitting slot
-            model = entry.get("model", "")
+            model = entry.get("model") or ""
             job_vram = _estimate_model_vram(model)
             estimated_slots = max(1, int(est.total_upper / 1800) + 1)  # 30-min slots
             slot = find_fitting_slot(

@@ -95,7 +95,7 @@ scripts/
   migrate_timers.py            # Migrate 8 of 10 systemd timers to recurring jobs
   migrate_dlq_max_retries.py   # Add max_retries column to existing dlq table (idempotent)
 
-tests/                           # 1,588 tests, 100% line coverage
+tests/                           # 1,677 tests, 100% line coverage
 ```
 
 ## How to Run
@@ -105,7 +105,7 @@ tests/                           # 1,588 tests, 100% line coverage
 cd ~/Documents/projects/ollama-queue
 source .venv/bin/activate
 
-# Run tests (1,588 total, 100% line coverage)
+# Run tests (1,677 total, 100% line coverage)
 pytest
 
 # Start the server (daemon + API + dashboard)
@@ -165,7 +165,7 @@ npm run build        # Production
 npm run dev          # Watch mode
 ```
 
-Sidebar nav (desktop) + bottom tab bar (mobile). 8 views: **Now** (2-column command center: running job, queue, resource gauges, KPI cards, alert strip — includes amber badge for auto-disabled recurring jobs count linking to Plan tab) + **Plan** (health summary strip showing active/failing/disabled/overdue/skip counts; 24h Gantt timeline with "now" needle dynamically positioned by wall-clock within zoom window, `visibleJobs` filter prevents past-due jobs piling at left edge in zoom mode; disabled jobs render at 40% opacity + dashed outline + ⏸ prefix; skip badge ↻N shows when job was skipped N times in last 24h; bar detail card shows load/run/unload segment breakdown; warmup cap = `min(rawWarmup, floor(estDur * 0.4))` prevents body collapse; 48-bucket load-map density strip with DLQ/deferral slot markers, ρ traffic intensity badge, "Suggest slot" button highlighting top-3 low-load windows; tag-grouped recurring jobs with collapsible sections, bulk actions, expandable detail panels) + **History** (DLQ entries with reschedule status badges/reasoning, deferred jobs panel, duration trends, activity heatmap, job list) + **Models** (model table) + **Perf** (model performance table, cross-model performance curve chart, 24h×7d load heatmap, system health gauges) + **Settings** (thresholds, defaults, retention, DLQ auto-reschedule, proactive deferral, daemon controls) + **Consumers** (scan button, consumer cards with status badges and include/ignore/revert actions, intercept toggle with status banner).
+Sidebar nav (desktop) + bottom tab bar (mobile). 8 views: **Now** (2-column command center: running job, queue, resource gauges [gradient color ramp on bar fill — full-width gradient track + mask; load_avg converted to % via `load_avg / cpu_count * 100` before display; CPU pause/resume thresholds normalized as `multiplier × 100` not `× 50`], KPI cards, alert strip — includes amber badge for auto-disabled recurring jobs count linking to Plan tab) + **Plan** (health summary strip showing active/failing/disabled/overdue/skip counts; 24h Gantt timeline with "now" needle dynamically positioned by wall-clock within zoom window, `visibleJobs` filter prevents past-due jobs piling at left edge in zoom mode; disabled jobs render at 40% opacity + dashed outline + ⏸ prefix; skip badge ↻N shows when job was skipped N times in last 24h; bar detail card shows load/run/unload segment breakdown; warmup cap = `min(rawWarmup, floor(estDur * 0.4))` prevents body collapse; 48-bucket load-map density strip with DLQ/deferral slot markers, ρ traffic intensity badge, "Suggest slot" button highlighting top-3 low-load windows; tag-grouped recurring jobs with collapsible sections, bulk actions, expandable detail panels) + **History** (DLQ entries with reschedule status badges/reasoning, deferred jobs panel, duration trends, activity heatmap, job list) + **Models** (model table) + **Perf** (model performance table, cross-model performance curve chart, 24h×7d load heatmap, system health gauges) + **Settings** (thresholds, defaults, retention, DLQ auto-reschedule, proactive deferral, daemon controls) + **Consumers** (scan button, consumer cards with status badges and include/ignore/revert actions, intercept toggle with status banner).
 
 Route IDs: `now` | `plan` | `history` | `models` | `settings` | `eval` | `consumers` | `performance`. Sidebar: 200px desktop, 64px icon-only (768–1023px), hidden on mobile. CSS classes: `layout-root`, `layout-sidebar`, `layout-main`, `now-grid`, `history-top-grid`, `mobile-bottom-nav`.
 
@@ -273,6 +273,7 @@ This applies to: component files, store transformations in `stores/`, computed v
 - **Daemon stdout capture has a 128KB sliding window** — `_MAX_STDOUT_BYTES = 128 * 1024`. The `_append_stdout` callback pops oldest chunks when total exceeds the cap. Without this, a chatty Ollama job (e.g. full response streaming) accumulates unbounded stdout in memory, which can exceed the service's `MemoryMax=512M` and trigger OOM kill.
 - **Falsy-zero antipattern in settings** — `db.get_setting()` returns strings or `None`. `x or default` treats `"0"` as truthy (correct) but `int(x) or default` treats `0` as falsy (wrong). Always use `int(x) if x is not None else default` for numeric settings that can legitimately be 0 (e.g. `error_budget=0` meaning zero tolerance, `poll_interval=0`).
 - **DLQ priority sort is ascending** — lower number = higher importance (1=critical, 10=background). `sorted(entries, key=lambda e: e.get("priority", 0))` is correct. The inverted sort (descending) processed background jobs before critical ones.
+- **`GET /api/health` returns `cpu_count`** — read from `/proc/cpuinfo` via `sensing/health.py:get_cpu_count()` (not `os.cpu_count()`), cached at module level in `api/health.py` as `_CPU_COUNT`. SPA `stores/health.js` exposes a `cpuCount` signal; `Now.jsx` and `CurrentJob.jsx` use `load_avg / cpuCount * 100` to convert load average to a percentage before passing to `ResourceGauges`. CPU pause/resume thresholds are `multiplier × 100` (not `× 50`).
 
 ## Design Doc
 
