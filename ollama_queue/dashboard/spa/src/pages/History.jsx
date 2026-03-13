@@ -3,7 +3,7 @@ import { shatterElement } from 'superhot-ui';
 import {
     dlqEntries, dlqCount, durationData, heatmapData, history,
     fetchDLQ, rescheduleDLQEntry, API,
-    highlightJobId,
+    highlightJobId, dlqSchedulePreview,
 } from '../stores';
 import { currentTab } from '../stores/health.js';
 import { useEffect, useRef, useState } from 'preact/hooks';
@@ -176,6 +176,11 @@ export default function History() {
                 </div>
             )}
 
+            {/* C22: DLQ Schedule Preview — expandable failure classification + retry slots */}
+            {dlqSchedulePreview.value?.entries?.length > 0 && (
+                <DLQSchedulePreviewPanel preview={dlqSchedulePreview.value} />
+            )}
+
             {/* Duration trends + Activity heatmap — side by side on desktop */}
             <div class="history-top-grid">
                 <div class="t-frame" data-label="How Long Jobs Take Over Time">
@@ -210,6 +215,51 @@ export default function History() {
 
             {/* HistoryList renders its own t-frame wrapper internally */}
             <HistoryList jobs={hist} />
+        </div>
+    );
+}
+
+// ── C22: DLQ Schedule Preview panel ───────────────────────────────────────
+
+// What it shows: Expandable panel with failure classification + predicted retry slots for
+//   unscheduled DLQ entries. Helps the user understand what will happen to stuck jobs.
+// Decision it drives: "Does the system have a plan for these failures, or do I need to act?"
+function DLQSchedulePreviewPanel({ preview }) {
+    const [open, setOpen] = useState(false);
+    if (!preview?.entries?.length) return null;
+    return (
+        <div class="t-frame" style={{ borderLeft: '3px solid var(--status-warning)' }}>
+            <button
+                onClick={() => setOpen(o => !o)}
+                style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: 'var(--status-warning)',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: 'var(--type-label)',
+                    padding: 0,
+                    width: '100%',
+                    textAlign: 'left',
+                }}
+            >
+                <span>{open ? '▼' : '▶'}</span>
+                <span>DLQ Retry Schedule Preview — {preview.count} {preview.count === 1 ? 'entry' : 'entries'} pending</span>
+            </button>
+            {open && (
+                <div style={{ marginTop: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    {preview.entries.map((slot, i) => (
+                        <div key={i} class="data-mono" style={{ display: 'flex', gap: '0.75rem', fontSize: 'var(--type-label)', padding: '0.375rem 0', borderBottom: '1px solid var(--border-subtle)' }}>
+                            <span style={{ color: 'var(--text-tertiary)', minWidth: '3rem' }}>#{slot.id ?? i + 1}</span>
+                            <span style={{ flex: 1, color: 'var(--text-secondary)' }}>{slot.failure_type ?? 'unknown'}</span>
+                            <span style={{ color: 'var(--text-tertiary)' }}>{slot.predicted_slot ? new Date(slot.predicted_slot * 1000).toLocaleString() : 'unscheduled'}</span>
+                        </div>
+                    ))}
+                </div>
+            )}
         </div>
     );
 }

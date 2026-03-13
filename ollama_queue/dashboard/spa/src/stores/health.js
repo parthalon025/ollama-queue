@@ -20,6 +20,77 @@ export const dlqCount = signal(0);
 export const dlqSchedulePreview = signal({ entries: [], count: 0 }); // /api/dlq/schedule-preview
 export const currentTab = signal('now'); // 'now' | 'plan' | 'history' | 'models' | 'settings'
 
+// ── Toast notification system ─────────────────────────────────────────────────
+// What it shows: Transient feedback messages (success/error/info) stacked at top-right.
+// Decision it drives: All action buttons push toasts here instead of inline text.
+//   Error toasts persist until dismissed; success toasts auto-dismiss after 3s.
+export const toasts = signal([]); // Array<{ id, type, msg, persistent }>
+
+let _toastId = 0;
+export function addToast(msg, type = 'info', persistent = false) {
+  const id = ++_toastId;
+  toasts.value = [...toasts.value, { id, type, msg, persistent }];
+  if (!persistent && type !== 'error') {
+    setTimeout(() => removeToast(id), 3000);
+  }
+  return id;
+}
+
+export function removeToast(id) {
+  toasts.value = toasts.value.filter(t => t.id !== id);
+}
+
+// ── Backends management ────────────────────────────────────────────────────────
+// What it shows: Per-backend CRUD signals for the new Backends tab.
+// Decision it drives: Users can add/remove/test backends from the dashboard.
+export const backendsLoading = signal(false);
+
+export async function addBackend(url, weight = 1) {
+  const res = await fetch(`${API}/backends`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url, weight }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  await fetchBackends();
+  return res.json();
+}
+
+export async function removeBackend(url) {
+  const res = await fetch(`${API}/backends/${encodeURIComponent(url)}`, { method: 'DELETE' });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  await fetchBackends();
+}
+
+export async function updateBackendWeight(url, weight) {
+  const res = await fetch(`${API}/backends/${encodeURIComponent(url)}/weight`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ weight }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  await fetchBackends();
+  return res.json();
+}
+
+export async function testBackend(url) {
+  const res = await fetch(`${API}/backends/${encodeURIComponent(url)}/test`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
 // ── Intercept mode state ──────────────────────────────────────────────────────
 
 // What it shows: Whether iptables intercept mode is enabled and whether the rule is live.

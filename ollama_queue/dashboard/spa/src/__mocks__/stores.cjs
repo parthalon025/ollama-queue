@@ -14,6 +14,7 @@ module.exports = {
     dlqSchedulePreview: signal([]),
     modelPerformance: signal(null),
     performanceCurve: signal(null),
+    status: signal({ _poll_ts: null }),
     fetchJobRuns: async () => [],
     fetchModelPerformance: () => {},
     fetchPerformanceCurve: () => {},

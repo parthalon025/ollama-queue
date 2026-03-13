@@ -11,6 +11,7 @@ const NAV_ITEMS = [
     { id: 'eval',      icon: '⊡', label: 'Eval',      tooltip: 'Test and compare AI model configurations' },
     { id: 'consumers', icon: '⇄', label: 'Consumers', tooltip: 'Detected Ollama consumers and routing' },
     { id: 'performance', icon: '⊘', label: 'Perf', tooltip: 'Model performance stats and system health' },
+    { id: 'backends', icon: '⊟', label: 'Backends', tooltip: 'Multi-backend fleet management and routing intelligence' },
 ];
 
 // What it shows: Mobile bottom tab bar for navigating between views, plus a floating action

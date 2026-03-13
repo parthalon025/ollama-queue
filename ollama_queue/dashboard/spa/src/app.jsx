@@ -1,6 +1,7 @@
-import { h, Component } from 'preact';
+import { Component } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 import { signal, useSignal } from '@preact/signals';
+import { ShMantra } from 'superhot-ui/preact';
 
 // Temporary debug boundary — catches Plan render errors that signals swallows silently
 class PlanErrorBoundary extends Component {
@@ -11,8 +12,11 @@ class PlanErrorBoundary extends Component {
     }
     render() {
         if (this.state.error) {
-            return h('div', { style: 'color:red;padding:1rem;font-family:monospace;white-space:pre-wrap' },
-                'Plan render error:\n' + this.state.error);
+            return (
+                <div style="color:red;padding:1rem;font-family:monospace;white-space:pre-wrap">
+                    Plan render error:{'\n'}{this.state.error}
+                </div>
+            );
         }
         return this.props.children;
     }
@@ -28,6 +32,8 @@ import ActiveEvalStrip from './components/ActiveEvalStrip.jsx';
 import BottomNav from './components/BottomNav.jsx';
 import SubmitJobModal from './components/SubmitJobModal.jsx';
 import OnboardingOverlay from './components/OnboardingOverlay.jsx';
+import ShToastContainer from './components/ShToastContainer.jsx';
+import ShCommandPaletteNative from './components/ShCommandPaletteNative.jsx';
 import Now from './pages/Now.jsx';
 import Plan from './pages/Plan';
 import History from './pages/History.jsx';
@@ -36,6 +42,7 @@ import Settings from './pages/Settings.jsx';
 import Eval from './pages/Eval.jsx';
 import Consumers from './pages/Consumers.jsx';
 import Performance from './pages/Performance.jsx';
+import BackendsTab from './pages/BackendsTab.jsx';
 
 // What it shows: A thin persistent strip at the top of the content area whenever an eval
 //   session is running — shows eval run #, model name, and current phase.
@@ -85,14 +92,17 @@ function EvalActivityBanner({ activeEval, onNavigate }) {
     );
 }
 
+// Tab list — tabs must be named with descriptive keys (not 'h', never 'tab' alone)
+const ALL_TABS = ['now', 'plan', 'history', 'models', 'settings', 'eval', 'consumers', 'performance', 'backends'];
+
 export function App() {
     // Component-scoped signal — controls the app-wide SubmitJobModal.
-    // Sidebar [+ Submit] and BottomNav FAB both set this to true; the modal resets it on close.
-    // Scoped here (not module-level) so it resets cleanly on each component mount, preventing
-    // HMR state leaks where the modal stays open after a hot reload.
     const showSubmitModal = useSignal(false);
 
-    // Theme: read from localStorage, default dark. Writes to <html data-theme="...">
+    // Cmd+K command palette
+    const paletteOpen = useSignal(false);
+
+    // Theme: read from localStorage, default dark.
     const [theme, setTheme] = useState(() => {
         const saved = localStorage.getItem('queue-theme');
         return (saved === 'light' || saved === 'dark') ? saved : 'dark';
@@ -112,27 +122,32 @@ export function App() {
         return () => stopPolling();
     }, []);
 
-    // Keyboard shortcuts: 1-5 to switch tabs
+    // Keyboard shortcuts: 1-8 switch tabs; Cmd/Ctrl+K opens palette
     useEffect(() => {
-        const TABS = ['now', 'plan', 'history', 'models', 'settings'];
         function onKeyDown(e) {
-            // Skip if modifier keys held (Ctrl, Alt, Meta)
+            // Cmd+K / Ctrl+K — command palette
+            if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+                e.preventDefault();
+                paletteOpen.value = !paletteOpen.value;
+                return;
+            }
+            // Skip if modifier keys held (Ctrl, Alt, Meta) for non-palette shortcuts
             if (e.ctrlKey || e.altKey || e.metaKey) return;
             // Skip if focus is inside a text input, textarea, select, or contenteditable
             const tag = (document.activeElement?.tagName || '').toLowerCase();
             if (tag === 'input' || tag === 'textarea' || tag === 'select' ||
                 document.activeElement?.isContentEditable) return;
             const idx = parseInt(e.key, 10) - 1;
-            if (idx >= 0 && idx < TABS.length) {
-                currentTab.value = TABS[idx];
+            if (idx >= 0 && idx < ALL_TABS.length) {
+                currentTab.value = ALL_TABS[idx];
             }
         }
         window.addEventListener('keydown', onKeyDown);
         return () => window.removeEventListener('keydown', onKeyDown);
-    }, []);  // empty deps — handler captures currentTab via signal write, no closure issue
+    }, []);
 
     function handleNavigate(viewId) {
-        if (viewId !== 'eval') stopEvalPoll();  // stop eval poll when leaving eval tab
+        if (viewId !== 'eval') stopEvalPoll();
         currentTab.value = viewId;
         if (viewId === 'models') fetchModels();
         if (viewId === 'plan') fetchSchedule();
@@ -142,22 +157,39 @@ export function App() {
 
     function renderView() {
         switch (currentTab.value) {
-            case 'plan':     return <PlanErrorBoundary><Plan /></PlanErrorBoundary>;
-            case 'history':  return <History />;
-            case 'models':   return <ModelsTab />;
-            case 'settings': return <Settings />;
-            case 'eval':      return <Eval />;
-            case 'consumers': return <Consumers />;
+            case 'plan':        return <PlanErrorBoundary><Plan /></PlanErrorBoundary>;
+            case 'history':     return <History />;
+            case 'models':      return <ModelsTab />;
+            case 'settings':    return <Settings />;
+            case 'eval':        return <Eval />;
+            case 'consumers':   return <Consumers />;
             case 'performance': return <Performance />;
-            default:          return <Now onSubmitRequest={handleSubmitRequest} />;
+            case 'backends':    return <BackendsTab />;
+            default:            return <Now onSubmitRequest={handleSubmitRequest} />;
         }
     }
 
     const daemonState = status.value?.daemon ?? null;
     const activeEval = status.value?.active_eval ?? null;
+    const isDaemonPaused = (daemonState?.state || '').startsWith('paused');
+
+    // Build command palette items from current signals
+    const paletteItems = [
+        { icon: '●', label: 'Submit job', group: 'Actions', action: handleSubmitRequest },
+        { icon: '⊡', label: 'Trigger eval run', group: 'Actions', action: () => handleNavigate('eval') },
+        ...ALL_TABS.map((tabId, i) => ({
+            icon: ['●','◫','◷','⊞','⚙','⊡','⇄','⊘','⊟'][i] || '→',
+            label: `Go to ${tabId.charAt(0).toUpperCase() + tabId.slice(1)}`,
+            group: 'Navigate',
+            shortcut: `${i + 1}`,
+            action: () => handleNavigate(tabId),
+        })),
+    ];
 
     return (
         <div class="layout-root sh-crt" style="background: var(--bg-base); color: var(--text-primary);">
+            {/* App-level SYSTEM PAUSED mantra — stamps watermark when daemon is paused */}
+            <ShMantra text="SYSTEM PAUSED" active={isDaemonPaused} />
             <Sidebar
                 active={currentTab.value}
                 onNavigate={handleNavigate}
@@ -168,12 +200,12 @@ export function App() {
                 onSubmitRequest={handleSubmitRequest}
             />
             <main class="layout-main animate-page-enter">
-                {/* Banner only on tabs without a dedicated eval panel — Now has CurrentJob, Eval has ActiveRunProgress */}
+                {/* Banner only on tabs without a dedicated eval panel */}
                 {activeEval && currentTab.value !== 'eval' && currentTab.value !== 'now' && <EvalActivityBanner activeEval={activeEval} onNavigate={handleNavigate} />}
                 <CohesionHeader />
                 {currentTab.value !== 'now' && <ActiveJobStrip />}
                 {currentTab.value !== 'eval' && <ActiveEvalStrip />}
-                <div key={currentTab.value} class="tab-enter" style="flex:1;overflow-y:auto;">
+                <div key={currentTab.value} class="tab-content tab-enter" style="flex:1;overflow-y:auto;">
                     {renderView()}
                 </div>
             </main>
@@ -183,17 +215,22 @@ export function App() {
                 dlqCount={dlqCount.value}
                 onSubmitRequest={handleSubmitRequest}
             />
-            {/* App-level SubmitJobModal — opened by Sidebar button and BottomNav FAB from any tab.
-                onJobSubmitted calls refreshQueue so the queue list updates immediately after submit. */}
+            {/* App-level SubmitJobModal */}
             <SubmitJobModal
                 open={showSubmitModal.value}
                 onClose={() => { showSubmitModal.value = false; }}
                 onJobSubmitted={() => refreshQueue()}
             />
-            {/* OnboardingOverlay — self-manages visibility via localStorage.
-                Renders nothing if localStorage key 'oq_onboarding_done' is already set.
-                Shown unconditionally here; the component decides whether to display. */}
+            {/* OnboardingOverlay — self-manages visibility via localStorage */}
             <OnboardingOverlay />
+            {/* Toast notification container — action feedback from any tab */}
+            <ShToastContainer />
+            {/* Cmd+K command palette */}
+            <ShCommandPaletteNative
+                open={paletteOpen.value}
+                onClose={() => { paletteOpen.value = false; }}
+                items={paletteItems}
+            />
         </div>
     );
 }

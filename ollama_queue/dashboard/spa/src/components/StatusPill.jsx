@@ -2,8 +2,6 @@
 // Decision it drives: Lets the user instantly identify job state at a glance across any list or table,
 //   so they can prioritize attention — e.g. a failed job needs action, a running job just needs patience.
 
-import { h } from 'preact';
-
 const STATUS_STYLES = {
   queued:    { label: 'queued',    cls: 'status-pill status-queued' },
   running:   { label: 'running',   cls: 'status-pill status-running status-running-active' },

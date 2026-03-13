@@ -1736,3 +1736,150 @@ kbd {
 
 /* Variant card grid */
 .variant-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; padding: 16px 0; }
+
+/* ── C11: CRT scanlines on layout root ─────────────────────────────────────── */
+/* Principle: diegetic — scanlines read as hardware artifact, not decoration */
+.layout-root {
+  --sh-crt-stripe: block;
+}
+
+/* ── C15: Scrollbar, selection, focus ring (SUPERHOT palette) ────────────── */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-thumb { background: var(--sh-phosphor, var(--accent)); opacity: 0.5; border-radius: 2px; }
+::-webkit-scrollbar-track { background: transparent; }
+::selection { background: var(--sh-phosphor, var(--accent)); color: var(--sh-void, #000); }
+:focus-visible {
+  outline: 1px solid var(--sh-phosphor, var(--accent));
+  outline-offset: 2px;
+}
+
+/* ── D18: Uniform tab-content entrance animation ─────────────────────────── */
+/* Every tab content div gets an entrance — prevents "already-there" stale feeling */
+.tab-content {
+  animation: tab-enter 200ms ease-out;
+}
+@keyframes tab-enter {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}
+@supports selector(:has(*)) {
+  @starting-style {
+    .tab-content { opacity: 0; transform: translateY(4px); }
+  }
+}
+
+/* ── C12: Semantic input tokens (forms) ──────────────────────────────────── */
+/* Applies to: SettingsForm, eval settings, SubmitJobModal, schedule forms */
+:root {
+  --input-bg: var(--bg-surface);
+  --input-border: var(--border-primary);
+  --input-border-focus: var(--sh-phosphor, var(--accent));
+  --input-height: 2.25rem;
+}
+input, select, textarea {
+  background: var(--input-bg);
+  border-color: var(--input-border);
+}
+input:focus, select:focus, textarea:focus {
+  border-color: var(--input-border-focus);
+  outline: none;
+}
+
+/* ── C13: Type scale tokens ──────────────────────────────────────────────── */
+/* Semantic type classes for display, body, label, small, micro */
+:root {
+  --type-display: clamp(1.5rem, 3vw, 2rem);
+}
+.type-display { font-size: var(--type-display); font-family: var(--font-mono); font-weight: 400; }
+
+/* ── C14: Transition token sweep ─────────────────────────────────────────── */
+:root {
+  --transition-default: all 0.2s ease;
+  --transition-fast: all 0.1s ease;
+}
+/* Elements that previously had ad-hoc transition values */
+.t-card, .t-btn, .t-input, .theme-toggle, .eval-subnav-btn {
+  transition: var(--transition-default);
+}
+
+/* ── VRAM bar utility (sh-vram-bar) ───────────────────────────────────────── */
+/* --sh-fill: 0-100 (unitless). Used in BackendsTab and BackendsPanel. */
+.sh-vram-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 6px;
+  background: var(--bg-surface);
+  border-radius: 3px;
+  overflow: hidden;
+  flex: 1;
+}
+.sh-vram-bar::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  width: calc(var(--sh-fill, 0) * 1%);
+  background: var(--sh-phosphor, var(--accent));
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+.sh-vram-bar--threat::before {
+  background: var(--sh-threat, var(--status-error));
+}
+
+/* ── Command palette item hover ───────────────────────────────────────────── */
+.palette-item:hover {
+  background: var(--bg-surface-raised) !important;
+  color: var(--sh-phosphor, var(--accent)) !important;
+}
+
+/* ── Backends tab ─────────────────────────────────────────────────────────── */
+.backends-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1rem;
+}
+.backend-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  transition: var(--transition-default);
+}
+.backend-card:hover {
+  border-color: var(--border-primary);
+}
+.backend-card--unhealthy {
+  border-color: var(--sh-threat, var(--status-error));
+}
+
+/* ── Confusion matrix (C24) ───────────────────────────────────────────────── */
+.confusion-matrix {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  max-width: 260px;
+}
+.confusion-cell {
+  padding: 0.75rem;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: var(--type-label);
+  border-radius: var(--radius-sm);
+}
+.confusion-cell--tp, .confusion-cell--tn { background: rgba(0,200,180,0.1); color: var(--sh-phosphor, var(--accent)); }
+.confusion-cell--fp, .confusion-cell--fn { background: rgba(239,68,68,0.1); color: var(--sh-threat, var(--status-error)); }
+
+/* ── Animate pulse (used by loading states) ───────────────────────────────── */
+.animate-pulse {
+  animation: pulse-opacity 1.5s ease-in-out infinite;
+}
+@keyframes pulse-opacity {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}

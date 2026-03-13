@@ -1,6 +1,10 @@
 /** @type {import('jest').Config} */
 module.exports = {
     testEnvironment: 'node',
+    // Inject h + Fragment globally so components that omit `import { h } from 'preact'`
+    // still work when Babel transforms JSX with pragma: 'h'. Mirrors esbuild's
+    // inject: ['./src/preact-shim.js'] behaviour at the bundle level.
+    setupFiles: ['<rootDir>/src/__mocks__/jest-setup.cjs'],
     transform: {
         '^.+\\.jsx?$': 'babel-jest',
     },
