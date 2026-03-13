@@ -2,6 +2,7 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -69,11 +70,11 @@ def test_add_backend_duplicate(client, db):
 
 
 def test_add_backend_connectivity_fail(client):
-    """POST /api/backends returns 502 when the URL is unreachable."""
+    """POST /api/backends returns 502 when the URL is unreachable (ConnectError)."""
     mock_client = AsyncMock()
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=False)
-    mock_client.get = AsyncMock(side_effect=Exception("Connection refused"))
+    mock_client.get = AsyncMock(side_effect=httpx.ConnectError("Connection refused"))
 
     with patch("ollama_queue.api.backends.httpx.AsyncClient", return_value=mock_client):
         resp = client.post("/api/backends", json={"url": "http://unreachable:11434"})
@@ -132,7 +133,7 @@ def test_update_weight_success(client, db):
     """PUT /api/backends/{url}/weight updates the weight and returns it."""
     db.add_backend("http://testhost:11434", weight=1.0)
 
-    resp = client.put("/api/backends/http://testhost:11434/weight", json={"weight": 4.0})
+    resp = client.put("/api/backends/http://testhost:11434/weight", params={"weight": 4.0})
     assert resp.status_code == 200
     data = resp.json()
     assert data["url"] == "http://testhost:11434"
@@ -145,21 +146,21 @@ def test_update_weight_success(client, db):
 
 def test_update_weight_not_found(client):
     """PUT /api/backends/{url}/weight for an unknown URL returns 404."""
-    resp = client.put("/api/backends/http://missing:11434/weight", json={"weight": 2.0})
+    resp = client.put("/api/backends/http://missing:11434/weight", params={"weight": 2.0})
     assert resp.status_code == 404
 
 
 def test_update_weight_invalid_too_low(client, db):
     """PUT /api/backends/{url}/weight with weight < 0.1 returns 400."""
     db.add_backend("http://testhost:11434", weight=1.0)
-    resp = client.put("/api/backends/http://testhost:11434/weight", json={"weight": 0.0})
+    resp = client.put("/api/backends/http://testhost:11434/weight", params={"weight": 0.0})
     assert resp.status_code == 400
 
 
 def test_update_weight_invalid_too_high(client, db):
     """PUT /api/backends/{url}/weight with weight > 10.0 returns 400."""
     db.add_backend("http://testhost:11434", weight=1.0)
-    resp = client.put("/api/backends/http://testhost:11434/weight", json={"weight": 15.0})
+    resp = client.put("/api/backends/http://testhost:11434/weight", params={"weight": 15.0})
     assert resp.status_code == 400
 
 

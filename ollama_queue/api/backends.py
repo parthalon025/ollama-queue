@@ -16,9 +16,10 @@ Decision it drives:
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
 import time
-from urllib.parse import unquote
+from urllib.parse import unquote, urlparse
 
 import httpx
 from fastapi import APIRouter, HTTPException, Path, Query
@@ -29,6 +30,30 @@ import ollama_queue.api.backend_router as _router
 
 _log = logging.getLogger(__name__)
 router = APIRouter()
+
+
+# ── SSRF protection ───────────────────────────────────────────────────────────
+
+# Deny cloud metadata endpoints to prevent SSRF via POST /api/backends.
+# Private/RFC-1918 ranges are intentionally allowed: Ollama backends are
+# typically LAN or Tailscale nodes (10.x, 172.16-31.x, 100.x, 192.168.x).
+_SSRF_DENYLIST_NETS = [
+    ipaddress.ip_network("169.254.0.0/16"),  # link-local (AWS/Azure metadata)
+    ipaddress.ip_network("100.100.100.0/24"),  # Alibaba Cloud ECS metadata
+]
+_SSRF_DENYLIST_HOSTS = frozenset(["metadata.google.internal"])
+
+
+def _is_safe_backend_url(url: str) -> bool:
+    """Return True if the URL does not target a cloud metadata endpoint."""
+    try:
+        hostname = (urlparse(url).hostname or "").lower()
+        if hostname in _SSRF_DENYLIST_HOSTS:
+            return False
+        addr = ipaddress.ip_address(hostname)
+        return not any(addr in net for net in _SSRF_DENYLIST_NETS)
+    except ValueError:
+        return True  # hostname (not an IP literal) — passes SSRF check
 
 
 # ── Request models ────────────────────────────────────────────────────────────
@@ -82,9 +107,15 @@ async def add_backend(req: AddBackendRequest):
         raise HTTPException(status_code=400, detail="url must start with http:// or https://")
     if not (0.1 <= req.weight <= 10.0):
         raise HTTPException(status_code=400, detail="weight must be between 0.1 and 10.0")
+    if not _is_safe_backend_url(req.url):
+        raise HTTPException(status_code=400, detail="url targets a disallowed host")
 
     db = _api.db
-    existing = db.get_backend(req.url) if db else None
+    if not db:
+        _log.error("add_backend: database not available — cannot register %s", req.url)
+        raise HTTPException(status_code=503, detail="database not available")
+
+    existing = db.get_backend(req.url)
     if existing:
         raise HTTPException(status_code=409, detail=f"backend {req.url} already registered")
 
@@ -95,13 +126,19 @@ async def add_backend(req: AddBackendRequest):
             resp.raise_for_status()
             data = resp.json()
             model_count = len(data.get("models", []))
-    except Exception as e:
+    except httpx.InvalidURL as e:
+        raise HTTPException(status_code=400, detail=f"invalid url: {e}") from e
+    except (httpx.ConnectError, httpx.TimeoutException) as e:
         _log.warning("connectivity test failed for %s: %s", req.url, e)
         raise HTTPException(status_code=502, detail=f"connectivity test failed: {e}") from e
+    except httpx.HTTPStatusError as e:
+        _log.warning("backend %s returned HTTP %d", req.url, e.response.status_code)
+        raise HTTPException(status_code=502, detail=f"backend returned {e.response.status_code}") from e
+    except Exception as e:
+        _log.error("unexpected error during connectivity test for %s: %s", req.url, e)
+        raise HTTPException(status_code=500, detail="internal error during connectivity test") from e
 
-    if db:
-        db.add_backend(req.url, req.weight)
-
+    db.add_backend(req.url, req.weight)
     _router.invalidate_backend_caches(req.url)
     _router.refresh_backends_from_db()
 
@@ -120,7 +157,11 @@ async def remove_backend(url: str = Path(...)):
     """
     url = unquote(url)
     db = _api.db
-    removed = db.remove_backend(url) if db else False
+    if not db:
+        _log.error("remove_backend: database not available for %s", url)
+        raise HTTPException(status_code=503, detail="database not available")
+
+    removed = db.remove_backend(url)
     if not removed:
         raise HTTPException(status_code=404, detail=f"backend {url} not found")
 
@@ -145,7 +186,11 @@ async def update_backend_weight(url: str = Path(...), weight: float = Query(...)
         raise HTTPException(status_code=400, detail="weight must be between 0.1 and 10.0")
 
     db = _api.db
-    updated = db.update_backend_weight(url, weight) if db else False
+    if not db:
+        _log.error("update_backend_weight: database not available for %s", url)
+        raise HTTPException(status_code=503, detail="database not available")
+
+    updated = db.update_backend_weight(url, weight)
     if not updated:
         raise HTTPException(status_code=404, detail=f"backend {url} not found")
 
@@ -179,7 +224,7 @@ async def test_backend(url: str = Path(...)):
             }
     except Exception as e:
         latency_ms = (time.time() - start) * 1000
-        _log.debug("test_backend unreachable %s: %s", url, e)
+        _log.info("test_backend unreachable %s: %s", url, e)
         return {
             "url": url,
             "healthy": False,
