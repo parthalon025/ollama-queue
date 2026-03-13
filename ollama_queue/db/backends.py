@@ -14,8 +14,8 @@ from contextlib import closing
 class BackendsMixin:
     """CRUD operations for the backends table."""
 
-    def add_backend(self, url: str, weight: float = 1.0, label: str | None = None) -> dict:
-        """Insert or replace a backend. Returns the stored row."""
+    def add_backend(self, url: str, weight: float = 1.0, label: str | None = None) -> dict | None:
+        """Insert or replace a backend. Returns the stored row, or None if the SELECT fails."""
         with self._lock:
             conn = self._connect()
             with closing(conn.cursor()) as cur:
@@ -46,7 +46,7 @@ class BackendsMixin:
                 conn.commit()
                 return cur.rowcount > 0
 
-    def list_backends(self) -> list:
+    def list_backends(self) -> list[dict]:
         """Return all enabled backends ordered by added_at (earliest first)."""
         with self._lock:
             conn = self._connect()

@@ -333,8 +333,8 @@ def invalidate_backend_caches(url: str) -> None:
     entries for that URL must be evicted so the next routing decision reflects
     the current backend list rather than a cached state from before the change.
     """
-    for cache in [_health_cache, _models_cache, _loaded_cache, _hw_cache, _gpu_name_cache]:
-        cache.pop(url, None)
+    for cache in (_health_cache, _models_cache, _loaded_cache, _hw_cache, _gpu_name_cache):
+        cache.pop(url, None)  # type: ignore[union-attr]  # all caches are dicts; mypy infers object from list
 
 
 def refresh_backends_from_db() -> None:
