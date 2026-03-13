@@ -183,7 +183,6 @@ def put_eval_settings(body: dict = Body(...)):
 
     # Validation rules — validate ALL before writing any
     validation_errors = []
-    provider_errors = []
     for key, value in body.items():
         bare_key = key.removeprefix("eval.")
         if bare_key not in _known_eval_keys:
@@ -224,10 +223,7 @@ def put_eval_settings(body: dict = Body(...)):
         elif bare_key == "positive_threshold" and (not isinstance(value, int) or not (1 <= value <= 5)):
             validation_errors.append(f"positive_threshold must be an integer 1-5, got {value!r}")
         elif f"eval.{bare_key}" in _PROVIDER_SETTINGS and value not in _VALID_PROVIDERS:
-            provider_errors.append(f"Invalid provider {value!r}: must be one of {sorted(_VALID_PROVIDERS)}")
-
-    if provider_errors:
-        raise HTTPException(status_code=400, detail="; ".join(provider_errors))
+            validation_errors.append(f"Invalid provider {value!r}: must be one of {sorted(_VALID_PROVIDERS)}")
 
     if validation_errors:
         raise HTTPException(status_code=422, detail=validation_errors)

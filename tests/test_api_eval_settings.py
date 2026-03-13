@@ -491,6 +491,32 @@ def test_create_eval_schedule_invalid_run_mode(client):
     assert resp.status_code == 400
 
 
+def test_put_eval_settings_returns_all_validation_errors(client):
+    """PUT with multiple invalid fields must return ALL errors in a single 422 response.
+
+    Regression: provider errors (HTTP 400) and numeric-range errors (HTTP 422)
+    were raised in separate conditional blocks.  Submitting both an invalid
+    provider AND an out-of-range numeric field returned only the first error
+    class encountered, requiring multiple round-trips to discover all problems.
+    The fix merges both error classes into a single HTTP 422 response.
+    """
+    resp = client.put(
+        "/api/eval/settings",
+        json={
+            "eval.per_cluster": 99,  # out-of-range → numeric validation error
+            "eval.generator_provider": "gemini",  # unknown provider → provider error
+        },
+    )
+    assert resp.status_code == 422
+    detail = resp.json()["detail"]
+    # detail must be a list containing errors for BOTH invalid fields
+    assert isinstance(detail, list), f"Expected list, got {type(detail)}: {detail}"
+    assert len(detail) >= 2, f"Expected ≥2 errors, got {len(detail)}: {detail}"
+    error_text = " ".join(str(e) for e in detail)
+    assert "per_cluster" in error_text, f"per_cluster error missing: {detail}"
+    assert "gemini" in error_text or "provider" in error_text.lower(), f"provider error missing: {detail}"
+
+
 def test_create_eval_schedule_duplicate_returns_409(client):
     """Creating duplicate schedule returns 409. Covers lines 1899-1903."""
     body = {
@@ -542,10 +568,12 @@ def test_empty_api_key_not_masked(client):
 
 
 def test_set_invalid_provider_rejected(client):
-    """PUT with invalid provider value should return 400."""
+    """PUT with invalid provider value should return 422 (merged into validation errors)."""
     resp = client.put("/api/eval/settings", json={"eval.generator_provider": "gemini"})
-    assert resp.status_code == 400
-    assert "gemini" in resp.json().get("detail", "").lower() or "provider" in resp.json().get("detail", "").lower()
+    assert resp.status_code == 422
+    detail = resp.json().get("detail", "")
+    detail_text = " ".join(str(e) for e in detail) if isinstance(detail, list) else str(detail)
+    assert "gemini" in detail_text.lower() or "provider" in detail_text.lower()
 
 
 def test_set_valid_provider_accepted(client):
