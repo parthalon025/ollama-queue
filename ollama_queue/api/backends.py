@@ -16,6 +16,7 @@ Decision it drives:
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from urllib.parse import unquote
 
@@ -26,6 +27,7 @@ from pydantic import BaseModel
 import ollama_queue.api as _api
 import ollama_queue.api.backend_router as _router
 
+_log = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -99,6 +101,7 @@ async def add_backend(req: AddBackendRequest):
             data = resp.json()
             model_count = len(data.get("models", []))
     except Exception as e:
+        _log.warning("connectivity test failed for %s: %s", req.url, e)
         raise HTTPException(status_code=502, detail=f"connectivity test failed: {e}") from e
 
     if db:
@@ -181,6 +184,7 @@ async def test_backend(url: str = Path(...)):
             }
     except Exception as e:
         latency_ms = (time.time() - start) * 1000
+        _log.debug("test_backend unreachable %s: %s", url, e)
         return {
             "url": url,
             "healthy": False,
