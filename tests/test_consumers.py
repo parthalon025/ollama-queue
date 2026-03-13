@@ -60,11 +60,11 @@ def test_consumer_update_status(db):
 
 def test_upsert_consumer_rejects_unknown_column(db):
     """upsert_consumer must reject unknown column names — prevents SQL injection via f-string."""
-    with pytest.raises((ValueError, KeyError)):
+    with pytest.raises(ValueError):
         db.upsert_consumer({"name": "test", "platform": "linux", "evil_col'; DROP TABLE consumers; --": "x"})
 
 
 def test_update_consumer_rejects_unknown_column(db):
     """update_consumer must reject unknown column names."""
-    with pytest.raises((ValueError, KeyError)):
+    with pytest.raises(ValueError):
         db.update_consumer(1, **{"evil_col'; DROP TABLE consumers; --": "x"})
