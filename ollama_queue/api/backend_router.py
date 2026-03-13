@@ -1,6 +1,6 @@
 """Multi-backend Ollama router for the proxy layer.
 
-Selects the best backend for each request using a four-tier strategy:
+Selects the best backend for each request using a five-tier strategy:
   1. Health check — skip unreachable backends (2s timeout, 30s cache)
   2. Model availability — prefer backends that have the requested model (60s cache)
   3. Warm model — prefer backends with the model already loaded in VRAM (5s cache)
