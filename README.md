@@ -32,7 +32,7 @@ Running multiple services against a local Ollama instance creates a resource con
 | Category | What it does |
 |---|---|
 | **Priority queue** | Jobs run highest-priority-first (integer priority; higher = sooner). SJF dequeue with Age-of-Information weighting prevents starvation. |
-| **Health gating** | Checks RAM, VRAM, and system load before each job. Pauses at high threshold, resumes below a lower threshold (hysteresis). Rejects submissions with 429 when queue depth exceeds limit. |
+| **Health gating** | Checks RAM, VRAM, and system load before each job. Pauses at high threshold, resumes below a lower threshold (hysteresis). Configurable max-pause escape hatch prevents indefinite stalls. Rejects submissions with 429 when queue depth exceeds limit. |
 | **Recurring jobs** | Cron or interval scheduling. 48-slot load map with pin slots, automatic rebalancing, and skip-on-busy logic. CLI suggests low-load windows. |
 | **Dead-letter queue** | Failed jobs retry with exponential backoff up to `max_retries`, then move to the DLQ. Auto-reschedule classifies failures, finds optimal time slots, and creates new jobs — with chronic failure detection to prevent infinite loops. Retry or clear from CLI or dashboard. |
 | **Proactive deferral** | Defer jobs when resources are tight; two-phase sweep resumes them when conditions improve or scheduled times pass. |
@@ -325,7 +325,7 @@ systemd timers / apps / proxy clients
 | **Scheduling** | croniter, custom 48-slot load map |
 | **Dashboard** | Preact 10, @preact/signals, Tailwind v4, uPlot |
 | **CLI** | Click |
-| **Tests** | pytest, pytest-xdist (1,677 tests, 100% line coverage) |
+| **Tests** | pytest, pytest-xdist (1,788 tests, 100% line coverage) |
 
 ---
 
@@ -352,7 +352,7 @@ ollama_queue/
 scripts/
   migrate_timers.py              # Migrate systemd timers to recurring jobs
   migrate_dlq_max_retries.py     # Schema migration (idempotent)
-tests/                           # 1,677 tests, 100% line coverage (pytest-xdist parallel)
+tests/                           # 1,788 tests, 100% line coverage (pytest-xdist parallel)
 ```
 
 ---
@@ -382,7 +382,7 @@ Dev/test: `pip install -r requirements-dev.txt`
 
 ```bash
 source .venv/bin/activate
-pytest  # 1,677 tests, 100% line coverage, parallel by default
+pytest  # 1,788 tests, 100% line coverage, parallel by default
 ```
 
 ---
@@ -406,6 +406,7 @@ Implementation plans and design decisions are in [`docs/plans/`](docs/plans/):
 | [UX design philosophy](docs/plans/2026-03-11-ux-design-philosophy-improvements-design.md) | SUPERHOT aesthetic, animation discipline, interaction depth strategy |
 | [UX Phase 3 — SUPERHOT effects](docs/plans/2026-03-11-ux-phase3-superhot-philosophy-plan.md) | ThreatPulse gauges, KPI glitch, StatusBadge beat, typed cursor states |
 | [UX Phase 4 — Visualization Science](docs/plans/2026-03-11-ux-phase4-viz-science-plan.md) | Treisman priority encoding, Shneiderman disclosure, Tufte sparklines, animation tiers |
+| [Edge case audit & fixes](docs/plans/2026-03-13-edge-case-fixes.md) | 27 edge cases across 6 subsystems — proxy deadlock, SQLITE_BUSY retry, health pause escape hatch, eval safety gates |
 
 ---
 

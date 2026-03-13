@@ -95,7 +95,7 @@ scripts/
   migrate_timers.py            # Migrate 8 of 10 systemd timers to recurring jobs
   migrate_dlq_max_retries.py   # Add max_retries column to existing dlq table (idempotent)
 
-tests/                           # 1,677 tests, 100% line coverage
+tests/                           # 1,788 tests, 100% line coverage
 ```
 
 ## How to Run
@@ -105,7 +105,7 @@ tests/                           # 1,677 tests, 100% line coverage
 cd ~/Documents/projects/ollama-queue
 source .venv/bin/activate
 
-# Run tests (1,677 total, 100% line coverage)
+# Run tests (1,788 total, 100% line coverage)
 pytest
 
 # Start the server (daemon + API + dashboard)
