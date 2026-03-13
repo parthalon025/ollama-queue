@@ -27,28 +27,29 @@ class DLQManager:
 
     def handle_failure(self, job_id: int, failure_reason: str) -> str:
         """Route a failed job. Returns 'retry' or 'dlq'."""
-        job = self.db.get_job(job_id)
-        if not job:
-            _log.warning("handle_failure: job #%d not found", job_id)
-            return "dlq"
+        with self.db._lock:
+            job = self.db.get_job(job_id)
+            if not job:
+                _log.warning("handle_failure: job #%d not found", job_id)
+                return "dlq"
+            retry_count = job.get("retry_count", 0)
+            max_retries = job.get("max_retries", 0)
+            if retry_count < max_retries:
+                return self._schedule_retry(job_id, retry_count, job=job)
+            else:
+                return self._move_to_dlq(job_id, failure_reason)
 
-        retry_count = job.get("retry_count", 0)
-        max_retries = job.get("max_retries", 0)
-
-        if retry_count < max_retries:
-            return self._schedule_retry(job_id, retry_count)
-        else:
-            return self._move_to_dlq(job_id, failure_reason)
-
-    def _schedule_retry(self, job_id: int, retry_count: int) -> str:
+    def _schedule_retry(self, job_id: int, retry_count: int, job: dict | None = None) -> str:
         settings = self.db.get_all_settings()
         base = float(settings.get("retry_backoff_base_seconds") or 60)
         cap = float(settings.get("retry_backoff_cap_seconds") or 3600)
 
         # Decorrelated jitter: each delay is random in [base, prev_delay * 3]
         # Breaks synchronization between retrying jobs (prevents thundering herd)
-        job = self.db.get_job(job_id)
-        prev_delay = job.get("last_retry_delay") or base
+        # Use already-fetched job if provided, otherwise re-fetch
+        if job is None:
+            job = self.db.get_job(job_id)
+        prev_delay = job.get("last_retry_delay") or base if job else base
         hi = max(base, prev_delay * 3)  # guard: ensure upper bound >= base
         delay = min(cap, random.uniform(base, hi))  # noqa: S311
 
