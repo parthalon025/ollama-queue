@@ -5,12 +5,14 @@ Selects the best backend for each request using a four-tier strategy:
   2. Model availability — prefer backends that have the requested model (60s cache)
   3. Warm model — prefer backends with the model already loaded in VRAM (5s cache)
   4. Hardware load — prefer backends with lower VRAM pressure (10s cache)
-  5. Random choice among remaining tied candidates
+  5. Weighted random among remaining tied candidates (OLLAMA_BACKEND_WEIGHTS)
 
 Configure via env vars:
-  OLLAMA_BACKENDS=http://host1:11434,http://host2:11434  (multi-backend)
-  OLLAMA_URL=http://127.0.0.1:11434                      (single-backend fallback)
-  OLLAMA_QUEUE_PORT=7683                                  (queue health port for HW checks)
+  OLLAMA_BACKENDS=http://host1:11434,http://host2:11434      (multi-backend)
+  OLLAMA_URL=http://127.0.0.1:11434                          (single-backend fallback)
+  OLLAMA_QUEUE_PORT=7683                                      (queue health port for HW checks)
+  OLLAMA_BACKEND_WEIGHTS=http://host1:11434:2,http://host2:11434:1
+                                                              (tie-break preference; higher = more traffic)
 
 Single-backend setups (or no OLLAMA_BACKENDS set) skip all routing logic.
 """
@@ -38,6 +40,27 @@ BACKENDS: list[str] = (
 # Port where ollama-queue health endpoint is reachable on each backend host.
 # Used to derive queue URL from Ollama backend URL for VRAM pressure checks.
 _QUEUE_PORT = int(os.environ.get("OLLAMA_QUEUE_PORT", "7683"))
+
+# Parse per-backend weights for tie-break routing: OLLAMA_BACKEND_WEIGHTS=url:weight,...
+# Unspecified backends default to weight 1. Used by weighted random in select_backend.
+_weights_raw = os.environ.get("OLLAMA_BACKEND_WEIGHTS", "")
+_BACKEND_WEIGHTS: dict[str, float] = {}
+if _weights_raw:
+    import contextlib
+
+    for _entry in _weights_raw.split(","):
+        _entry = _entry.strip()
+        if _entry:
+            _parts = _entry.rsplit(":", 1)
+            if len(_parts) == 2:
+                with contextlib.suppress(ValueError):
+                    _BACKEND_WEIGHTS[_parts[0].rstrip("/")] = float(_parts[1])
+
+
+def _get_weights(backends: list[str]) -> list[float]:
+    """Return per-backend weights in the same order as backends list. Default weight: 1.0."""
+    return [_BACKEND_WEIGHTS.get(b, 1.0) for b in backends]
+
 
 # Cache TTLs (seconds)
 _HEALTH_TTL = 30.0
@@ -227,5 +250,6 @@ async def select_backend(model: str = "") -> str:
         if len(healthy) == 1:
             return healthy[0]
 
-    # 5. Random among remaining candidates (distributes load over time; not crypto use)
-    return random.choice(healthy)  # noqa: S311
+    # 5. Weighted random among remaining candidates — higher weight = more traffic share
+    weights = _get_weights(healthy)
+    return random.choices(healthy, weights=weights, k=1)[0]  # noqa: S311

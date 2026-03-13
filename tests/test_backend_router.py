@@ -380,6 +380,43 @@ def test_fetch_all_backend_models_merges_deduplicates():
 
 
 # ---------------------------------------------------------------------------
+# _get_weights — backend preference weights
+# ---------------------------------------------------------------------------
+
+
+def test_get_weights_returns_defaults_when_no_config():
+    """Backends not in _BACKEND_WEIGHTS get weight 1.0."""
+    with patch.object(router, "_BACKEND_WEIGHTS", {}):
+        weights = router._get_weights(["http://a:11434", "http://b:11434"])
+    assert weights == [1.0, 1.0]
+
+
+def test_get_weights_applies_configured_weights():
+    """Configured weights are returned in backend list order."""
+    weights_map = {"http://fast:11434": 3.0, "http://slow:11434": 1.0}
+    with patch.object(router, "_BACKEND_WEIGHTS", weights_map):
+        weights = router._get_weights(["http://fast:11434", "http://slow:11434"])
+    assert weights == [3.0, 1.0]
+
+
+def test_weighted_random_respects_weights():
+    """Higher-weight backend wins the overwhelming majority of tie-break picks."""
+    backends = ["http://weak:11434", "http://strong:11434"]
+    weights_map = {"http://strong:11434": 100.0, "http://weak:11434": 1.0}
+
+    with (
+        patch.object(router, "BACKENDS", backends),
+        patch.object(router, "_BACKEND_WEIGHTS", weights_map),
+        patch.object(router, "_backend_healthy", new=AsyncMock(return_value=True)),
+    ):
+        # Run 20 times — strong should win almost every pick
+        results = [run(router.select_backend("")) for _ in range(20)]
+
+    strong_wins = results.count("http://strong:11434")
+    assert strong_wins >= 18, f"strong won only {strong_wins}/20 — weights not applied"
+
+
+# ---------------------------------------------------------------------------
 # BACKENDS env var parsing (static, no async)
 # ---------------------------------------------------------------------------
 
