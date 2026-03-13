@@ -497,9 +497,14 @@ class LoopMixin:
         )
 
     def shutdown(self) -> None:
-        """Shut down the thread pool executor, releasing worker threads."""
+        """Shut down the thread pool executor, releasing worker threads.
+
+        wait=True ensures all in-flight worker threads finish before the daemon
+        exits.  wait=False would return immediately, leaving background threads
+        that may write to a closed DB connection or update state after shutdown.
+        """
         if self._executor is not None:
-            self._executor.shutdown(wait=False)
+            self._executor.shutdown(wait=True)
             self._executor = None
 
     def run(self, poll_interval: int | None = None) -> None:

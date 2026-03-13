@@ -3249,3 +3249,19 @@ def test_preempted_job_stays_in_running_until_exit(db):
     # --- KEY ASSERTION 2: slot is free after process exited ---
     with daemon._running_lock:
         assert job_id not in daemon._running, "Job still in _running after process exited"
+
+
+def test_shutdown_waits_for_threads(daemon):
+    """shutdown() must call executor.shutdown(wait=True) so in-flight threads finish
+    before the daemon exits. wait=False leaves background threads dangling — they can
+    write to a closed DB connection or update state after shutdown."""
+    from concurrent.futures import ThreadPoolExecutor
+    from unittest.mock import MagicMock
+
+    # Install a mock executor so we can inspect the shutdown call.
+    mock_executor = MagicMock(spec=ThreadPoolExecutor)
+    daemon._executor = mock_executor
+
+    daemon.shutdown()
+
+    mock_executor.shutdown.assert_called_once_with(wait=True)
