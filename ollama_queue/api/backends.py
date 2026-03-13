@@ -21,7 +21,7 @@ import time
 from urllib.parse import unquote
 
 import httpx
-from fastapi import APIRouter, HTTPException, Path
+from fastapi import APIRouter, HTTPException, Path, Query
 from pydantic import BaseModel
 
 import ollama_queue.api as _api
@@ -37,11 +37,6 @@ router = APIRouter()
 class AddBackendRequest(BaseModel):
     url: str
     weight: float = 1.0
-    label: str | None = None
-
-
-class UpdateWeightRequest(BaseModel):
-    weight: float
 
 
 # ── GET /api/backends ─────────────────────────────────────────────────────────
@@ -105,7 +100,7 @@ async def add_backend(req: AddBackendRequest):
         raise HTTPException(status_code=502, detail=f"connectivity test failed: {e}") from e
 
     if db:
-        db.add_backend(req.url, req.weight, req.label)
+        db.add_backend(req.url, req.weight)
 
     _router.invalidate_backend_caches(req.url)
     _router.refresh_backends_from_db()
@@ -139,22 +134,22 @@ async def remove_backend(url: str = Path(...)):
 
 
 @router.put("/api/backends/{url:path}/weight")
-async def update_backend_weight(req: UpdateWeightRequest, url: str = Path(...)):
+async def update_backend_weight(url: str = Path(...), weight: float = Query(...)):
     """Update the routing weight for a registered backend.
 
     Plain English: Higher weight = more traffic share in weighted-random tie-breaks.
     Range 0.1-10.0. Takes effect on the next routing decision.
     """
     url = unquote(url)
-    if not (0.1 <= req.weight <= 10.0):
+    if not (0.1 <= weight <= 10.0):
         raise HTTPException(status_code=400, detail="weight must be between 0.1 and 10.0")
 
     db = _api.db
-    updated = db.update_backend_weight(url, req.weight) if db else False
+    updated = db.update_backend_weight(url, weight) if db else False
     if not updated:
         raise HTTPException(status_code=404, detail=f"backend {url} not found")
 
-    return {"url": url, "weight": req.weight}
+    return {"url": url, "weight": weight}
 
 
 # ── GET /api/backends/{url}/test ─────────────────────────────────────────────

@@ -14,19 +14,16 @@ from contextlib import closing
 class BackendsMixin:
     """CRUD operations for the backends table."""
 
-    def add_backend(self, url: str, weight: float = 1.0, label: str | None = None) -> dict | None:
-        """Insert or replace a backend. Returns the stored row, or None if the SELECT fails."""
+    def add_backend(self, url: str, weight: float = 1.0) -> None:
+        """Insert or replace a backend row."""
         with self._lock:
             conn = self._connect()
             with closing(conn.cursor()) as cur:
                 cur.execute(
-                    "INSERT OR REPLACE INTO backends (url, weight, enabled, added_at, label) VALUES (?, ?, 1, ?, ?)",
-                    (url, weight, time.time(), label),
+                    "INSERT OR REPLACE INTO backends (url, weight, enabled, added_at) VALUES (?, ?, 1, ?)",
+                    (url, weight, time.time()),
                 )
                 conn.commit()
-                cur.execute("SELECT * FROM backends WHERE url = ?", (url,))
-                row = cur.fetchone()
-                return dict(row) if row else None
 
     def remove_backend(self, url: str) -> bool:
         """Delete a backend by URL. Returns True if a row was deleted."""
