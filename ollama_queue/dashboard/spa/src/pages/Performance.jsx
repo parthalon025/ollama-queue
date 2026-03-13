@@ -3,7 +3,7 @@ import {
     modelPerformance, performanceCurve,
     fetchModelPerformance, fetchPerformanceCurve,
 } from '../stores';
-import { evalVariants } from '../stores/eval.js';
+import { evalVariants, fetchEvalVariants } from '../stores/eval.js';
 import { SystemHealth } from '../components/SystemHealth.jsx';
 import PerformanceCurveChart from '../components/PerformanceCurveChart.jsx';
 import LoadHeatmap from '../components/LoadHeatmap.jsx';
@@ -30,6 +30,7 @@ export default function Performance() {
     useEffect(() => {
         fetchModelPerformance();
         fetchPerformanceCurve();
+        fetchEvalVariants(); // needed for judge model annotation when landing directly on this tab
     }, []);
 
     // Convert stats object { model_name: { run_count, avg_tok_per_min, ... } } to sorted array
@@ -99,7 +100,7 @@ export default function Performance() {
 
             {/* Performance Curve — tok/min vs model size */}
             <p style="font-size: var(--type-label); color: var(--text-secondary); margin-bottom: 8px;">
-                Jobs completed per hour. Use this to estimate capacity for batch workloads.
+                Throughput vs model size. Points above the curve are overperforming for their size class.
             </p>
             <PerformanceCurveChart curve={curve} models={models} />
 
