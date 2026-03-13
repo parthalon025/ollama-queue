@@ -558,3 +558,40 @@ def test_parse_meminfo_valueerror():
     # MemTotal should be skipped (ValueError), MemFree should be parsed
     assert "MemTotal" not in result
     assert result["MemFree"] == 8000
+
+
+def test_evaluate_handles_missing_settings():
+    """C7: evaluate() must not crash when settings values are None (fresh install / missing DB keys).
+
+    Simulates a settings dict where all threshold values are None, as would
+    happen when db.get_setting() returns None for unseeded keys.  The call
+    must return a valid decision dict without raising TypeError/ValueError.
+    Sensible defaults should keep should_pause=False when metrics are low.
+    """
+    m = HealthMonitor()
+    # All settings values are None — mirrors a fresh DB with no seeded rows
+    settings = {
+        "ram_pause_pct": None,
+        "ram_resume_pct": None,
+        "swap_pause_pct": None,
+        "swap_resume_pct": None,
+        "load_pause_multiplier": None,
+        "load_resume_multiplier": None,
+        "yield_to_interactive": None,
+    }
+    snap = {
+        "ram_pct": 40.0,
+        "swap_pct": 5.0,
+        "load_avg": 1.0,
+        "cpu_count": 4,
+        "vram_pct": 30.0,
+        "ollama_model": None,
+    }
+    # Must not raise; must return a well-formed result dict
+    result = m.evaluate(snap, settings, currently_paused=False)
+    assert isinstance(result, dict)
+    assert "should_pause" in result
+    assert "should_yield" in result
+    assert "reason" in result
+    assert isinstance(result["should_pause"], bool)
+    assert isinstance(result["should_yield"], bool)
