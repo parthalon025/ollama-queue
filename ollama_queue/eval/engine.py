@@ -282,6 +282,9 @@ def _call_proxy(
         except httpx.TimeoutException:
             _log.warning("proxy timeout for model=%s (attempt %d/%d)", model, attempt + 1, _MAX_RETRIES + 1)
             last_exc = Exception(f"timeout model={model}")
+            if attempt < _MAX_RETRIES:
+                time.sleep(2**attempt)
+                continue
             return None, None
         except Exception as exc:
             _log.exception("proxy unexpected error for model=%s: %s", model, exc)

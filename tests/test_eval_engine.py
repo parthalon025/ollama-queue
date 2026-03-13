@@ -3284,7 +3284,10 @@ class TestCallProxyRetryAndErrorPaths:
         assert text is None  # exhausted retries
 
     def test_timeout_returns_none(self):
-        with patch("httpx.Client") as mock_cls:
+        with (
+            patch("httpx.Client") as mock_cls,
+            patch("time.sleep"),
+        ):
             mock_client = MagicMock()
             mock_client.__enter__ = MagicMock(return_value=mock_client)
             mock_client.__exit__ = MagicMock(return_value=False)
@@ -3301,6 +3304,39 @@ class TestCallProxyRetryAndErrorPaths:
             )
         assert text is None
         assert job_id is None
+
+    def test_call_proxy_retries_on_timeout(self):
+        """TimeoutException on first attempt must trigger retry, not immediate (None, None)."""
+        mock_resp_ok = MagicMock()
+        mock_resp_ok.status_code = 200
+        mock_resp_ok.raise_for_status = MagicMock()
+        mock_resp_ok.json.return_value = {"response": "success after timeout", "_queue_job_id": 7}
+
+        with (
+            patch("httpx.Client") as mock_cls,
+            patch("time.sleep"),
+        ):
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            # First call raises TimeoutException, second returns success
+            mock_client.post.side_effect = [
+                httpx.TimeoutException("timed out"),
+                mock_resp_ok,
+            ]
+            mock_cls.return_value = mock_client
+            text, job_id = _call_proxy(
+                http_base="http://localhost:7683",
+                model="m",
+                prompt="p",
+                temperature=0.5,
+                num_ctx=4096,
+                timeout=30,
+                source="test",
+            )
+        assert mock_client.post.call_count == 2, "retry must happen — call_count should be 2"
+        assert text == "success after timeout"
+        assert job_id == 7
 
     def test_unexpected_error_returns_none(self):
         with patch("httpx.Client") as mock_cls:
