@@ -161,15 +161,27 @@ class JobsMixin:
             conn.commit()
 
     def cancel_job(self, job_id):
+        """Cancel a pending job. Returns a status string:
+        - "cancelled"       — job was pending and is now cancelled
+        - "not_found"       — no job with this ID exists
+        - "already_terminal" — job exists but is not in a cancellable state
+        """
         with self._lock:
             conn = self._connect()
-            conn.execute(
+            cur = conn.execute(
                 """UPDATE jobs
                    SET status = 'cancelled', outcome_reason = 'user cancelled', completed_at = ?
                    WHERE id = ? AND status = 'pending'""",
                 (time.time(), job_id),
             )
             conn.commit()
+            if cur.rowcount > 0:
+                return "cancelled"
+            # Distinguish: job doesn't exist vs job exists but not pending
+            row = conn.execute("SELECT id FROM jobs WHERE id = ?", (job_id,)).fetchone()
+            if row is None:
+                return "not_found"
+            return "already_terminal"
 
     def set_job_priority(self, job_id, priority):
         """Update priority of a pending job. Returns True if updated."""

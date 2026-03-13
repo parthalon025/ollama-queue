@@ -116,7 +116,11 @@ def submit_job(req: SubmitJobRequest):
 @router.post("/api/queue/cancel/{job_id}")
 def cancel_job(job_id: int):
     db = _api.db
-    db.cancel_job(job_id)
+    result = db.cancel_job(job_id)
+    if result == "not_found":
+        raise HTTPException(status_code=404, detail="Job not found")
+    if result == "already_terminal":
+        raise HTTPException(status_code=409, detail="Job is already in a terminal state")
     return {"ok": True}
 
 

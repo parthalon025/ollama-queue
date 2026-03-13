@@ -73,6 +73,27 @@ def test_cancel_job(client):
     assert resp.status_code == 200
 
 
+def test_cancel_job_returns_404_for_unknown_id(client):
+    """Cancelling a job ID that does not exist must return HTTP 404."""
+    resp = client.post("/api/queue/cancel/99999")
+    assert resp.status_code == 404
+
+
+def test_cancel_job_returns_409_for_terminal_job(client):
+    """Cancelling a job already in a terminal state must return HTTP 409."""
+    # Submit a job, then mark it completed via the DB
+    resp = client.post(
+        "/api/queue/submit", json={"command": "echo test", "source": "test", "model": "m", "priority": 5, "timeout": 60}
+    )
+    job_id = resp.json()["job_id"]
+    # Cancel it once (moves to 'cancelled' terminal state)
+    first = client.post(f"/api/queue/cancel/{job_id}")
+    assert first.status_code == 200
+    # Second cancel attempt on a terminal job must return 409
+    second = client.post(f"/api/queue/cancel/{job_id}")
+    assert second.status_code == 409
+
+
 def test_get_settings(client):
     resp = client.get("/api/settings")
     assert resp.status_code == 200
