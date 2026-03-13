@@ -36,6 +36,15 @@ class ScheduleMixin:
     ):
         if interval_seconds is None and cron_expression is None:
             raise ValueError("Either interval_seconds or cron_expression must be provided")
+        if cron_expression:
+            try:
+                import datetime
+
+                from croniter import croniter
+
+                croniter(cron_expression, datetime.datetime.now())
+            except (ValueError, KeyError) as e:
+                raise ValueError(f"Invalid cron expression '{cron_expression}': {e}") from e
         with self._lock:
             conn = self._connect()
             now = time.time()

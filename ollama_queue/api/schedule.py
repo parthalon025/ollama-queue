@@ -272,7 +272,10 @@ def add_schedule(body: RecurringJobCreate):
 
     from ollama_queue.scheduling.scheduler import Scheduler
 
-    rj_id = db.add_recurring_job(**body.model_dump())
+    try:
+        rj_id = db.add_recurring_job(**body.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     Scheduler(db).rebalance()
     rj = db.get_recurring_job(rj_id)
     # Auto-generate description in background if not already provided
