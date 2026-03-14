@@ -163,8 +163,62 @@ export function edgeState(id, {
   }
 }
 
-// ── Main component (placeholder — built up in subsequent tasks) ───────────────
+// ── SVG animation styles ───────────────────────────────────────────────────────
+const ANIM_CSS = `
+  @keyframes march-phosphor { to { stroke-dashoffset: -18; } }
+  @keyframes march-amber    { to { stroke-dashoffset: -18; } }
+  @keyframes march-threat   { to { stroke-dashoffset: -9;  } }
+  @keyframes threat-pulse   { 0%,100% { opacity:1; } 50% { opacity:0.35; } }
+  .topo-threat-pulse { animation: threat-pulse 1.2s ease-in-out infinite; }
+`;
 
+// ── Defs component: SVG filter definitions and arrowhead markers ────────────────
+// What it shows: SVG filter definitions for CRT phosphor glow effects and arrowhead markers.
+// Decision it drives: All topology edges and nodes reference these shared filter/marker IDs.
+function Defs() {
+  return (
+    <defs>
+      <style>{ANIM_CSS}</style>
+
+      <filter id="topo-glow-phosphor" x="-30%" y="-30%" width="160%" height="160%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blur" />
+        <feComposite in="SourceGraphic" in2="blur" operator="over" />
+      </filter>
+      <filter id="topo-glow-amber" x="-30%" y="-30%" width="160%" height="160%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blur" />
+        <feComposite in="SourceGraphic" in2="blur" operator="over" />
+      </filter>
+      <filter id="topo-glow-threat" x="-40%" y="-40%" width="180%" height="180%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="blur" />
+        <feComposite in="SourceGraphic" in2="blur" operator="over" />
+      </filter>
+
+      {[
+        { id: 'arrow-phosphor', fill: 'var(--sh-phosphor, var(--accent))' },
+        { id: 'arrow-amber',    fill: 'var(--status-warning, #f59e0b)' },
+        { id: 'arrow-threat',   fill: 'var(--sh-threat, var(--status-error))' },
+        { id: 'arrow-dim',      fill: 'var(--text-tertiary)' },
+      ].map(item => (
+        <marker key={item.id} id={item.id} markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+          <path d="M0,0 L6,3 L0,6 Z" fill={item.fill} />
+        </marker>
+      ))}
+    </defs>
+  );
+}
+
+// ── Main component ──────────────────────────────────────────────────────────────
 export default function TopologyDiagram({ daemonStatus, currentJob, backends, dlqCount, activeEval, queueDepth }) {
-  return <svg viewBox="0 0 860 480" width="100%" style={{ display: 'block' }} />;
+  return (
+    <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+      <svg
+        viewBox="0 0 860 480"
+        width="100%"
+        style={{ display: 'block', minWidth: 480 }}
+        aria-label="ollama-queue system topology"
+      >
+        <Defs />
+      </svg>
+    </div>
+  );
 }
