@@ -122,6 +122,23 @@ export function App() {
         return () => stopPolling();
     }, []);
 
+    // What it does: Flashes the main content area when connection recovers after an outage.
+    // Design system §7.2 stage 4: "t2-tick-flash on data containers" on recovery.
+    // Only fires on disconnected → ok transitions (not on initial load).
+    useEffect(() => {
+        function onRestored() {
+            const main = document.querySelector('.layout-main');
+            if (!main) return;
+            // Remove + re-add class on next frame to re-trigger CSS animation
+            main.classList.remove('t2-tick-flash');
+            requestAnimationFrame(() => main.classList.add('t2-tick-flash'));
+            // Clean up after animation (0.4s)
+            setTimeout(() => main.classList.remove('t2-tick-flash'), 500);
+        }
+        window.addEventListener('queue:connection-restored', onRestored);
+        return () => window.removeEventListener('queue:connection-restored', onRestored);
+    }, []);
+
     // Keyboard shortcuts: 1-8 switch tabs; Cmd/Ctrl+K opens palette
     useEffect(() => {
         function onKeyDown(e) {
