@@ -20,8 +20,11 @@ import { priorityBorderWidth, priorityBorderOpacity } from '../utils/priority.js
  * @param {{ jobs: Array<object>, currentJob: object|null }} props
  */
 const PRIORITY_COLORS = {
-  critical: '#ef4444', high: '#f97316',
-  normal: '#3b82f6', low: '#6b7280', background: '#374151',
+  critical:   'var(--status-error)',
+  high:       'var(--status-warning)',
+  normal:     'var(--accent)',
+  low:        'var(--text-tertiary)',
+  background: 'var(--text-tertiary)',
 };
 
 function priorityColor(p) {

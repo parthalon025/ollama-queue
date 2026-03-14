@@ -194,7 +194,7 @@ export default function CurrentJob({ daemon, currentJob, latestHealth, settings,
               width: '100%',
               maxWidth: '100%',
               height: '100%',
-              background: isOverrun ? '#f97316' : 'var(--accent)',
+              background: isOverrun ? 'var(--status-warning)' : 'var(--accent)',
               borderRadius: '2px',
               transition: 'background 0.3s ease',
               ...(isOverrun ? {} : { width: `${progressPct}%`, transition: 'width 1s linear' }),
@@ -303,10 +303,10 @@ function ActiveGpuBadge({ model }) {
 // Decision it drives: Quick visual cue — burst means the queue is under pressure,
 //   trough means it's a good time to submit batch work.
 const REGIME_STYLE = {
-  burst:   { color: '#f97316', border: '#f97316', bg: 'rgba(249,115,22,0.1)' },
-  trough:  { color: '#60a5fa', border: '#60a5fa', bg: 'rgba(96,165,250,0.1)' },
-  steady:  { color: 'var(--status-healthy)', border: 'var(--status-healthy)', bg: 'rgba(74,222,128,0.08)' },
-  unknown: { color: 'var(--text-tertiary)', border: 'var(--border-subtle)', bg: 'transparent' },
+  burst:   { color: 'var(--regime-burst)',   border: 'var(--regime-burst)',   bg: 'var(--regime-burst-bg)' },
+  trough:  { color: 'var(--regime-trough)',  border: 'var(--regime-trough)',  bg: 'var(--regime-trough-bg)' },
+  steady:  { color: 'var(--regime-steady)',  border: 'var(--regime-steady)',  bg: 'var(--regime-steady-bg)' },
+  unknown: { color: 'var(--regime-unknown)', border: 'var(--regime-unknown)', bg: 'var(--regime-unknown-bg)' },
 };
 
 const REGIME_LABELS = {

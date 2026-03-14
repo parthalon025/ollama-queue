@@ -10,18 +10,18 @@ import { fetchJobRuns } from '../stores';
 
 export const SOURCE_COLORS = {
     aria:     'var(--accent)',
-    telegram: '#f97316',
-    notion:   '#a78bfa',
-    eval:     '#6366f1',
+    telegram: 'var(--source-telegram)',
+    notion:   'var(--source-notion)',
+    eval:     'var(--source-eval)',
 };
 
 export function sourceColor(source) {
     if (!source || source === 'none') return 'var(--text-tertiary)';
     const s = source.toLowerCase();
     if (s === 'aria' || s.startsWith('aria-')) return 'var(--accent)';
-    if (s === 'telegram' || s.startsWith('telegram-')) return '#f97316';
-    if (s === 'notion' || s.startsWith('notion-')) return '#a78bfa';
-    if (s === 'eval' || s.startsWith('eval-')) return '#6366f1';
+    if (s === 'telegram' || s.startsWith('telegram-')) return 'var(--source-telegram)';
+    if (s === 'notion' || s.startsWith('notion-')) return 'var(--source-notion)';
+    if (s === 'eval' || s.startsWith('eval-')) return 'var(--source-eval)';
     return 'var(--text-tertiary)';
 }
 
@@ -854,10 +854,10 @@ export function GanttChart({
                 color:
             </span>
             {[
-                { color: 'var(--accent)',        label: 'aria',     symbol: '◆' },
-                { color: '#f97316',              label: 'telegram', symbol: '●' },
-                { color: '#a78bfa',              label: 'notion',   symbol: '▲' },
-                { color: 'var(--text-tertiary)', label: 'other',    symbol: '·' },
+                { color: 'var(--accent)',           label: 'aria',     symbol: '◆' },
+                { color: 'var(--source-telegram)',  label: 'telegram', symbol: '●' },
+                { color: 'var(--source-notion)',    label: 'notion',   symbol: '▲' },
+                { color: 'var(--text-tertiary)',    label: 'other',    symbol: '·' },
             ].map(({ color, label, symbol }) => (
                 <span key={label} style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
                     <span style={{ color }}>{symbol}</span>

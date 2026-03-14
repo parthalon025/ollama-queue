@@ -10,6 +10,22 @@
   --scan-line: oklch(0 0 0 / 0.08);
   /* VT323 loads via Google Fonts <link> in index.html — prefix before the fallback stack */
   --font-mono: 'VT323', 'Perfect DOS VGA 437', 'Fixedsys Excelsior', 'Courier New', monospace;
+
+  /* ── Source identity colors — categorical, not status ── */
+  --source-telegram:      var(--status-warning);
+  --source-notion:        oklch(0.68 0.14 295);
+  --source-eval:          oklch(0.62 0.18 270);
+  --source-default:       var(--text-secondary);
+
+  /* ── Burst regime colors ── */
+  --regime-burst:         var(--status-warning);
+  --regime-trough:        oklch(0.62 0.13 230);
+  --regime-steady:        var(--status-healthy);
+  --regime-unknown:       var(--text-tertiary);
+  --regime-burst-bg:      oklch(0.72 0.18 55 / 0.1);
+  --regime-trough-bg:     oklch(0.62 0.13 230 / 0.1);
+  --regime-steady-bg:     oklch(0.55 0.18 145 / 0.1);
+  --regime-unknown-bg:    var(--bg-inset);
 }
 
 /* ── Light theme token overrides ── */
