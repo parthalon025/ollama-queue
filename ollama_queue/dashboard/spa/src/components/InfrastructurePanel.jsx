@@ -24,7 +24,10 @@ export function hostGauges(latestHealth, settings, cpuCount) {
     ];
 }
 
-// Returns display state for one backend row.
+// Returns display state for one backend row: GPU label, VRAM pressure color,
+//   loaded model name, and whether this backend is currently serving the active job.
+// Decision it drives: BackendRow uses this to render the phosphor highlight + ▶ badge
+//   on the backend that has the running job's model warm in VRAM.
 // Pure — no signals, no DOM, fully testable.
 export function backendRowState(backend, activeModel) {
     let host = backend.url;
@@ -86,20 +89,22 @@ export default function InfrastructurePanel({ latestHealth, settings, cpuCount }
             )}
 
             {/* Backend rows — one per configured Ollama backend */}
-            {allUnhealthy ? (
-                <span style={{ color: 'var(--status-error)', fontSize: 'var(--type-label)', fontFamily: 'var(--font-mono)' }}>
-                    All backends unreachable — routing unavailable
-                </span>
-            ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
-                    {backends.map(backend => (
-                        <BackendRow
-                            key={backend.url}
-                            row={backendRowState(backend, activeModel)}
-                            url={backend.url}
-                        />
-                    ))}
-                </div>
+            {backends.length > 0 && (
+                allUnhealthy ? (
+                    <span style={{ color: 'var(--status-error)', fontSize: 'var(--type-label)', fontFamily: 'var(--font-mono)' }}>
+                        All backends unreachable — routing unavailable
+                    </span>
+                ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
+                        {backends.map(backend => (
+                            <BackendRow
+                                key={backend.url}
+                                row={backendRowState(backend, activeModel)}
+                                url={backend.url}
+                            />
+                        ))}
+                    </div>
+                )
             )}
         </div>
     );

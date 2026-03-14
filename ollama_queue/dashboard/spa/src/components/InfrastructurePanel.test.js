@@ -46,7 +46,6 @@ const BASE = {
     healthy: true,
     vram_pct: 21,
     loaded_models: ['nomic-embed-text:latest'],
-    model_count: 12,
     gpu_name: null,
 };
 
