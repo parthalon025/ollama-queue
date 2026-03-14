@@ -39,7 +39,7 @@ Running multiple services against a local Ollama instance creates a resource con
 | **Stall detection** | Bayesian detection of jobs that started but stopped producing output. |
 | **Circuit breaker** | Isolates Ollama failures automatically; exponential backoff before retry; prevents cascading failures. |
 | **Burst detection** | Classifies traffic regime (burst / steady / trough) and adapts dequeue rate accordingly. |
-| **Ollama proxy** | Drop-in `/api/generate` and `/api/embed` proxy — point existing apps at `localhost:7683` and they queue automatically. Routes requests across multiple Ollama backends and captures per-backend throughput metrics. |
+| **Ollama proxy** | Drop-in `/api/generate` and `/api/embed` proxy — point existing apps at `localhost:7683` and they queue automatically. Routes requests across multiple Ollama backends and captures per-backend throughput metrics. Per-backend routing weights are live-configurable via `PUT /api/backends/{url}/weight` without restarting. |
 | **Consumer detection** | 4-phase scanner finds every service calling Ollama directly. Config patcher rewrites them to route through the queue. Optional iptables REDIRECT intercept catches unpatched callers at the network layer. |
 | **Eval pipeline** | Run A/B–E prompt variant evaluations with an LLM judge (F1/recall/precision). Auto-promote the winning config when quality gates pass. Thompson Sampling routes production traffic to the recommended variant. |
 | **Intelligence layer** | Bayesian log-normal runtime estimation (4-tier hierarchy), log-linear cross-model performance curves, 10-factor slot scoring with VRAM hard gates, hourly/daily load pattern learning. |
@@ -240,7 +240,7 @@ Eight views served from `http://localhost:7683/ui/`:
 | **History** | Job history, DLQ entries with reschedule status badges and reasoning, deferred jobs panel, duration trends, activity heatmap |
 | **Models** | Model table with active model tracking |
 | **Perf** | Per-model performance table, cross-model performance curve chart (SVG scatter, log-scale), 24h×7d load heatmap, system health gauges, per-backend throughput table showing tok/min per GPU |
-| **Settings** | Thresholds, defaults, retention, DLQ auto-reschedule, proactive deferral, daemon controls (14+ tunable parameters) |
+| **Settings** | Thresholds, defaults, retention, DLQ auto-reschedule, proactive deferral, daemon controls (14+ tunable parameters), CRT scanline display preference (off/low/medium/high) |
 | **Eval** | Runs, Variants, Trends, Settings sub-views for the prompt eval pipeline |
 | **Consumers** | Scan results, consumer cards with status badges, include/ignore/revert actions, intercept toggle |
 
