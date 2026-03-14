@@ -6,10 +6,11 @@
 
 import { useEffect, useState } from 'preact/hooks';
 import { ShFrozen, ShGlitch, ShShatter, ShThreatPulse } from 'superhot-ui/preact';
+import TopologyDiagram from '../components/TopologyDiagram.jsx';
 import {
   backendsData, backendsError, fetchBackends,
   addBackend, removeBackend, updateBackendWeight, testBackend,
-  addToast, currentJob, API,
+  addToast, currentJob, dlqCount, status, queue, API,
 } from '../stores';
 import { ShStatusBadge } from 'superhot-ui/preact';
 import { useActionFeedback } from '../hooks/useActionFeedback.js';
@@ -328,40 +329,16 @@ export default function BackendsTab() {
         </div>
       </div>
 
-      {/* 6.4 Backend Topology (ASCII CSS diagram) */}
-      <div class="t-frame" data-label="Topology">
-        <div class="data-mono" style={{ fontSize: 'var(--type-label)', lineHeight: 1.8, color: 'var(--text-secondary)' }}>
-          <div style={{ color: 'var(--sh-phosphor, var(--accent))' }}>
-            ┌─────────────────┐
-          </div>
-          <div>
-            {'│ '}
-            <span style={{ color: 'var(--sh-phosphor, var(--accent))' }}>ollama-queue</span>
-            {'     │'}
-          </div>
-          <div style={{ color: 'var(--sh-phosphor, var(--accent))' }}>
-            └────────┬────────┘
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', marginTop: '0.25rem' }}>
-            {backends.length === 0 ? (
-              <span style={{ color: 'var(--text-tertiary)' }}>         (no backends)</span>
-            ) : backends.map((backend, i) => {
-              let hostLabel = backend.url;
-              try { hostLabel = new URL(backend.url).hostname; } catch (_) {}
-              const isLast = i === backends.length - 1;
-              return (
-                <div key={backend.url} style={{ color: backend.healthy ? 'var(--sh-phosphor, var(--accent))' : 'var(--sh-threat, var(--status-error))' }}>
-                  {isLast ? '         └── ' : '         ├── '}
-                  {hostLabel}
-                  {' '}
-                  {backend.healthy ? '●' : '✕'}
-                  {' '}
-                  {backend.gpu_name ? `(${backend.gpu_name})` : ''}
-                </div>
-              );
-            })}
-          </div>
-        </div>
+      {/* 6.4 System Topology — live directed-graph diagram */}
+      <div class="t-frame" data-label="System Topology">
+        <TopologyDiagram
+          daemonStatus={status.value?.daemon ?? null}
+          currentJob={currentJob.value}
+          backends={backendsData.value || []}
+          dlqCount={dlqCount.value ?? 0}
+          activeEval={status.value?.active_eval ?? null}
+          queueDepth={queue.value?.length ?? 0}
+        />
       </div>
     </div>
   );
