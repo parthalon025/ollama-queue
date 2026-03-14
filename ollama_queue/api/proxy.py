@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import time
 import uuid
 
@@ -22,8 +23,20 @@ _log = logging.getLogger(__name__)
 
 router = APIRouter()
 
+BITNET_URL = os.environ.get("BITNET_URL", "http://127.0.0.1:11435")
 PROXY_WAIT_TIMEOUT = 600
 PROXY_POLL_INTERVAL = 0.5
+
+# Semaphore that serializes BitNet requests independently from Ollama.
+# llama-server is always-on (not subprocess-per-job), so the DB sentinel
+# used by _proxy_ollama_request does not apply here.  BitNet and Ollama
+# can run concurrently; BitNet requests serialize among themselves.
+_BITNET_LOCK = asyncio.Semaphore(1)
+
+
+def _is_bitnet_model(model_name: str) -> bool:
+    return model_name.startswith("bitnet:")
+
 
 # HTTP hop-by-hop headers that must not be forwarded to clients.
 _hop_by_hop = frozenset(
@@ -72,6 +85,83 @@ async def _iter_ndjson(rp_resp, release_fn=None, metrics_fn=None):
     finally:
         if release_fn:
             release_fn()
+
+
+async def _proxy_bitnet_request(
+    endpoint: str,
+    command: str,
+    body: dict,
+    error_prefix: str,
+) -> dict:
+    """Proxy a request to BitNet llama-server, serializing via _BITNET_LOCK.
+
+    Unlike _proxy_ollama_request, this uses asyncio.Semaphore(1) instead of the
+    DB sentinel — llama-server is always-on (not subprocess-per-job), so the DB
+    claim mechanism does not apply.  BitNet and Ollama can run concurrently;
+    BitNet requests serialize among themselves via the in-process semaphore.
+
+    The request body is forwarded as-is (OpenAI format); llama-server speaks
+    OpenAI natively so no translation is needed.
+    """
+    db = _api.db
+    state = db.get_daemon_state()
+    if state and state.get("state") == "paused_manual":
+        raise HTTPException(status_code=503, detail="Queue is manually paused")
+
+    priority = body.pop("_priority", 0)
+    source = body.pop("_source", "proxy")
+    req_timeout = body.pop("_timeout", 600)
+    model = body.get("model", "")
+
+    async with _BITNET_LOCK:
+        job_id = db.submit_job(
+            command=command,
+            model=model,
+            priority=priority,
+            timeout=req_timeout,
+            source=source,
+            resource_profile="bitnet",
+        )
+        db.start_job(job_id)
+
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(float(req_timeout))) as client:
+                resp = await client.post(f"{BITNET_URL}{endpoint}", json=body)
+                result = resp.json()
+
+            stdout_tail = ""
+            choices = result.get("choices") or []
+            if choices:
+                stdout_tail = str((choices[0].get("message") or {}).get("content", ""))[:500]
+            db.complete_job(
+                job_id=job_id,
+                exit_code=0,
+                stdout_tail=stdout_tail,
+                stderr_tail="",
+                outcome_reason=None,
+            )
+            result["_queue_job_id"] = job_id
+            return result
+        except httpx.ReadTimeout as e:
+            _log.warning("%s timed out for job %d after %ss (pass _timeout to override)", command, job_id, req_timeout)
+            db.complete_job(
+                job_id=job_id,
+                exit_code=1,
+                stdout_tail="",
+                stderr_tail=str(e)[:500],
+                outcome_reason=f"proxy timeout after {req_timeout}s",
+            )
+            raise HTTPException(status_code=504, detail=f"{error_prefix}: read timeout after {req_timeout}s") from e
+        except Exception as e:
+            _log.error("%s failed for job %d: %s", command, job_id, e, exc_info=True)
+            db.complete_job(
+                job_id=job_id,
+                exit_code=1,
+                stdout_tail="",
+                stderr_tail=str(e)[:500],
+                outcome_reason=f"proxy error: {e}",
+            )
+            raise HTTPException(status_code=502, detail=f"{error_prefix}: {e}") from e
 
 
 async def _proxy_ollama_request(
@@ -467,16 +557,30 @@ def _ollama_embed_to_openai_response(result: dict) -> dict:
 async def proxy_chat_completions(body: dict = Body(...)):
     """OpenAI-compatible chat completions endpoint, serialized through the queue.
 
-    Accepts OpenAI /v1/chat/completions format; translates to Ollama /api/chat,
-    queues through the daemon sentinel, then translates the response back to
-    OpenAI format. Allows LangChain ChatOpenAI (and any OpenAI-compat client)
-    to route through the queue without modifying the caller.
+    Accepts OpenAI /v1/chat/completions format.  Routing:
+      - model starts with "bitnet:" → forwarded directly to BitNet llama-server
+        (already speaks OpenAI; no format translation needed; serialized via
+        _BITNET_LOCK so BitNet and Ollama can run concurrently).
+      - all other models → translated to Ollama /api/chat format, queued through
+        the daemon DB sentinel, response translated back to OpenAI format.
 
-    Queue-specific fields (extracted from body, not forwarded to Ollama):
+    Queue-specific fields (extracted from body, not forwarded):
       _priority: int (default 0)
       _source: str (default "proxy")
       _timeout: int (default 600)
     """
+    model = body.get("model", "")
+    if _is_bitnet_model(model):
+        body.setdefault("_source", "bitnet-proxy")
+        result = await _proxy_bitnet_request(
+            endpoint="/v1/chat/completions",
+            command="proxy:/v1/chat/completions[bitnet]",
+            body=body,
+            error_prefix="BitNet chat completion failed",
+        )
+        result.pop("_queue_job_id", None)  # strip queue metadata before returning
+        return result
+
     ollama_body = _openai_to_ollama_chat_request(body)
     ollama_body.setdefault("_source", "gpt-researcher")
     model = ollama_body.get("model", "")

@@ -95,7 +95,7 @@ scripts/
   migrate_timers.py            # Migrate 8 of 10 systemd timers to recurring jobs
   migrate_dlq_max_retries.py   # Add max_retries column to existing dlq table (idempotent)
 
-tests/                           # 1,870 tests, 100% line coverage
+tests/                           # 1,883 tests, 100% line coverage
 ```
 
 ## How to Run

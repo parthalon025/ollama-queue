@@ -26,6 +26,7 @@ _log = logging.getLogger(__name__)
 
 # Profile rules: first match wins. (keywords, profile)
 _PROFILE_RULES: list[tuple[list[str], str]] = [
+    (["bitnet:"], "bitnet"),  # BitNet llama-server (always-on, serialized via semaphore)
     (["embed", "nomic", "mxbai", "bge-m3", "all-minilm"], "embed"),
     (
         ["70b", "34b", "32b", ":671b", "deepseek-r1:14", "deepseek-r1:32", "llama3.3:70", "qwen2.5:72"],
