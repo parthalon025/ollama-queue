@@ -47,11 +47,20 @@ export function backendRowState(backend, activeModel) {
     const loadedLabel = loaded.length > 0
         ? `${loaded[0].split(':')[0]}${loaded.length > 1 ? ` +${loaded.length - 1}` : ''}`
         : null;
+    // Full list for tooltip — shows all loaded models on hover when truncated by "+N"
+    const modelsTooltip = loaded.length > 0 ? loaded.join(', ') : null;
 
     const isServing = !!(activeModel && backend.healthy &&
         loaded.some(m => m === activeModel || m.startsWith(activeModel.split(':')[0] + ':')));
 
-    return { label, vramPct, vramColor, loadedLabel, isServing, isHealthy: !!backend.healthy };
+    return { label, vramPct, vramColor, loadedLabel, modelsTooltip, isServing, isHealthy: !!backend.healthy };
+}
+
+// Returns true when there are configured backends but none are reachable.
+// Used to switch from per-row rendering to a single "all unreachable" message.
+// Pure — no signals, fully testable.
+export function computeAllUnhealthy(backends) {
+    return backends.length > 0 && backends.every(b => !b.healthy);
 }
 
 export default function InfrastructurePanel({ latestHealth, settings, cpuCount }) {
@@ -67,7 +76,7 @@ export default function InfrastructurePanel({ latestHealth, settings, cpuCount }
     }, []);
 
     const gauges = hostGauges(latestHealth, settings, cpuCount);
-    const allUnhealthy = backends.length > 0 && backends.every(b => !b.healthy);
+    const allUnhealthy = computeAllUnhealthy(backends);
 
     return (
         <div class="t-frame" data-label="Infrastructure" data-chroma="lune">
@@ -138,7 +147,7 @@ function HostGaugeBar({ gauge }) {
 
 // Renders one backend row: health dot + GPU name + VRAM bar + loaded model + serving badge.
 function BackendRow({ row, url }) {
-    const { label, vramPct, vramColor, loadedLabel, isServing, isHealthy } = row;
+    const { label, vramPct, vramColor, loadedLabel, modelsTooltip, isServing, isHealthy } = row;
 
     return (
         <div
@@ -176,9 +185,9 @@ function BackendRow({ row, url }) {
                         </span>
                     </div>
 
-                    {/* Currently loaded model */}
+                    {/* Currently loaded model — title shows full list when truncated by "+N" */}
                     {loadedLabel && (
-                        <span style={{ color: isServing ? 'var(--sh-phosphor)' : 'var(--status-ok)', fontSize: 'var(--type-micro)', flexShrink: 0 }}>
+                        <span title={modelsTooltip} style={{ color: isServing ? 'var(--sh-phosphor)' : 'var(--status-ok)', fontSize: 'var(--type-micro)', flexShrink: 0 }}>
                             · {loadedLabel}
                         </span>
                     )}

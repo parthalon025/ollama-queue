@@ -1,4 +1,4 @@
-import { hostGauges, backendRowState } from './InfrastructurePanel.jsx';
+import { hostGauges, backendRowState, computeAllUnhealthy } from './InfrastructurePanel.jsx';
 
 // ── hostGauges ────────────────────────────────────────────────────────────────
 
@@ -119,4 +119,42 @@ test('backendRowState: vramColor phosphor when vram_pct <= 80', () => {
 test('backendRowState: isHealthy reflects backend.healthy', () => {
     expect(backendRowState(BASE, null).isHealthy).toBe(true);
     expect(backendRowState({ ...BASE, healthy: false }, null).isHealthy).toBe(false);
+});
+
+test('backendRowState: modelsTooltip is full comma-joined list', () => {
+    const b = { ...BASE, loaded_models: ['model-a:latest', 'model-b:7b', 'model-c:latest'] };
+    expect(backendRowState(b, null).modelsTooltip).toBe('model-a:latest, model-b:7b, model-c:latest');
+});
+
+test('backendRowState: modelsTooltip is null when no models loaded', () => {
+    const b = { ...BASE, loaded_models: [] };
+    expect(backendRowState(b, null).modelsTooltip).toBeNull();
+});
+
+// ── computeAllUnhealthy ────────────────────────────────────────────────────────
+// Controls the "All backends unreachable" message vs per-row rendering in InfrastructurePanel.
+
+test('computeAllUnhealthy: empty backends → false (no backends configured)', () => {
+    expect(computeAllUnhealthy([])).toBe(false);
+});
+
+test('computeAllUnhealthy: all unhealthy → true (shows error message)', () => {
+    const backends = [
+        { ...BASE, healthy: false },
+        { ...BASE, url: 'http://10.0.0.2:11434', healthy: false },
+    ];
+    expect(computeAllUnhealthy(backends)).toBe(true);
+});
+
+test('computeAllUnhealthy: mixed health → false (rows render normally)', () => {
+    const backends = [
+        { ...BASE, healthy: true },
+        { ...BASE, url: 'http://10.0.0.2:11434', healthy: false },
+    ];
+    expect(computeAllUnhealthy(backends)).toBe(false);
+});
+
+test('computeAllUnhealthy: all healthy → false', () => {
+    const backends = [{ ...BASE, healthy: true }, { ...BASE, url: 'http://10.0.0.2:11434', healthy: true }];
+    expect(computeAllUnhealthy(backends)).toBe(false);
 });
