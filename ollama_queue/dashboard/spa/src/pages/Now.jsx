@@ -11,7 +11,7 @@ import QueueList from '../components/QueueList.jsx';
 import HeroCard from '../components/HeroCard.jsx';
 import ResourceGauges from '../components/ResourceGauges.jsx';
 import PageBanner from '../components/PageBanner.jsx';
-import BackendsPanel from '../components/BackendsPanel.jsx';
+import InfrastructurePanel from '../components/InfrastructurePanel.jsx';
 
 // NOTE: all .map() callbacks use descriptive names — never 'h' (shadows JSX factory)
 
@@ -203,21 +203,12 @@ export default function Now({ onSubmitRequest }) {
                         </div>
                     )}
 
-                    {/* Resource gauges */}
-                    {latestHealth && (
-                        <div class="t-frame" data-label="System Resources" data-chroma="lune">
-                            <ResourceGauges
-                                ram={latestHealth.ram_pct}
-                                vram={latestHealth.vram_pct}
-                                load={(latestHealth.load_avg / (cpuCount.value || 1)) * 100}
-                                swap={latestHealth.swap_pct}
-                                settings={sett}
-                            />
-                        </div>
-                    )}
-
-                    {/* Backend health panel — only visible when multi-backend is configured */}
-                    <BackendsPanel />
+                    {/* Infrastructure panel — host scheduler metrics + per-backend GPU rows */}
+                    <InfrastructurePanel
+                        latestHealth={latestHealth}
+                        settings={sett}
+                        cpuCount={cpuCount.value}
+                    />
 
                     {/* KPI cards — 2×2 grid */}
                     <div class="grid grid-cols-2 gap-3">
