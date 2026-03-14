@@ -22,7 +22,7 @@ export function sourceColor(source) {
     if (s === 'telegram' || s.startsWith('telegram-')) return 'var(--source-telegram)';
     if (s === 'notion' || s.startsWith('notion-')) return 'var(--source-notion)';
     if (s === 'eval' || s.startsWith('eval-')) return 'var(--source-eval)';
-    return 'var(--text-tertiary)';
+    return 'var(--source-default)';
 }
 
 export function formatDuration(seconds) {
@@ -183,7 +183,7 @@ export function alignLoadMapToNow(slots, nowUnixSec) {
 // Color a load_map score for the density strip.
 // Pinned slots get amber; scored slots scale blue opacity; empty = inset.
 export function loadMapSlotColor(score) {
-    if (score >= LOAD_MAP_PIN_SCORE) return 'rgba(251,146,60,0.85)'; // amber — pinned/blocked
+    if (score >= LOAD_MAP_PIN_SCORE) return 'color-mix(in oklch, var(--status-warning) 85%, transparent)'; // amber — pinned/blocked
     if (score <= 0) return 'var(--bg-inset)';
     const intensity = Math.min(score / 10, 1); // score range 0–10 for non-pinned
     const opacity = 0.20 + intensity * 0.70;   // 0.20 → 0.90

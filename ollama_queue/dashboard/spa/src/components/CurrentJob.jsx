@@ -286,7 +286,7 @@ function ActiveGpuBadge({ model }) {
     <span style={{
       fontSize: 'var(--type-micro)',
       color: 'var(--accent)',
-      background: 'var(--accent-subtle, rgba(99,102,241,0.1))',
+      background: 'color-mix(in oklch, var(--accent) 10%, transparent)',
       border: '1px solid var(--accent)',
       borderRadius: '3px',
       padding: '1px 6px',
