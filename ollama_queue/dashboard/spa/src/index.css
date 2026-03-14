@@ -1342,7 +1342,7 @@ body {
   border: 1px solid var(--accent);
 }
 .eval-badge-production {
-  background: var(--status-healthy-glow, rgba(34,197,94,0.1));
+  background: var(--status-healthy-glow, color-mix(in oklch, var(--status-healthy) 10%, transparent));
   color: var(--status-healthy);
   border: 1px solid var(--status-healthy);
 }
@@ -1627,9 +1627,9 @@ body {
   padding: 0.5rem; border-radius: 4px;
   white-space: pre-wrap; word-break: break-all;
 }
-.badge--lock { background: var(--status-error, #dc3545); color: #fff; }
-.badge--system { background: var(--text-secondary, #6c757d); color: #fff; }
-.badge--caution { background: var(--status-warning); color: white; }
+.badge--lock   { background: var(--status-error, #dc3545); color: white; }
+.badge--system { background: var(--text-secondary, #6c757d); color: white; }
+.badge--caution { background: color-mix(in oklch, var(--status-warning) 15%, var(--bg-inset)); color: var(--status-warning); }
 .badge--ok { background: color-mix(in srgb, var(--status-ok, #198754) 15%, var(--bg-surface)); color: var(--status-ok, #198754); }
 
 /* CRT scanlines — superhot-ui aesthetic, enabled on .sh-crt elements */
@@ -1747,7 +1747,7 @@ kbd {
 
 /* EVAL badge + perf annotation */
 .nav-badge          { display: inline-block; padding: 1px 5px; border-radius: 4px; font-size: 0.65rem; font-weight: 700; letter-spacing: 0.04em; margin-left: 4px; }
-.nav-badge--eval    { background: var(--source-eval); color: white; }
+.nav-badge--eval    { background: color-mix(in oklch, var(--source-eval) 15%, var(--bg-inset)); color: var(--source-eval); }
 .perf-eval-annotation { padding: 8px 12px; background: var(--surface-2, #1f2937); border-left: 3px solid var(--status-warning); border-radius: 4px; font-size: 0.8rem; color: var(--text, #f3f4f6); margin-top: 8px; }
 
 /* Variant lineage tooltip */
