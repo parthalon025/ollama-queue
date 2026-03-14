@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 from fastapi import APIRouter
 
 import ollama_queue.api as _api
@@ -14,6 +16,25 @@ _monitor = HealthMonitor()
 _CPU_COUNT = _monitor.get_cpu_count()
 _GPU_NAME = _monitor.get_gpu_name()  # None on non-GPU machines
 _VRAM_TOTAL_GB = _monitor.get_vram_total_gb()  # 0.0 on non-GPU machines
+
+
+@router.get("/api/health/status")
+def get_health_status():
+    """Lightweight probe for uptime checkers and container health checks.
+
+    Returns only daemon liveness and uptime — no telemetry log.
+    Response is always under 100 bytes.
+    """
+    db = _api.db
+    daemon_state = db.get_daemon_state()
+    state = daemon_state.get("state") or "idle"
+    uptime_since = daemon_state.get("uptime_since")
+    uptime_s = int(time.time() - uptime_since) if uptime_since else 0
+    return {
+        "ok": True,
+        "daemon_state": state,
+        "uptime_s": uptime_s,
+    }
 
 
 @router.get("/api/health")
