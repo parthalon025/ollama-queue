@@ -80,7 +80,7 @@ export default function BackendsPanel() {
                                 borderRadius: 'var(--radius-sm)',
                                 fontSize: 'var(--type-label)',
                                 fontFamily: 'var(--font-mono)',
-                                outline: isServing ? '1px solid var(--status-ok)' : 'none',
+                                outline: isServing ? '1px solid var(--status-healthy)' : 'none',
                             }}
                         >
                             {/* Health indicator dot */}
@@ -88,7 +88,7 @@ export default function BackendsPanel() {
                                 width: 8,
                                 height: 8,
                                 borderRadius: '50%',
-                                background: backend.healthy ? 'var(--status-ok)' : 'var(--status-error)',
+                                background: backend.healthy ? 'var(--status-healthy)' : 'var(--status-error)',
                                 flexShrink: 0,
                             }} />
 
@@ -107,7 +107,7 @@ export default function BackendsPanel() {
                             {/* "serving" badge: shows when this backend is executing the current job */}
                             {isServing && (
                                 <span style={{
-                                    color: 'var(--status-ok)',
+                                    color: 'var(--status-healthy)',
                                     fontSize: 'var(--type-micro)',
                                     fontFamily: 'var(--font-mono)',
                                     letterSpacing: '0.04em',
@@ -183,7 +183,7 @@ export default function BackendsPanel() {
                                         <span
                                             title={backend.loaded_models.join(', ')}
                                             style={{
-                                                color: 'var(--status-ok)',
+                                                color: 'var(--status-healthy)',
                                                 fontSize: 'var(--type-micro)',
                                                 flexShrink: 0,
                                             }}

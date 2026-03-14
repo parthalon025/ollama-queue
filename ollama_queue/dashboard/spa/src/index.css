@@ -1411,7 +1411,7 @@ body {
 
 /* Action feedback inline status */
 .action-fb { font-size: var(--type-label); margin-top: 4px; min-height: 1.2em; }
-.action-fb--loading { color: var(--text-muted); }
+.action-fb--loading { color: var(--text-tertiary); }
 .action-fb--success { color: var(--status-healthy); }
 .action-fb--error   { color: var(--status-error); white-space: pre-wrap; }
 
