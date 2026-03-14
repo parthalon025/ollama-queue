@@ -1,3 +1,5 @@
+import LiveIndicator from './LiveIndicator.jsx';
+
 // What it shows: The full ollama-queue system as a live directed-graph topology.
 //   Four columns: Inputs → Queue/Scheduler → Daemon/DLQ/Sensing → Router/Backends.
 //   Active paths animate with marching-ant arrows; nodes reflect live health state.
@@ -357,26 +359,51 @@ function Node({ name, ns, tprops }) {
 }
 
 // ── Main component ──────────────────────────────────────────────────────────────
+// What it shows: Section header (live indicator dot + "SYSTEM TOPOLOGY" label + optional burst
+//   regime badge) above the full directed-graph SVG.
+// Decision it drives: At a glance — is the system live? Is a burst regime active?
 export default function TopologyDiagram({ daemonStatus, currentJob, backends, dlqCount, activeEval, queueDepth }) {
   const tprops = { daemonStatus, currentJob, backends: backends || [], dlqCount: dlqCount || 0, activeEval, queueDepth: queueDepth || 0 };
+  const burst = daemonStatus?.burst_regime;
+  const burstActive = burst && burst !== 'calm' && burst !== 'unknown';
 
   return (
-    <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-      <svg
-        viewBox="0 0 860 480"
-        width="100%"
-        style={{ display: 'block', minWidth: 480 }}
-        aria-label="ollama-queue system topology"
-      >
-        <Defs />
-        {/* Edges drawn first — nodes layer on top */}
-        {Object.keys(EDGE_PATHS).map(id => (
-          <Edge key={id} id={id} es={edgeState(id, tprops)} />
-        ))}
-        {Object.keys(NODES).map(name => (
-          <Node key={name} name={name} ns={nodeState(name, tprops)} tprops={tprops} />
-        ))}
-      </svg>
-    </div>
+    <>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+        <LiveIndicator
+          state={daemonStatus?.state === 'running' ? 'running' : daemonStatus?.state?.startsWith('paused') ? 'queued' : 'running'}
+          pulse={daemonStatus?.state === 'running'}
+        />
+        <span class="data-mono" style={{ fontSize: 'var(--type-label)', color: 'var(--text-secondary)', letterSpacing: '0.08em' }}>
+          SYSTEM TOPOLOGY
+        </span>
+        {burstActive && (
+          <span class="data-mono" style={{
+            fontSize: 'var(--type-micro)',
+            color: burst === 'storm' ? 'var(--sh-threat, var(--status-error))' : 'var(--status-warning, #f59e0b)',
+            marginLeft: 'auto',
+          }}>
+            {burst.toUpperCase()}
+          </span>
+        )}
+      </div>
+      <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+        <svg
+          viewBox="0 0 860 480"
+          width="100%"
+          style={{ display: 'block', minWidth: 480 }}
+          aria-label="ollama-queue system topology"
+        >
+          <Defs />
+          {/* Edges drawn first — nodes layer on top */}
+          {Object.keys(EDGE_PATHS).map(id => (
+            <Edge key={id} id={id} es={edgeState(id, tprops)} />
+          ))}
+          {Object.keys(NODES).map(name => (
+            <Node key={name} name={name} ns={nodeState(name, tprops)} tprops={tprops} />
+          ))}
+        </svg>
+      </div>
+    </>
   );
 }
