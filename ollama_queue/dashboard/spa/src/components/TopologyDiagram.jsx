@@ -35,13 +35,15 @@ function _isServing(backend, activeModel) {
   );
 }
 
-// Builds the sublabel for a GPU node: model name(s) + VRAM%, with ▶ prefix when actively serving
-function _gpuSubLabel(backend, activeModel) {
+// Builds the sublabel for a GPU node: task source + VRAM% when active, model + VRAM% when warm
+function _gpuSubLabel(backend, activeModel, activeSource) {
   const pct = `${backend.vram_pct ?? 0}%`;
   const models = backend.loaded_models || [];
+  const serving = _isServing(backend, activeModel);
   if (models.length === 0) return `idle · ${pct}`;
-  const tag = models.length === 1 ? models[0] : `${models[0]} +${models.length - 1}`;
-  return _isServing(backend, activeModel) ? `▶ ${tag} · ${pct}` : `${tag} · ${pct}`;
+  const modelTag = models.length === 1 ? models[0] : `${models[0]} +${models.length - 1}`;
+  if (serving) return `▶ ${activeSource ?? modelTag} · ${pct}`;
+  return `${modelTag} · ${pct}`;
 }
 
 // ── Pure helpers (exported for tests) ────────────────────────────────────────
@@ -60,7 +62,8 @@ export function nodeState(name, {
   const isDaemonJob = typeof daemonStatus?.current_job_id === 'number' && daemonStatus.current_job_id > 0;
   const burst       = daemonStatus?.burst_regime ?? 'unknown';
 
-  const activeModel = currentJob?.model ?? null;
+  const activeModel  = currentJob?.model  ?? null;
+  const activeSource = currentJob?.source ?? null;
   const gtx = _findLocalBackend(backends);
   const rtx = _findRemoteBackend(backends);
 
@@ -94,12 +97,12 @@ export function nodeState(name, {
 
     case 'gtx1650': {
       if (!gtx || !gtx.healthy) return threat('offline');
-      const gtxSub = _gpuSubLabel(gtx, activeModel);
+      const gtxSub = _gpuSubLabel(gtx, activeModel, activeSource);
       return _isServing(gtx, activeModel) ? glow(C.PHOSPHOR, 'url(#topo-glow-phosphor)', gtxSub) : { ...dim(gtxSub), opacity: 0.8 };
     }
     case 'rtx5080': {
       if (!rtx || !rtx.healthy) return threat('offline');
-      const rtxSub = _gpuSubLabel(rtx, activeModel);
+      const rtxSub = _gpuSubLabel(rtx, activeModel, activeSource);
       return _isServing(rtx, activeModel) ? glow(C.PHOSPHOR, 'url(#topo-glow-phosphor)', rtxSub) : { ...dim(rtxSub), opacity: 0.8 };
     }
 
