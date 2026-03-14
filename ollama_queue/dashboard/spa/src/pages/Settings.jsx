@@ -1,10 +1,32 @@
-import { useCallback, useEffect, useRef } from 'preact/hooks';
+import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 import { useSignal } from '@preact/signals';
 import { settings, status, API, restartDaemon } from '../stores';
 import SettingsForm from '../components/SettingsForm';
 import { useActionFeedback } from '../hooks/useActionFeedback.js';
 import PageBanner from '../components/PageBanner.jsx';
-import ShCrtToggleNative from '../components/ShCrtToggleNative.jsx';
+import { ShCrtToggle } from 'superhot-ui/preact';
+
+// Intensity → CSS var opacity map. Matches the values used by ShCrtToggleNative.
+const CRT_OPACITY = { off: 0, low: 0.02, medium: 0.05, high: 0.1 };
+const CRT_STORAGE_KEY = 'crt-prefs';
+
+function readCrtIntensity() {
+  try {
+    const raw = localStorage.getItem(CRT_STORAGE_KEY);
+    if (raw) return JSON.parse(raw).intensity ?? 'medium';
+  } catch (_) {}
+  return 'medium';
+}
+
+function applyCrtIntensity(intensity) {
+  document.documentElement.style.setProperty(
+    '--crt-scanline-opacity',
+    CRT_OPACITY[intensity] ?? CRT_OPACITY.medium,
+  );
+  try {
+    localStorage.setItem(CRT_STORAGE_KEY, JSON.stringify({ intensity }));
+  } catch (_) {}
+}
 
 // Fields that require a daemon restart to take effect. Saved on blur like all
 // other settings, but the banner stays visible until the daemon cycles through
@@ -22,6 +44,13 @@ export default function Settings() {
   const sett = settings.value;
   const st = status.value;
   const daemonState = st && st.daemon ? st.daemon.state : null;
+
+  const [intensity, setIntensity] = useState(() => readCrtIntensity());
+
+  // Apply CSS var on mount to match persisted preference
+  useEffect(() => {
+    applyCrtIntensity(intensity);
+  }, []);
 
   // Tracks whether a restart-required field was saved since the last daemon restart.
   // Component-scoped signal (not module-level) so it resets on unmount.
@@ -125,7 +154,13 @@ export default function Settings() {
       />
       {/* D20: CRT scanline intensity preference */}
       <div class="t-frame" data-label="Display" style="margin-top:1rem;">
-        <ShCrtToggleNative />
+        <ShCrtToggle
+          intensity={intensity}
+          onIntensityChange={({ intensity: lvl }) => {
+            setIntensity(lvl);
+            applyCrtIntensity(lvl);
+          }}
+        />
       </div>
       <div aria-label="Keyboard shortcuts" style="margin-top:24px;padding-top:16px;border-top:1px solid var(--border-subtle);">
         <p style="font-family:var(--font-mono);font-size:var(--type-micro);color:var(--text-tertiary);">
