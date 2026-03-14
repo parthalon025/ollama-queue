@@ -125,7 +125,7 @@ export default function Settings() {
   }, [resumeAct]);
 
   return (
-    <div class="flex flex-col gap-4 animate-page-enter">
+    <div class="flex flex-col gap-4 animate-page-enter" data-mood="nostalgic">
       <PageBanner title="Settings" subtitle="queue configuration and thresholds" />
       {restartRequired.value && (
         <div role="alert" style="background:color-mix(in srgb,var(--status-warning) 12%,transparent);border:1px solid var(--status-warning);border-radius:var(--radius);padding:10px 14px;display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;">

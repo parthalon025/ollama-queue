@@ -124,7 +124,7 @@ export default function History() {
     }
 
     return (
-        <div class="flex flex-col gap-6 animate-page-enter">
+        <div class="flex flex-col gap-6 animate-page-enter" data-mood="dread">
             <PageBanner title="History" subtitle="completed and failed jobs" />
 
             {/* DLQ section — only shown when entries exist */}
