@@ -6,7 +6,7 @@ import json
 from unittest.mock import patch
 
 from ollama_queue.db import Database
-from ollama_queue.eval.engine import create_eval_run, update_eval_run
+from ollama_queue.eval.engine import create_eval_run, insert_eval_result, update_eval_run
 from ollama_queue.eval.promote import check_auto_promote
 
 # ---------------------------------------------------------------------------
@@ -209,7 +209,11 @@ def db(tmp_path):
 
 
 def _setup_completed_run(db, variant_id="A", f1=0.90, auc=0.90):
-    """Create a completed run with metrics that would pass all quality gates."""
+    """Create a completed run with metrics that would pass all quality gates.
+
+    Adds 5 successful judge rows so Gate 3 (error_budget_used <= error_budget)
+    can evaluate.  Without judge rows, Gate 3 blocks with "error rate undefined".
+    """
     run_id = create_eval_run(db, variant_id=variant_id)
     metrics = {
         variant_id: {
@@ -228,6 +232,17 @@ def _setup_completed_run(db, variant_id="A", f1=0.90, auc=0.90):
         metrics=json.dumps(metrics),
         item_count=10,
     )
+    for i in range(5):
+        insert_eval_result(
+            db,
+            run_id=run_id,
+            variant=variant_id,
+            source_item_id=f"src_{i}",
+            target_item_id=f"tgt_{i}",
+            row_type="judge",
+            is_same_cluster=1,
+            score_transfer=4,
+        )
     return run_id
 
 

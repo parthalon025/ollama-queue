@@ -124,7 +124,7 @@ class StallDetector:
                     data = _json.loads(resp.read())
                 loaded.update(m.get("name", "").split(":")[0] for m in data.get("models", []))
             except Exception as exc:
-                _log.debug("get_ollama_ps_models %s failed: %s", backend, exc)
+                _log.warning("get_ollama_ps_models %s failed: %s", backend, exc)
         return loaded
 
     # ── log-likelihood ratios per group ──────────────────────────────────────
