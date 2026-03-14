@@ -39,11 +39,12 @@ Running multiple services against a local Ollama instance creates a resource con
 | **Stall detection** | Bayesian detection of jobs that started but stopped producing output. |
 | **Circuit breaker** | Isolates Ollama failures automatically; exponential backoff before retry; prevents cascading failures. |
 | **Burst detection** | Classifies traffic regime (burst / steady / trough) and adapts dequeue rate accordingly. |
-| **Ollama proxy** | Drop-in `/api/generate` and `/api/embed` proxy — point existing apps at `localhost:7683` and they queue automatically. Routes requests across multiple Ollama backends and captures per-backend throughput metrics. Per-backend routing weights are live-configurable via `PUT /api/backends/{url}/weight` without restarting. |
+| **Ollama proxy** | Drop-in `/api/generate` and `/api/embed` proxy — point existing apps at `localhost:7683` and they queue automatically. Routes requests across multiple Ollama backends (`OLLAMA_BACKENDS` env var) and captures per-backend throughput metrics. Per-backend routing weights are live-configurable via `PUT /api/backends/{url}/weight` without restarting. |
+| **BitNet routing** | Models prefixed with `bitnet:` are forwarded directly to BitNet llama-server (`BITNET_URL`, default `http://127.0.0.1:11435`) via an independent semaphore lock — BitNet and Ollama run concurrently; BitNet requests serialize among themselves. |
 | **Consumer detection** | 4-phase scanner finds every service calling Ollama directly. Config patcher rewrites them to route through the queue. Optional iptables REDIRECT intercept catches unpatched callers at the network layer. |
 | **Eval pipeline** | Run A/B–E prompt variant evaluations with an LLM judge (F1/recall/precision). Auto-promote the winning config when quality gates pass. Thompson Sampling routes production traffic to the recommended variant. |
 | **Intelligence layer** | Bayesian log-normal runtime estimation (4-tier hierarchy), log-linear cross-model performance curves, 10-factor slot scoring with VRAM hard gates, hourly/daily load pattern learning. |
-| **Web dashboard** | 8-view Preact SPA: Now, Plan, History, Models, Performance, Settings, Eval, Consumers. SUPERHOT terminal aesthetic — CRT page banners, VT323 pixel font, glitch/shatter effects on state transitions, ThreatPulse gauges with three-state ambient animation, KPI degradation glitch on warning transitions. |
+| **Web dashboard** | 9-view Preact SPA: Now, Plan, History, Models, Performance, Backends, Settings, Eval, Consumers. SUPERHOT terminal aesthetic — CRT page banners, VT323 pixel font, glitch/shatter effects on state transitions, ThreatPulse gauges with three-state ambient animation, KPI degradation glitch on warning transitions. |
 | **Accessible, science-backed UI** | Non-color priority discriminators (Treisman multi-channel encoding), progressive disclosure on queue row hover (Shneiderman), sparklines on every KPI card (Tufte), semantic `data-chroma` tokens, three-tier animation system with `prefers-reduced-motion` opt-in, `@starting-style` tab entrance animations. |
 | **REST API** | 90+ endpoints covering all features. |
 
@@ -141,6 +142,10 @@ ollama-queue settings set ram_threshold_high 85
 
 The server exposes `/api/generate` and `/api/embed` as a drop-in Ollama proxy. Redirect your apps from `localhost:11434` to `localhost:7683` and they queue automatically — no other code changes required.
 
+**Multi-backend routing:** Set `OLLAMA_BACKENDS=http://host1:11434,http://host2:11434` to distribute requests across multiple Ollama instances. Weights are configurable live via `PUT /api/backends/{url}/weight`. Single-backend setups skip routing logic entirely.
+
+**BitNet routing:** Models with a `bitnet:` prefix are forwarded to BitNet llama-server instead of Ollama. Set `BITNET_URL` (default: `http://127.0.0.1:11435`). BitNet and Ollama run concurrently — each has its own semaphore so they don't block each other.
+
 Pass priority metadata in the JSON body (stripped before forwarding to Ollama):
 
 ```json
@@ -231,15 +236,16 @@ curl -X POST http://localhost:7683/api/eval/runs/<id>/promote
 
 ## Web Dashboard
 
-Eight views served from `http://localhost:7683/ui/`:
+Nine views served from `http://localhost:7683/ui/`:
 
 | View | Description |
 |---|---|
-| **Now** | Running job, queue, ThreatPulse resource gauges (RAM/VRAM with three-state ambient animation), KPI cards with sparkline trends and chroma-coded severity, burst regime badge, alert strip |
+| **Now** | Running job, queue, ThreatPulse resource gauges (RAM/VRAM with three-state ambient animation — normal/warning/critical), KPI cards with sparkline trends and chroma-coded severity, KPI degradation glitch on warning transitions, burst regime badge, alert strip |
 | **Plan** | 24h Gantt timeline with "now" needle, 48-bucket load-map strip with DLQ/deferral slot markers, traffic intensity badge, "Suggest slot" button, tag-grouped recurring jobs |
 | **History** | Job history, DLQ entries with reschedule status badges and reasoning, deferred jobs panel, duration trends, activity heatmap |
 | **Models** | Model table with active model tracking |
 | **Perf** | Per-model performance table, cross-model performance curve chart (SVG scatter, log-scale), 24h×7d load heatmap, system health gauges, per-backend throughput table showing tok/min per GPU |
+| **Backends** | Full fleet overview of all configured Ollama backends — health, throughput, routing weights, add/remove/test controls |
 | **Settings** | Thresholds, defaults, retention, DLQ auto-reschedule, proactive deferral, daemon controls (14+ tunable parameters), CRT scanline display preference (off/low/medium/high) |
 | **Eval** | Runs, Variants, Trends, Settings sub-views for the prompt eval pipeline |
 | **Consumers** | Scan results, consumer cards with status badges, include/ignore/revert actions, intercept toggle |
@@ -306,9 +312,12 @@ systemd timers / apps / proxy clients
 ┌─────────────────────────────────────────────┐
 │  FastAPI (90+ endpoints)                    │
 │  /api/generate  /api/embed  (proxy)         │
+│    ├─ model starts with "bitnet:" →         │
+│    │      BitNet llama-server (BITNET_URL)  │
+│    └─ otherwise → OLLAMA_BACKENDS routing   │
 │  /api/queue     /api/history  /api/health   │
 │  /api/schedule  /api/dlq     /api/settings  │
-│  /api/eval      /api/consumers              │
+│  /api/eval      /api/consumers  /api/backends│
 │                                             │
 │  Static: /ui/ → Preact SPA                  │
 └─────────────────────────────────────────────┘
@@ -340,7 +349,10 @@ ollama_queue/
   app.py              # FastAPI app factory: create_app(db)
 
   api/                # FastAPI REST API (90+ endpoints, APIRouter per domain)
+    backend_router.py # Multi-backend routing: OLLAMA_BACKENDS weighted selection
+    proxy.py          # /api/generate + /api/embed: BitNet semaphore + Ollama routing
   db/                 # SQLite persistence (mixin pattern → single Database class)
+    backends.py       # Backend registry: add/update/remove/list backends + weights
   daemon/             # Polling loop + job executor (mixin pattern → single Daemon class)
   eval/               # Eval pipeline: generate, judge, promote, analysis, metrics
   scheduling/         # Scheduler, slot scoring, deferral, DLQ scheduling
