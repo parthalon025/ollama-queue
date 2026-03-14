@@ -71,6 +71,7 @@ class Daemon(LoopMixin, ExecutorMixin):
         # Adaptive entropy tracking (in-memory rolling baseline)
         self._entropy_history: deque[float] = deque(maxlen=30)
         self._entropy_suspend_until: float = 0.0
+        self._entropy_anomaly_active: bool = False  # dedup: log WARNING only on transition
         # Burst detection -- use the module-level singleton so the API's record_submission()
         # calls (on /api/queue/submit) feed into the same detector the daemon reads.
         self._burst_detector = _burst_singleton
