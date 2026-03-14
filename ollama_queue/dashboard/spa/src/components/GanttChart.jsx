@@ -494,12 +494,12 @@ export function GanttChart({
                                             : (score === 0
                                                 ? 'var(--bg-inset)'
                                                 : score === 1
-                                                    ? 'rgba(99,179,237,0.25)'
+                                                    ? 'var(--density-low)'
                                                     : score === 2
-                                                        ? 'rgba(99,179,237,0.55)'
-                                                        : 'rgba(99,179,237,0.9)'),
+                                                        ? 'var(--density-mid)'
+                                                        : 'var(--density-high)'),
                                         borderRight: bucketIdx < densityBuckets.length - 1 ? '1px solid var(--border-subtle)' : 'none',
-                                        outline: isSelected ? '2px solid var(--accent)' : isSuggested ? '2px solid rgba(52,211,153,0.9)' : 'none',
+                                        outline: isSelected ? '2px solid var(--accent)' : isSuggested ? '2px solid color-mix(in oklch, var(--status-healthy) 90%, transparent)' : 'none',
                                         outlineOffset: '-2px',
                                     }}
                                     title={isSuggested
@@ -868,9 +868,9 @@ export function GanttChart({
             {/* Candlestick encoding legend — mimics the actual bar shape: thin-wick body thin-wick */}
             <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
                 <span style={{ display: 'flex', alignItems: 'center', width: 36, height: 10 }}>
-                    <span style={{ flex: 1, height: 2, background: 'rgba(99,179,237,0.7)', borderRadius: '2px 0 0 2px' }} />
-                    <span style={{ width: 16, height: '100%', background: 'rgba(99,179,237,0.85)', borderRadius: 1 }} />
-                    <span style={{ flex: 1, height: 2, background: 'rgba(99,179,237,0.5)', borderRadius: '0 2px 2px 0' }} />
+                    <span style={{ flex: 1, height: 2, background: 'var(--density-high)', borderRadius: '2px 0 0 2px' }} />
+                    <span style={{ width: 16, height: '100%', background: 'var(--density-high)', borderRadius: 1 }} />
+                    <span style={{ flex: 1, height: 2, background: 'var(--density-mid)', borderRadius: '0 2px 2px 0' }} />
                 </span>
                 load · run · unload
             </span>

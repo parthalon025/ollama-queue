@@ -26,6 +26,12 @@
   --regime-trough-bg:     color-mix(in oklch, var(--regime-trough) 10%, transparent);
   --regime-steady-bg:     color-mix(in oklch, var(--status-healthy) 10%, transparent);
   --regime-unknown-bg:    var(--bg-inset);
+
+  /* ── Load map density colors ── */
+  --density-base:         oklch(0.73 0.12 215);       /* load map density hue */
+  --density-low:          color-mix(in oklch, var(--density-base) 25%, transparent);
+  --density-mid:          color-mix(in oklch, var(--density-base) 55%, transparent);
+  --density-high:         color-mix(in oklch, var(--density-base) 90%, transparent);
 }
 
 /* ── Light theme token overrides ── */
