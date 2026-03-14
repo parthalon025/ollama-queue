@@ -13,6 +13,26 @@ const C = {
   TEXT_DIM: 'var(--text-tertiary)',
 };
 
+// ── Backend detection helpers (shared by nodeState + edgeState) ──────────────
+function _findLocalBackend(backends) {
+  return backends.find(b => {
+    try { const host = new URL(b.url).hostname; return host === '127.0.0.1' || host === 'localhost'; }
+    catch (_) { return false; }
+  });
+}
+function _findRemoteBackend(backends) {
+  return backends.find(b => {
+    try { const host = new URL(b.url).hostname; return host !== '127.0.0.1' && host !== 'localhost'; }
+    catch (_) { return false; }
+  });
+}
+function _isServing(backend, activeModel) {
+  if (!backend || !backend.healthy || !activeModel) return false;
+  return (backend.loaded_models || []).some(
+    m => m === activeModel || m.startsWith(activeModel.split(':')[0] + ':')
+  );
+}
+
 // ── Pure helpers (exported for tests) ────────────────────────────────────────
 
 export function nodeState(name, {
@@ -30,14 +50,8 @@ export function nodeState(name, {
   const burst       = daemonStatus?.burst_regime ?? 'unknown';
 
   const activeModel = currentJob?.model ?? null;
-  function isServing(b) {
-    if (!b || !b.healthy || !activeModel) return false;
-    return (b.loaded_models || []).some(
-      m => m === activeModel || m.startsWith(activeModel.split(':')[0] + ':')
-    );
-  }
-  const gtx = backends.find(b => { try { const h = new URL(b.url).hostname; return h === '127.0.0.1' || h === 'localhost'; } catch (_) { return false; } });
-  const rtx = backends.find(b => { try { const h = new URL(b.url).hostname; return h !== '127.0.0.1' && h !== 'localhost'; } catch (_) { return false; } });
+  const gtx = _findLocalBackend(backends);
+  const rtx = _findRemoteBackend(backends);
 
   const dim    = (sublabel = null) => ({ stroke: C.DIM,    filter: null,                        opacity: 0.7, sublabel, sublabelColor: null,    pulse: false });
   const glow   = (col, flt, sublabel = null) => ({ stroke: col, filter: flt, opacity: 1, sublabel, sublabelColor: null, pulse: false });
@@ -70,12 +84,12 @@ export function nodeState(name, {
     case 'gtx1650': {
       if (!gtx || !gtx.healthy) return threat('offline');
       const vram = `${gtx.vram_pct ?? 0}% VRAM`;
-      return isServing(gtx) ? glow(C.PHOSPHOR, 'url(#topo-glow-phosphor)', vram) : { ...dim(vram), opacity: 0.8 };
+      return _isServing(gtx, activeModel) ? glow(C.PHOSPHOR, 'url(#topo-glow-phosphor)', vram) : { ...dim(vram), opacity: 0.8 };
     }
     case 'rtx5080': {
       if (!rtx || !rtx.healthy) return threat('offline');
       const vram = `${rtx.vram_pct ?? 0}% VRAM`;
-      return isServing(rtx) ? glow(C.PHOSPHOR, 'url(#topo-glow-phosphor)', vram) : { ...dim(vram), opacity: 0.8 };
+      return _isServing(rtx, activeModel) ? glow(C.PHOSPHOR, 'url(#topo-glow-phosphor)', vram) : { ...dim(vram), opacity: 0.8 };
     }
 
     case 'recurring': case 'cli': case 'intercept':
@@ -100,17 +114,11 @@ export function edgeState(id, {
   const burst       = daemonStatus?.burst_regime ?? 'unknown';
 
   const activeModel = currentJob?.model ?? null;
-  function isServing(b) {
-    if (!b || !b.healthy || !activeModel) return false;
-    return (b.loaded_models || []).some(
-      m => m === activeModel || m.startsWith(activeModel.split(':')[0] + ':')
-    );
-  }
-  const gtx = backends.find(b => { try { const h = new URL(b.url).hostname; return h === '127.0.0.1' || h === 'localhost'; } catch (_) { return false; } });
-  const rtx = backends.find(b => { try { const h = new URL(b.url).hostname; return h !== '127.0.0.1' && h !== 'localhost'; } catch (_) { return false; } });
+  const gtx = _findLocalBackend(backends);
+  const rtx = _findRemoteBackend(backends);
 
-  const gtxServing     = isServing(gtx);
-  const rtxServing     = isServing(rtx);
+  const gtxServing     = _isServing(gtx, activeModel);
+  const rtxServing     = _isServing(rtx, activeModel);
   const neitherServing = isDaemonJob && !gtxServing && !rtxServing;
 
   const PH  = 'var(--sh-phosphor, var(--accent))';
