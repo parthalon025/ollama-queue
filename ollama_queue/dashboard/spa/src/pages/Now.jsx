@@ -9,7 +9,6 @@ import { useActionFeedback } from '../hooks/useActionFeedback.js';
 import CurrentJob from '../components/CurrentJob.jsx';
 import QueueList from '../components/QueueList.jsx';
 import HeroCard from '../components/HeroCard.jsx';
-import ResourceGauges from '../components/ResourceGauges.jsx';
 import PageBanner from '../components/PageBanner.jsx';
 import InfrastructurePanel from '../components/InfrastructurePanel.jsx';
 
