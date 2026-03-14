@@ -245,6 +245,51 @@ function lc(n) { return { x: n.x,           y: n.y + NH / 2 }; } // left-center
 function tc(n) { return { x: n.x + NW / 2, y: n.y };           } // top-center
 function bc(n) { return { x: n.x + NW / 2, y: n.y + NH };      } // bottom-center
 
+// ── Edge path definitions ─────────────────────────────────────────────────────
+// What it shows: SVG path strings for all 13 directed edges in the topology graph.
+// Decision it drives: Edges connect nodes visually; active edges animate to show live data flow.
+function buildEdgePaths() {
+  const N = NODES;
+  const R = name => rc(N[name]), L = name => lc(N[name]),
+        T = name => tc(N[name]), B = name => bc(N[name]);
+
+  return {
+    // Primary flow (left-to-right, orthogonal routing)
+    e1:  `M ${R('recurring').x} ${R('recurring').y} H ${L('scheduler').x}`,
+    e2:  `M ${B('scheduler').x} ${B('scheduler').y} V ${T('queue').y}`,
+    e3:  `M ${R('cli').x} ${R('cli').y} H ${R('cli').x + 20} V ${L('queue').y} H ${L('queue').x}`,
+    e4:  `M ${R('intercept').x} ${R('intercept').y} H ${R('intercept').x + 20} V ${L('queue').y} H ${L('queue').x}`,
+    e5:  `M ${R('eval').x} ${R('eval').y} H ${R('eval').x + 20} V ${L('queue').y} H ${L('queue').x}`,
+    e6:  `M ${R('queue').x} ${R('queue').y} H ${L('daemon').x}`,
+    e7:  `M ${R('daemon').x} ${R('daemon').y} H ${L('router').x}`,
+    e8:  `M ${R('proxy').x} ${R('proxy').y} H ${(R('proxy').x + L('router').x) / 2} V ${L('router').y} H ${L('router').x}`,
+    e9:  `M ${N.router.x + 60} ${B('router').y} V ${T('gtx1650').y}`,
+    e10: `M ${N.router.x + 110} ${B('router').y} V ${N.router.y + NH + 30} H ${N.rtx5080.x + NW - 20} V ${T('rtx5080').y} H ${N.rtx5080.x + 110}`,
+    // Feedback arcs — bezier curves (visually distinct from forward flow)
+    e11: `M ${L('sensing').x} ${L('sensing').y} C ${N.sensing.x - 60} ${L('sensing').y} ${N.daemon.x - 60} ${L('daemon').y} ${L('daemon').x} ${L('daemon').y}`,
+    e12: `M ${R('daemon').x} ${R('daemon').y + 10} H ${R('daemon').x + 30} V ${T('dlq').y - 10} H ${R('dlq').x} V ${T('dlq').y}`,
+    e13: `M ${L('dlq').x} ${L('dlq').y} C ${N.dlq.x - 120} ${L('dlq').y} ${N.scheduler.x - 80} ${R('scheduler').y} ${R('scheduler').x} ${R('scheduler').y}`,
+  };
+}
+const EDGE_PATHS = buildEdgePaths();
+
+// Renders a single directed edge with its computed style
+function Edge({ id, es }) {
+  return (
+    <path
+      d={EDGE_PATHS[id]}
+      stroke={es.stroke}
+      stroke-width={es.strokeWidth}
+      stroke-dasharray={es.dasharray ?? undefined}
+      stroke-linecap="round"
+      fill="none"
+      opacity={es.opacity}
+      marker-end={es.marker}
+      style={es.animation ? { animation: es.animation } : undefined}
+    />
+  );
+}
+
 // What it shows: A single topology node — rect + label + sublabel.
 // Decision it drives: Node colour/glow/opacity reflects live system state for that subsystem.
 function Node({ name, ns, tprops }) {
@@ -317,6 +362,7 @@ export default function TopologyDiagram({ daemonStatus, currentJob, backends, dl
 
   // Static dim state — live wiring comes in Task 5
   const dimNs = { stroke: 'var(--border)', filter: null, opacity: 0.7, sublabel: null, sublabelColor: null, pulse: false };
+  const dimEs = { stroke: 'var(--text-tertiary)', strokeWidth: 1, dasharray: null, animation: null, opacity: 0.3, marker: 'url(#arrow-dim)' };
 
   return (
     <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
@@ -327,6 +373,10 @@ export default function TopologyDiagram({ daemonStatus, currentJob, backends, dl
         aria-label="ollama-queue system topology"
       >
         <Defs />
+        {/* Edges drawn first — nodes layer on top */}
+        {Object.keys(EDGE_PATHS).map(id => (
+          <Edge key={id} id={id} es={dimEs} />
+        ))}
         {Object.keys(NODES).map(name => (
           <Node key={name} name={name} ns={dimNs} tprops={tprops} />
         ))}
