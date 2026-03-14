@@ -43,7 +43,7 @@ export default function Sidebar({ active, onNavigate, daemonState, dlqCount, the
     if (dlqCount !== prevDlqRef.current) {
         if (prevDlqRef.current === 0 && dlqCount > 0) {
             badgeAnimClass.current = 't3-badge-appear';
-        } else if (dlqCount > 0) {
+        } else if (dlqCount > prevDlqRef.current) {
             badgeAnimClass.current = 't3-counter-bump';
         } else {
             badgeAnimClass.current = '';

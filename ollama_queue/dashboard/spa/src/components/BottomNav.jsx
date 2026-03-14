@@ -35,7 +35,7 @@ export default function BottomNav({ active, onNavigate, dlqCount, onSubmitReques
     if (issueCount !== prevDlqRef.current) {
         if (prevDlqRef.current === 0 && issueCount > 0) {
             badgeAnimClass.current = 't3-badge-appear';
-        } else if (issueCount > 0) {
+        } else if (issueCount > prevDlqRef.current) {
             badgeAnimClass.current = 't3-counter-bump';
         } else {
             badgeAnimClass.current = '';
