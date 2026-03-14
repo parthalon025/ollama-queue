@@ -90,10 +90,13 @@ export default function History() {
                     const rows = Array.from(dlqListRef.current.children);
                     if (rows.length > 0) {
                         await new Promise(resolve => {
+                            const maxWait = rows.length * 80 + 700; // stagger window + animation duration
+                            const timer = setTimeout(resolve, maxWait);
+                            const done = () => { clearTimeout(timer); resolve(); };
                             rows.forEach((row, i) => {
                                 setTimeout(() => {
                                     shatterElement(row, {
-                                        onComplete: i === rows.length - 1 ? resolve : undefined,
+                                        onComplete: i === rows.length - 1 ? done : undefined,
                                     });
                                 }, i * 80);
                             });
