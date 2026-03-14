@@ -42,9 +42,8 @@ _ENV_BACKENDS: list[str] = (
 )
 BACKENDS: list[str] = list(_ENV_BACKENDS)
 
-# Port where ollama-queue health endpoint is reachable on each backend host.
-# Used to derive queue URL from Ollama backend URL for VRAM pressure checks.
-_QUEUE_PORT = int(os.environ.get("OLLAMA_QUEUE_PORT", "7683"))
+# OLLAMA_QUEUE_PORT is read at call time (not module load) so env changes are picked up
+# without a restart. Default: 7683.
 
 # Parse per-backend weights for tie-break routing: OLLAMA_BACKEND_WEIGHTS=url:weight,...
 # Unspecified backends default to weight 1. Used by weighted random in select_backend.
@@ -63,8 +62,17 @@ if _weights_raw:
 
 
 def _get_weights(backends: list[str]) -> list[float]:
-    """Return per-backend weights in the same order as backends list. Default weight: 1.0."""
-    return [_BACKEND_WEIGHTS.get(b, 1.0) for b in backends]
+    """Return per-backend weights. DB weights take precedence over OLLAMA_BACKEND_WEIGHTS env var."""
+    import contextlib
+
+    import ollama_queue.api as _api  # deferred: avoids circular import at module load
+
+    db_weights: dict[str, float] = {}
+    if _api.db is not None:
+        with contextlib.suppress(Exception):
+            for row in _api.db.list_backends():
+                db_weights[row["url"].rstrip("/")] = float(row["weight"])
+    return [db_weights.get(b.rstrip("/"), _BACKEND_WEIGHTS.get(b.rstrip("/"), 1.0)) for b in backends]
 
 
 # Cache TTLs (seconds)
@@ -154,7 +162,9 @@ async def _backend_vram_pct(url: str) -> float:
         from urllib.parse import urlparse, urlunparse
 
         parsed = urlparse(url)
-        queue_url = urlunparse(parsed._replace(netloc=f"{parsed.hostname}:{_QUEUE_PORT}"))
+        queue_url = urlunparse(
+            parsed._replace(netloc=f"{parsed.hostname}:{int(os.environ.get('OLLAMA_QUEUE_PORT', '7683'))}")
+        )
         async with httpx.AsyncClient(timeout=2.0) as c:
             r = await c.get(f"{queue_url}/api/health")
             if r.status_code == 200:
@@ -193,7 +203,9 @@ async def _backend_gpu_name(url: str) -> str | None:
         from urllib.parse import urlparse, urlunparse
 
         parsed = urlparse(url)
-        queue_url = urlunparse(parsed._replace(netloc=f"{parsed.hostname}:{_QUEUE_PORT}"))
+        queue_url = urlunparse(
+            parsed._replace(netloc=f"{parsed.hostname}:{int(os.environ.get('OLLAMA_QUEUE_PORT', '7683'))}")
+        )
         async with httpx.AsyncClient(timeout=2.0) as c:
             r = await c.get(f"{queue_url}/api/health")
             if r.status_code == 200:

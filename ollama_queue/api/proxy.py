@@ -23,7 +23,7 @@ _log = logging.getLogger(__name__)
 
 router = APIRouter()
 
-BITNET_URL = os.environ.get("BITNET_URL", "http://127.0.0.1:11435")
+# BITNET_URL is read at call time (not module load) so env changes are picked up without restart.
 PROXY_WAIT_TIMEOUT = 600
 PROXY_POLL_INTERVAL = 0.5
 
@@ -126,7 +126,9 @@ async def _proxy_bitnet_request(
 
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(float(req_timeout))) as client:
-                resp = await client.post(f"{BITNET_URL}{endpoint}", json=body)
+                resp = await client.post(
+                    f"{os.environ.get('BITNET_URL', 'http://127.0.0.1:11435')}{endpoint}", json=body
+                )
                 result = resp.json()
 
             stdout_tail = ""
