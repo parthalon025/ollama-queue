@@ -35,6 +35,15 @@ function _isServing(backend, activeModel) {
   );
 }
 
+// Builds the sublabel for a GPU node: model name(s) + VRAM%, with ▶ prefix when actively serving
+function _gpuSubLabel(backend, activeModel) {
+  const pct = `${backend.vram_pct ?? 0}%`;
+  const models = backend.loaded_models || [];
+  if (models.length === 0) return `idle · ${pct}`;
+  const tag = models.length === 1 ? models[0] : `${models[0]} +${models.length - 1}`;
+  return _isServing(backend, activeModel) ? `▶ ${tag} · ${pct}` : `${tag} · ${pct}`;
+}
+
 // ── Pure helpers (exported for tests) ────────────────────────────────────────
 
 export function nodeState(name, {
@@ -85,13 +94,13 @@ export function nodeState(name, {
 
     case 'gtx1650': {
       if (!gtx || !gtx.healthy) return threat('offline');
-      const vram = `${gtx.vram_pct ?? 0}% VRAM`;
-      return _isServing(gtx, activeModel) ? glow(C.PHOSPHOR, 'url(#topo-glow-phosphor)', vram) : { ...dim(vram), opacity: 0.8 };
+      const gtxSub = _gpuSubLabel(gtx, activeModel);
+      return _isServing(gtx, activeModel) ? glow(C.PHOSPHOR, 'url(#topo-glow-phosphor)', gtxSub) : { ...dim(gtxSub), opacity: 0.8 };
     }
     case 'rtx5080': {
       if (!rtx || !rtx.healthy) return threat('offline');
-      const vram = `${rtx.vram_pct ?? 0}% VRAM`;
-      return _isServing(rtx, activeModel) ? glow(C.PHOSPHOR, 'url(#topo-glow-phosphor)', vram) : { ...dim(vram), opacity: 0.8 };
+      const rtxSub = _gpuSubLabel(rtx, activeModel);
+      return _isServing(rtx, activeModel) ? glow(C.PHOSPHOR, 'url(#topo-glow-phosphor)', rtxSub) : { ...dim(rtxSub), opacity: 0.8 };
     }
 
     case 'recurring': case 'cli': case 'intercept':
