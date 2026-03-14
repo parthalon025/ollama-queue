@@ -88,12 +88,21 @@ export default function History() {
                 // Stagger-shatter all visible DLQ row elements before clearing
                 if (dlqListRef.current) {
                     const rows = Array.from(dlqListRef.current.children);
-                    rows.forEach((row, i) => {
-                        setTimeout(() => shatterElement(row), i * 80);
-                    });
+                    if (rows.length > 0) {
+                        await new Promise(resolve => {
+                            const maxWait = rows.length * 80 + 700; // stagger window + animation duration
+                            const timer = setTimeout(resolve, maxWait);
+                            const done = () => { clearTimeout(timer); resolve(); };
+                            rows.forEach((row, i) => {
+                                setTimeout(() => {
+                                    shatterElement(row, {
+                                        onComplete: i === rows.length - 1 ? done : undefined,
+                                    });
+                                }, i * 80);
+                            });
+                        });
+                    }
                 }
-                // Wait for animations to be visible before making the API call
-                await new Promise(resolve => setTimeout(resolve, 300));
                 const res = await fetch(`${API}/dlq`, { method: 'DELETE' });
                 if (!res.ok) throw new Error(`Clear failed: ${res.status}`);
                 await fetchDLQ();
@@ -115,7 +124,7 @@ export default function History() {
     }
 
     return (
-        <div class="flex flex-col gap-6 animate-page-enter">
+        <div class="flex flex-col gap-6 animate-page-enter" data-mood="dread">
             <PageBanner title="History" subtitle="completed and failed jobs" />
 
             {/* DLQ section — only shown when entries exist */}
@@ -378,12 +387,21 @@ function DLQRow({ entry, onAction }) {
                             style="font-size: var(--type-label); padding: 2px 8px;"
                             disabled={dismissFb.phase === 'loading'}
                             onClick={() => {
-                                if (rowRef.current) shatterElement(rowRef.current);
-                                dismissAct(
-                                    'Dismissing…',
-                                    () => onAction('dismiss', entry.id),
-                                    `DLQ #${entry.id} dismissed`,
-                                );
+                                if (rowRef.current) {
+                                    shatterElement(rowRef.current, {
+                                        onComplete: () => dismissAct(
+                                            'Dismissing…',
+                                            () => onAction('dismiss', entry.id),
+                                            `DLQ #${entry.id} dismissed`,
+                                        ),
+                                    });
+                                } else {
+                                    dismissAct(
+                                        'Dismissing…',
+                                        () => onAction('dismiss', entry.id),
+                                        `DLQ #${entry.id} dismissed`,
+                                    );
+                                }
                             }}
                         >
                             {dismissFb.phase === 'loading' ? 'Dismissing…' : 'Delete'}

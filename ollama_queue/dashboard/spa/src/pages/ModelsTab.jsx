@@ -154,7 +154,7 @@ export default function ModelsTab() {
     };
 
     return (
-        <div class="flex flex-col gap-4 animate-page-enter">
+        <div class="flex flex-col gap-4 animate-page-enter" data-mood="nostalgic">
             <PageBanner title="Models" subtitle="installed AI models and downloads" />
 
             {pullError && (

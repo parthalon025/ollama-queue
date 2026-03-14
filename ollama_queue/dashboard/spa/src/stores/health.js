@@ -81,6 +81,18 @@ export async function updateBackendWeight(url, weight) {
   await fetchBackends();
 }
 
+export async function updateBackendInferenceMode(url, mode) {
+  // mode is a query param — matches PUT /api/backends/{url}/inference-mode?mode=X
+  const res = await fetch(`${API}/backends/${encodeURIComponent(url)}/inference-mode?mode=${mode}`, {
+    method: 'PUT',
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  await fetchBackends();
+}
+
 export async function testBackend(url) {
   const res = await fetch(`${API}/backends/${encodeURIComponent(url)}/test`);
   if (!res.ok) {

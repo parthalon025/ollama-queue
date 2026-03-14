@@ -81,6 +81,7 @@ _MODELS_TTL = 60.0
 _LOADED_TTL = 5.0
 _HW_TTL = 10.0
 _GPU_NAME_TTL = 600.0  # GPU names don't change — refresh every 10 minutes
+_VRAM_TOTAL_TTL = 600.0  # Total VRAM is hardware-constant — refresh every 10 minutes
 
 # Module-level caches: url -> (timestamp, data)
 _health_cache: dict[str, tuple[float, bool]] = {}
@@ -88,6 +89,7 @@ _models_cache: dict[str, tuple[float, frozenset[str]]] = {}
 _loaded_cache: dict[str, tuple[float, frozenset[str]]] = {}
 _hw_cache: dict[str, tuple[float, float]] = {}
 _gpu_name_cache: dict[str, tuple[float, str | None]] = {}
+_vram_total_cache: dict[str, tuple[float, float]] = {}
 
 
 async def _backend_healthy(url: str) -> bool:
@@ -219,6 +221,102 @@ async def _backend_gpu_name(url: str) -> str | None:
     return name
 
 
+async def _backend_vram_total_gb(url: str) -> float:
+    """Return total VRAM (GB) for this backend's host machine.
+
+    Plain English: Queries the remote ollama-queue /api/health endpoint for the
+    vram_total_gb field (populated from nvidia-smi at startup). Used by the gpu_only
+    filter to check whether a model's estimated VRAM will fit.
+
+    Returns 0.0 when the backend has no GPU or is unreachable. Cached 10min.
+    """
+    now = time.monotonic()
+    cached = _vram_total_cache.get(url)
+    if cached and now - cached[0] < _VRAM_TOTAL_TTL:
+        return cached[1]
+    total = 0.0
+    try:
+        from urllib.parse import urlparse, urlunparse
+
+        parsed = urlparse(url)
+        queue_url = urlunparse(
+            parsed._replace(netloc=f"{parsed.hostname}:{int(os.environ.get('OLLAMA_QUEUE_PORT', '7683'))}")
+        )
+        async with httpx.AsyncClient(timeout=2.0) as c:
+            r = await c.get(f"{queue_url}/api/health")
+            if r.status_code == 200:
+                total = float(r.json().get("vram_total_gb") or 0.0)
+        _vram_total_cache[url] = (now, total)
+    except Exception as e:
+        _log.debug("vram_total_gb %s failed: %s", url, e)
+        _vram_total_cache[url] = (now, 0.0)
+    return total
+
+
+def _get_inference_modes() -> dict[str, str]:
+    """Return {url: inference_mode} for all DB-registered backends.
+
+    Plain English: Reads per-backend inference mode settings from the DB so the
+    router can enforce gpu_only restrictions. Returns cpu_shared for any URL not
+    explicitly configured (env-var backends not in DB default to cpu_shared).
+    """
+    import contextlib
+
+    import ollama_queue.api as _api  # deferred: same pattern as _get_weights
+
+    modes: dict[str, str] = {}
+    if _api.db is not None:
+        with contextlib.suppress(Exception):
+            for row in _api.db.list_backends():
+                modes[row["url"].rstrip("/")] = row.get("inference_mode", "cpu_shared")
+    return modes
+
+
+async def _apply_gpu_only_filter(healthy: list[str], model: str) -> list[str]:
+    """Remove gpu_only backends where the model's estimated VRAM won't fit.
+
+    Plain English: For backends configured as gpu_only, checks whether the model
+    would fit in available VRAM (total_gb x (1 - used%)). If not, removes the
+    backend from routing candidates so Ollama won't fall back to CPU RAM there.
+    Returns the original list unchanged if no gpu_only backends are in play or if
+    VRAM data is unavailable (fail-open to preserve routing).
+    """
+    import contextlib
+
+    import ollama_queue.api as _api
+
+    modes = _get_inference_modes()
+    gpu_only_set = {u for u, m in modes.items() if m == "gpu_only"}
+    healthy_keys = {b.rstrip("/") for b in healthy}
+
+    if not (gpu_only_set & healthy_keys):
+        return healthy  # fast path: no gpu_only backends in healthy set
+
+    vram_totals, vram_pcts = await asyncio.gather(
+        asyncio.gather(*(_backend_vram_total_gb(b) for b in healthy)),
+        asyncio.gather(*(_backend_vram_pct(b) for b in healthy)),
+    )
+
+    needed_mb = 0.0
+    if _api.db is not None:
+        with contextlib.suppress(Exception):
+            from ollama_queue.models.client import OllamaModels
+
+            needed_mb = OllamaModels().estimate_vram_mb(model, _api.db)
+
+    filtered = []
+    for b, total_gb, pct in zip(healthy, vram_totals, vram_pcts, strict=False):
+        if b.rstrip("/") in gpu_only_set and total_gb > 0 and needed_mb > 0:
+            avail_mb = total_gb * 1024.0 * max(0.0, 1.0 - pct / 100.0)
+            if needed_mb > avail_mb:
+                _log.debug("gpu_only filter: %s excluded (need %.0fMB avail %.0fMB)", b, needed_mb, avail_mb)
+                continue
+        filtered.append(b)
+
+    # Never leave the candidate list empty — fail-open so requests aren't dropped
+    return filtered if filtered else healthy
+
+
 async def fetch_all_backend_models() -> list[dict]:
     """Fetch /api/tags from all backends and return a merged, deduplicated model list.
 
@@ -261,6 +359,9 @@ async def _route_by_model(healthy: list[str], model: str) -> list[str]:
     Returns a narrowed list of candidates. Caller picks from this list (random or first).
     Extracted to keep select_backend under the PLR0911 return-statement limit.
     """
+    # 0. gpu_only filter — exclude backends where the model won't fit in VRAM
+    healthy = await _apply_gpu_only_filter(healthy, model)
+
     # 2. Prefer backends that have the requested model (parallel model list checks)
     avail = await asyncio.gather(*(_available_models(b) for b in healthy))
     with_model = [b for b, ms in zip(healthy, avail, strict=False) if model in ms]
@@ -354,7 +455,7 @@ def invalidate_backend_caches(url: str) -> None:
     entries for that URL must be evicted so the next routing decision reflects
     the current backend list rather than a cached state from before the change.
     """
-    for cache in (_health_cache, _models_cache, _loaded_cache, _hw_cache, _gpu_name_cache):
+    for cache in (_health_cache, _models_cache, _loaded_cache, _hw_cache, _gpu_name_cache, _vram_total_cache):
         cache.pop(url, None)  # type: ignore[union-attr]  # all caches are dicts; mypy infers object from list
 
 

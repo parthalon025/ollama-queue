@@ -70,6 +70,13 @@ class AddBackendRequest(BaseModel):
 @router.get("/api/backends")
 async def get_backends():
     """Return health and resource status for all configured Ollama backends."""
+    db = _api.db
+    # Build a url→inference_mode map from DB (env-var-only backends default to 'cpu_shared')
+    db_modes: dict[str, str] = {}
+    if db:
+        for row in db.list_backends():
+            db_modes[row["url"].rstrip("/")] = row.get("inference_mode", "cpu_shared")
+
     results = []
     for url in _router.BACKENDS:
         healthy, models, loaded, vram_pct, gpu_name = await asyncio.gather(
@@ -87,6 +94,7 @@ async def get_backends():
                 "loaded_models": sorted(loaded),
                 "vram_pct": round(vram_pct, 1),
                 "gpu_name": gpu_name,
+                "inference_mode": db_modes.get(url.rstrip("/"), "cpu_shared"),
             }
         )
     return results
@@ -195,6 +203,39 @@ async def update_backend_weight(url: str = Path(...), weight: float = Query(...)
         raise HTTPException(status_code=404, detail=f"backend {url} not found")
 
     return {"url": url, "weight": weight}
+
+
+# ── PUT /api/backends/{url}/inference-mode ───────────────────────────────────
+
+
+@router.put("/api/backends/{url:path}/inference-mode")
+async def update_backend_inference_mode(url: str = Path(...), mode: str = Query(...)):
+    """Set whether a backend restricts inference to GPU VRAM only or allows CPU overflow.
+
+    Plain English: 'gpu_only' means the queue will skip this backend when the model
+    won't fit in VRAM (avoids CPU-RAM overflow). 'cpu_shared' (default) allows Ollama
+    to fall back to CPU RAM for models too large for VRAM.
+
+    Env-var backends not yet in the DB are auto-registered on first inference-mode set.
+    """
+    url = unquote(url)
+    if mode not in ("gpu_only", "cpu_shared"):
+        raise HTTPException(status_code=400, detail="mode must be 'gpu_only' or 'cpu_shared'")
+
+    db = _api.db
+    if not db:
+        raise HTTPException(status_code=503, detail="database not available")
+
+    # Auto-register env-var backends that aren't in the DB yet so the setting can be stored
+    if not db.get_backend(url) and any(b.rstrip("/") == url.rstrip("/") for b in _router.BACKENDS):
+        _log.info("auto-registering env-var backend %s for inference_mode configuration", url)
+        db.add_backend(url)
+
+    updated = db.update_backend_inference_mode(url, mode)
+    if not updated:
+        raise HTTPException(status_code=404, detail=f"backend {url} not found or not configured")
+
+    return {"url": url, "inference_mode": mode}
 
 
 # ── GET /api/backends/{url}/test ─────────────────────────────────────────────

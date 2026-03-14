@@ -1,3 +1,4 @@
+import { useRef } from 'preact/hooks';
 import { healthData, settings, connectionStatus } from '../stores';
 import { scheduledEvalCount } from '../stores/eval.js';
 import SystemHealthChip from './SystemHealthChip.jsx';
@@ -30,6 +31,26 @@ export default function Sidebar({ active, onNavigate, daemonState, dlqCount, the
     const latestHealth = healthData.value?.length > 0 ? healthData.value[0] : null;
     const sett = settings.value;
     const connStatus = connectionStatus.value;
+
+    // DLQ badge animation tracking.
+    // What it does: fires t3-badge-appear when the DLQ badge first appears (count was 0),
+    //   and t3-counter-bump when the count increases. The key increments each time to force
+    //   Preact to remount the badge span, which re-triggers the CSS animation.
+    const prevDlqRef = useRef(dlqCount);
+    const badgeAnimKey = useRef(0);
+    const badgeAnimClass = useRef('');
+
+    if (dlqCount !== prevDlqRef.current) {
+        if (prevDlqRef.current === 0 && dlqCount > 0) {
+            badgeAnimClass.current = 't3-badge-appear';
+        } else if (dlqCount > prevDlqRef.current) {
+            badgeAnimClass.current = 't3-counter-bump';
+        } else {
+            badgeAnimClass.current = '';
+        }
+        badgeAnimKey.current += 1;
+        prevDlqRef.current = dlqCount;
+    }
 
     return (
         <aside class="layout-sidebar">
@@ -87,17 +108,20 @@ export default function Sidebar({ active, onNavigate, daemonState, dlqCount, the
                                 <span class="nav-badge nav-badge--eval" title={`${scheduledEvalCount.value} eval run(s) in next 4h`}>EVAL</span>
                             )}
                             {badge && (
-                                <span style={{
-                                    marginLeft: 'auto',
-                                    background: 'var(--status-error)',
-                                    color: '#fff',
-                                    fontSize: 'var(--type-micro)',
-                                    fontFamily: 'var(--font-mono)',
-                                    padding: '1px 5px',
-                                    borderRadius: 10,
-                                    fontWeight: 700,
-                                    flexShrink: 0,
-                                }}>
+                                <span
+                                    key={badgeAnimKey.current}
+                                    class={badgeAnimClass.current}
+                                    style={{
+                                        marginLeft: 'auto',
+                                        background: 'var(--status-error)',
+                                        color: '#fff',
+                                        fontSize: 'var(--type-micro)',
+                                        fontFamily: 'var(--font-mono)',
+                                        padding: '1px 5px',
+                                        borderRadius: 10,
+                                        fontWeight: 700,
+                                        flexShrink: 0,
+                                    }}>
                                     {badge}
                                 </span>
                             )}

@@ -864,7 +864,7 @@ export default function Plan() {
     // --- Main render ---
 
     return (
-        <div class="flex flex-col gap-4 animate-page-enter">
+        <div class="flex flex-col gap-4 animate-page-enter" data-mood="wonder">
             <PageBanner title="Schedule" subtitle="recurring jobs and upcoming run times" />
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>

@@ -78,7 +78,8 @@ export default function Now({ onSubmitRequest }) {
     const showProxyStat = proxyGenerate > 0 || proxyEmbed > 0;
 
     return (
-        <div ref={pageRef} class="flex flex-col gap-4 animate-page-enter">
+        <div ref={pageRef} class="flex flex-col gap-4 animate-page-enter"
+             data-mood={showAlerts ? 'dread' : 'dawn'}>
             <PageBanner title="Now" subtitle="live queue status" />
             {/* Disconnected banner */}
             {connectionStatus.value === 'disconnected' && (

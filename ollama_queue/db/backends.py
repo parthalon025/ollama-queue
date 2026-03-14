@@ -51,6 +51,21 @@ class BackendsMixin:
                 cur.execute("SELECT * FROM backends WHERE enabled = 1 ORDER BY added_at")
                 return [dict(r) for r in cur.fetchall()]
 
+    def update_backend_inference_mode(self, url: str, mode: str) -> bool:
+        """Set inference_mode for a backend. Returns True if the row existed.
+
+        Plain English: Controls whether this backend may use CPU RAM when the model
+        doesn't fit in VRAM ('cpu_shared', the default) or must stay GPU-only ('gpu_only').
+        """
+        if mode not in ("gpu_only", "cpu_shared"):
+            raise ValueError(f"inference_mode must be 'gpu_only' or 'cpu_shared', got {mode!r}")
+        with self._lock:
+            conn = self._connect()
+            with closing(conn.cursor()) as cur:
+                cur.execute("UPDATE backends SET inference_mode = ? WHERE url = ?", (mode, url))
+                conn.commit()
+                return cur.rowcount > 0
+
     def get_backend(self, url: str) -> dict | None:
         """Return a single backend row by URL, or None if not found."""
         with self._lock:

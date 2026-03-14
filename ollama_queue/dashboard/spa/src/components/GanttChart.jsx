@@ -10,19 +10,19 @@ import { fetchJobRuns } from '../stores';
 
 export const SOURCE_COLORS = {
     aria:     'var(--accent)',
-    telegram: '#f97316',
-    notion:   '#a78bfa',
-    eval:     '#6366f1',
+    telegram: 'var(--source-telegram)',
+    notion:   'var(--source-notion)',
+    eval:     'var(--source-eval)',
 };
 
 export function sourceColor(source) {
-    if (!source || source === 'none') return 'var(--text-tertiary)';
+    if (!source || source === 'none') return 'var(--source-default)';
     const s = source.toLowerCase();
     if (s === 'aria' || s.startsWith('aria-')) return 'var(--accent)';
-    if (s === 'telegram' || s.startsWith('telegram-')) return '#f97316';
-    if (s === 'notion' || s.startsWith('notion-')) return '#a78bfa';
-    if (s === 'eval' || s.startsWith('eval-')) return '#6366f1';
-    return 'var(--text-tertiary)';
+    if (s === 'telegram' || s.startsWith('telegram-')) return 'var(--source-telegram)';
+    if (s === 'notion' || s.startsWith('notion-')) return 'var(--source-notion)';
+    if (s === 'eval' || s.startsWith('eval-')) return 'var(--source-eval)';
+    return 'var(--source-default)';
 }
 
 export function formatDuration(seconds) {
@@ -183,11 +183,11 @@ export function alignLoadMapToNow(slots, nowUnixSec) {
 // Color a load_map score for the density strip.
 // Pinned slots get amber; scored slots scale blue opacity; empty = inset.
 export function loadMapSlotColor(score) {
-    if (score >= LOAD_MAP_PIN_SCORE) return 'rgba(251,146,60,0.85)'; // amber — pinned/blocked
+    if (score >= LOAD_MAP_PIN_SCORE) return 'color-mix(in oklch, var(--status-warning) 85%, transparent)'; // amber — pinned/blocked
     if (score <= 0) return 'var(--bg-inset)';
     const intensity = Math.min(score / 10, 1); // score range 0–10 for non-pinned
     const opacity = 0.20 + intensity * 0.70;   // 0.20 → 0.90
-    return `rgba(99,179,237,${opacity.toFixed(2)})`;
+    return `rgba(99,179,237,${opacity.toFixed(2)})`; // dynamic opacity — color-mix() requires static %; --density-base not usable here
 }
 
 function _relativeTime(ts) {
@@ -494,12 +494,12 @@ export function GanttChart({
                                             : (score === 0
                                                 ? 'var(--bg-inset)'
                                                 : score === 1
-                                                    ? 'rgba(99,179,237,0.25)'
+                                                    ? 'var(--density-low)'
                                                     : score === 2
-                                                        ? 'rgba(99,179,237,0.55)'
-                                                        : 'rgba(99,179,237,0.9)'),
+                                                        ? 'var(--density-mid)'
+                                                        : 'var(--density-high)'),
                                         borderRight: bucketIdx < densityBuckets.length - 1 ? '1px solid var(--border-subtle)' : 'none',
-                                        outline: isSelected ? '2px solid var(--accent)' : isSuggested ? '2px solid rgba(52,211,153,0.9)' : 'none',
+                                        outline: isSelected ? '2px solid var(--accent)' : isSuggested ? '2px solid color-mix(in oklch, var(--status-healthy) 90%, transparent)' : 'none',
                                         outlineOffset: '-2px',
                                     }}
                                     title={isSuggested
@@ -788,7 +788,7 @@ export function GanttChart({
                                             fontFamily: 'var(--font-mono)',
                                             fontSize: 'var(--type-micro)',
                                             color: 'rgba(255,255,255,0.85)',
-                                            background: 'rgba(249,115,22,0.6)',
+                                            background: 'color-mix(in oklch, var(--source-telegram) 60%, transparent)',
                                             borderRadius: 3,
                                             padding: '1px 4px',
                                             whiteSpace: 'nowrap',
@@ -854,10 +854,10 @@ export function GanttChart({
                 color:
             </span>
             {[
-                { color: 'var(--accent)',        label: 'aria',     symbol: '◆' },
-                { color: '#f97316',              label: 'telegram', symbol: '●' },
-                { color: '#a78bfa',              label: 'notion',   symbol: '▲' },
-                { color: 'var(--text-tertiary)', label: 'other',    symbol: '·' },
+                { color: 'var(--accent)',           label: 'aria',     symbol: '◆' },
+                { color: 'var(--source-telegram)',  label: 'telegram', symbol: '●' },
+                { color: 'var(--source-notion)',    label: 'notion',   symbol: '▲' },
+                { color: 'var(--text-tertiary)',    label: 'other',    symbol: '·' },
             ].map(({ color, label, symbol }) => (
                 <span key={label} style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
                     <span style={{ color }}>{symbol}</span>
@@ -868,9 +868,9 @@ export function GanttChart({
             {/* Candlestick encoding legend — mimics the actual bar shape: thin-wick body thin-wick */}
             <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
                 <span style={{ display: 'flex', alignItems: 'center', width: 36, height: 10 }}>
-                    <span style={{ flex: 1, height: 2, background: 'rgba(99,179,237,0.7)', borderRadius: '2px 0 0 2px' }} />
-                    <span style={{ width: 16, height: '100%', background: 'rgba(99,179,237,0.85)', borderRadius: 1 }} />
-                    <span style={{ flex: 1, height: 2, background: 'rgba(99,179,237,0.5)', borderRadius: '0 2px 2px 0' }} />
+                    <span style={{ flex: 1, height: 2, background: 'var(--density-high)', borderRadius: '2px 0 0 2px' }} />
+                    <span style={{ width: 16, height: '100%', background: 'var(--density-high)', borderRadius: 1 }} />
+                    <span style={{ flex: 1, height: 2, background: 'var(--density-mid)', borderRadius: '0 2px 2px 0' }} />
                 </span>
                 load · run · unload
             </span>

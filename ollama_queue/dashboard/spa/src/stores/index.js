@@ -97,7 +97,16 @@ async function fetchStatus() {
             status.value = data;
             if (Array.isArray(data.queue)) queue.value = data.queue;
             _pollFailures = 0;
-            connectionStatus.value = 'ok';
+            // Fire recovery event when transitioning from disconnected → ok.
+            // Notifies UI to trigger t2-tick-flash on data containers (design system §7.2 stage 4).
+            if (connectionStatus.value === 'disconnected') {
+                connectionStatus.value = 'ok';
+                if (typeof window !== 'undefined') {
+                    window.dispatchEvent(new CustomEvent('queue:connection-restored'));
+                }
+            } else {
+                connectionStatus.value = 'ok';
+            }
             _backoffMs = POLL_INTERVAL;
             _pollCount++;
             if (_pollCount % 12 === 0) _fetchNonRealtime();
