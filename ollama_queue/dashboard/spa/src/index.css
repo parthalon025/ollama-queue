@@ -1313,7 +1313,7 @@ body {
 
 /* Circuit breaker banner */
 .eval-circuit-breaker-banner {
-  background: var(--status-error-glow, rgba(239,68,68,0.1));
+  background: var(--status-error-glow, color-mix(in oklch, var(--status-error) 15%, transparent));
   border: 1px solid var(--status-error);
   border-radius: var(--radius);
   padding: 0.5rem 0.75rem;
@@ -1629,7 +1629,7 @@ body {
 }
 .badge--lock { background: var(--status-error, #dc3545); color: #fff; }
 .badge--system { background: var(--text-secondary, #6c757d); color: #fff; }
-.badge--caution { background: #fd7e14; color: #fff; }
+.badge--caution { background: var(--status-warning); color: white; }
 .badge--ok { background: color-mix(in srgb, var(--status-ok, #198754) 15%, var(--bg-surface)); color: var(--status-ok, #198754); }
 
 /* CRT scanlines — superhot-ui aesthetic, enabled on .sh-crt elements */
@@ -1661,7 +1661,7 @@ kbd {
 .status-queued    { background: var(--bg-surface-raised); color: var(--text-secondary); }
 .status-running   { background: color-mix(in oklch, var(--status-healthy) 15%, var(--bg-inset)); color: var(--status-healthy); }
 .status-running-active { animation: pulse 1.5s ease-in-out infinite; }
-.status-complete  { background: color-mix(in oklch, var(--status-healthy) 10%, var(--bg-inset)); color: var(--status-healthy); }
+.status-complete  { background: var(--bg-surface-raised); color: var(--text-secondary); }
 .status-failed    { background: color-mix(in oklch, var(--status-error) 15%, var(--bg-inset)); color: var(--status-error); }
 .status-error     { border: 1px solid var(--status-error); }
 .status-deferred  { background: var(--bg-inset); color: var(--text-tertiary); }
@@ -1747,7 +1747,7 @@ kbd {
 
 /* EVAL badge + perf annotation */
 .nav-badge          { display: inline-block; padding: 1px 5px; border-radius: 4px; font-size: 0.65rem; font-weight: 700; letter-spacing: 0.04em; margin-left: 4px; }
-.nav-badge--eval    { background: var(--source-eval); color: var(--bg-base); }
+.nav-badge--eval    { background: var(--source-eval); color: white; }
 .perf-eval-annotation { padding: 8px 12px; background: var(--surface-2, #1f2937); border-left: 3px solid var(--status-warning); border-radius: 4px; font-size: 0.8rem; color: var(--text, #f3f4f6); margin-top: 8px; }
 
 /* Variant lineage tooltip */
