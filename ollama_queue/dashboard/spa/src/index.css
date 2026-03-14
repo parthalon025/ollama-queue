@@ -22,9 +22,9 @@
   --regime-trough:        oklch(0.62 0.13 230);
   --regime-steady:        var(--status-healthy);
   --regime-unknown:       var(--text-tertiary);
-  --regime-burst-bg:      oklch(0.72 0.18 55 / 0.1);
+  --regime-burst-bg:      color-mix(in oklch, var(--status-warning) 10%, transparent);
   --regime-trough-bg:     oklch(0.62 0.13 230 / 0.1);
-  --regime-steady-bg:     oklch(0.55 0.18 145 / 0.1);
+  --regime-steady-bg:     color-mix(in oklch, var(--status-healthy) 10%, transparent);
   --regime-unknown-bg:    var(--bg-inset);
 }
 

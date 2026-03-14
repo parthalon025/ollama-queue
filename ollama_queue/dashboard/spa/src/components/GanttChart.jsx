@@ -16,7 +16,7 @@ export const SOURCE_COLORS = {
 };
 
 export function sourceColor(source) {
-    if (!source || source === 'none') return 'var(--text-tertiary)';
+    if (!source || source === 'none') return 'var(--source-default)';
     const s = source.toLowerCase();
     if (s === 'aria' || s.startsWith('aria-')) return 'var(--accent)';
     if (s === 'telegram' || s.startsWith('telegram-')) return 'var(--source-telegram)';
@@ -788,7 +788,7 @@ export function GanttChart({
                                             fontFamily: 'var(--font-mono)',
                                             fontSize: 'var(--type-micro)',
                                             color: 'rgba(255,255,255,0.85)',
-                                            background: 'rgba(249,115,22,0.6)',
+                                            background: 'color-mix(in oklch, var(--source-telegram) 60%, transparent)',
                                             borderRadius: 3,
                                             padding: '1px 4px',
                                             whiteSpace: 'nowrap',
