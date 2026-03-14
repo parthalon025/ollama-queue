@@ -148,6 +148,26 @@ def test_health_includes_cpu_count(client):
     assert data["cpu_count"] >= 1
 
 
+def test_health_status_returns_required_fields(client):
+    """GET /api/health/status returns lightweight probe with ok, daemon_state, uptime_s."""
+    resp = client.get("/api/health/status")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert "daemon_state" in data
+    assert isinstance(data["daemon_state"], str)
+    assert "uptime_s" in data
+    assert isinstance(data["uptime_s"], int)
+    assert data["uptime_s"] >= 0
+
+
+def test_health_status_is_lightweight(client):
+    """GET /api/health/status response is under 1KB (vs 2.4MB for /api/health)."""
+    resp = client.get("/api/health/status")
+    assert resp.status_code == 200
+    assert len(resp.content) < 1024
+
+
 def test_get_durations(client):
     resp = client.get("/api/durations")
     assert resp.status_code == 200
