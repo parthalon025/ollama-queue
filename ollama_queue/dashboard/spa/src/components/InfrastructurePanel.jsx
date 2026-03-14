@@ -166,7 +166,7 @@ function BackendRow({ row, url }) {
             }}
         >
             {/* Health indicator dot */}
-            <span style={{ width: 8, height: 8, borderRadius: '50%', background: isHealthy ? 'var(--status-ok)' : 'var(--status-error)', flexShrink: 0 }} />
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: isHealthy ? 'var(--status-healthy)' : 'var(--status-error)', flexShrink: 0 }} />
 
             {/* GPU label */}
             <span style={{ color: 'var(--text-primary)', flex: '0 0 auto', minWidth: '6rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -187,7 +187,7 @@ function BackendRow({ row, url }) {
 
                     {/* Currently loaded model — title shows full list when truncated by "+N" */}
                     {loadedLabel && (
-                        <span title={modelsTooltip} style={{ color: isServing ? 'var(--sh-phosphor)' : 'var(--status-ok)', fontSize: 'var(--type-micro)', flexShrink: 0 }}>
+                        <span title={modelsTooltip} style={{ color: isServing ? 'var(--sh-phosphor)' : 'var(--status-healthy)', fontSize: 'var(--type-micro)', flexShrink: 0 }}>
                             · {loadedLabel}
                         </span>
                     )}
