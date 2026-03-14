@@ -360,10 +360,6 @@ function Node({ name, ns, tprops }) {
 export default function TopologyDiagram({ daemonStatus, currentJob, backends, dlqCount, activeEval, queueDepth }) {
   const tprops = { daemonStatus, currentJob, backends: backends || [], dlqCount: dlqCount || 0, activeEval, queueDepth: queueDepth || 0 };
 
-  // Static dim state — live wiring comes in Task 5
-  const dimNs = { stroke: 'var(--border)', filter: null, opacity: 0.7, sublabel: null, sublabelColor: null, pulse: false };
-  const dimEs = { stroke: 'var(--text-tertiary)', strokeWidth: 1, dasharray: null, animation: null, opacity: 0.3, marker: 'url(#arrow-dim)' };
-
   return (
     <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
       <svg
@@ -375,10 +371,10 @@ export default function TopologyDiagram({ daemonStatus, currentJob, backends, dl
         <Defs />
         {/* Edges drawn first — nodes layer on top */}
         {Object.keys(EDGE_PATHS).map(id => (
-          <Edge key={id} id={id} es={dimEs} />
+          <Edge key={id} id={id} es={edgeState(id, tprops)} />
         ))}
         {Object.keys(NODES).map(name => (
-          <Node key={name} name={name} ns={dimNs} tprops={tprops} />
+          <Node key={name} name={name} ns={nodeState(name, tprops)} tprops={tprops} />
         ))}
       </svg>
     </div>
