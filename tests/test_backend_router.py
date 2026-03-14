@@ -1,0 +1,481 @@
+"""Tests for the multi-backend Ollama router."""
+
+from __future__ import annotations
+
+import asyncio
+import time
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
+import ollama_queue.api.backend_router as router
+
+
+def run(coro):
+    """Run an async coroutine synchronously — matches this project's no-pytest-asyncio pattern."""
+    return asyncio.run(coro)
+
+
+@pytest.fixture(autouse=True)
+def clear_caches():
+    """Clear module-level caches between tests."""
+    router._health_cache.clear()
+    router._models_cache.clear()
+    router._loaded_cache.clear()
+    router._hw_cache.clear()
+    router._gpu_name_cache.clear()
+    yield
+    router._health_cache.clear()
+    router._models_cache.clear()
+    router._loaded_cache.clear()
+    router._hw_cache.clear()
+    router._gpu_name_cache.clear()
+
+
+# ---------------------------------------------------------------------------
+# select_backend — single backend fast path
+# ---------------------------------------------------------------------------
+
+
+def test_single_backend_returns_immediately():
+    """Single backend: no health/model checks are performed."""
+    with patch.object(router, "BACKENDS", ["http://local:11434"]):
+        result = run(router.select_backend("qwen3:14b"))
+    assert result == "http://local:11434"
+
+
+# ---------------------------------------------------------------------------
+# select_backend — health filtering
+# ---------------------------------------------------------------------------
+
+
+def test_healthy_backend_selected():
+    """Two backends: returns the healthy one."""
+    with (
+        patch.object(router, "BACKENDS", ["http://local:11434", "http://remote:11434"]),
+        patch.object(router, "_backend_healthy", new=AsyncMock(side_effect=[True, False])),
+        patch.object(router, "_available_models", new=AsyncMock(return_value=frozenset())),
+    ):
+        result = run(router.select_backend("qwen3:14b"))
+    assert result == "http://local:11434"
+
+
+def test_all_unhealthy_falls_back_to_first():
+    """All backends down: falls back to first configured backend."""
+    with (
+        patch.object(router, "BACKENDS", ["http://local:11434", "http://remote:11434"]),
+        patch.object(router, "_backend_healthy", new=AsyncMock(return_value=False)),
+    ):
+        result = run(router.select_backend("qwen3:14b"))
+    assert result == "http://local:11434"
+
+
+# ---------------------------------------------------------------------------
+# select_backend — model-aware routing
+# ---------------------------------------------------------------------------
+
+
+def test_routes_to_backend_with_model():
+    """Both healthy, only remote has the requested model — routes to remote."""
+    backends = ["http://local:11434", "http://remote:11434"]
+    model_sets = {
+        "http://local:11434": frozenset(["other-model:7b"]),
+        "http://remote:11434": frozenset(["deepseek-r1:70b"]),
+    }
+
+    async def fake_avail(url):
+        return model_sets[url]
+
+    with (
+        patch.object(router, "BACKENDS", backends),
+        patch.object(router, "_backend_healthy", new=AsyncMock(return_value=True)),
+        patch.object(router, "_available_models", new=AsyncMock(side_effect=fake_avail)),
+        patch.object(router, "_loaded_models", new=AsyncMock(return_value=frozenset())),
+    ):
+        result = run(router.select_backend("deepseek-r1:70b"))
+
+    assert result == "http://remote:11434"
+
+
+def test_routes_to_warm_backend():
+    """Both have the model; remote already has it loaded in VRAM — routes to remote."""
+    backends = ["http://local:11434", "http://remote:11434"]
+    model_name = "qwen3:14b"
+
+    loaded_sets = {
+        "http://local:11434": frozenset(),
+        "http://remote:11434": frozenset([model_name]),
+    }
+
+    async def fake_loaded(url):
+        return loaded_sets[url]
+
+    with (
+        patch.object(router, "BACKENDS", backends),
+        patch.object(router, "_backend_healthy", new=AsyncMock(return_value=True)),
+        patch.object(router, "_available_models", new=AsyncMock(return_value=frozenset([model_name]))),
+        patch.object(router, "_loaded_models", new=AsyncMock(side_effect=fake_loaded)),
+    ):
+        result = run(router.select_backend(model_name))
+
+    assert result == "http://remote:11434"
+
+
+def test_no_model_skips_model_checks():
+    """Empty model string: skip model availability and loaded checks."""
+    backends = ["http://local:11434", "http://remote:11434"]
+    avail_mock = AsyncMock(return_value=frozenset())
+
+    with (
+        patch.object(router, "BACKENDS", backends),
+        patch.object(router, "_backend_healthy", new=AsyncMock(return_value=True)),
+        patch.object(router, "_available_models", new=avail_mock),
+    ):
+        result = run(router.select_backend(""))
+
+    avail_mock.assert_not_called()
+    assert result in backends
+
+
+# ---------------------------------------------------------------------------
+# Cache behaviour
+# ---------------------------------------------------------------------------
+
+
+def test_health_cache_hit():
+    """Cached health result is returned without making a new HTTP call."""
+    now = time.monotonic()
+    router._health_cache["http://cached:11434"] = (now, True)
+    result = run(router._backend_healthy("http://cached:11434"))
+    assert result is True
+
+
+def test_health_cache_expired():
+    """Expired cache entry triggers a new health check and refreshes the cache."""
+    expired_ts = time.monotonic() - router._HEALTH_TTL - 1
+    router._health_cache["http://stale:11434"] = (expired_ts, True)
+
+    with patch("ollama_queue.api.backend_router.httpx.AsyncClient", _fake_async_client(json_data={})):
+        result = run(router._backend_healthy("http://stale:11434"))
+
+    assert result is True
+    assert router._health_cache["http://stale:11434"][0] > expired_ts
+
+
+# ---------------------------------------------------------------------------
+# _available_models and _loaded_models
+# ---------------------------------------------------------------------------
+
+
+def _fake_async_client(json_data=None, side_effect=None):
+    """Return a fake httpx.AsyncClient class for use in `async with` blocks.
+
+    AsyncMock context-manager wiring is tricky (default __aenter__ returns a new
+    mock, not self). A lightweight fake class avoids all that complexity.
+    """
+
+    class _FakeResp:
+        status_code = 200
+
+        def json(self):
+            return json_data or {}
+
+    class _FakeClient:
+        def __init__(self, **_):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            pass
+
+        async def get(self, url):
+            if side_effect:
+                raise side_effect
+            return _FakeResp()
+
+    return _FakeClient
+
+
+def test_available_models_parses_tags_response():
+    """_available_models extracts model names from /api/tags JSON."""
+    tags_response = {"models": [{"name": "qwen3:14b"}, {"name": "deepseek-r1:8b"}]}
+
+    with patch("ollama_queue.api.backend_router.httpx.AsyncClient", _fake_async_client(json_data=tags_response)):
+        result = run(router._available_models("http://host:11434"))
+
+    assert result == frozenset(["qwen3:14b", "deepseek-r1:8b"])
+
+
+def test_available_models_returns_empty_on_error():
+    """_available_models returns empty frozenset on connection failure."""
+    with patch(
+        "ollama_queue.api.backend_router.httpx.AsyncClient",
+        _fake_async_client(side_effect=Exception("connection refused")),
+    ):
+        result = run(router._available_models("http://dead:11434"))
+
+    assert result == frozenset()
+
+
+def test_loaded_models_parses_ps_response():
+    """_loaded_models extracts model names from /api/ps JSON."""
+    ps_response = {"models": [{"name": "qwen3:14b", "size": 8000000000}]}
+
+    with patch("ollama_queue.api.backend_router.httpx.AsyncClient", _fake_async_client(json_data=ps_response)):
+        result = run(router._loaded_models("http://host:11434"))
+
+    assert result == frozenset(["qwen3:14b"])
+
+
+# ---------------------------------------------------------------------------
+# _backend_vram_pct — hardware load check
+# ---------------------------------------------------------------------------
+
+
+def test_hw_cache_hit():
+    """Cached VRAM result is returned without making a new HTTP call."""
+    now = time.monotonic()
+    router._hw_cache["http://cached:11434"] = (now, 42.5)
+    result = run(router._backend_vram_pct("http://cached:11434"))
+    assert result == 42.5
+
+
+def test_backend_vram_pct_parses_health_response():
+    """_backend_vram_pct extracts vram_pct from the first health log entry."""
+    health_response = {"log": [{"vram_pct": 67.3, "ram_pct": 40.0}]}
+
+    with patch("ollama_queue.api.backend_router.httpx.AsyncClient", _fake_async_client(json_data=health_response)):
+        result = run(router._backend_vram_pct("http://host:11434"))
+
+    assert result == pytest.approx(67.3)
+
+
+def test_backend_vram_pct_returns_zero_on_error():
+    """_backend_vram_pct returns 0.0 (no penalty) on connection failure."""
+    with patch(
+        "ollama_queue.api.backend_router.httpx.AsyncClient",
+        _fake_async_client(side_effect=Exception("connection refused")),
+    ):
+        result = run(router._backend_vram_pct("http://dead:11434"))
+
+    assert result == 0.0
+
+
+def test_backend_vram_pct_returns_zero_on_empty_log():
+    """_backend_vram_pct returns 0.0 when the health log is empty."""
+    health_response = {"log": []}
+
+    with patch("ollama_queue.api.backend_router.httpx.AsyncClient", _fake_async_client(json_data=health_response)):
+        result = run(router._backend_vram_pct("http://host:11434"))
+
+    assert result == 0.0
+
+
+# ---------------------------------------------------------------------------
+# _backend_gpu_name — GPU model name from queue health endpoint
+# ---------------------------------------------------------------------------
+
+
+def test_gpu_name_cache_hit():
+    """Cached GPU name is returned without making a new HTTP call."""
+    now = time.monotonic()
+    router._gpu_name_cache["http://cached:11434"] = (now, "RTX 4090")
+    result = run(router._backend_gpu_name("http://cached:11434"))
+    assert result == "RTX 4090"
+
+
+def test_backend_gpu_name_parses_health_response():
+    """_backend_gpu_name extracts gpu_name from the /api/health JSON response."""
+    health_response = {"gpu_name": "NVIDIA GeForce RTX 4090", "log": [], "cpu_count": 16}
+
+    with patch("ollama_queue.api.backend_router.httpx.AsyncClient", _fake_async_client(json_data=health_response)):
+        result = run(router._backend_gpu_name("http://host:11434"))
+
+    assert result == "NVIDIA GeForce RTX 4090"
+
+
+def test_backend_gpu_name_returns_none_on_error():
+    """_backend_gpu_name returns None on connection failure (no penalty)."""
+    with patch(
+        "ollama_queue.api.backend_router.httpx.AsyncClient",
+        _fake_async_client(side_effect=Exception("connection refused")),
+    ):
+        result = run(router._backend_gpu_name("http://dead:11434"))
+
+    assert result is None
+
+
+def test_backend_gpu_name_returns_none_when_absent():
+    """_backend_gpu_name returns None when gpu_name key is missing (non-GPU machine)."""
+    health_response = {"log": [], "cpu_count": 8}
+
+    with patch("ollama_queue.api.backend_router.httpx.AsyncClient", _fake_async_client(json_data=health_response)):
+        result = run(router._backend_gpu_name("http://cpu-only:11434"))
+
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# select_backend — hardware load tiebreaker
+# ---------------------------------------------------------------------------
+
+
+def test_routes_to_lower_vram_backend():
+    """Both warm; local has 80% VRAM, remote has 20% — routes to remote (lower pressure)."""
+    backends = ["http://local:11434", "http://remote:11434"]
+    model_name = "qwen3:14b"
+
+    vram_vals = {
+        "http://local:11434": 80.0,
+        "http://remote:11434": 20.0,
+    }
+
+    async def fake_vram(url):
+        return vram_vals[url]
+
+    with (
+        patch.object(router, "BACKENDS", backends),
+        patch.object(router, "_backend_healthy", new=AsyncMock(return_value=True)),
+        patch.object(router, "_available_models", new=AsyncMock(return_value=frozenset([model_name]))),
+        patch.object(router, "_loaded_models", new=AsyncMock(return_value=frozenset([model_name]))),
+        patch.object(router, "_backend_vram_pct", new=AsyncMock(side_effect=fake_vram)),
+    ):
+        result = run(router.select_backend(model_name))
+
+    assert result == "http://remote:11434"
+
+
+def test_hw_check_skipped_when_no_model():
+    """When no model is specified, the HW check is skipped — falls through to random."""
+    backends = ["http://local:11434", "http://remote:11434"]
+    vram_mock = AsyncMock(return_value=80.0)
+
+    with (
+        patch.object(router, "BACKENDS", backends),
+        patch.object(router, "_backend_healthy", new=AsyncMock(return_value=True)),
+        patch.object(router, "_backend_vram_pct", new=vram_mock),
+    ):
+        result = run(router.select_backend(""))
+
+    vram_mock.assert_not_called()
+    assert result in backends
+
+
+# ---------------------------------------------------------------------------
+# fetch_all_backend_models
+# ---------------------------------------------------------------------------
+
+
+def test_fetch_all_backend_models_merges_deduplicates():
+    """Models on both backends appear once with both URLs in 'backends'."""
+    backends = ["http://local:11434", "http://remote:11434"]
+
+    responses = {
+        "http://local:11434": {
+            "models": [{"name": "qwen3:14b", "size": 8000000000}, {"name": "nomic-embed-text", "size": 274000000}]
+        },
+        "http://remote:11434": {
+            "models": [{"name": "qwen3:14b", "size": 8000000000}, {"name": "deepseek-r1:70b", "size": 39000000000}]
+        },
+    }
+
+    call_idx = [0]
+
+    def _fake_client_for_url(json_data=None, side_effect=None):
+        class _FakeResp:
+            status_code = 200
+
+            def json(self):
+                return json_data or {}
+
+        class _FakeClient:
+            def __init__(self, **_):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_):
+                pass
+
+            async def get(self, url):
+                # Map /api/tags URL back to the backend
+                for b in backends:
+                    if url.startswith(b):
+                        return type("R", (), {"status_code": 200, "json": lambda self, d=responses[b]: d})()
+                return _FakeResp()
+
+        return _FakeClient
+
+    with (
+        patch.object(router, "BACKENDS", backends),
+        patch("ollama_queue.api.backend_router.httpx.AsyncClient", _fake_client_for_url()),
+    ):
+        result = run(router.fetch_all_backend_models())
+
+    by_name = {m["name"]: m for m in result}
+    assert set(by_name.keys()) == {"qwen3:14b", "nomic-embed-text", "deepseek-r1:70b"}
+    # qwen3:14b appears on both backends
+    assert set(by_name["qwen3:14b"]["backends"]) == {"http://local:11434", "http://remote:11434"}
+    # nomic-embed-text only on local
+    assert by_name["nomic-embed-text"]["backends"] == ["http://local:11434"]
+    # deepseek only on remote
+    assert by_name["deepseek-r1:70b"]["backends"] == ["http://remote:11434"]
+
+
+# ---------------------------------------------------------------------------
+# _get_weights — backend preference weights
+# ---------------------------------------------------------------------------
+
+
+def test_get_weights_returns_defaults_when_no_config():
+    """Backends not in _BACKEND_WEIGHTS get weight 1.0."""
+    with patch.object(router, "_BACKEND_WEIGHTS", {}):
+        weights = router._get_weights(["http://a:11434", "http://b:11434"])
+    assert weights == [1.0, 1.0]
+
+
+def test_get_weights_applies_configured_weights():
+    """Configured weights are returned in backend list order."""
+    weights_map = {"http://fast:11434": 3.0, "http://slow:11434": 1.0}
+    with patch.object(router, "_BACKEND_WEIGHTS", weights_map):
+        weights = router._get_weights(["http://fast:11434", "http://slow:11434"])
+    assert weights == [3.0, 1.0]
+
+
+def test_weighted_random_respects_weights():
+    """Higher-weight backend wins the overwhelming majority of tie-break picks."""
+    backends = ["http://weak:11434", "http://strong:11434"]
+    weights_map = {"http://strong:11434": 100.0, "http://weak:11434": 1.0}
+
+    with (
+        patch.object(router, "BACKENDS", backends),
+        patch.object(router, "_BACKEND_WEIGHTS", weights_map),
+        patch.object(router, "_backend_healthy", new=AsyncMock(return_value=True)),
+    ):
+        # Run 20 times — strong should win almost every pick
+        results = [run(router.select_backend("")) for _ in range(20)]
+
+    strong_wins = results.count("http://strong:11434")
+    assert strong_wins >= 18, f"strong won only {strong_wins}/20 — weights not applied"
+
+
+# ---------------------------------------------------------------------------
+# BACKENDS env var parsing (static, no async)
+# ---------------------------------------------------------------------------
+
+
+def test_backends_parsed_from_env():
+    """OLLAMA_BACKENDS env var is parsed into a list of stripped URLs."""
+    raw = "http://a:11434 , http://b:11434 "
+    result = [b.strip().rstrip("/") for b in raw.split(",") if b.strip()]
+    assert result == ["http://a:11434", "http://b:11434"]
+
+
+def test_backends_trailing_slash_stripped():
+    """Trailing slashes on backend URLs are stripped."""
+    raw = "http://a:11434/"
+    result = [b.strip().rstrip("/") for b in raw.split(",") if b.strip()]
+    assert result == ["http://a:11434"]

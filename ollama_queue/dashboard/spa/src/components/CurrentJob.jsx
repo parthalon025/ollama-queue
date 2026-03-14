@@ -4,8 +4,9 @@ import { applyMantra, removeMantra } from 'superhot-ui';
 import StatusBadge from './StatusBadge.jsx';
 import ResourceGauges from './ResourceGauges.jsx';
 import EmptyState from './EmptyState.jsx';
+import ModelChip from './ModelChip.jsx';
 import { formatDuration } from '../utils/time.js';
-import { API, cpuCount } from '../stores';
+import { API, cpuCount, backendsData } from '../stores';
 
 /**
  * What it shows: What the daemon is doing RIGHT NOW — running job name/model/elapsed time
@@ -124,9 +125,14 @@ export default function CurrentJob({ daemon, currentJob, latestHealth, settings,
                 </span>
               )}
               {currentJob && currentJob.model && (
-                <span class="data-mono" style="font-size: var(--type-label); color: var(--text-secondary);">
-                  {currentJob.model}
-                </span>
+                <ModelChip model={currentJob.model} />
+              )}
+              {/* What it shows: Which GPU is handling this job — derived by matching the
+               *    running model against each backend's currently-loaded-in-VRAM model list.
+               * Decision it drives: In a multi-backend setup, tells the user whether the
+               *    local GPU or the remote machine is doing the work right now. */}
+              {currentJob && currentJob.model && (
+                <ActiveGpuBadge model={currentJob.model} />
               )}
               {/* Proxy call in progress for an eval session (current_job_id=-1 → no job row) */}
               {!currentJob && activeEval && (
@@ -251,6 +257,44 @@ export default function CurrentJob({ daemon, currentJob, latestHealth, settings,
         />
       )}
     </div>
+  );
+}
+
+// What it shows: Which GPU backend has the running job's model loaded in VRAM right now.
+//   Only renders when multiple backends are configured and we can match the model to one.
+// Decision it drives: In multi-backend setups, instantly answers "is this running on my
+//   local GPU or the remote machine?" without opening the Backends panel.
+function ActiveGpuBadge({ model }) {
+  const backends = backendsData.value;
+  // Single-backend or no data — badge adds no info
+  if (!backends || backends.length <= 1 || !model) return null;
+
+  const base = model.split(':')[0].toLowerCase();
+  const match = backends.find(b =>
+    b.loaded_models?.some(m => m.split(':')[0].toLowerCase() === base)
+  );
+  if (!match) return null;
+
+  let label = match.gpu_name;
+  if (!label) {
+    try { label = new URL(match.url).hostname; } catch (_) { label = match.url; }
+  }
+  // Abbreviate long GPU names: "NVIDIA GeForce RTX 5080" → "RTX 5080"
+  label = label.replace(/^nvidia\s+geforce\s+/i, '').replace(/^nvidia\s+/i, '');
+
+  return (
+    <span style={{
+      fontSize: 'var(--type-micro)',
+      color: 'var(--accent)',
+      background: 'var(--accent-subtle, rgba(99,102,241,0.1))',
+      border: '1px solid var(--accent)',
+      borderRadius: '3px',
+      padding: '1px 6px',
+      fontFamily: 'var(--font-mono)',
+      flexShrink: 0,
+    }}>
+      on {label}
+    </span>
   );
 }
 

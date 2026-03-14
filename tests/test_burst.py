@@ -6,13 +6,24 @@ from ollama_queue.sensing.burst import BurstDetector
 
 
 class TestBurstDetector:
-    def test_starts_unknown_before_10_samples(self):
-        """Returns 'unknown' until 10 inter-arrival samples are collected."""
+    def test_starts_unknown_before_5_samples(self):
+        """Returns 'unknown' until 5 inter-arrival samples are collected."""
         detector = BurstDetector()
         now = time.time()
-        for i in range(9):
+        for i in range(4):
             detector.record_submission(now + i * 10)
+        # 4 submissions = 3 intervals, still below threshold of 5
         assert detector.regime(now + 100) == "unknown"
+
+    def test_activates_after_5_samples(self):
+        """After 5 inter-arrival samples, regime() should NOT return 'unknown' (#26)."""
+        detector = BurstDetector()
+        now = time.time()
+        # 6 submissions = 5 intervals — meets the threshold
+        for i in range(6):
+            detector.record_submission(now + i * 10)
+        regime = detector.regime(now + 100)
+        assert regime != "unknown", f"Expected non-unknown regime after 5 samples, got {regime}"
 
     def test_subcritical_on_slow_steady_arrivals(self):
         """Slow, regular arrivals (100s apart) produce subcritical regime."""
@@ -106,3 +117,48 @@ class TestBurstDetector:
         detector._ewma = -0.1  # negative ratio, no bracket matches
         result = detector.regime(time.time())
         assert result == "subcritical"
+
+    def test_burst_detector_regime_releases_lock_after_call(self):
+        """regime() must not hold the lock after returning — regression for concurrent sort/append."""
+        detector = BurstDetector()
+        ts = time.time()
+        for i in range(100):
+            detector.record_submission(ts + i * 0.5)
+
+        result = detector.regime()
+        assert result in ("unknown", "subcritical", "moderate", "warning", "critical")
+        # Verify lock is not held (would deadlock if sort were still happening inside)
+        acquired = detector._lock.acquire(blocking=False)
+        assert acquired, "Lock held after regime() returned — this would block record_submission()"
+        detector._lock.release()
+
+    def test_burst_detector_no_deque_mutation_error_under_concurrency(self):
+        """regime() + record_submission() must not cause RuntimeError: deque mutated during iteration."""
+        import threading
+
+        detector = BurstDetector()
+        ts = time.time()
+        for i in range(100):
+            detector.record_submission(ts + i * 0.5)
+
+        errors = []
+
+        def run_regime():
+            try:
+                for _ in range(50):
+                    detector.regime()
+            except RuntimeError as e:
+                errors.append(str(e))
+
+        def run_submissions():
+            for _ in range(50):
+                detector.record_submission(time.time())
+
+        t1 = threading.Thread(target=run_regime)
+        t2 = threading.Thread(target=run_submissions)
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+        assert not errors, f"Concurrent regime()+record_submission() raised: {errors}"

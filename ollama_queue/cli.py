@@ -178,9 +178,10 @@ def cancel(ctx, job_id):
 
 @main.command()
 @click.option("--port", default=7683, type=int, help="Port for FastAPI server")
+@click.option("--host", default="127.0.0.1", help="Host to bind (use 0.0.0.0 for all interfaces)")
 @click.option("--debug", is_flag=True, default=False, help="Enable DEBUG logging for all ollama_queue modules")
 @click.pass_context
-def serve(ctx, port, debug):
+def serve(ctx, port, host, debug):
     """Start the daemon and FastAPI server."""
     import threading
 
@@ -209,7 +210,7 @@ def serve(ctx, port, debug):
     # Start FastAPI (blocks until shutdown)
     app = create_app(db)
     click.echo(f"Starting ollama-queue on port {port}...")
-    uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
+    uvicorn.run(app, host=host, port=port, log_level="warning")
 
 
 def _parse_interval(interval_str: str) -> int:

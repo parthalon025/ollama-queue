@@ -76,10 +76,31 @@ class RuntimeEstimator:
 
         # Bayesian update
         if durations:
-            bad = [d for d in durations if d <= 0]
-            if bad:
-                logger.warning("Clamping %d non-positive durations for model=%r: %s", len(bad), model, bad[:5])
-            log_durations = [math.log(max(d, 0.1)) for d in durations]
+            valid = [d for d in durations if d > 0]
+            excluded = len(durations) - len(valid)
+            if excluded:
+                logger.warning("Excluded %d non-positive durations for model=%r", excluded, model)
+            if not valid:
+                # All durations were non-positive — fall back to prior
+                post_mean = prior["log_mean"]
+                post_std = prior["log_std"]
+                gen_mean = math.exp(post_mean)
+                gen_upper = math.exp(post_mean + 1.28 * post_std)
+                warmup_mean = 0.0
+                warmup_upper = 0.0
+                if loaded_models is None or model not in loaded_models:
+                    warmup_mean, warmup_upper = self._estimate_warmup(model)
+                return Estimate(
+                    warmup_mean=warmup_mean,
+                    warmup_upper=warmup_upper,
+                    generation_mean=gen_mean,
+                    generation_upper=gen_upper,
+                    total_mean=warmup_mean + gen_mean,
+                    total_upper=warmup_upper + gen_upper,
+                    confidence=self._confidence_level(n_obs),
+                    n_observations=n_obs,
+                )
+            log_durations = [math.log(d) for d in valid]
             n = len(log_durations)
             sample_mean = sum(log_durations) / n
 
@@ -128,10 +149,13 @@ class RuntimeEstimator:
         prior = WARMUP_PRIOR.copy()
 
         if warmups:
-            bad = [w for w in warmups if w <= 0]
-            if bad:
-                logger.warning("Clamping %d non-positive warmup values for model=%r", len(bad), model)
-            log_warmups = [math.log(max(w, 0.01)) for w in warmups]
+            valid_warmups = [w for w in warmups if w > 0]
+            excluded_w = len(warmups) - len(valid_warmups)
+            if excluded_w:
+                logger.warning("Excluded %d non-positive warmup values for model=%r", excluded_w, model)
+            if not valid_warmups:
+                return math.exp(prior["log_mean"]), math.exp(prior["log_mean"] + 1.28 * prior["log_std"])
+            log_warmups = [math.log(w) for w in valid_warmups]
             n = len(log_warmups)
             sample_mean = sum(log_warmups) / n
             n0 = prior["n0"]

@@ -2,6 +2,7 @@ import { useState, useMemo } from 'preact/hooks';
 import { useSignal } from '@preact/signals';
 import EmptyState from './EmptyState.jsx';
 import { retryJob } from '../stores/queue.js';
+import ModelChip from './ModelChip.jsx';
 
 const STATUS_CONFIG = {
   completed: { icon: '\u2713', color: 'var(--status-healthy)' },
@@ -118,9 +119,7 @@ function HistoryRow({ job, copied }) {
           </span>
         )}
         {/* Model */}
-        <span class="data-mono" style="font-size: var(--type-label); color: var(--text-secondary); max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-          {job.model || '--'}
-        </span>
+        {job.model ? <ModelChip model={job.model} /> : <span class="data-mono" style="font-size: var(--type-label); color: var(--text-secondary);">--</span>}
         {/* Duration */}
         <span class="data-mono" style="font-size: var(--type-micro); color: var(--text-tertiary); width: 44px; text-align: right;">
           {duration !== null ? formatDur(duration) : '--'}

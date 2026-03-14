@@ -502,7 +502,7 @@ def _judge_one_target(
     source_cluster_id: str = "",
     judge_mode: str = "rubric",
     diff_target: dict | None = None,
-) -> None:
+) -> bool:
     """Call judge for one (principle, target) pair and store the result.
 
     judge_mode controls the scoring approach:
@@ -510,6 +510,8 @@ def _judge_one_target(
     - "binary": YES/NO transfer match
     - "tournament": paired A/B comparison (requires diff_target)
     - "bayesian": paired comparison + signal fusion (requires diff_target)
+
+    Returns True if a parse failure occurred, False otherwise.
     """
     t0 = time.monotonic()
     extra_cols: dict[str, Any] = {}
@@ -604,6 +606,7 @@ def _judge_one_target(
         error=scores.get("error"),
         **extra_cols,
     )
+    return scores.get("error") == "parse_failed"
 
 
 # ---------------------------------------------------------------------------
@@ -611,7 +614,7 @@ def _judge_one_target(
 # ---------------------------------------------------------------------------
 
 
-def run_eval_judge(
+def run_eval_judge(  # noqa: PLR0911
     run_id: int,
     db: Database,
     http_base: str = "http://127.0.0.1:7683",
@@ -668,6 +671,7 @@ def run_eval_judge(
     # Collect all (source_item_id, target_item_id) pairs so they can be persisted
     # for exact replay via the repeat endpoint.
     judge_pairs: list[list[str]] = []
+    parse_failures: int = 0
 
     for gen_result in gen_results:
         # Cooperative cancellation: stop if run was externally cancelled/failed.
@@ -706,7 +710,7 @@ def run_eval_judge(
                 diff_t = diff_targets[i]
                 judge_pairs.append([source_item_id, str(same_t["id"])])
                 try:
-                    _judge_one_target(
+                    _was_parse_fail = _judge_one_target(
                         db=db,
                         run_id=run_id,
                         variant=gen_result["variant"],
@@ -723,6 +727,8 @@ def run_eval_judge(
                         judge_mode=judge_mode,
                         diff_target=diff_t,
                     )
+                    if _was_parse_fail:
+                        parse_failures += 1
                 except _eng._ProxyDownError as exc:
                     _log.warning("run_eval_judge: proxy down — aborting run_id=%d: %s", run_id, exc)
                     _eng.update_eval_run(
@@ -733,13 +739,19 @@ def run_eval_judge(
                         completed_at=datetime.now(UTC).isoformat(),
                     )
                     return
+
+                # Post-HTTP cancellation re-check (paired mode)
+                _jpost = _eng.get_eval_run(db, run_id)
+                if _jpost is None or _jpost.get("status") in ("failed", "cancelled"):
+                    _log.info("run_eval_judge: cancelled during HTTP call for run_id=%d", run_id)
+                    return
         else:
             # Standard rubric/binary modes: judge each target independently
             for is_same, target_list in [(True, same_targets), (False, diff_targets)]:
                 for target in target_list:
                     judge_pairs.append([source_item_id, str(target["id"])])
                     try:
-                        _judge_one_target(
+                        _was_parse_fail = _judge_one_target(
                             db=db,
                             run_id=run_id,
                             variant=gen_result["variant"],
@@ -755,6 +767,8 @@ def run_eval_judge(
                             source_cluster_id=source_cid,
                             judge_mode=judge_mode,
                         )
+                        if _was_parse_fail:
+                            parse_failures += 1
                     except _eng._ProxyDownError as exc:
                         _log.warning("run_eval_judge: proxy down — aborting run_id=%d: %s", run_id, exc)
                         _eng.update_eval_run(
@@ -766,11 +780,26 @@ def run_eval_judge(
                         )
                         return
 
+                    # Post-HTTP cancellation re-check (rubric/binary mode)
+                    _jpost = _eng.get_eval_run(db, run_id)
+                    if _jpost is None or _jpost.get("status") in ("failed", "cancelled"):
+                        _log.info("run_eval_judge: cancelled during HTTP call for run_id=%d", run_id)
+                        return
+
     # Persist exact (source_item_id, target_item_id) pairs for reproducibility.
     # This overwrites the coarse source-only item_ids stored during generation.
     if judge_pairs:
         _eng.update_eval_run(db, run_id, item_ids=json.dumps(judge_pairs))
         _log.info("run_eval_judge: persisted %d judge pairs for run_id=%d", len(judge_pairs), run_id)
+
+    # Log and persist judge parse failures for observability (#22)
+    if parse_failures > 0:
+        _log.warning(
+            "run_eval_judge: run_id=%d had %d judge parse failures",
+            run_id,
+            parse_failures,
+        )
+        _eng.update_eval_run(db, run_id, judge_parse_failures=parse_failures)
 
     scored_rows = _eng._fetch_scored_rows(db, run_id)
     if judge_mode in ("tournament", "bayesian"):

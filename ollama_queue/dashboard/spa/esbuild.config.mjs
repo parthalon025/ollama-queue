@@ -1,8 +1,23 @@
 import * as esbuild from 'esbuild';
 import { createHash } from 'crypto';
 import { readFileSync, writeFileSync } from 'fs';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const isWatch = process.argv.includes('--watch');
+
+// Pin all Preact imports to a single instance — prevents the dual-Preact crash
+// that occurs when file: deps (like superhot-ui) have their own node_modules/preact.
+// Without this alias, esbuild resolves preact/hooks from the symlink target's real
+// path, producing two separate Preact module instances that don't share currentComponent.
+const preactAlias = {
+  'preact':              resolve(__dirname, 'node_modules/preact'),
+  'preact/hooks':        resolve(__dirname, 'node_modules/preact/hooks'),
+  'preact/jsx-runtime':  resolve(__dirname, 'node_modules/preact/jsx-runtime'),
+  '@preact/signals':     resolve(__dirname, 'node_modules/@preact/signals'),
+};
 
 const config = {
   entryPoints: ['src/index.jsx'],
@@ -17,6 +32,7 @@ const config = {
   minify: !isWatch,
   sourcemap: isWatch,
   logLevel: 'info',
+  alias: preactAlias,
 };
 
 function injectVersionHash() {

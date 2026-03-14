@@ -1,4 +1,4 @@
-
+import { h } from 'preact';
 // What it shows: A segmented button control with 5 named priority levels
 //   (Critical, High, Normal, Low, Background), highlighting the currently selected tier.
 // Decision it drives: Lets the user pick a job priority by name rather than guessing

@@ -4,6 +4,7 @@ import { settings, status, API, restartDaemon } from '../stores';
 import SettingsForm from '../components/SettingsForm';
 import { useActionFeedback } from '../hooks/useActionFeedback.js';
 import PageBanner from '../components/PageBanner.jsx';
+import ShCrtToggleNative from '../components/ShCrtToggleNative.jsx';
 
 // Fields that require a daemon restart to take effect. Saved on blur like all
 // other settings, but the banner stays visible until the daemon cycles through
@@ -122,6 +123,10 @@ export default function Settings() {
         pauseFb={pauseFb}
         resumeFb={resumeFb}
       />
+      {/* D20: CRT scanline intensity preference */}
+      <div class="t-frame" data-label="Display" style="margin-top:1rem;">
+        <ShCrtToggleNative />
+      </div>
       <div aria-label="Keyboard shortcuts" style="margin-top:24px;padding-top:16px;border-top:1px solid var(--border-subtle);">
         <p style="font-family:var(--font-mono);font-size:var(--type-micro);color:var(--text-tertiary);">
           Keyboard shortcuts:{'  '}
@@ -129,7 +134,8 @@ export default function Settings() {
           <kbd>2</kbd> Plan{'  ·  '}
           <kbd>3</kbd> History{'  ·  '}
           <kbd>4</kbd> Models{'  ·  '}
-          <kbd>5</kbd> Settings
+          <kbd>5</kbd> Settings{'  ·  '}
+          <kbd>Cmd+K</kbd> Command palette
         </p>
       </div>
     </div>

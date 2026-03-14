@@ -466,6 +466,62 @@ class TestPortHasProcess:
         assert result is False
 
 
+class TestMtimeGuard:
+    """TOCTOU guard: patch_consumer rejects if file modified since scan (#17)."""
+
+    def test_rejects_patch_after_file_modified(self, tmp_path):
+        import os
+        import time
+
+        f = tmp_path / ".env"
+        f.write_text("OLLAMA_HOST=localhost:11434\n")
+        scanned_mtime = os.path.getmtime(f)
+
+        # Ensure filesystem mtime granularity is exceeded
+        time.sleep(0.05)
+        f.write_text("OLLAMA_HOST=localhost:11434\n# modified\n")
+
+        consumer = {
+            "name": "app",
+            "type": "env_file",
+            "patch_path": str(f),
+            "restart_policy": "deferred",
+            "scanned_mtime": scanned_mtime,
+        }
+        with pytest.raises(ValueError, match="modified since scan"):
+            patch_consumer(consumer)
+
+    def test_allows_patch_when_mtime_matches(self, tmp_path):
+        import os
+
+        f = tmp_path / ".env"
+        f.write_text("OLLAMA_HOST=localhost:11434\n")
+        scanned_mtime = os.path.getmtime(f)
+
+        consumer = {
+            "name": "app",
+            "type": "env_file",
+            "patch_path": str(f),
+            "restart_policy": "deferred",
+            "scanned_mtime": scanned_mtime,
+        }
+        result = patch_consumer(consumer)
+        assert result["patch_applied"] is True
+
+    def test_skips_check_when_no_scanned_mtime(self, tmp_path):
+        f = tmp_path / ".env"
+        f.write_text("OLLAMA_HOST=localhost:11434\n")
+        consumer = {
+            "name": "app",
+            "type": "env_file",
+            "patch_path": str(f),
+            "restart_policy": "deferred",
+        }
+        # No scanned_mtime — should proceed without checking
+        result = patch_consumer(consumer)
+        assert result["patch_applied"] is True
+
+
 class TestPatchEnvFile:
     """_patch_env with env_file type (line 39 — via patch_consumer)."""
 

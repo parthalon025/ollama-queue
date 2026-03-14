@@ -1,4 +1,5 @@
 import { Fragment } from 'preact';
+import { scheduledEvalCount } from '../stores/eval.js';
 
 // NOTE: callback params use descriptive names — never 'h'
 const NAV_ITEMS = [
@@ -10,6 +11,7 @@ const NAV_ITEMS = [
     { id: 'eval',      icon: '⊡', label: 'Eval',      tooltip: 'Test and compare AI model configurations' },
     { id: 'consumers', icon: '⇄', label: 'Consumers', tooltip: 'Detected Ollama consumers and routing' },
     { id: 'performance', icon: '⊘', label: 'Perf', tooltip: 'Model performance stats and system health' },
+    { id: 'backends', icon: '⊟', label: 'Backends', tooltip: 'Multi-backend fleet management and routing intelligence' },
 ];
 
 // What it shows: Mobile bottom tab bar for navigating between views, plus a floating action
@@ -59,6 +61,9 @@ export default function BottomNav({ active, onNavigate, dlqCount, onSubmitReques
                         >
                             <span style="font-size: 1.1rem;">{item.icon}</span>
                             <span>{item.label}</span>
+                            {item.id === 'plan' && scheduledEvalCount.value > 0 && (
+                                <span class="nav-badge nav-badge--eval" title={`${scheduledEvalCount.value} eval run(s) in next 4h`}>EVAL</span>
+                            )}
                             {showBadge && (
                                 <span style="position:absolute;top:4px;right:4px;background:var(--status-error);color:#fff;border-radius:50%;width:16px;height:16px;font-size:10px;display:flex;align-items:center;justify-content:center;font-weight:600;">
                                     {issueCount > 9 ? '9+' : issueCount}

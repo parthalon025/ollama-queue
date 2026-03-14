@@ -4,14 +4,14 @@
 //   all read from these signals; mutations (trigger, cancel, save settings) go through
 //   the exported functions which update signals on success.
 
-import { signal } from '@preact/signals';
+import { signal, computed } from '@preact/signals';
 import { API } from './_shared.js';
 
 // ── Eval pipeline signals ─────────────────────────────────────────────────────
 
-// What it shows: Current sub-tab within the Eval page (Runs / Configurations / Trends / Settings)
+// What it shows: Current sub-tab within the Eval page (Campaign / Variants / Timeline / Config)
 // Decision it drives: Which eval view is displayed
-export const evalSubTab = signal('runs');
+export const evalSubTab = signal('campaign');
 
 // What it shows: List of all eval runs (summary)
 // Decision it drives: Run history table and active run tracking
@@ -97,6 +97,11 @@ export async function fetchEvalRuns() {
   try {
     const res = await fetch(`${API}/eval/runs`);
     if (res.ok) evalRuns.value = await res.json();
+    // Fire-and-forget: update scheduled eval count for the next 4 hours
+    fetch(`${API}/eval/runs?status=scheduled&within_hours=4`)
+      .then(r => r.ok ? r.json() : [])
+      .then(data => { scheduledEvalCount.value = Array.isArray(data) ? data.length : (data.items?.length || 0); })
+      .catch(() => {});
   } catch (e) { console.error('fetchEvalRuns failed:', e); }
 }
 
@@ -135,11 +140,16 @@ export async function fetchRunAnalysis(runId) {
 }
 
 // Normalize raw /eval/trends response so components receive consistent shapes:
+//  - no_cluster_data: true when backend has no cluster labels (early-stage project)
 //  - variants: object keyed by id → array with id field attached
 //  - each run: started_at ISO string → timestamp (unix seconds) added
 //  - trend_direction: aggregated across variants (regressing > stable > improving)
 //  - completed_runs, judge_reliability, item_count_growing: aggregated at top level
 function normalizeTrends(raw) {
+  // Surface the no_cluster_data sentinel so F1LineChart can show a specific
+  // explanation instead of the generic "complete 2 runs to see trends" message.
+  const noClusterData = raw.status === 'no_cluster_data';
+
   const variantsArr = Object.entries(raw.variants || {}).map(([id, v]) => ({
     id,
     ...v,
@@ -176,6 +186,7 @@ function normalizeTrends(raw) {
     completed_runs: completedRuns,
     judge_reliability: judgeReliability,
     item_count_growing: itemCountGrowing,
+    no_cluster_data: noClusterData,
   };
 }
 
@@ -243,6 +254,63 @@ export async function cancelEvalRun(runId) {
   evalActiveRun.value = null;
   sessionStorage.removeItem('evalActiveRun');
   await fetchEvalRuns();
+}
+
+// ── Cross-component navigation signals ───────────────────────────────────────
+
+// What it shows: The current recommended/production variant (the "winner").
+// Decision it drives: Every place that shows "who's winning" reads this.
+export const evalWinner = computed(() =>
+  (evalVariants.value || []).find(v => v.is_recommended || v.is_production) || null
+);
+
+// What it shows: Post-run action suggestions parsed from the active eval run's suggestions_json field.
+// Decision it drives: Shows the user up to 3 recommended next actions after a run completes.
+export const evalActiveSuggestions = computed(() => {
+  const run = evalActiveRun.value;
+  if (!run?.suggestions_json) return [];
+  try {
+    const parsed = typeof run.suggestions_json === 'string'
+      ? JSON.parse(run.suggestions_json) : run.suggestions_json;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch { return []; }
+});
+
+// What it shows: Oracle (judge reliability) report parsed from the active eval run's oracle_json field.
+// Decision it drives: Shows kappa score and judge agreement metrics for the current eval session.
+export const evalActiveOracle = computed(() => {
+  const run = evalActiveRun.value;
+  if (!run?.oracle_json) return null;
+  try {
+    return typeof run.oracle_json === 'string'
+      ? JSON.parse(run.oracle_json) : run.oracle_json;
+  } catch { return null; }
+});
+
+// What it shows: Number of eval runs scheduled in the next 4 hours.
+// Decision it drives: Plan tab badge — is there an eval coming that will use the GPU?
+export const scheduledEvalCount = signal(0);
+
+// What it shows: Which variant the user wants to focus on in the Variants tab.
+// Decision it drives: VariantChip clicks set this; Variants tab scrolls to match.
+export const focusVariantId = signal(null);
+
+// What it shows: Eval runs scheduled within the next 4 hours.
+// Decision it drives: Plan tab Gantt renders these as indigo blocks so the user can see
+//   upcoming eval runs alongside recurring jobs and avoid scheduling conflicts.
+export const scheduledEvalRuns = signal([]);
+
+export async function fetchScheduledEvalRuns() {
+  try {
+    const res = await fetch(`${API}/eval/runs?status=scheduled`);
+    if (!res.ok) return;
+    const data = await res.json();
+    scheduledEvalRuns.value = Array.isArray(data) ? data : (data.items || []);
+    scheduledEvalCount.value = scheduledEvalRuns.value.filter(run => {
+      const inFourHours = Date.now() / 1000 + 4 * 3600;
+      return run.scheduled_for && run.scheduled_for < inFourHours;
+    }).length;
+  } catch { /* silent — eval scheduled runs are optional */ }
 }
 
 // On startup: verify stored active run is still live — clear it if the API says it's terminal.

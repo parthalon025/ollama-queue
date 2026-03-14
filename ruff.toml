@@ -29,7 +29,7 @@ ignore = [
 ]
 
 [lint.per-file-ignores]
-"tests/**/*.py" = ["S101", "S106", "PLR2004", "E501", "SIM115", "B017", "F841", "S603", "S607"]
+"tests/**/*.py" = ["S101", "S105", "S106", "PLR2004", "E501", "SIM115", "B017", "F841", "S603", "S607"]
 # FastAPI route registration is inherently large/complex; Body() default is the FastAPI idiom
 "ollama_queue/api/*.py" = ["B008", "B904", "C901", "PLR0912", "PLR0915"]
 # Eval engine orchestrator is a multi-phase state machine with mode dispatch — complexity by design
@@ -38,6 +38,8 @@ ignore = [
 "ollama_queue/daemon/*.py" = ["C901", "PLR0911", "PLR0912", "PLR0915", "S602", "S603", "S607"]
 # Health checks run known system binaries (nvidia-smi, ollama) — not user input
 "ollama_queue/sensing/health.py" = ["S603", "S607", "C901", "SIM105", "S110"]
+# Stall detector queries known Ollama backends from env config — not user input
+"ollama_queue/sensing/stall.py" = ["S310"]
 # Model registry runs known ollama binary — not user input; SIM105/RUF002 are stylistic
 "ollama_queue/models/client.py" = ["S603", "S607", "SIM105", "RUF002"]
 # Admin migration script — subprocess calls use known binary paths, not user input

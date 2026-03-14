@@ -387,3 +387,94 @@ class TestFindFittingSlot:
             estimated_slots=3,
         )
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# vram_known tests — phantom-zero guard
+# ---------------------------------------------------------------------------
+
+
+class TestScoreSlotVramUnknown:
+    """When vram_known=False, VRAM-based gates are skipped."""
+
+    def test_vram_hard_gate_skipped_when_unknown(self):
+        """VRAM overcommit should NOT return -1 when vram_known=False."""
+        result = score_slot(
+            slot_load=0.0,
+            slot_vram_committed_gb=6.0,
+            job_vram_needed_gb=6.0,
+            total_vram_gb=8.0,  # 6+6=12 > 8 — normally infeasible
+            is_pinned=False,
+            model_is_hot=False,
+            recurring_conflict=False,
+            historical_quiet=False,
+            failure_category=None,
+            queue_depth=0,
+            vram_known=False,
+        )
+        assert result > 0, "VRAM hard gate should be skipped when vram_known=False"
+
+    def test_vram_hard_gate_applied_when_known(self):
+        """VRAM overcommit should return -1 when vram_known=True (default)."""
+        result = score_slot(
+            slot_load=0.0,
+            slot_vram_committed_gb=6.0,
+            job_vram_needed_gb=6.0,
+            total_vram_gb=8.0,
+            is_pinned=False,
+            model_is_hot=False,
+            recurring_conflict=False,
+            historical_quiet=False,
+            failure_category=None,
+            queue_depth=0,
+            vram_known=True,
+        )
+        assert result == -1.0
+
+    def test_resource_failure_headroom_skipped_when_unknown(self):
+        """Resource failure VRAM headroom check skipped when vram_known=False."""
+        result = score_slot(
+            slot_load=0.0,
+            slot_vram_committed_gb=0.0,
+            job_vram_needed_gb=6.0,
+            total_vram_gb=7.0,  # headroom=1 < 6*0.3=1.8 — normally infeasible for resource
+            is_pinned=False,
+            model_is_hot=False,
+            recurring_conflict=False,
+            historical_quiet=False,
+            failure_category="resource",
+            queue_depth=0,
+            vram_known=False,
+        )
+        assert result > 0, "Resource headroom check should be skipped when vram_known=False"
+
+
+class TestFindFittingSlotVramUnknown:
+    """find_fitting_slot passes vram_known through to score_slot."""
+
+    def test_find_slot_with_vram_unknown(self):
+        """Slots that would fail VRAM gate become feasible when vram_known=False."""
+        load_map = [
+            _make_slot(0, vram=7.0, ts=1000.0),  # 7 + 4 > 8 — normally infeasible
+            _make_slot(1, vram=7.0, ts=2000.0),
+        ]
+        # With vram_known=True, no slots fit
+        result_known = find_fitting_slot(
+            load_map=load_map,
+            job_vram_needed_gb=4.0,
+            total_vram_gb=8.0,
+            estimated_slots=1,
+            vram_known=True,
+        )
+        assert result_known is None
+
+        # With vram_known=False, slots are feasible
+        result_unknown = find_fitting_slot(
+            load_map=load_map,
+            job_vram_needed_gb=4.0,
+            total_vram_gb=8.0,
+            estimated_slots=1,
+            vram_known=False,
+        )
+        assert result_unknown is not None
+        assert result_unknown["score"] > 0

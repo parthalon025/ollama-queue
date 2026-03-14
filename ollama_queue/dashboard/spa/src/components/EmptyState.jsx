@@ -1,4 +1,4 @@
-
+import { h } from 'preact';
 // What it shows: A centered placeholder when a list or section has no data.
 //   Displays a short headline and a one-line explanation. Optionally shows a CTA button.
 // Decision it drives: Tells the user why the panel is blank and what to do next —

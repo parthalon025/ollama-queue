@@ -16,6 +16,7 @@ import logging
 import time
 
 from ollama_queue.db import Database
+from ollama_queue.db.schedule import _local_dt
 
 _log = logging.getLogger(__name__)
 
@@ -71,6 +72,8 @@ class Scheduler:
         # AoI sort: lower score = higher urgency. Ensures stale jobs promoted first
         # when multiple become due simultaneously.
         due.sort(key=lambda rj: self._aoi_sort_key(rj, now, aoi_weight, last_success_cache.get(rj["id"])))
+        from croniter import CroniterBadCronError
+
         new_ids = []
         next_run_updates: dict[int, float] = {}  # rj_id → new next_run; batched at end
         for rj in due:
@@ -95,7 +98,7 @@ class Scheduler:
 
                     from croniter import croniter
 
-                    start_dt = datetime.datetime.fromtimestamp(now)
+                    start_dt = _local_dt(now)
                     return croniter(cron_expr, start_dt).get_next(datetime.datetime).timestamp()
                 if not rj.get("interval_seconds"):
                     _log.warning(
@@ -115,7 +118,17 @@ class Scheduler:
                     recurring_job_id=rj["id"],
                     details={"name": rj["name"], "reason": "already pending or running"},
                 )
-                next_run_updates[rj["id"]] = _compute_next_run()
+                try:
+                    next_run_updates[rj["id"]] = _compute_next_run()
+                except CroniterBadCronError as exc:
+                    _log.warning(
+                        "promote_due_jobs: skipping next_run update for recurring job %r (id=%s)"
+                        " — bad cron expression %r: %s",
+                        rj.get("name"),
+                        rj.get("id"),
+                        rj.get("cron_expression"),
+                        exc,
+                    )
                 continue
 
             job_id = self.db.submit_job(
@@ -260,9 +273,7 @@ class Scheduler:
 
     def _time_to_slot(self, unix_ts: float) -> int:
         """Convert a Unix timestamp to a 30-min slot index (0-47) based on local time."""
-        import datetime
-
-        dt = datetime.datetime.fromtimestamp(unix_ts)
+        dt = _local_dt(unix_ts)
         seconds_in_day = dt.hour * 3600 + dt.minute * 60 + dt.second
         return (seconds_in_day % self._DAY_SECONDS) // self._SLOT_SECONDS
 
@@ -274,7 +285,7 @@ class Scheduler:
 
         cron_expr = rj["cron_expression"]
         pinned = bool(rj.get("pinned"))
-        start_dt = datetime.datetime.fromtimestamp(now)
+        start_dt = _local_dt(now)
         c = croniter(cron_expr, start_dt)
         fire_times: list[float] = []
         for _ in range(48):  # max 48 firings in 24h (every 30 min)
@@ -305,9 +316,7 @@ class Scheduler:
 
         interval = rj["interval_seconds"]
         firings_per_day = max(1, self._DAY_SECONDS // interval)
-        local_midnight = datetime.datetime.combine(
-            datetime.datetime.fromtimestamp(now).date(), datetime.time.min
-        ).timestamp()
+        local_midnight = datetime.datetime.combine(_local_dt(now).date(), datetime.time.min).timestamp()
         for i in range(firings_per_day):
             fire_ts = local_midnight + (i * interval) % self._DAY_SECONDS
             slot = self._time_to_slot(fire_ts)
@@ -356,7 +365,7 @@ class Scheduler:
         vram: list[float] = [0.0] * self._SLOT_COUNT
         slot_rj_ids: list[list[int]] = [[] for _ in range(self._SLOT_COUNT)]
 
-        local_midnight = _dt.datetime.combine(_dt.datetime.fromtimestamp(now).date(), _dt.time.min).timestamp()
+        local_midnight = _dt.datetime.combine(_local_dt(now).date(), _dt.time.min).timestamp()
 
         for rj in self._get_recurring_jobs():
             if not rj["enabled"]:

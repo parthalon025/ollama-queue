@@ -1,3 +1,5 @@
+import time
+
 import pytest
 
 from ollama_queue.sensing.health import HealthMonitor
@@ -389,6 +391,37 @@ def test_fetch_vram_pct_zero_total():
         assert m._fetch_vram_pct() == 0.0
 
 
+def test_get_gpu_name_returns_name():
+    """get_gpu_name returns the GPU model string from nvidia-smi."""
+    m = HealthMonitor()
+    mock_result = MagicMock(returncode=0, stdout="NVIDIA GeForce RTX 4090\n")
+    with patch("ollama_queue.sensing.health.subprocess.run", return_value=mock_result):
+        assert m.get_gpu_name() == "NVIDIA GeForce RTX 4090"
+
+
+def test_get_gpu_name_nonzero_returncode():
+    """get_gpu_name returns None when nvidia-smi exits non-zero."""
+    m = HealthMonitor()
+    mock_result = MagicMock(returncode=1, stdout="", stderr="NVIDIA-SMI has failed")
+    with patch("ollama_queue.sensing.health.subprocess.run", return_value=mock_result):
+        assert m.get_gpu_name() is None
+
+
+def test_get_gpu_name_exception():
+    """get_gpu_name returns None when nvidia-smi is not installed."""
+    m = HealthMonitor()
+    with patch("ollama_queue.sensing.health.subprocess.run", side_effect=OSError("not found")):
+        assert m.get_gpu_name() is None
+
+
+def test_get_gpu_name_empty_output():
+    """get_gpu_name returns None when nvidia-smi returns an empty string."""
+    m = HealthMonitor()
+    mock_result = MagicMock(returncode=0, stdout="\n")
+    with patch("ollama_queue.sensing.health.subprocess.run", return_value=mock_result):
+        assert m.get_gpu_name() is None
+
+
 def test_get_ollama_active_model_nonzero_returncode():
     """Line 110: ollama ps non-zero returncode returns None."""
     m = HealthMonitor()
@@ -519,6 +552,86 @@ def test_parse_meminfo_oserror():
     assert result == {}
 
 
+def test_evaluate_escapes_stuck_pause_after_max_duration():
+    """If paused longer than max_pause_duration_seconds, force resume."""
+    m = HealthMonitor()
+    snap = {
+        "ram_pct": 80.0,
+        "swap_pct": 10.0,
+        "load_avg": 2.0,
+        "cpu_count": 8,
+        "vram_pct": 50.0,
+        "ollama_model": None,
+        "ollama_loaded_models": [],
+    }
+    settings = {
+        "ram_pause_pct": 85,
+        "ram_resume_pct": 75,  # RAM at 80 — in hysteresis band
+        "swap_pause_pct": 80,
+        "swap_resume_pct": 60,
+        "load_pause_multiplier": 3.0,
+        "load_resume_multiplier": 2.0,
+        "yield_to_interactive": False,
+        "max_pause_duration_seconds": 300,
+    }
+    result = m.evaluate(snap, settings, currently_paused=True, paused_since=time.time() - 600)
+    assert result["should_pause"] is False, "Should escape stuck pause after max_pause_duration"
+    assert "Force resume" in result["reason"]
+
+
+def test_evaluate_no_escape_when_within_max_duration():
+    """If paused shorter than max_pause_duration_seconds, normal hysteresis applies."""
+    m = HealthMonitor()
+    snap = {
+        "ram_pct": 80.0,
+        "swap_pct": 10.0,
+        "load_avg": 2.0,
+        "cpu_count": 8,
+        "vram_pct": 50.0,
+        "ollama_model": None,
+        "ollama_loaded_models": [],
+    }
+    settings = {
+        "ram_pause_pct": 85,
+        "ram_resume_pct": 75,
+        "swap_pause_pct": 80,
+        "swap_resume_pct": 60,
+        "load_pause_multiplier": 3.0,
+        "load_resume_multiplier": 2.0,
+        "yield_to_interactive": False,
+        "max_pause_duration_seconds": 300,
+    }
+    result = m.evaluate(snap, settings, currently_paused=True, paused_since=time.time() - 100)
+    # RAM at 80% is above resume threshold of 75%, so should stay paused
+    assert result["should_pause"] is True
+
+
+def test_evaluate_no_escape_when_setting_missing():
+    """Without max_pause_duration_seconds, no escape hatch fires."""
+    m = HealthMonitor()
+    snap = {
+        "ram_pct": 80.0,
+        "swap_pct": 10.0,
+        "load_avg": 2.0,
+        "cpu_count": 8,
+        "vram_pct": 50.0,
+        "ollama_model": None,
+        "ollama_loaded_models": [],
+    }
+    settings = {
+        "ram_pause_pct": 85,
+        "ram_resume_pct": 75,
+        "swap_pause_pct": 80,
+        "swap_resume_pct": 60,
+        "load_pause_multiplier": 3.0,
+        "load_resume_multiplier": 2.0,
+        "yield_to_interactive": False,
+    }
+    result = m.evaluate(snap, settings, currently_paused=True, paused_since=time.time() - 99999)
+    # No max_pause_duration_seconds in settings, so normal hysteresis: stay paused
+    assert result["should_pause"] is True
+
+
 def test_parse_meminfo_valueerror():
     """Lines 237-238: non-integer value in meminfo is silently skipped."""
     fake_meminfo = "MemTotal:       notanumber kB\nMemFree:        8000 kB\n"
@@ -527,3 +640,40 @@ def test_parse_meminfo_valueerror():
     # MemTotal should be skipped (ValueError), MemFree should be parsed
     assert "MemTotal" not in result
     assert result["MemFree"] == 8000
+
+
+def test_evaluate_handles_missing_settings():
+    """C7: evaluate() must not crash when settings values are None (fresh install / missing DB keys).
+
+    Simulates a settings dict where all threshold values are None, as would
+    happen when db.get_setting() returns None for unseeded keys.  The call
+    must return a valid decision dict without raising TypeError/ValueError.
+    Sensible defaults should keep should_pause=False when metrics are low.
+    """
+    m = HealthMonitor()
+    # All settings values are None — mirrors a fresh DB with no seeded rows
+    settings = {
+        "ram_pause_pct": None,
+        "ram_resume_pct": None,
+        "swap_pause_pct": None,
+        "swap_resume_pct": None,
+        "load_pause_multiplier": None,
+        "load_resume_multiplier": None,
+        "yield_to_interactive": None,
+    }
+    snap = {
+        "ram_pct": 40.0,
+        "swap_pct": 5.0,
+        "load_avg": 1.0,
+        "cpu_count": 4,
+        "vram_pct": 30.0,
+        "ollama_model": None,
+    }
+    # Must not raise; must return a well-formed result dict
+    result = m.evaluate(snap, settings, currently_paused=False)
+    assert isinstance(result, dict)
+    assert "should_pause" in result
+    assert "should_yield" in result
+    assert "reason" in result
+    assert isinstance(result["should_pause"], bool)
+    assert isinstance(result["should_yield"], bool)

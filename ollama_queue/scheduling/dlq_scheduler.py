@@ -71,6 +71,7 @@ class DLQScheduler:
     def _do_sweep(self, entries: list[dict]) -> list[dict]:
         """Process DLQ entries by priority, find slots, create new jobs."""
         if not self.db.get_setting("dlq.auto_reschedule"):
+            logger.debug("DLQ auto-reschedule is disabled — skipping sweep")
             return []
 
         rescheduled = []
@@ -84,12 +85,17 @@ class DLQScheduler:
         load_map = self.load_map_fn()
 
         for entry in sorted_entries:
-            # Skip chronic failures
-            if (entry.get("auto_reschedule_count") or 0) >= chronic_threshold:
+            # Re-read from DB inside the lock to prevent two concurrent sweeps both
+            # seeing count=threshold-1 and both rescheduling (race #9).
+            fresh = self.db.get_dlq_entry(entry["id"])
+            if fresh is None:
+                continue
+            # Skip chronic failures (atomic with lock — no stale-read race)
+            if (fresh.get("auto_reschedule_count") or 0) >= chronic_threshold:
                 logger.info(
                     "DLQ #%s: skipping chronic failure (count=%s, threshold=%s)",
                     entry.get("id"),
-                    entry.get("auto_reschedule_count"),
+                    fresh.get("auto_reschedule_count"),
                     chronic_threshold,
                 )
                 continue
@@ -108,13 +114,13 @@ class DLQScheduler:
 
             # Estimate runtime
             est = self.estimator.estimate(
-                entry.get("model", ""),
+                entry.get("model") or "",
                 entry.get("command", ""),
                 entry.get("resource_profile", "ollama"),
             )
 
             # Find fitting slot
-            model = entry.get("model", "")
+            model = entry.get("model") or ""
             job_vram = _estimate_model_vram(model)
             estimated_slots = max(1, int(est.total_upper / 1800) + 1)  # 30-min slots
             slot = find_fitting_slot(

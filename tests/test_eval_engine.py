@@ -1384,10 +1384,32 @@ class TestCheckAutoPromote:
         db.set_setting("eval.stability_window", 0)  # disabled
         import json
 
+        # Establish a production baseline (variant B) with lower F1 —
+        # required since first-ever run blocks auto-promote (#8).
+        with db._lock:
+            conn = db._connect()
+            conn.execute("UPDATE eval_variants SET is_production = 1 WHERE id = 'B'")
+            conn.commit()
+        baseline_id = create_eval_run(db, variant_id="B")
+        baseline_metrics = json.dumps({"B": {"f1": 0.70, "precision": 0.75, "recall": 0.65, "actionability": 0.7}})
+        update_eval_run(db, baseline_id, status="complete", winner_variant="B", metrics=baseline_metrics)
+
         run_id = create_eval_run(db, variant_id="A")
         metrics = json.dumps({"A": {"f1": 0.85, "precision": 0.9, "recall": 0.8, "actionability": 0.8}})
         update_eval_run(
             db, run_id, status="complete", winner_variant="A", metrics=metrics, item_count=10, error_budget=0.30
+        )
+        # Gate 3 now requires at least one judge row; insert a clean one so the
+        # happy-path tests reach do_promote_eval_run.
+        insert_eval_result(
+            db,
+            run_id=run_id,
+            variant="A",
+            source_item_id="src-0",
+            target_item_id="tgt-0",
+            is_same_cluster=1,
+            row_type="judge",
+            score_transfer=4,
         )
         return db, run_id
 
@@ -1478,6 +1500,20 @@ class TestCheckAutoPromoteBayesian:
         db.set_setting("eval.stability_window", 0)
         import json
 
+        # Establish production baseline (variant B) with lower AUC —
+        # required since first-ever run blocks auto-promote (#8).
+        with db._lock:
+            conn = db._connect()
+            conn.execute("UPDATE eval_variants SET is_production = 1 WHERE id = 'B'")
+            conn.commit()
+        baseline_id = create_eval_run(db, variant_id="B")
+        baseline_metrics = json.dumps(
+            {"B": {"auc": 0.75, "separation": 0.30, "same_mean_posterior": 0.70, "diff_mean_posterior": 0.40}}
+        )
+        update_eval_run(
+            db, baseline_id, status="complete", winner_variant="B", metrics=baseline_metrics, judge_mode="bayesian"
+        )
+
         run_id = create_eval_run(db, variant_id="A")
         metrics = json.dumps(
             {
@@ -1499,6 +1535,18 @@ class TestCheckAutoPromoteBayesian:
             item_count=10,
             error_budget=0.30,
             judge_mode="bayesian",
+        )
+        # Gate 3 now requires at least one judge row; insert a clean one so the
+        # happy-path tests reach do_promote_eval_run.
+        insert_eval_result(
+            db,
+            run_id=run_id,
+            variant="A",
+            source_item_id="src-0",
+            target_item_id="tgt-0",
+            is_same_cluster=1,
+            row_type="judge",
+            score_transfer=4,
         )
         return db, run_id
 
@@ -1541,11 +1589,24 @@ class TestCheckAutoPromoteBayesian:
         db.set_setting("eval.error_budget", 0.30)
         db.set_setting("eval.stability_window", 2)  # need 2 passing runs
 
+        # Establish production baseline (variant B) with lower AUC (#8)
+        with db._lock:
+            conn = db._connect()
+            conn.execute("UPDATE eval_variants SET is_production = 1 WHERE id = 'B'")
+            conn.commit()
+        baseline_id = create_eval_run(db, variant_id="B")
+        baseline_metrics = json.dumps(
+            {"B": {"auc": 0.70, "separation": 0.25, "same_mean_posterior": 0.65, "diff_mean_posterior": 0.40}}
+        )
+        update_eval_run(
+            db, baseline_id, status="complete", winner_variant="B", metrics=baseline_metrics, judge_mode="bayesian"
+        )
+
         bayesian_metrics = json.dumps(
             {"A": {"auc": 0.90, "separation": 0.50, "same_mean_posterior": 0.85, "diff_mean_posterior": 0.35}}
         )
         # Create two complete runs with same winner + passing AUC
-        for _ in range(2):
+        for i in range(2):
             rid = create_eval_run(db, variant_id="A")
             update_eval_run(
                 db,
@@ -1556,6 +1617,17 @@ class TestCheckAutoPromoteBayesian:
                 item_count=10,
                 error_budget=0.30,
                 judge_mode="bayesian",
+            )
+            # Gate 3 requires at least one judge row per run
+            insert_eval_result(
+                db,
+                run_id=rid,
+                variant="A",
+                source_item_id=f"src-{i}",
+                target_item_id=f"tgt-{i}",
+                is_same_cluster=1,
+                row_type="judge",
+                score_transfer=4,
             )
 
         with patch("ollama_queue.eval.promote.do_promote_eval_run") as mock_promote:
@@ -1610,6 +1682,15 @@ class TestCheckAutoPromoteBayesian:
         db.set_setting("eval.stability_window", 0)
         import json
 
+        # Establish production baseline (variant B) with lower F1 (#8)
+        with db._lock:
+            conn = db._connect()
+            conn.execute("UPDATE eval_variants SET is_production = 1 WHERE id = 'B'")
+            conn.commit()
+        baseline_id = create_eval_run(db, variant_id="B")
+        baseline_metrics = json.dumps({"B": {"f1": 0.70, "precision": 0.75, "recall": 0.65, "actionability": 0.7}})
+        update_eval_run(db, baseline_id, status="complete", winner_variant="B", metrics=baseline_metrics)
+
         run_id = create_eval_run(db, variant_id="A")
         # Legacy run: has F1 but no AUC — should use F1 path
         metrics = json.dumps({"A": {"f1": 0.85, "precision": 0.9, "recall": 0.8, "actionability": 0.8}})
@@ -1622,6 +1703,17 @@ class TestCheckAutoPromoteBayesian:
             item_count=10,
             error_budget=0.30,
             # No judge_mode set — defaults to 'rubric'
+        )
+        # Gate 3 now requires at least one judge row
+        insert_eval_result(
+            db,
+            run_id=run_id,
+            variant="A",
+            source_item_id="src-0",
+            target_item_id="tgt-0",
+            is_same_cluster=1,
+            row_type="judge",
+            score_transfer=4,
         )
         with patch("ollama_queue.eval.promote.do_promote_eval_run") as mock_promote:
             mock_promote.return_value = {"ok": True, "run_id": run_id, "variant_id": "A", "label": "Config A"}
@@ -3284,7 +3376,10 @@ class TestCallProxyRetryAndErrorPaths:
         assert text is None  # exhausted retries
 
     def test_timeout_returns_none(self):
-        with patch("httpx.Client") as mock_cls:
+        with (
+            patch("httpx.Client") as mock_cls,
+            patch("time.sleep"),
+        ):
             mock_client = MagicMock()
             mock_client.__enter__ = MagicMock(return_value=mock_client)
             mock_client.__exit__ = MagicMock(return_value=False)
@@ -3301,6 +3396,39 @@ class TestCallProxyRetryAndErrorPaths:
             )
         assert text is None
         assert job_id is None
+
+    def test_call_proxy_retries_on_timeout(self):
+        """TimeoutException on first attempt must trigger retry, not immediate (None, None)."""
+        mock_resp_ok = MagicMock()
+        mock_resp_ok.status_code = 200
+        mock_resp_ok.raise_for_status = MagicMock()
+        mock_resp_ok.json.return_value = {"response": "success after timeout", "_queue_job_id": 7}
+
+        with (
+            patch("httpx.Client") as mock_cls,
+            patch("time.sleep"),
+        ):
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            # First call raises TimeoutException, second returns success
+            mock_client.post.side_effect = [
+                httpx.TimeoutException("timed out"),
+                mock_resp_ok,
+            ]
+            mock_cls.return_value = mock_client
+            text, job_id = _call_proxy(
+                http_base="http://localhost:7683",
+                model="m",
+                prompt="p",
+                temperature=0.5,
+                num_ctx=4096,
+                timeout=30,
+                source="test",
+            )
+        assert mock_client.post.call_count == 2, "retry must happen — call_count should be 2"
+        assert text == "success after timeout"
+        assert job_id == 7
 
     def test_unexpected_error_returns_none(self):
         with patch("httpx.Client") as mock_cls:

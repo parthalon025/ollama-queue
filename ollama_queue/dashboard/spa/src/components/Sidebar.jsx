@@ -1,5 +1,8 @@
 import { healthData, settings, connectionStatus } from '../stores';
+import { scheduledEvalCount } from '../stores/eval.js';
 import SystemHealthChip from './SystemHealthChip.jsx';
+import SystemSummaryLine from './SystemSummaryLine.jsx';
+import EvalWinnerChip from './EvalWinnerChip.jsx';
 
 // NOTE: callback params use descriptive names (item, etc.) — never 'h' (shadows JSX factory)
 const NAV_ITEMS = [
@@ -11,6 +14,7 @@ const NAV_ITEMS = [
     { id: 'eval',      icon: '⊡', label: 'Eval',      tooltip: 'Test and compare AI model configurations' },
     { id: 'consumers', icon: '⇄', label: 'Consumers', tooltip: 'Detected Ollama consumers and routing' },
     { id: 'performance', icon: '⊘', label: 'Perf', tooltip: 'Model performance stats and system health' },
+    { id: 'backends', icon: '⊟', label: 'Backends', tooltip: 'Multi-backend fleet management and routing intelligence' },
 ];
 
 // What it shows: Sidebar navigation + aggregate system health chip at the top.
@@ -41,6 +45,11 @@ export default function Sidebar({ active, onNavigate, daemonState, dlqCount, the
                     settings={sett}
                     connectionStatus={connStatus}
                 />
+            </div>
+
+            <div class="sidebar-summary">
+                <SystemSummaryLine />
+                <EvalWinnerChip />
             </div>
 
             {/* Nav items */}
@@ -74,6 +83,9 @@ export default function Sidebar({ active, onNavigate, daemonState, dlqCount, the
                         >
                             <span style="font-size: 1rem; flex-shrink: 0;">{item.icon}</span>
                             <span class="sidebar-label">{item.label}</span>
+                            {item.id === 'plan' && scheduledEvalCount.value > 0 && (
+                                <span class="nav-badge nav-badge--eval" title={`${scheduledEvalCount.value} eval run(s) in next 4h`}>EVAL</span>
+                            )}
                             {badge && (
                                 <span style={{
                                     marginLeft: 'auto',

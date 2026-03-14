@@ -106,6 +106,163 @@ class TestOllamaProvider:
         assert body["options"]["top_k"] == 40
 
 
+def test_call_proxy_raw_returns_queue_job_id():
+    """_call_proxy_raw must read _queue_job_id (with underscore) from proxy response."""
+    from unittest.mock import MagicMock, patch
+
+    from ollama_queue.eval.providers import _call_proxy_raw
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "response": "hello world",
+        "_queue_job_id": 42,
+        "prompt_eval_count": 10,
+        "eval_count": 5,
+    }
+    mock_resp.raise_for_status = MagicMock()
+
+    with patch("httpx.Client") as mock_client_cls:
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__.return_value = mock_client
+        mock_client.post.return_value = mock_resp
+        text, usage, job_id = _call_proxy_raw(
+            {"model": "qwen2.5:7b", "prompt": "test", "stream": False},
+            "http://127.0.0.1:7683",
+            60,
+        )
+
+    assert job_id == 42, f"Expected job_id=42, got {job_id!r}"
+
+
+def test_call_proxy_raw_retries_on_429():
+    """_call_proxy_raw must retry on 429 and succeed on second attempt."""
+    from unittest.mock import MagicMock, patch
+
+    import httpx as _httpx
+
+    from ollama_queue.eval.providers import _call_proxy_raw
+
+    call_count = {"n": 0}
+
+    def make_resp(*args, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            # First attempt: 429 Too Many Requests
+            mock_resp = MagicMock()
+            mock_resp.status_code = 429
+            mock_resp.raise_for_status.side_effect = _httpx.HTTPStatusError(
+                "429", request=MagicMock(), response=MagicMock(status_code=429)
+            )
+            return mock_resp
+        # Second attempt: success
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = {
+            "response": "ok",
+            "_queue_job_id": 1,
+            "prompt_eval_count": 0,
+            "eval_count": 0,
+        }
+        return mock_resp
+
+    with patch("httpx.Client") as mock_client_cls, patch("time.sleep"):
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__.return_value = mock_client
+        mock_client.post.side_effect = make_resp
+        text, usage, job_id = _call_proxy_raw(
+            {"model": "x", "prompt": "y", "stream": False},
+            "http://127.0.0.1:7683",
+            60,
+        )
+
+    assert call_count["n"] == 2, f"Expected 2 attempts (retry on 429), got {call_count['n']}"
+    assert text == "ok", f"Expected text='ok' after retry, got {text!r}"
+
+
+@pytest.mark.parametrize("status_code", [429, 502, 503, 504])
+def test_call_proxy_raw_retries_on_all_retryable_codes(status_code):
+    """_call_proxy_raw must retry on all retryable HTTP error codes."""
+    from unittest.mock import MagicMock, patch
+
+    import httpx as _httpx
+
+    from ollama_queue.eval.providers import _call_proxy_raw
+
+    call_count = {"n": 0}
+
+    def make_resp(*args, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            mock_resp = MagicMock()
+            mock_resp.status_code = status_code
+            mock_resp.raise_for_status.side_effect = _httpx.HTTPStatusError(
+                str(status_code), request=MagicMock(), response=MagicMock(status_code=status_code)
+            )
+            return mock_resp
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = {
+            "response": "ok",
+            "_queue_job_id": 1,
+            "prompt_eval_count": 0,
+            "eval_count": 0,
+        }
+        return mock_resp
+
+    with patch("httpx.Client") as mock_client_cls, patch("time.sleep"):
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__.return_value = mock_client
+        mock_client.post.side_effect = make_resp
+        text, usage, job_id = _call_proxy_raw(
+            {"model": "x", "prompt": "y", "stream": False},
+            "http://127.0.0.1:7683",
+            60,
+        )
+
+    assert call_count["n"] == 2, f"Expected 2 attempts on {status_code}, got {call_count['n']}"
+    assert text == "ok"
+
+
+def test_call_proxy_raw_retries_exhausted():
+    """_call_proxy_raw must exhaust all retries and return failure when every attempt gets a retryable error."""
+    from unittest.mock import MagicMock, patch
+
+    import httpx as _httpx
+
+    from ollama_queue.eval.providers import _MAX_RETRIES, _call_proxy_raw
+
+    call_count = {"n": 0}
+
+    def make_resp(*args, **kwargs):
+        call_count["n"] += 1
+        # Every attempt returns 429 — retries never succeed
+        mock_resp = MagicMock()
+        mock_resp.status_code = 429
+        mock_resp.raise_for_status.side_effect = _httpx.HTTPStatusError(
+            "429", request=MagicMock(), response=MagicMock(status_code=429)
+        )
+        return mock_resp
+
+    with patch("httpx.Client") as mock_client_cls, patch("time.sleep"):
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__.return_value = mock_client
+        mock_client.post.side_effect = make_resp
+        text, usage, job_id = _call_proxy_raw(
+            {"model": "x", "prompt": "y", "stream": False},
+            "http://127.0.0.1:7683",
+            60,
+        )
+
+    assert (
+        call_count["n"] == _MAX_RETRIES + 1
+    ), f"Expected {_MAX_RETRIES + 1} attempts (all retries exhausted), got {call_count['n']}"
+    assert text is None, f"Expected text=None on exhaustion, got {text!r}"
+    assert usage == {}, f"Expected empty usage on exhaustion, got {usage!r}"
+
+
 class TestGetProvider:
     def test_ollama_returns_ollama_provider(self):
         p = get_provider("ollama", http_base="http://localhost:7683")

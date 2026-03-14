@@ -14,7 +14,9 @@ a single Database class API.
 import logging
 import sqlite3
 import threading
+import time as _time
 
+from ollama_queue.db.backends import BackendsMixin
 from ollama_queue.db.dlq import DLQMixin
 from ollama_queue.db.eval import EvalMixin
 from ollama_queue.db.health import HealthMixin
@@ -34,6 +36,7 @@ class Database(
     HealthMixin,
     DLQMixin,
     EvalMixin,
+    BackendsMixin,
 ):
     """Synchronous SQLite database for the ollama-queue daemon.
 
@@ -64,15 +67,40 @@ class Database(
         return self._conn
 
     def _add_column_if_missing(self, conn: sqlite3.Connection, table: str, col: str, defn: str) -> None:
-        """ALTER TABLE ... ADD COLUMN, ignoring duplicate-column errors."""
+        """ALTER TABLE ... ADD COLUMN, ignoring duplicate-column errors. Caller owns the commit."""
         try:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {defn}")
-            conn.commit()
         except sqlite3.OperationalError as e:
             if "duplicate column" in str(e).lower():
                 _log.debug("%s.%s already exists — skipping migration", table, col)
             else:
                 raise
+
+    def _retry_on_busy(self, fn, max_retries=2, backoff=0.1):
+        """Retry a DB write on SQLITE_BUSY (WAL checkpoint contention).
+
+        After 1000 WAL pages SQLite forces a checkpoint.  If 10+ FastAPI reader
+        threads hold transactions during the checkpoint, the daemon's write blocks
+        for busy_timeout=5000ms and then fails with SQLITE_BUSY.  This retries
+        with exponential backoff so transient checkpoint contention self-heals.
+
+        Must be called INSIDE self._lock — retries the DB operation, not the lock
+        acquisition.
+        """
+        for attempt in range(max_retries + 1):
+            try:
+                return fn()
+            except sqlite3.OperationalError as e:
+                if "locked" in str(e).lower() and attempt < max_retries:
+                    _log.warning(
+                        "SQLITE_BUSY on attempt %d/%d — retrying after %.1fs",
+                        attempt + 1,
+                        max_retries,
+                        backoff * (2**attempt),
+                    )
+                    _time.sleep(backoff * (2**attempt))
+                else:
+                    raise
 
     def close(self):
         with self._lock:

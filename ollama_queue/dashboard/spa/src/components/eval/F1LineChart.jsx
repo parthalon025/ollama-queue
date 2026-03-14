@@ -135,9 +135,15 @@ export default function F1LineChart() {
   const trends = evalTrends.value;
 
   if (!trends || !trends.variants || trends.variants.length === 0) {
+    // Distinguish: no cluster labels (data source issue) vs simply no runs yet.
+    // "no_cluster_data" means the backend has items but none have cluster_seed set,
+    // so the eval pipeline can't group them into training/test splits for trending.
+    const msg = trends?.no_cluster_data
+      ? 'Cluster labels are missing from your data source. Run the data source prime step in Eval Settings to backfill cluster labels, then re-run an evaluation.'
+      : 'Complete at least 2 evaluation runs to see whether quality is improving, staying the same, or declining over time.';
     return (
       <div class="t-frame eval-f1-chart-empty" data-label="Quality Score Over Time">
-        Complete at least 2 evaluation runs to see whether quality is improving, staying the same, or declining over time.
+        {msg}
       </div>
     );
   }

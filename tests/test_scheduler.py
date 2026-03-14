@@ -618,3 +618,91 @@ class TestRebalanceCoverageGaps:
         db.add_recurring_job("cron1", "echo hi", cron_expression="0 6 * * *", next_run=time.time() + 100)
         changes = scheduler.rebalance(time.time())
         assert changes == []
+
+
+class TestPromoteDueJobsBadCronSkip:
+    def test_promote_due_jobs_skips_bad_cron_entries(self, db, scheduler):
+        """H3: a malformed cron expression on one job must not abort promotion of others.
+
+        The bad-cron job is first promoted (creating a pending duplicate), then
+        its cron expression is corrupted in the DB and next_run reset to due.
+        The second promote_due_jobs call hits the duplicate-coalesce path for
+        that job, which calls _compute_next_run(cron_expr) and raises
+        CroniterBadCronError.  Without the fix this exception propagates and
+        aborts the loop, preventing the valid job from being promoted.
+        """
+        now = time.time()
+
+        # Bad-cron job: add with valid expr, promote to create a pending duplicate
+        rj_bad_id = db.add_recurring_job(
+            "bad-cron-job",
+            "echo bad",
+            cron_expression="0 7 * * *",
+            next_run=now - 1,
+        )
+        # First promotion creates the pending job (sets up duplicate state)
+        scheduler.promote_due_jobs(now)
+
+        # Corrupt cron expression and reset next_run so it appears due again
+        conn = db._connect()
+        conn.execute(
+            "UPDATE recurring_jobs SET cron_expression = ?, next_run = ? WHERE id = ?",
+            ("NOT_A_VALID_CRON *** bad", now - 1, rj_bad_id),
+        )
+        conn.commit()
+        scheduler._invalidate_jobs_cache()
+
+        # Valid job — due and should be promoted even when the bad-cron job
+        # is encountered in the same loop iteration
+        db.add_recurring_job("valid-job", "echo valid", interval_seconds=3600, next_run=now - 1)
+        scheduler._invalidate_jobs_cache()
+
+        # Should not raise; bad-cron entry is logged+skipped, valid job is promoted
+        new_ids = scheduler.promote_due_jobs(now)
+
+        # The valid interval job must have been promoted
+        assert len(new_ids) >= 1
+        promoted_commands = [db.get_job(jid)["command"] for jid in new_ids]
+        assert "echo valid" in promoted_commands
+
+
+class TestTimezoneAwareCron:
+    def test_next_run_computed_from_timezone_aware_datetime(self, db):
+        """next_run for cron jobs is computed using timezone-aware datetime (#10)."""
+        rj_id = db.add_recurring_job("tz-cron", "echo hi", cron_expression="0 7 * * *")
+        rj = db.get_recurring_job(rj_id)
+        # next_run should be a valid positive timestamp (in the future or at least > 0)
+        assert rj["next_run"] is not None
+        assert rj["next_run"] > 0
+
+    def test_update_next_run_uses_timezone_aware_datetime(self, db):
+        """update_recurring_next_run uses timezone-aware datetime for cron eval (#10)."""
+        from ollama_queue.scheduling.scheduler import Scheduler
+
+        scheduler = Scheduler(db)
+        rj_id = db.add_recurring_job("tz-update", "echo hi", cron_expression="30 8 * * *")
+        completed_at = time.time()
+        scheduler.update_next_run(rj_id, completed_at, job_id=1)
+        rj = db.get_recurring_job(rj_id)
+        # next_run should be after completed_at
+        assert rj["next_run"] > completed_at
+
+    def test_local_dt_helper_returns_aware_datetime(self):
+        """_local_dt returns a timezone-aware datetime, not naive."""
+        from ollama_queue.db.schedule import _local_dt
+
+        dt = _local_dt(time.time())
+        assert dt.tzinfo is not None
+
+    def test_local_dt_falls_back_to_utc(self):
+        """_local_dt falls back to UTC if ZoneInfo('localtime') fails."""
+        import datetime
+        from unittest.mock import patch
+
+        with patch("ollama_queue.db.schedule.ZoneInfo", side_effect=Exception("no tz")):
+            # Need to re-import to get the patched version
+            from ollama_queue.db import schedule
+
+            dt = schedule._local_dt(1_700_000_000.0)
+            assert dt.tzinfo is not None
+            assert dt.tzinfo == datetime.UTC

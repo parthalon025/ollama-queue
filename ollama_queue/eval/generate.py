@@ -524,6 +524,30 @@ def run_eval_generate(  # noqa: PLR0911
                     )
                     return
 
+            # --- Corruption check: delete null-principle rows from interrupted runs ---
+            # If a previous run was interrupted mid-stream (daemon restart, OOM, etc.),
+            # eval_results may contain rows where principle IS NULL and error IS NULL.
+            # insert_eval_result uses INSERT OR IGNORE, so these rows would be silently
+            # skipped on the next run, leaving corrupted data in the DB indefinitely.
+            with db._lock:
+                conn = db._connect()
+                existing = conn.execute(
+                    "SELECT id FROM eval_results "
+                    "WHERE run_id = ? AND variant = ? AND source_item_id = ? "
+                    "AND row_type = 'generate' AND principle IS NULL AND error IS NULL",
+                    (run_id, variant_id, str(source_item["id"])),
+                ).fetchone()
+                if existing:
+                    _log.warning(
+                        "eval run %d: deleting corrupted generation row (null principle, no error) "
+                        "for variant=%s item=%s — will regenerate",
+                        run_id,
+                        variant_id,
+                        source_item["id"],
+                    )
+                    conn.execute("DELETE FROM eval_results WHERE id = ?", (existing["id"],))
+                    conn.commit()
+
             try:
                 ok = _generate_one(
                     db=db,
@@ -550,6 +574,17 @@ def run_eval_generate(  # noqa: PLR0911
             submitted += 1
             if not ok:
                 failed += 1
+
+            # Post-HTTP cancellation re-check: the blocking _generate_one() call
+            # may have taken minutes. If the run was cancelled during that window,
+            # stop immediately instead of processing remaining items.
+            _post = _eng.get_eval_run(db, run_id)
+            if _post is None or _post.get("status") in ("failed", "cancelled"):
+                _log.info(
+                    "run_eval_generate: cancelled during HTTP call for run_id=%d",
+                    run_id,
+                )
+                return
 
     # Guard: if run was cancelled (e.g. during the last throttle sleep), don't overwrite status
     _final = _eng.get_eval_run(db, run_id)

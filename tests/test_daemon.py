@@ -222,6 +222,53 @@ def test_records_duration_on_success(daemon):
     assert len(history) == 1
 
 
+def test_record_duration_skips_none_model(daemon):
+    """Command-only jobs (model=None) must not write a null-model row to duration_history (H6).
+
+    Before the fix: record_duration was called unconditionally with job["model"]=None,
+    inserting a corrupt NULL-model row into duration_history that poisons duration estimates.
+    After the fix: the call is guarded and no row is written for None-model jobs.
+    """
+    daemon.db.submit_job("echo cmd-only", None, 5, 60, "cmd-src", resource_profile="any")
+    with (
+        patch.object(
+            daemon.health,
+            "check",
+            return_value={
+                "ram_pct": 50.0,
+                "swap_pct": 10.0,
+                "load_avg": 1.0,
+                "cpu_count": 4,
+                "vram_pct": 50.0,
+                "ollama_model": None,
+            },
+        ),
+        patch("ollama_queue.daemon.executor.subprocess") as mock_sub,
+        patch.object(daemon.db, "record_duration", wraps=daemon.db.record_duration) as mock_record,
+    ):
+        proc = MagicMock()
+        proc.pid = 1234
+        proc.returncode = 0
+        proc.communicate.return_value = (b"done", b"")
+        mock_sub.Popen.return_value = proc
+
+        daemon.poll_once()
+        _drain(daemon)
+
+    # record_duration must NOT be called with model=None
+    for call in mock_record.call_args_list:
+        model_arg = call.kwargs.get("model") or (call.args[1] if len(call.args) > 1 else None)
+        assert (
+            model_arg is not None
+        ), "record_duration was called with model=None — corrupt null-model row would be written"
+
+    # No null-model rows in duration_history
+    history = daemon.db.get_duration_history("cmd-src")
+    assert all(
+        row["model"] is not None for row in history
+    ), "duration_history contains a null-model row from a command-only job"
+
+
 class TestDaemonSchedulerIntegration:
     def test_poll_once_promotes_due_recurring_job(self, db):
         now = time.time()
@@ -428,6 +475,29 @@ def test_heavy_jobs_serialize(db):
         "priority": 5,
     }
     assert d._can_admit(job) is False
+
+
+def test_heavy_job_not_blocked_by_embed_only(db):
+    """Heavy-profile job is admitted when only embed-profile jobs are running (H7).
+
+    Embed jobs use negligible VRAM and should not count against the heavy job's
+    serialization gate.  Before the fix, len(self._running) == 0 blocked the
+    heavy job whenever *any* job was running — including cheap embed jobs.
+    """
+    d = Daemon(db)
+    # Simulate one embed job running
+    d._running[99] = MagicMock()
+    d._running_models[99] = "nomic-embed-text"
+    job = {
+        "id": 2,
+        "model": "deepseek-r1:70b",
+        "resource_profile": "heavy",
+        "command": "echo",
+        "source": "test",
+        "timeout": 60,
+        "priority": 5,
+    }
+    assert d._can_admit(job) is True
 
 
 def test_same_model_blocks_second(db):
@@ -716,6 +786,75 @@ def test_stall_no_kill_within_grace(daemon):
         daemon._check_stalled_jobs(time.time())
 
     mock_kill.assert_not_called()
+
+
+def test_stall_recovered_clears_flag(daemon):
+    """_check_stalled_jobs clears stall_detected_at when posterior drops below threshold."""
+    job_id = daemon.db.submit_job("sleep 9999", "qwen2.5:7b", 5, 600, "test")
+    stall_time = time.time() - 120
+    with daemon.db._lock:
+        conn = daemon.db._connect()
+        conn.execute(
+            "UPDATE jobs SET status='running', started_at=?, pid=9999, stall_detected_at=? WHERE id=?",
+            (time.time() - 400, stall_time, job_id),
+        )
+        conn.commit()
+
+    with daemon._running_lock:
+        daemon._running[job_id] = MagicMock()
+
+    # Posterior drops below threshold (0.3 < 0.8) — job has recovered
+    with (
+        patch.object(daemon.stall_detector, "compute_posterior", return_value=(0.30, {"posterior": 0.30})),
+        patch.object(daemon.stall_detector, "get_ollama_ps_models", return_value=set()),
+    ):
+        daemon._check_stalled_jobs(time.time())
+
+    job = daemon.db.get_job(job_id)
+    assert job["stall_detected_at"] is None, "stall_detected_at should be cleared on recovery"
+
+
+def test_stall_recovered_prevents_kill_on_next_spike(daemon):
+    """After stall recovery, a new spike must start a fresh grace period (no immediate kill)."""
+    daemon.db.set_setting("stall_action", "kill")
+    daemon.db.set_setting("stall_kill_grace_seconds", "60")
+    job_id = daemon.db.submit_job("sleep 9999", "qwen2.5:7b", 5, 600, "test")
+
+    # Step 1: Stall detected 120s ago (grace period already exceeded)
+    stall_time = time.time() - 120
+    with daemon.db._lock:
+        conn = daemon.db._connect()
+        conn.execute(
+            "UPDATE jobs SET status='running', started_at=?, pid=9999, stall_detected_at=? WHERE id=?",
+            (time.time() - 400, stall_time, job_id),
+        )
+        conn.commit()
+
+    with daemon._running_lock:
+        daemon._running[job_id] = MagicMock()
+
+    # Step 2: Job recovers (posterior drops below threshold)
+    with (
+        patch.object(daemon.stall_detector, "compute_posterior", return_value=(0.30, {"posterior": 0.30})),
+        patch.object(daemon.stall_detector, "get_ollama_ps_models", return_value=set()),
+    ):
+        daemon._check_stalled_jobs(time.time())
+
+    job = daemon.db.get_job(job_id)
+    assert job["stall_detected_at"] is None
+
+    # Step 3: New stall spike — should set NEW stall_detected_at (not kill immediately)
+    with (
+        patch.object(daemon.stall_detector, "compute_posterior", return_value=(0.95, {"posterior": 0.95})),
+        patch.object(daemon.stall_detector, "get_ollama_ps_models", return_value=set()),
+        patch("ollama_queue.daemon.executor.os.kill") as mock_kill,
+    ):
+        daemon._check_stalled_jobs(time.time())
+
+    # Should NOT have been killed — the fresh stall_detected_at is only moments old
+    mock_kill.assert_not_called()
+    job = daemon.db.get_job(job_id)
+    assert job["stall_detected_at"] is not None, "new stall should be flagged"
 
 
 # --- check_command pre-flight gate ---
@@ -1809,6 +1948,18 @@ def test_recover_orphans_sigterm_orphaned_pid(db):
     mock_kill.assert_called_once_with(999999, _signal.SIGTERM)
     job = db.get_job(job_id)
     assert job["status"] == "pending"
+
+
+def test_recover_orphans_clears_proxy_sentinel(db):
+    """Orphaned proxy sentinel (-1) in daemon_state must be cleared on restart."""
+    d = Daemon(db)
+    # Simulate crash-during-proxy: sentinel left in DB
+    db.update_daemon_state(state="running", current_job_id=-1)
+
+    d._recover_orphans()
+
+    state = db.get_daemon_state()
+    assert state["current_job_id"] is None, "Proxy sentinel should be cleared on restart"
 
 
 # --- _record_ollama_success log (line 548) ---
@@ -3195,3 +3346,282 @@ def test_run_job_unhandled_exception_partial_metrics_store_fails(db, caplog):
 
     # Should log debug message about failed partial capture
     assert any("Failed to capture partial metrics" in r.message for r in caplog.records)
+
+
+# --- H2: preempted job stays in _running until process exits ---
+
+
+def test_preempted_job_stays_in_running_until_exit(db):
+    """After _preempt_job, the job must remain in _running until the process
+    fully exits (poll() returns non-None).  The slot must not be freed while
+    the process is still alive, or the daemon will re-dequeue the same job
+    before the previous execution has terminated (double-execution bug)."""
+    from concurrent.futures import Future
+
+    from ollama_queue.daemon import Daemon
+
+    daemon = Daemon(db)
+    db.set_setting("preemption_enabled", True)
+
+    job_id = db.submit_job("echo low", "qwen2.5:7b", 5, 600, "test")
+    db.start_job(job_id)
+    with db._lock:
+        conn = db._connect()
+        conn.execute("UPDATE jobs SET pid=99999 WHERE id=?", (job_id,))
+        conn.commit()
+
+    # Plant the job in _running (as it would be when the worker thread is live)
+    fake_future = Future()
+    with daemon._running_lock:
+        daemon._running[job_id] = fake_future
+        daemon._running_models[job_id] = "qwen2.5:7b"
+
+    # Preempt the job — SIGTERM sent, job re-queued to pending
+    with patch("ollama_queue.daemon.executor.os.kill", return_value=None):
+        daemon._preempt_job(job_id)
+
+    # --- KEY ASSERTION 1: slot must still be held after kill ---
+    # The process hasn't exited yet (process still alive); _running must still
+    # contain the job_id so _can_admit does not grant the freed slot prematurely.
+    with daemon._running_lock:
+        assert job_id in daemon._running, (
+            "Job was removed from _running immediately after kill — "
+            "slot freed before process exited (double-execution risk)"
+        )
+
+    # --- Simulate process exit: resolve the Future (worker thread finished) ---
+    fake_future.set_result(None)
+    # The finally block in _run_job pops from _running.  We simulate that here
+    # since we bypassed _run_job in this unit test.
+    with daemon._running_lock:
+        daemon._running.pop(job_id, None)
+        daemon._running_models.pop(job_id, None)
+
+    # --- KEY ASSERTION 2: slot is free after process exited ---
+    with daemon._running_lock:
+        assert job_id not in daemon._running, "Job still in _running after process exited"
+
+
+def test_shutdown_waits_for_threads(daemon):
+    """shutdown() must call executor.shutdown(wait=True) so in-flight threads finish
+    before the daemon exits. wait=False leaves background threads dangling — they can
+    write to a closed DB connection or update state after shutdown."""
+    from concurrent.futures import ThreadPoolExecutor
+    from unittest.mock import MagicMock
+
+    # Install a mock executor so we can inspect the shutdown call.
+    mock_executor = MagicMock(spec=ThreadPoolExecutor)
+    daemon._executor = mock_executor
+
+    daemon.shutdown()
+
+    mock_executor.shutdown.assert_called_once_with(wait=True)
+
+
+# --- _can_admit: proxy sentinel blocks admission (#3) ---
+
+
+def test_can_admit_blocked_by_proxy_sentinel(db, monkeypatch):
+    """_can_admit returns False when proxy sentinel (-1) is set in daemon_state.
+
+    The proxy sentinel means an /api/generate or /api/embed request is in-flight
+    and holding the Ollama server.  Even though _running is empty (proxy jobs
+    aren't tracked there), _can_admit must refuse new jobs.
+    """
+    d = Daemon(db)
+    # Simulate proxy claim in-flight
+    db.update_daemon_state(current_job_id=-1)
+    job = {"id": 1, "model": "qwen2.5:7b", "resource_profile": "ollama", "priority": 5}
+    monkeypatch.setattr(d, "_model_pull_in_progress", lambda m: False)
+    monkeypatch.setattr(d, "_free_vram_mb", lambda: 16000.0)
+    monkeypatch.setattr(d, "_free_ram_mb", lambda: 32000.0)
+    # Mock health to pass all checks — the ONLY reason for refusal should be sentinel
+    with patch.object(
+        d.health,
+        "check",
+        return_value={
+            "ram_pct": 10.0,
+            "swap_pct": 5.0,
+            "load_avg": 0.1,
+            "cpu_count": 4,
+            "vram_pct": 10.0,
+            "ollama_model": None,
+        },
+    ):
+        assert d._can_admit(job) is False
+
+
+def test_can_admit_allowed_when_no_proxy_sentinel(db, monkeypatch):
+    """_can_admit is not blocked when current_job_id is None (no proxy claim)."""
+    d = Daemon(db)
+    job = {"id": 1, "model": "qwen2.5:7b", "resource_profile": "ollama", "priority": 5}
+    monkeypatch.setattr(d, "_model_pull_in_progress", lambda m: False)
+    monkeypatch.setattr(d, "_free_vram_mb", lambda: 16000.0)
+    monkeypatch.setattr(d, "_free_ram_mb", lambda: 32000.0)
+    with patch.object(
+        d.health,
+        "check",
+        return_value={
+            "ram_pct": 10.0,
+            "swap_pct": 5.0,
+            "load_avg": 0.1,
+            "cpu_count": 4,
+            "vram_pct": 10.0,
+            "ollama_model": None,
+        },
+    ):
+        assert d._can_admit(job) is True
+
+
+# --- proc.wait() timeout after drain (#4) ---
+
+
+def test_proc_wait_uses_timeout_after_drain(db):
+    """proc.wait() after _drain_pipes_with_tracking must use a timeout, not bare wait().
+
+    A bare proc.wait() can deadlock the worker thread if the process is a zombie
+    or stuck in an uninterruptible state.
+    """
+
+    d = Daemon(db)
+    job_id = db.submit_job("echo hi", "qwen2.5:7b", 5, 60, "test")
+    db.start_job(job_id)
+    job = db.get_job(job_id)
+
+    with (
+        patch("ollama_queue.daemon.executor.subprocess") as mock_sub,
+        patch("ollama_queue.daemon.executor._drain_pipes_with_tracking") as mock_drain,
+    ):
+        proc = MagicMock()
+        proc.pid = 1234
+        proc.returncode = 0
+        mock_sub.Popen.return_value = proc
+        mock_drain.return_value = (b"ok", b"")
+        d._run_job(dict(job))
+
+    # Verify wait was called with a timeout argument (not bare)
+    proc.wait.assert_called()
+    args, kwargs = proc.wait.call_args
+    timeout_val = kwargs.get("timeout") or (args[0] if args else None)
+    assert (
+        timeout_val is not None and timeout_val > 0
+    ), f"proc.wait() must be called with a positive timeout, got args={args} kwargs={kwargs}"
+
+
+def test_proc_wait_timeout_expired_kills_process(db, caplog):
+    """When proc.wait(timeout=30) raises TimeoutExpired, the process is killed."""
+    import subprocess
+
+    d = Daemon(db)
+    job_id = db.submit_job("echo hi", "qwen2.5:7b", 5, 60, "test")
+    db.start_job(job_id)
+    job = db.get_job(job_id)
+
+    with (
+        patch("ollama_queue.daemon.executor.subprocess") as mock_sub,
+        patch("ollama_queue.daemon.executor._drain_pipes_with_tracking") as mock_drain,
+        caplog.at_level(logging.WARNING),
+    ):
+        proc = MagicMock()
+        proc.pid = 1234
+        mock_sub.Popen.return_value = proc
+        mock_sub.TimeoutExpired = subprocess.TimeoutExpired
+        mock_drain.return_value = (b"ok", b"")
+
+        # First wait(timeout=30) raises TimeoutExpired; second wait(timeout=5) succeeds
+        proc.wait.side_effect = [
+            subprocess.TimeoutExpired("cmd", 30),
+            None,
+        ]
+        proc.returncode = -9  # killed
+        d._run_job(dict(job))
+
+    proc.kill.assert_called_once()
+    assert any("timed out after drain" in r.message for r in caplog.records)
+
+
+# --- Orphan recovery: partial eval results annotation (#23) ---
+
+
+def test_recover_orphans_annotates_partial_eval_results(db):
+    """Orphaned eval runs with partial results get annotated error message (#23)."""
+    d = Daemon(db)
+    with db._lock:
+        conn = db._connect()
+        conn.execute(
+            "INSERT INTO eval_runs (id, data_source_url, variants, per_cluster, status, run_mode, started_at) "
+            "VALUES (100, 'http://test', '[]', 4, 'generating', 'batch', ?)",
+            (time.time(),),
+        )
+        # Insert 3 partial results for run 100
+        for i in range(3):
+            conn.execute(
+                "INSERT INTO eval_results (run_id, variant, source_item_id, target_item_id, is_same_cluster) "
+                "VALUES (100, 'A', ?, ?, 1)",
+                (f"src_{i}", f"tgt_{i}"),
+            )
+        conn.commit()
+    d._recover_orphans()
+    with db._lock:
+        conn = db._connect()
+        run = conn.execute("SELECT error FROM eval_runs WHERE id = 100").fetchone()
+    assert "3 partial results remain" in run["error"]
+
+
+def test_recover_orphans_no_partial_results_clean_message(db):
+    """Orphaned eval runs with zero results get clean error message (#23)."""
+    d = Daemon(db)
+    with db._lock:
+        conn = db._connect()
+        conn.execute(
+            "INSERT INTO eval_runs (id, data_source_url, variants, per_cluster, status, run_mode, started_at) "
+            "VALUES (101, 'http://test', '[]', 4, 'judging', 'batch', ?)",
+            (time.time(),),
+        )
+        conn.commit()
+    d._recover_orphans()
+    with db._lock:
+        conn = db._connect()
+        run = conn.execute("SELECT error FROM eval_runs WHERE id = 101").fetchone()
+    assert run["error"] == "daemon restart: session abandoned"
+    assert "partial" not in run["error"]
+
+
+# --- Orphan recovery: NULL-PID warning log (#24) ---
+
+
+def test_recover_orphans_logs_warning_for_null_pid(db, caplog):
+    """Orphan jobs with no PID emit a warning about possible duplicate execution (#24)."""
+    d = Daemon(db)
+    job_id = db.submit_job("echo hi", "", 5, 60, "test")
+    db.start_job(job_id)
+    # pid column is NULL (not set yet) — default state after start_job
+
+    with caplog.at_level(logging.WARNING):
+        d._recover_orphans()
+
+    job = db.get_job(job_id)
+    assert job["status"] == "pending"
+    assert any(
+        f"Orphan job #{job_id} has no PID" in r.message and "duplicate execution" in r.message for r in caplog.records
+    )
+
+
+def test_recover_orphans_no_null_pid_warning_for_valid_pid(db, caplog):
+    """Orphan jobs with a valid PID do not get the NULL-PID warning (#24)."""
+    d = Daemon(db)
+    job_id = db.submit_job("echo hi", "", 5, 60, "test")
+    db.start_job(job_id)
+    with db._lock:
+        conn = db._connect()
+        conn.execute("UPDATE jobs SET pid = 999999 WHERE id = ?", (job_id,))
+        conn.commit()
+
+    with (
+        caplog.at_level(logging.WARNING),
+        patch("ollama_queue.daemon.loop.os.kill") as mock_kill,
+    ):
+        mock_kill.side_effect = ProcessLookupError
+        d._recover_orphans()
+
+    assert not any("has no PID" in r.message for r in caplog.records)

@@ -1,32 +1,194 @@
-import { useEffect } from 'preact/hooks';
-import { fetchEvalVariants, fetchEvalTemplates } from '../stores';
-import VariantToolbar from '../components/eval/VariantToolbar.jsx';
-import VariantTable from '../components/eval/VariantTable.jsx';
-import TemplateSection from '../components/eval/TemplateSection.jsx';
+/**
+ * What it shows: Your library of prompt variants — each displayed as a card
+ *   showing its score, stability, provider, and key settings. Like a deck of
+ *   recipe cards, each for a different way to ask the AI to find lessons.
+ * Decision it drives: "Which variant should I promote? Which one to clone for
+ *   the next round of testing? Which ones to compare side-by-side?"
+ */
+import { useState, useEffect, useRef } from 'preact/hooks';
+import { evalVariants, fetchEvalVariants, focusVariantId } from '../stores/eval.js';
+import { API } from '../stores/_shared.js';
+import VariantCard from '../components/eval/VariantCard.jsx';
 import ConfigDiffPanel from '../components/eval/ConfigDiffPanel.jsx';
-// What it shows: The Configurations view — all variant configs and prompt templates,
-//   plus a config diff comparison panel for side-by-side variant analysis.
-//   Toolbar for creating/generating/exporting configs, the full variant table,
-//   and a collapsible template section below.
-// Decision it drives: User manages which configs exist, compares differences between
-//   two configs, and selects them for runs.
-//   Cloning and editing allows fine-tuning without losing system defaults.
 
 // NOTE: All .map() callbacks use descriptive parameter names — never 'h' (shadows JSX factory)
 
+const SWEEP_DIMENSIONS = ['temperature', 'num_ctx', 'model'];
+
 export default function EvalVariants() {
+  const [selected, setSelected] = useState([]);
+
+  // Sweep form state
+  // What it shows: A form that clones one base variant multiple times, each with a
+  //   different value for a single dimension (temperature, context window, or model).
+  //   Creates N variants in one click instead of cloning manually N times.
+  // Decision it drives: Quickly populate a sweep for parameter tuning experiments.
+  const [showSweep, setShowSweep] = useState(false);
+  const [sweepBaseId, setSweepBaseId] = useState('');
+  const [sweepDim, setSweepDim] = useState('temperature');
+  const [sweepValues, setSweepValues] = useState('');
+  const [sweepFb, setSweepFb] = useState('');
+
   useEffect(() => {
-    // Load both when view mounts
     fetchEvalVariants();
-    fetchEvalTemplates();
   }, []);
 
+  // Sort variants by latest_f1 descending; variants without a score go last
+  const variants = [...evalVariants.value].sort((a, b) =>
+    (b.latest_f1 ?? -1) - (a.latest_f1 ?? -1)
+  );
+
+  function toggleSelect(id, checked) {
+    setSelected(prev => checked ? [...prev, id] : prev.filter(x => x !== id));
+  }
+
+  async function handleSweep(evt) {
+    evt.preventDefault();
+    // Parse comma-separated values; convert to numbers where possible
+    const rawValues = sweepValues.split(',').map(s => s.trim()).filter(Boolean);
+    const values = rawValues.map(v => {
+      const n = parseFloat(v);
+      return isNaN(n) ? v : n;
+    });
+    setSweepFb('Creating sweep variants…');
+    try {
+      const res = await fetch(`${API}/eval/variants/sweep`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ base_variant_id: sweepBaseId, dimension: sweepDim, values }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      setSweepFb(`Created ${data.created} variant${data.created !== 1 ? 's' : ''}`);
+      await fetchEvalVariants();
+      setTimeout(() => { setShowSweep(false); setSweepFb(''); }, 1500);
+    } catch (e) {
+      setSweepFb(`Error: ${e.message}`);
+    }
+  }
+
+  // C26: Export/Import handlers
+  const fileInputRef = useRef(null);
+
+  async function handleExport() {
+    try {
+      const res = await fetch(`${API}/eval/variants/export`);
+      if (!res.ok) throw new Error(`Export failed: HTTP ${res.status}`);
+      const data = await res.json();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `eval-variants-${new Date().toISOString().slice(0,10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setSweepFb(`Export error: ${e.message}`);
+    }
+  }
+
+  async function handleImport(evt) {
+    const file = evt.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const body = JSON.parse(text);
+      const res = await fetch(`${API}/eval/variants/import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(`Import failed: HTTP ${res.status}`);
+      const data = await res.json();
+      setSweepFb(`Imported ${data.created ?? '?'} variant(s)`);
+      await fetchEvalVariants();
+    } catch (e) {
+      setSweepFb(`Import error: ${e.message}`);
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  }
+
   return (
-    <div class="flex flex-col gap-4 animate-page-enter">
-      <VariantToolbar />
-      <ConfigDiffPanel />
-      <VariantTable />
-      <TemplateSection />
+    <div class="eval-variants">
+      <div class="eval-variants__toolbar" style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.75rem', alignItems: 'center' }}>
+        <button onClick={() => { /* open create form */ }}>+ Create</button>
+        <button
+          class="t-btn t-btn-secondary"
+          style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }}
+          onClick={() => { setShowSweep(s => !s); setSweepFb(''); }}
+        >
+          {showSweep ? '✕ Cancel sweep' : '⤢ Sweep'}
+        </button>
+        {/* C26: Export/Import */}
+        <button class="t-btn t-btn-secondary" style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }} onClick={handleExport} title="Export all variants as JSON">
+          ↓ Export
+        </button>
+        <button class="t-btn t-btn-secondary" style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }} onClick={() => fileInputRef.current?.click()} title="Import variants from JSON">
+          ↑ Import
+        </button>
+        <input ref={fileInputRef} type="file" accept=".json" style={{ display: 'none' }} onChange={handleImport} />
+        {selected.length >= 2 && <span>{selected.length} selected for compare</span>}
+        {sweepFb && <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: sweepFb.startsWith('Error') || sweepFb.startsWith('Import error') || sweepFb.startsWith('Export error') ? 'var(--status-error)' : 'var(--text-secondary)' }}>{sweepFb}</span>}
+      </div>
+
+      {/* Parameter sweep form — creates N clones of a base variant varying one dimension */}
+      {showSweep && (
+        <form class="eval-sweep-form" onSubmit={handleSweep} style={{ margin: '0.5rem 0', padding: '0.75rem', border: '1px solid var(--border-subtle)', borderRadius: '4px', display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'flex-end' }}>
+          <div>
+            <label style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', display: 'block', marginBottom: '2px' }}>Base variant</label>
+            <select value={sweepBaseId} onChange={evt => setSweepBaseId(evt.target.value)} required style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)' }}>
+              <option value="">— choose —</option>
+              {variants.map(v => (
+                <option key={v.id} value={v.id}>{v.label || v.id}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', display: 'block', marginBottom: '2px' }}>Dimension</label>
+            <select value={sweepDim} onChange={evt => setSweepDim(evt.target.value)} style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)' }}>
+              {SWEEP_DIMENSIONS.map(d => <option key={d} value={d}>{d}</option>)}
+            </select>
+          </div>
+          <div style={{ flex: '1 1 200px' }}>
+            <label style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', display: 'block', marginBottom: '2px' }}>
+              Values <span style={{ color: 'var(--text-tertiary)' }}>(comma-separated)</span>
+            </label>
+            <input
+              type="text"
+              value={sweepValues}
+              onInput={evt => setSweepValues(evt.target.value)}
+              placeholder={sweepDim === 'model' ? 'qwen2.5:7b, qwen2.5:14b' : '0.3, 0.7, 1.0'}
+              required
+              style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', width: '100%' }}
+            />
+          </div>
+          <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+            <button type="submit" class="t-btn t-btn-primary" style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }}>
+              Run sweep
+            </button>
+          </div>
+        </form>
+      )}
+
+      {selected.length >= 2 && <ConfigDiffPanel />}
+
+      <div class="variant-grid">
+        {variants.map(v => (
+          <VariantCard
+            key={v.id}
+            variant={v}
+            selected={selected.includes(v.id)}
+            onSelect={checked => toggleSelect(v.id, checked)}
+            onClone={() => { /* clone logic */ }}
+            onEdit={() => { focusVariantId.value = v.id; }}
+            onDelete={() => fetchEvalVariants()}
+          />
+        ))}
+      </div>
     </div>
   );
 }

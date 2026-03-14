@@ -116,7 +116,11 @@ def submit_job(req: SubmitJobRequest):
 @router.post("/api/queue/cancel/{job_id}")
 def cancel_job(job_id: int):
     db = _api.db
-    db.cancel_job(job_id)
+    result = db.cancel_job(job_id)
+    if result == "not_found":
+        raise HTTPException(status_code=404, detail="Job not found")
+    if result == "not_cancellable":
+        raise HTTPException(status_code=409, detail="Job is not in a cancellable state")
     return {"ok": True}
 
 
@@ -126,6 +130,8 @@ def set_priority(job_id: int, body: dict = Body(...)):
     priority = body.get("priority")
     if not isinstance(priority, int):
         raise HTTPException(status_code=400, detail="priority must be an integer")
+    if priority < 0 or priority > 10:
+        raise HTTPException(status_code=400, detail="priority must be 0-10")
     updated = db.set_job_priority(job_id, priority)
     if not updated:
         raise HTTPException(status_code=404, detail="Job not found or not pending")
@@ -148,6 +154,9 @@ def get_queue_etas():
 @router.get("/api/history")
 def get_history(limit: int = 20, offset: int = 0, source: str | None = None):
     db = _api.db
+    if offset < 0:
+        raise HTTPException(status_code=400, detail="offset must be >= 0")
+    limit = max(1, min(limit, 200))
     return db.get_history(limit=limit, offset=offset, source=source)
 
 
@@ -160,13 +169,23 @@ def get_heatmap(days: int = 7):
     cutoff = time.time() - (days * 86400)
     with db._lock:
         conn = db._connect()
+        # day_of_week: SQLite %w is Sunday=0; convert to Monday=0 via (dow+6)%7.
+        # hour: cast to integer so JS receives a number, not a string.
+        # count: job count (not GPU minutes) — matches the LoadHeatmap tooltip.
+        # Use a subquery to alias the expressions before GROUP BY.
+        # Inner: convert SQLite %w (Sunday=0) → Monday=0 and cast hour to int.
         rows = conn.execute(
-            """SELECT strftime('%w', datetime(started_at, 'unixepoch', 'localtime')) as dow,
-                      strftime('%H', datetime(started_at, 'unixepoch', 'localtime')) as hour,
-                      SUM(completed_at - started_at) / 60.0 as gpu_minutes
-               FROM jobs
-               WHERE status='completed' AND started_at > ?
-               GROUP BY dow, hour""",
+            """SELECT day_of_week, hour, COUNT(*) AS count
+               FROM (
+                   SELECT
+                       (CAST(strftime('%w', datetime(started_at, 'unixepoch', 'localtime'))
+                            AS INTEGER) + 6) % 7 AS day_of_week,
+                       CAST(strftime('%H', datetime(started_at, 'unixepoch', 'localtime'))
+                            AS INTEGER) AS hour
+                   FROM jobs
+                   WHERE status='completed' AND started_at > ?
+               )
+               GROUP BY day_of_week, hour""",
             (cutoff,),
         ).fetchall()
     return [dict(r) for r in rows]

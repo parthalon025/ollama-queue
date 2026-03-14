@@ -11,6 +11,7 @@ import QueueList from '../components/QueueList.jsx';
 import HeroCard from '../components/HeroCard.jsx';
 import ResourceGauges from '../components/ResourceGauges.jsx';
 import PageBanner from '../components/PageBanner.jsx';
+import BackendsPanel from '../components/BackendsPanel.jsx';
 
 // NOTE: all .map() callbacks use descriptive names — never 'h' (shadows JSX factory)
 
@@ -214,6 +215,9 @@ export default function Now({ onSubmitRequest }) {
                             />
                         </div>
                     )}
+
+                    {/* Backend health panel — only visible when multi-backend is configured */}
+                    <BackendsPanel />
 
                     {/* KPI cards — 2×2 grid */}
                     <div class="grid grid-cols-2 gap-3">

@@ -1,7 +1,8 @@
-import { useState } from 'preact/hooks';
+import { useState, useEffect } from 'preact/hooks';
 import { API, fetchEvalVariants } from '../../stores';
 import { EVAL_TRANSLATIONS } from './translations.js';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
+import ModelChip from '../ModelChip.jsx';
 // What it shows: A single eval variant config with 3-level progressive disclosure.
 //   L1: ★ badge, variant ID/label, model, recommended/production badges, latest quality.
 //   L2: model, creativity, memory window, template, quality sparkline, edit/clone buttons.
@@ -10,6 +11,35 @@ import { useActionFeedback } from '../../hooks/useActionFeedback.js';
 //   configs to customize them, and tracks per-variant quality over time.
 
 // NOTE: All .map() callbacks use descriptive parameter names — never 'h' (shadows JSX factory)
+
+// What it shows: Promotion lineage for production/recommended variants — which run promoted
+//   this variant, the F1 improvement over the prior variant, and how many lessons were tested.
+// Decision it drives: Lets the user understand why a variant is production without drilling
+//   into run history. Gracefully shows nothing if the /lineage endpoint doesn't exist yet.
+function LineageTip({ variantId }) {
+  const [lineage, setLineage] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(`${API}/eval/variants/${variantId}/lineage`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { setLineage(data); setLoading(false); })
+      .catch(() => { setLoading(false); });
+  }, [variantId]);
+
+  if (loading) return <span class="lineage-tip__loading">…</span>;
+  if (!lineage) return <span class="lineage-tip__empty">No lineage</span>;
+
+  return (
+    <div class="lineage-tip">
+      {lineage.run_id && <span>Run #{lineage.run_id}</span>}
+      {lineage.f1_delta != null && <span> · +{lineage.f1_delta.toFixed(2)} F1</span>}
+      {lineage.comparison_variant_id && <span> over variant-{lineage.comparison_variant_id}</span>}
+      {lineage.lessons_tested != null && <span> · {lineage.lessons_tested} lessons</span>}
+      {lineage.run_date && <span> · {new Date(lineage.run_date * 1000).toLocaleDateString()}</span>}
+    </div>
+  );
+}
 
 function getTemplateLabelFromId(templateId) {
   return EVAL_TRANSLATIONS[templateId]?.label ?? templateId;
@@ -99,11 +129,15 @@ export default function VariantRow({ variant }) {
           <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-secondary)' }}>
             {label}
           </span>
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)' }}>
-            · {model}
-          </span>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)' }}>·</span>
+          <ModelChip model={model} />
           {is_production ? <span class="eval-badge eval-badge-production">★ Production</span> : null}
           {is_recommended && !is_production ? <span class="eval-badge eval-badge-recommended">★ Recommended</span> : null}
+          {(is_production || is_recommended) && (
+            <span class="variant-lineage-trigger" title="Promotion history">
+              ⓘ <LineageTip variantId={id} />
+            </span>
+          )}
           {latest_f1 != null && (
             <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-secondary)' }}>
               {EVAL_TRANSLATIONS.f1.label}: {Math.round(latest_f1 * 100)}%
@@ -119,13 +153,11 @@ export default function VariantRow({ variant }) {
       {level >= 2 && (
         <div class="eval-variant-row-l2">
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', marginBottom: '0.5rem' }}>
-            <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)' }}>
                 Model:
               </span>
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-primary)', marginLeft: '0.4rem' }}>
-                {model}
-              </span>
+              <ModelChip model={model} />
             </div>
             <div>
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)' }}>

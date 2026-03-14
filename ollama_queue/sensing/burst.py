@@ -75,38 +75,42 @@ class BurstDetector:
                     )
             self._last_ts = ts
 
-    def regime(self, now: float) -> str:
+    def regime(self, now: float | None = None) -> str:
         """Return current burst regime classification.
 
         Returns:
-            "unknown"     — insufficient data (< 10 samples)
+            "unknown"     — insufficient data (< 5 samples)
             "subcritical" — normal traffic
             "moderate"    — elevated submission rate
             "warning"     — approaching saturation
             "critical"    — burst in progress; consider engaging 429 gate
 
-        Requires at least 10 inter-arrival samples for a reliable baseline.
+        Requires at least 5 inter-arrival samples for a reliable baseline.
         """
         with self._lock:
-            if len(self._baseline_samples) < 10 or self._ewma is None:
+            if len(self._baseline_samples) < 5 or self._ewma is None:
                 return "unknown"
+            # Copy under lock — avoids RuntimeError: deque mutated during iteration
+            # when record_submission() appends concurrently from FastAPI worker threads.
+            samples_copy = list(self._baseline_samples)
+            ewma = self._ewma
+        # Sort and all computation outside the lock — minimises lock hold time.
+        # 75th percentile baseline: robust against burst contamination.
+        # Nearest-rank p75 (0-indexed): ceil(0.75 * N) - 1, computed via
+        # ceiling-division trick to avoid importing math.
+        sorted_samples = sorted(samples_copy)
+        n = len(sorted_samples)
+        p75_idx = min(-(-n * 3 // 4) - 1, n - 1)
+        baseline = sorted_samples[p75_idx]
 
-            # 75th percentile baseline: robust against burst contamination.
-            # Nearest-rank p75 (0-indexed): ceil(0.75 * N) - 1, computed via
-            # ceiling-division trick to avoid importing math.
-            sorted_samples = sorted(self._baseline_samples)
-            n = len(sorted_samples)
-            p75_idx = min(-(-n * 3 // 4) - 1, n - 1)
-            baseline = sorted_samples[p75_idx]
+        if baseline <= 0:
+            return "unknown"
 
-            if baseline <= 0:
-                return "unknown"
-
-            ratio = self._ewma / baseline
-            for name, low, high in _REGIMES:
-                if low <= ratio < high:
-                    return name
-            return "subcritical"
+        ratio = ewma / baseline
+        for name, low, high in _REGIMES:
+            if low <= ratio < high:
+                return name
+        return "subcritical"
 
 
 # Module-level singleton shared between daemon and API.

@@ -78,6 +78,22 @@ class HealthMonitor:
 
     _VRAM_TOTAL_FALLBACK_GB = 24.0
 
+    def get_gpu_name(self) -> str | None:
+        """Return the GPU model name from nvidia-smi, or None if unavailable."""
+        try:
+            result = subprocess.run(
+                ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode != 0:
+                return None
+            name = result.stdout.strip().split("\n")[0].strip()
+            return name if name else None
+        except (OSError, subprocess.TimeoutExpired, ValueError, IndexError, UnicodeDecodeError):
+            return None
+
     def get_vram_total_gb(self) -> float:
         """Return total GPU VRAM in GB from nvidia-smi, or 24.0 as fallback.
 
@@ -170,6 +186,7 @@ class HealthMonitor:
         currently_paused: bool,
         queued_model: str | None = None,
         recent_job_models: set[str] | None = None,
+        paused_since: float | None = None,
     ) -> dict:
         """Evaluate a health snapshot against threshold settings.
 
@@ -191,39 +208,63 @@ class HealthMonitor:
         - If NOT paused: pause when any metric exceeds its pause threshold.
         - If paused: only resume when ALL metrics are below their resume thresholds.
 
+        Max-pause escape hatch:
+        - If paused longer than max_pause_duration_seconds, force resume
+          regardless of current metrics. Prevents indefinite stalls when
+          metrics hover in the hysteresis band.
+
         Yield logic:
         - If an ollama model is loaded, yield_to_interactive is on,
           and the loaded model differs from queued_model and is not a
           recently-completed queue job model, yield.
         """
+        # --- Max-pause escape hatch ---
+        max_pause = settings.get("max_pause_duration_seconds")
+        if currently_paused and max_pause and paused_since:
+            pause_duration = time.time() - paused_since
+            if pause_duration >= float(max_pause):
+                return {
+                    "should_pause": False,
+                    "should_yield": False,
+                    "reason": f"Force resume: paused {pause_duration:.0f}s >= max {max_pause}s",
+                }
+
         reasons: list[str] = []
+
+        # Guard against None values in settings (e.g. fresh install before defaults are seeded,
+        # or a DB migration that added a new key without backfilling existing rows).
+        # Use explicit None checks — NOT `x or default`, which treats 0 as falsy.
+        ram_pause = settings["ram_pause_pct"] if settings["ram_pause_pct"] is not None else 85
+        ram_resume = settings["ram_resume_pct"] if settings["ram_resume_pct"] is not None else 75
+        swap_pause = settings["swap_pause_pct"] if settings["swap_pause_pct"] is not None else 50
+        swap_resume = settings["swap_resume_pct"] if settings["swap_resume_pct"] is not None else 40
+        load_pause_mult = settings["load_pause_multiplier"] if settings["load_pause_multiplier"] is not None else 2.0
+        load_resume_mult = settings["load_resume_multiplier"] if settings["load_resume_multiplier"] is not None else 1.5
 
         # --- Pause / resume with hysteresis ---
         if not currently_paused:
             # Check if any metric exceeds its pause threshold
-            if snap["ram_pct"] >= settings["ram_pause_pct"]:
-                reasons.append(f"RAM {snap['ram_pct']}% >= {settings['ram_pause_pct']}%")
-            if snap["swap_pct"] >= settings["swap_pause_pct"]:
-                reasons.append(f"Swap {snap['swap_pct']}% >= {settings['swap_pause_pct']}%")
-            load_pause = settings["load_pause_multiplier"] * snap["cpu_count"]
+            if snap["ram_pct"] >= ram_pause:
+                reasons.append(f"RAM {snap['ram_pct']}% >= {ram_pause}%")
+            if snap["swap_pct"] >= swap_pause:
+                reasons.append(f"Swap {snap['swap_pct']}% >= {swap_pause}%")
+            load_pause = load_pause_mult * snap["cpu_count"]
             if snap["load_avg"] >= load_pause:
                 reasons.append(
-                    f"Load {snap['load_avg']} >= {load_pause} "
-                    f"({settings['load_pause_multiplier']}x {snap['cpu_count']} CPUs)"
+                    f"Load {snap['load_avg']} >= {load_pause} " f"({load_pause_mult}x {snap['cpu_count']} CPUs)"
                 )
             should_pause = len(reasons) > 0
         else:
             # Currently paused: only resume if ALL metrics below resume thresholds
             still_high: list[str] = []
-            if snap["ram_pct"] > settings["ram_resume_pct"]:
-                still_high.append(f"RAM {snap['ram_pct']}% > {settings['ram_resume_pct']}%")
-            if snap["swap_pct"] > settings["swap_resume_pct"]:
-                still_high.append(f"Swap {snap['swap_pct']}% > {settings['swap_resume_pct']}%")
-            load_resume = settings["load_resume_multiplier"] * snap["cpu_count"]
+            if snap["ram_pct"] > ram_resume:
+                still_high.append(f"RAM {snap['ram_pct']}% > {ram_resume}%")
+            if snap["swap_pct"] > swap_resume:
+                still_high.append(f"Swap {snap['swap_pct']}% > {swap_resume}%")
+            load_resume = load_resume_mult * snap["cpu_count"]
             if snap["load_avg"] > load_resume:
                 still_high.append(
-                    f"Load {snap['load_avg']} > {load_resume} "
-                    f"({settings['load_resume_multiplier']}x {snap['cpu_count']} CPUs)"
+                    f"Load {snap['load_avg']} > {load_resume} " f"({load_resume_mult}x {snap['cpu_count']} CPUs)"
                 )
             should_pause = len(still_high) > 0
             reasons = still_high if still_high else ["all metrics below resume thresholds"]

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 from collections import defaultdict
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -18,9 +17,6 @@ if TYPE_CHECKING:
     from ollama_queue.db import Database
 
 _log = logging.getLogger(__name__)
-
-# Prior: P(transfers) = 0.25 — most principles DON'T transfer to arbitrary targets
-_PRIOR_LOG_ODDS = math.log(0.25 / 0.75)  # approx -1.10
 
 
 def _compute_f1_block(same: list[dict], diff: list[dict], all_pairs: list[dict]) -> dict[str, float]:

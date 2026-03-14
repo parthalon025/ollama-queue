@@ -61,28 +61,32 @@ class OllamaModels:
 
     # Class-level cache shared across instances — models change rarely
     _list_local_cache: tuple[float, list[dict]] | None = None
-    _LIST_LOCAL_TTL = 60.0  # seconds
+    _LIST_LOCAL_TTL = 15.0  # seconds
+    _list_local_lock = threading.Lock()
 
     @classmethod
     def _invalidate_list_cache(cls) -> None:
         """Call after pulling/deleting a model to force a fresh fetch."""
         cls._list_local_cache = None
 
-    def list_local(self) -> list[dict]:
-        """Run `ollama list` and return [{name, size_bytes, modified}] with 60s TTL cache.
+    @classmethod
+    def list_local(cls) -> list[dict]:
+        """Run `ollama list` and return [{name, size_bytes, modified}] with TTL cache.
 
         Returns empty list if ollama is not available.
         """
-        now = time.monotonic()
-        if OllamaModels._list_local_cache is not None:
-            ts, val = OllamaModels._list_local_cache
-            if now - ts < OllamaModels._LIST_LOCAL_TTL:
-                return val
-        result = self._fetch_list_local()
-        OllamaModels._list_local_cache = (now, result)
-        return result
+        with cls._list_local_lock:
+            now = time.monotonic()
+            if OllamaModels._list_local_cache is not None:
+                ts, val = OllamaModels._list_local_cache
+                if now - ts < OllamaModels._LIST_LOCAL_TTL:
+                    return val
+            result = cls._fetch_list_local()
+            OllamaModels._list_local_cache = (now, result)
+            return result
 
-    def _fetch_list_local(self) -> list[dict]:
+    @classmethod
+    def _fetch_list_local(cls) -> list[dict]:
         """Run `ollama list` and parse output (uncached)."""
         try:
             result = subprocess.run(
@@ -255,6 +259,9 @@ class OllamaModels:
             if m["name"] == model_name and m["size_bytes"]:
                 return (m["size_bytes"] / 1_000_000) * safety
 
+        _log.warning(
+            "VRAM estimate for model '%s' using 4000MB default — model not in registry or local list", model_name
+        )
         return 4000.0  # 4 GB unknown default
 
     def record_observed_vram(self, model_name: str, vram_mb: float, db: Database) -> None:
