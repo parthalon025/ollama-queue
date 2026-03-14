@@ -179,6 +179,7 @@ export default function AddRecurringJobModal({ onAdded }) {
 
             <dialog
                 ref={dialogRef}
+                class="sh-crt"
                 onClick={handleBackdropClick}
                 style={{
                     background: 'var(--bg-surface)',
