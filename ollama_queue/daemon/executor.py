@@ -521,23 +521,25 @@ class ExecutorMixin:
                 except Exception:
                     _log.exception("Failed to store metrics for job #%d", job["id"])
 
-            # Record duration if successful — skip command-only jobs (model=None)
-            # to avoid inserting corrupt null-model rows into duration_history (H6)
-            if exit_code == 0 and job.get("model"):
-                self.db.record_duration(
-                    source=job["source"],
-                    model=job["model"],
-                    duration=duration,
-                    exit_code=exit_code,
-                )
-                # Record observed VRAM delta
-                vram_after = self._free_vram_mb()
-                if vram_before is not None and vram_after is not None and job.get("model"):
-                    delta = vram_before - vram_after
-                    if delta > 0:
-                        self._ollama_models.record_observed_vram(job["model"], delta, self.db)
+            if exit_code == 0:
+                # Record duration — skip command-only jobs (model=None)
+                # to avoid inserting corrupt null-model rows into duration_history (H6)
+                if job.get("model"):
+                    self.db.record_duration(
+                        source=job["source"],
+                        model=job["model"],
+                        duration=duration,
+                        exit_code=exit_code,
+                    )
+                    # Record observed VRAM delta
+                    vram_after = self._free_vram_mb()
+                    if vram_before is not None and vram_after is not None:
+                        delta = vram_before - vram_after
+                        if delta > 0:
+                            self._ollama_models.record_observed_vram(job["model"], delta, self.db)
 
                 # max_runs countdown: decrement on success, auto-disable at 0
+                # Applied to all successful jobs regardless of model (command-only jobs count too)
                 if job.get("recurring_job_id"):
                     _rj_for_maxruns = self.db.get_recurring_job(job["recurring_job_id"])
                     if _rj_for_maxruns and _rj_for_maxruns.get("max_runs") is not None:
