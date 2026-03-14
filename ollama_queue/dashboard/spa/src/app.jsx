@@ -137,7 +137,7 @@ export function App() {
                 main.classList.add('t2-tick-flash');
                 rafId = null;
             });
-            // Clean up after animation (0.4s)
+            // Clean up after animation (0.4s animation + rAF lead-in = 500ms total)
             timerId = setTimeout(() => {
                 main.classList.remove('t2-tick-flash');
                 timerId = null;

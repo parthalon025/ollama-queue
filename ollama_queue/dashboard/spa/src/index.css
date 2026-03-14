@@ -1956,6 +1956,7 @@ input:focus, select:focus, textarea:focus {
     --mood-accent: var(--status-healthy);
 }
 
+/* nostalgic: desaturate only — no frame shadow override; base .t-frame:hover elevation still applies */
 [data-mood="nostalgic"] {
     filter: saturate(0.9);
 }

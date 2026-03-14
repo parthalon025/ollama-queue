@@ -187,7 +187,7 @@ export function loadMapSlotColor(score) {
     if (score <= 0) return 'var(--bg-inset)';
     const intensity = Math.min(score / 10, 1); // score range 0–10 for non-pinned
     const opacity = 0.20 + intensity * 0.70;   // 0.20 → 0.90
-    return `rgba(99,179,237,${opacity.toFixed(2)})`;
+    return `rgba(99,179,237,${opacity.toFixed(2)})`; // dynamic opacity — color-mix() requires static %; --density-base not usable here
 }
 
 function _relativeTime(ts) {
