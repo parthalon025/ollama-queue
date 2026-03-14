@@ -126,17 +126,29 @@ export function App() {
     // Design system §7.2 stage 4: "t2-tick-flash on data containers" on recovery.
     // Only fires on disconnected → ok transitions (not on initial load).
     useEffect(() => {
+        let rafId = null;
+        let timerId = null;
         function onRestored() {
             const main = document.querySelector('.layout-main');
             if (!main) return;
             // Remove + re-add class on next frame to re-trigger CSS animation
             main.classList.remove('t2-tick-flash');
-            requestAnimationFrame(() => main.classList.add('t2-tick-flash'));
+            rafId = requestAnimationFrame(() => {
+                main.classList.add('t2-tick-flash');
+                rafId = null;
+            });
             // Clean up after animation (0.4s)
-            setTimeout(() => main.classList.remove('t2-tick-flash'), 500);
+            timerId = setTimeout(() => {
+                main.classList.remove('t2-tick-flash');
+                timerId = null;
+            }, 500);
         }
         window.addEventListener('queue:connection-restored', onRestored);
-        return () => window.removeEventListener('queue:connection-restored', onRestored);
+        return () => {
+            window.removeEventListener('queue:connection-restored', onRestored);
+            if (rafId !== null) cancelAnimationFrame(rafId);
+            if (timerId !== null) clearTimeout(timerId);
+        };
     }, []);
 
     // Keyboard shortcuts: 1-8 switch tabs; Cmd/Ctrl+K opens palette
