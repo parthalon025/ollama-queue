@@ -207,8 +207,109 @@ function Defs() {
   );
 }
 
+// ── Node layout constants ─────────────────────────────────────────────────────
+// All positions are top-left (x, y). Node size: 150 × 38.
+const NW = 150, NH = 38;
+
+const NODES = {
+  // Column 1 — Inputs (x=20)
+  recurring:  { x: 20,  y: 40,  label: 'Recurring Jobs',     sub: 'scheduler · promote' },
+  cli:        { x: 20,  y: 110, label: 'CLI / API Submit',   sub: 'ollama-queue submit' },
+  proxy:      { x: 20,  y: 180, label: 'Direct Proxy',       sub: '/generate · /embed' },
+  intercept:  { x: 20,  y: 250, label: 'Consumer Intercept', sub: 'iptables REDIRECT' },
+  eval:       { x: 20,  y: 320, label: 'Eval Pipeline',      sub: 'A/B eval · judge' },
+  // Column 2 — Queue layer (x=215)
+  scheduler:  { x: 215, y: 40,  label: 'Scheduler',          sub: 'recurring · dlq · defer' },
+  queue:      { x: 215, y: 150, label: 'Queue',               sub: 'priority · sqlite' },
+  // Column 3 — Engine (x=410)
+  daemon:     { x: 410, y: 150, label: 'Daemon',              sub: 'poller · executor' },
+  sensing:    { x: 410, y: 265, label: 'Sensing',             sub: 'health · stall · burst' },
+  dlq:        { x: 410, y: 370, label: 'DLQ',                 sub: 'dead letter' },
+  // Column 4 — Output (x=605)
+  router:     { x: 605, y: 150, label: 'Backend Router',      sub: '5-tier selection' },
+  gtx1650:    { x: 605, y: 270, label: 'GTX 1650',            sub: 'local GPU' },
+  rtx5080:    { x: 605, y: 370, label: 'RTX 5080',            sub: 'remote GPU' },
+};
+
+// Connection point helpers
+function rc(n) { return { x: n.x + NW,     y: n.y + NH / 2 }; } // right-center
+function lc(n) { return { x: n.x,           y: n.y + NH / 2 }; } // left-center
+function tc(n) { return { x: n.x + NW / 2, y: n.y };           } // top-center
+function bc(n) { return { x: n.x + NW / 2, y: n.y + NH };      } // bottom-center
+
+// What it shows: A single topology node — rect + label + sublabel.
+// Decision it drives: Node colour/glow/opacity reflects live system state for that subsystem.
+function Node({ name, ns, tprops }) {
+  const n = NODES[name];
+  const sub = ns.sublabel ?? n.sub;
+  const subColor = ns.sublabelColor ?? 'var(--text-tertiary)';
+  const cls = ns.pulse ? 'topo-threat-pulse' : '';
+
+  // VRAM bar — only for GPU backend nodes with live vram_pct data
+  let vramBar = null;
+  if (name === 'gtx1650' || name === 'rtx5080') {
+    const isLocal = name === 'gtx1650';
+    const backends = tprops?.backends || [];
+    const b = backends.find(bk => {
+      try {
+        const host = new URL(bk.url).hostname;
+        return isLocal ? (host === '127.0.0.1' || host === 'localhost') : (host !== '127.0.0.1' && host !== 'localhost');
+      } catch (_) { return false; }
+    });
+    if (b && b.healthy) {
+      const pct = Math.min(100, Math.max(0, b.vram_pct ?? 0));
+      const barFill = pct > 90 ? 'var(--sh-threat, var(--status-error))'
+                    : pct > 80 ? 'var(--status-warning, #f59e0b)'
+                    : 'var(--sh-phosphor, var(--accent))';
+      vramBar = (
+        <rect
+          x={n.x} y={n.y + NH - 3}
+          width={Math.round(pct / 100 * NW)} height={3}
+          fill={barFill}
+          opacity={ns.opacity}
+        />
+      );
+    }
+  }
+
+  return (
+    <g class={cls}>
+      <rect
+        x={n.x} y={n.y} width={NW} height={NH} rx="4"
+        fill="var(--bg-elevated)"
+        stroke={ns.stroke}
+        stroke-width={ns.filter ? 2 : 1}
+        filter={ns.filter ?? undefined}
+        opacity={ns.opacity}
+      />
+      <text
+        x={n.x + NW / 2} y={n.y + 14}
+        text-anchor="middle"
+        font-family="var(--font-mono)"
+        font-size="11"
+        fill={ns.filter ? ns.stroke : 'var(--text-primary)'}
+        opacity={ns.opacity}
+      >{n.label}</text>
+      <text
+        x={n.x + NW / 2} y={n.y + 27}
+        text-anchor="middle"
+        font-family="var(--font-mono)"
+        font-size="9"
+        fill={subColor}
+        opacity={ns.opacity}
+      >{sub}</text>
+      {vramBar}
+    </g>
+  );
+}
+
 // ── Main component ──────────────────────────────────────────────────────────────
 export default function TopologyDiagram({ daemonStatus, currentJob, backends, dlqCount, activeEval, queueDepth }) {
+  const tprops = { daemonStatus, currentJob, backends: backends || [], dlqCount: dlqCount || 0, activeEval, queueDepth: queueDepth || 0 };
+
+  // Static dim state — live wiring comes in Task 5
+  const dimNs = { stroke: 'var(--border)', filter: null, opacity: 0.7, sublabel: null, sublabelColor: null, pulse: false };
+
   return (
     <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
       <svg
@@ -218,6 +319,9 @@ export default function TopologyDiagram({ daemonStatus, currentJob, backends, dl
         aria-label="ollama-queue system topology"
       >
         <Defs />
+        {Object.keys(NODES).map(name => (
+          <Node key={name} name={name} ns={dimNs} tprops={tprops} />
+        ))}
       </svg>
     </div>
   );
