@@ -92,6 +92,7 @@ ollama_queue/
       dist/           # Production build output (gitignored)
 
 scripts/
+  backend-onboard.sh           # Pull all required Ollama models on any backend URL (run when adding a new host)
   migrate_timers.py            # Migrate 8 of 10 systemd timers to recurring jobs
   migrate_dlq_max_retries.py   # Add max_retries column to existing dlq table (idempotent)
 
@@ -192,7 +193,7 @@ This applies to: component files, store transformations in `stores/`, computed v
 
 ## Gotchas
 
-- **Multi-backend setup** — configured via `OLLAMA_BACKENDS` in `~/.env` (sourced by the systemd service). Current config: `http://127.0.0.1:11434` (GTX 1650, local) + `http://100.114.197.57:11434` (RTX 5080, `desktop-fbl9e0c`). Default weights in `OLLAMA_BACKEND_WEIGHTS`. **DB weights take precedence** — use `PUT /api/backends/{url}/weight` to override per-backend routing weight at runtime without restarting the service. The remote Windows PC runs ollama-queue in Docker (`docker run -d --name ollama-queue -p 7683:7683 -e OLLAMA_URL=http://host.docker.internal:11434 --restart unless-stopped ollama-queue:latest`) for VRAM-aware routing. `Dockerfile` is in the project root.
+- **Multi-backend setup** — configured via `OLLAMA_BACKENDS` in `~/.env` (sourced by the systemd service). Current config: `http://127.0.0.1:11434` (GTX 1650, local) + `http://100.114.197.57:11434` (RTX 5080, `desktop-fbl9e0c`). Default weights in `OLLAMA_BACKEND_WEIGHTS`. **DB weights take precedence** — use `PUT /api/backends/{url}/weight` to override per-backend routing weight at runtime without restarting the service. The remote Windows PC runs ollama-queue in Docker (`docker run -d --name ollama-queue -p 7683:7683 -e OLLAMA_URL=http://host.docker.internal:11434 --restart unless-stopped ollama-queue:latest`) for VRAM-aware routing. `Dockerfile` is in the project root. **When adding a new backend**, run `scripts/backend-onboard.sh http://<tailscale-ip>:11434` to pull all required models — model list is maintained in the script, sourced from `~/.claude/docs/ollama-models.md`. Note: `bitnet:10b` is excluded (not an Ollama model — served by `bitnet-server.service` on port 11435).
 - **`_gpu_name_cache` is populated lazily with a 600s TTL** — if the remote ollama-queue container wasn't up when the first `/api/backends` request fired, `gpu_name` will be cached as `null` for 10 minutes. Restart the `ollama-queue.service` to flush all in-process caches immediately.
 - **`gpu_name: null` from Docker container = WSL2 GPU name quirk, not missing data** — `nvidia-smi --query-gpu=memory.used,memory.total` works inside Docker Desktop (VRAM % correct), but `--query-gpu=name` may return null. VRAM pressure routing works correctly; only the label in BackendsPanel falls back to hostname.
 - **Stall detector queries all OLLAMA_BACKENDS** — `sensing/stall.py:get_ollama_ps_models()` unions `/api/ps` from every configured backend. Before this fix it hardcoded `localhost:11434`, causing remote-backend jobs to always get a false-positive `+1.61` stall penalty (model "not loaded" on wrong host).
