@@ -51,7 +51,9 @@ class LoopMixin:
         for j in pending_jobs:
             priority_weights[j["priority"]] += weights[j["id"]] / total_w
 
-        return -sum(w * log2(w) for w in priority_weights.values() if w > 0)
+        # max(0.0, ...) prevents -0.0 (IEEE 754 negative zero) when a single priority bucket
+        # has w=1.0 and log2(1.0)=0.0, which would print as "-0.00" in log output.
+        return max(0.0, -sum(w * log2(w) for w in priority_weights.values() if w > 0))
 
     def _check_entropy(self, pending_jobs: list[dict], now: float, settings: dict | None = None) -> None:
         """Compute entropy, update rolling baseline, log anomalies, set suspension."""
@@ -75,7 +77,8 @@ class LoopMixin:
         if std_entropy == 0:
             std_entropy = 0.1
 
-        if entropy < mean_entropy - sigma * std_entropy:
+        anomaly = entropy < mean_entropy - sigma * std_entropy
+        if anomaly:
             # Determine anomaly type
             high_priority_count = sum(1 for j in pending_jobs if j["priority"] <= 4)
             if high_priority_count / max(len(pending_jobs), 1) > 0.7:
@@ -83,16 +86,22 @@ class LoopMixin:
             else:
                 alert_type = "background_flood"
 
-            self.db.log_schedule_event(
-                "entropy_alert",
-                details={"entropy": entropy, "mean_entropy": mean_entropy, "sigma": sigma, "type": alert_type},
-            )
-            _log.warning(
-                "Queue entropy anomaly detected: entropy=%.2f mean=%.2f type=%s",
-                entropy,
-                mean_entropy,
-                alert_type,
-            )
+            # rising_edge is True only on the first poll that enters the anomalous state.
+            # Suppresses WARNING/INFO spam when the queue stays anomalous across many polls.
+            rising_edge = not self._entropy_anomaly_active
+            self._entropy_anomaly_active = True
+
+            if rising_edge:
+                self.db.log_schedule_event(
+                    "entropy_alert",
+                    details={"entropy": entropy, "mean_entropy": mean_entropy, "sigma": sigma, "type": alert_type},
+                )
+                _log.warning(
+                    "Queue entropy anomaly detected: entropy=%.2f mean=%.2f type=%s",
+                    entropy,
+                    mean_entropy,
+                    alert_type,
+                )
 
             suspend_enabled = (
                 settings.get("entropy_suspend_low_priority")
@@ -101,7 +110,10 @@ class LoopMixin:
             )
             if alert_type == "critical_backlog" and suspend_enabled:
                 self._entropy_suspend_until = now + 60.0  # suspend p8-10 for 60s
-                _log.info("Suspended low-priority (p8-10) promotion for 60s due to critical_backlog")
+                if rising_edge:
+                    _log.info("Suspended low-priority (p8-10) promotion for 60s due to critical_backlog")
+        else:
+            self._entropy_anomaly_active = False
 
     # --- Orphan recovery ---
 
