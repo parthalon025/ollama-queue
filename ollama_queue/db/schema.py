@@ -157,6 +157,8 @@ class SchemaMixin:
         self._add_column_if_missing(conn, "eval_runs", "suggestions_json", "TEXT")
         # Judge parse failure tracking (#22)
         self._add_column_if_missing(conn, "eval_runs", "judge_parse_failures", "INTEGER DEFAULT 0")
+        # Per-backend inference mode: 'gpu_only' restricts to VRAM-only; 'cpu_shared' allows CPU overflow
+        self._add_column_if_missing(conn, "backends", "inference_mode", "TEXT NOT NULL DEFAULT 'cpu_shared'")
         # Backfill pre-existing rows
         conn.execute("UPDATE eval_variants SET params = '{}' WHERE params IS NULL")
         conn.execute("UPDATE eval_variants SET provider = 'ollama' WHERE provider IS NULL")

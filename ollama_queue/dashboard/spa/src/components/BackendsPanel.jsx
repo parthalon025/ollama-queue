@@ -5,7 +5,7 @@
 //   going and can spot capacity problems at a glance.
 
 import { useEffect } from 'preact/hooks';
-import { backendsData, fetchBackends, currentJob } from '../stores';
+import { backendsData, fetchBackends, currentJob, updateBackendInferenceMode } from '../stores';
 
 // NOTE: all .map() callbacks use descriptive names — never 'h' (shadows JSX factory)
 
@@ -116,6 +116,34 @@ export default function BackendsPanel() {
                                     serving
                                 </span>
                             )}
+
+                            {/* Inference mode toggle — GPU only vs GPU+CPU overflow.
+                              Clicking sends PUT /api/backends/{url}/inference-mode.
+                              Decision it drives: route this backend only when model fits in VRAM. */}
+                            <button
+                                onClick={() => {
+                                    const next = backend.inference_mode === 'gpu_only' ? 'cpu_shared' : 'gpu_only';
+                                    updateBackendInferenceMode(backend.url, next).catch(err => console.error('inference mode:', err));
+                                }}
+                                title={backend.inference_mode === 'gpu_only'
+                                    ? 'GPU only — model must fit in VRAM. Click to allow CPU overflow.'
+                                    : 'GPU+CPU — Ollama may overflow to CPU RAM. Click to restrict to GPU only.'}
+                                style={{
+                                    background: 'none',
+                                    border: '1px solid',
+                                    borderColor: backend.inference_mode === 'gpu_only' ? 'var(--accent)' : 'var(--border-subtle)',
+                                    borderRadius: 'var(--radius-sm)',
+                                    cursor: 'pointer',
+                                    padding: '0 0.3rem',
+                                    color: backend.inference_mode === 'gpu_only' ? 'var(--accent)' : 'var(--text-tertiary)',
+                                    fontSize: 'var(--type-micro)',
+                                    fontFamily: 'var(--font-mono)',
+                                    flexShrink: 0,
+                                    lineHeight: '1.4',
+                                }}
+                            >
+                                {backend.inference_mode === 'gpu_only' ? 'GPU' : 'GPU+CPU'}
+                            </button>
 
                             {/* Model count */}
                             <span style={{ color: 'var(--text-tertiary)', flex: '0 0 auto' }}>

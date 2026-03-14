@@ -8,7 +8,9 @@
  *   Should I run another test, or promote the current leader?"
  */
 import { h } from 'preact';
-import { evalWinner, evalActiveRun, evalActiveSuggestions, evalActiveOracle } from '../stores/eval.js';
+import { useEffect } from 'preact/hooks';
+import { evalWinner, evalActiveRun, evalActiveSuggestions, evalActiveOracle,
+         fetchEvalRuns, fetchEvalVariants } from '../stores/eval.js';
 import F1Score from '../components/F1Score.jsx';
 import VariantChip from '../components/VariantChip.jsx';
 import EvalNextStepsCard from '../components/eval/EvalNextStepsCard.jsx';
@@ -20,6 +22,13 @@ import RunHistoryTable from '../components/eval/RunHistoryTable.jsx';
 // NOTE: All .map() callbacks use descriptive parameter names — never 'h' (shadows JSX factory)
 
 export default function EvalRuns() {
+  // Fetch runs + variants on mount — both are needed: runs for the history table,
+  // variants for the evalWinner computed signal (winner chip at the top).
+  useEffect(() => {
+    fetchEvalRuns();
+    fetchEvalVariants();
+  }, []);
+
   const winner = evalWinner.value;
   const activeRun = evalActiveRun.value;
   const suggestions = evalActiveSuggestions.value;
