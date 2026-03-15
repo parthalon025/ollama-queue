@@ -241,7 +241,11 @@ export async function triggerEvalRun(body) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`Trigger failed: ${res.status}`);
+  if (!res.ok) {
+    let detail = `Trigger failed: ${res.status}`;
+    try { const errBody = await res.json(); if (errBody.detail) detail = errBody.detail; } catch { /* non-JSON */ }
+    throw new Error(detail);
+  }
   return res.json(); // { run_id }
 }
 

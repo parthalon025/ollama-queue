@@ -4860,3 +4860,188 @@ class TestConfigDiffNewColumns:
         # Should not raise — returns diffs or empty list
         diffs = describe_config_diff(a, b)
         assert isinstance(diffs, list)
+
+
+# ---------------------------------------------------------------------------
+# Pre-flight model check in run_eval_session
+# ---------------------------------------------------------------------------
+
+
+class TestRunEvalSessionPreflightModelCheck:
+    """run_eval_session should fail immediately if variant or judge models aren't installed."""
+
+    def test_fails_fast_on_missing_variant_model(self, tmp_path):
+        """Eval session should fail immediately if variant models aren't installed in Ollama."""
+        from ollama_queue.db import Database
+        from ollama_queue.eval.engine import create_eval_run, get_eval_run, run_eval_session, update_eval_run
+
+        db = Database(str(tmp_path / "test.db"))
+        db.initialize()
+
+        # Create a run with variant A (seeded variant, model = deepseek-r1:8b or similar)
+        run_id = create_eval_run(db, variant_id="A", variants=["A"])
+        update_eval_run(db, run_id, status="queued")
+
+        # Mock OllamaModels.list_local to return a set that does NOT include the variant's model
+        fake_models = [{"name": "some-other-model:7b"}]
+
+        with (
+            patch("ollama_queue.models.client.OllamaModels.list_local", return_value=fake_models),
+            patch("ollama_queue.eval.generate.run_eval_generate") as mock_generate,
+        ):
+            run_eval_session(run_id, db)
+
+        # Verify: run status is "failed", error contains "not installed"
+        run = get_eval_run(db, run_id)
+        assert run is not None
+        assert run["status"] == "failed"
+        assert "not installed" in run["error"].lower() or "Models not installed" in run["error"]
+        # Verify: run_eval_generate was NOT called (we failed before reaching it)
+        mock_generate.assert_not_called()
+
+    def test_fails_fast_on_missing_judge_model(self, tmp_path):
+        """Eval session should fail if the judge model isn't installed."""
+        from ollama_queue.db import Database
+        from ollama_queue.eval.engine import create_eval_run, get_eval_run, run_eval_session, update_eval_run
+
+        db = Database(str(tmp_path / "test.db"))
+        db.initialize()
+
+        # Set a judge model that is NOT in the installed list
+        db.set_setting("eval.judge_model", "missing-judge:7b")
+
+        # The run's variant models must be in the installed list (so only judge fails)
+        # Variant A uses the seeded model — look it up
+        from ollama_queue.eval.engine import get_eval_variant
+
+        variant = get_eval_variant(db, "A")
+        variant_model = variant["model"]
+
+        run_id = create_eval_run(db, variant_id="A", variants=["A"])
+        update_eval_run(db, run_id, status="queued")
+
+        fake_models = [{"name": variant_model}]
+
+        with (
+            patch("ollama_queue.models.client.OllamaModels.list_local", return_value=fake_models),
+            patch("ollama_queue.eval.generate.run_eval_generate") as mock_generate,
+        ):
+            run_eval_session(run_id, db)
+
+        run = get_eval_run(db, run_id)
+        assert run is not None
+        assert run["status"] == "failed"
+        assert "judge" in run["error"].lower()
+        mock_generate.assert_not_called()
+
+    def test_passes_when_all_models_installed(self, tmp_path):
+        """Eval session proceeds when all models are installed."""
+        from ollama_queue.db import Database
+        from ollama_queue.eval.engine import create_eval_run, run_eval_session, update_eval_run
+
+        db = Database(str(tmp_path / "test.db"))
+        db.initialize()
+
+        db.set_setting("eval.judge_model", "judge-model:7b")
+
+        from ollama_queue.eval.engine import get_eval_variant
+
+        variant = get_eval_variant(db, "A")
+        variant_model = variant["model"]
+
+        run_id = create_eval_run(db, variant_id="A", variants=["A"])
+        update_eval_run(db, run_id, status="queued")
+
+        fake_models = [{"name": variant_model}, {"name": "judge-model:7b"}]
+
+        run_failed = {"id": run_id, "status": "failed"}
+
+        with (
+            patch("ollama_queue.models.client.OllamaModels.list_local", return_value=fake_models),
+            patch("ollama_queue.eval.generate.run_eval_generate") as mock_generate,
+            patch(
+                "ollama_queue.eval.engine.get_eval_run",
+                side_effect=[
+                    # First call: pre-flight fetch
+                    {"id": run_id, "status": "queued", "variants": json.dumps(["A"]), "judge_model": None},
+                    # Second call: post-generate check
+                    run_failed,
+                ],
+            ),
+        ):
+            run_eval_session(run_id, db)
+
+        # generate was called (pre-flight passed)
+        mock_generate.assert_called_once()
+
+    def test_skips_check_when_ollama_unreachable(self, tmp_path):
+        """When list_local returns empty (Ollama unreachable), skip the check gracefully."""
+        from ollama_queue.db import Database
+        from ollama_queue.eval.engine import create_eval_run, run_eval_session, update_eval_run
+
+        db = Database(str(tmp_path / "test.db"))
+        db.initialize()
+
+        run_id = create_eval_run(db, variant_id="A", variants=["A"])
+        update_eval_run(db, run_id, status="queued")
+
+        run_failed = {"id": run_id, "status": "failed"}
+
+        with (
+            patch("ollama_queue.models.client.OllamaModels.list_local", return_value=[]),
+            patch("ollama_queue.eval.generate.run_eval_generate") as mock_generate,
+            patch(
+                "ollama_queue.eval.engine.get_eval_run",
+                side_effect=[
+                    {"id": run_id, "status": "queued", "variants": json.dumps(["A"]), "judge_model": None},
+                    run_failed,
+                ],
+            ),
+        ):
+            run_eval_session(run_id, db)
+
+        # generate was called (check was skipped because Ollama unreachable)
+        mock_generate.assert_called_once()
+
+    def test_skips_non_ollama_provider_variants(self, tmp_path):
+        """Variants with provider != 'ollama' should not trigger missing model errors."""
+        from ollama_queue.db import Database
+        from ollama_queue.eval.engine import create_eval_run, run_eval_session, update_eval_run
+
+        db = Database(str(tmp_path / "test.db"))
+        db.initialize()
+
+        # Create a custom variant with provider='claude' and a model not in Ollama
+        with db._lock:
+            conn = db._connect()
+            conn.execute(
+                "INSERT INTO eval_variants (id, label, prompt_template_id, model, temperature, num_ctx, provider, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))",
+                ("claude-v1", "Claude variant", "zero-shot-causal", "claude-3-haiku", 0.6, 8192, "claude"),
+            )
+            conn.commit()
+
+        run_id = create_eval_run(db, variant_id="claude-v1", variants=["claude-v1"])
+        update_eval_run(db, run_id, status="queued")
+        # Set judge_model to something installed so the judge check doesn't fail
+        db.set_setting("eval.judge_model", "installed-model:7b")
+
+        fake_models = [{"name": "installed-model:7b"}]
+
+        run_after_gen = {"id": run_id, "status": "failed"}
+
+        with (
+            patch("ollama_queue.models.client.OllamaModels.list_local", return_value=fake_models),
+            patch("ollama_queue.eval.generate.run_eval_generate") as mock_generate,
+            patch(
+                "ollama_queue.eval.engine.get_eval_run",
+                side_effect=[
+                    {"id": run_id, "status": "queued", "variants": json.dumps(["claude-v1"]), "judge_model": None},
+                    run_after_gen,
+                ],
+            ),
+        ):
+            run_eval_session(run_id, db)
+
+        # generate was called — claude variant should not be checked against Ollama models
+        mock_generate.assert_called_once()

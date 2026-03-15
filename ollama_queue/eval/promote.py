@@ -376,8 +376,11 @@ def generate_eval_analysis(  # noqa: PLR0911 — guard-and-return pattern is int
     analysis_model: str = (
         _eng._get_eval_setting(db, "eval.analysis_model", "")
         or run.get("judge_model")
-        or _eng._get_eval_setting(db, "eval.judge_model", "deepseek-r1:8b")
+        or _eng._get_eval_setting(db, "eval.judge_model", "")
     )
+    if not analysis_model:
+        _log.warning("No analysis model configured — skipping analysis for run %d", run_id)
+        return
 
     try:
         variant_ids: list[str] = json.loads(run.get("variants") or "[]")

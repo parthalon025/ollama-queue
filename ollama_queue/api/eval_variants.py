@@ -12,10 +12,41 @@ from starlette.responses import Response
 
 import ollama_queue.api as _api
 from ollama_queue.eval.validation import validate_provider, validate_variant_params
+from ollama_queue.models.client import OllamaModels
 
 _log = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _installed_ollama_models() -> set[str]:
+    """Return set of locally installed Ollama model names.
+
+    Returns empty set if Ollama is unreachable.
+    """
+    try:
+        return {m["name"].removesuffix(":latest") for m in OllamaModels.list_local()}
+    except Exception:
+        _log.warning("Failed to fetch installed Ollama models; skipping validation")
+        return set()
+
+
+def _validate_model_installed(model: str, provider: str) -> None:
+    """Raise HTTPException if provider=ollama and model is not installed.
+
+    Skips validation when Ollama is unreachable (empty model list).
+    """
+    if provider != "ollama" or not model:
+        return
+    installed = _installed_ollama_models()
+    if not installed:
+        return  # Ollama unreachable — skip validation
+    check_name = model.removesuffix(":latest")
+    if check_name not in installed:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Model {model!r} is not installed in Ollama. " f"Installed: {', '.join(sorted(installed))}",
+        )
 
 
 def _get_eval_variant(conn, variant_id: str) -> dict:
@@ -373,6 +404,8 @@ def create_eval_variant(body: dict = Body(...)):
     system_prompt = body.get("system_prompt")
     training_config = body.get("training_config")
 
+    _validate_model_installed(model, provider_str)
+
     now = _dt.datetime.now(_dt.UTC).isoformat()
     new_id = str(uuid.uuid4())[:8]
     with db._lock:
@@ -593,6 +626,10 @@ def update_eval_variant(variant_id: str, body: dict = Body(...)):
                 updates["provider"] = validate_provider(updates["provider"])
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc))
+        # Validate model is installed in Ollama if model is being updated
+        if "model" in updates:
+            update_provider = updates.get("provider") or variant.get("provider", "ollama")
+            _validate_model_installed(updates["model"], update_provider)
         assert all(
             re.match(r"^[a-z_]+$", k) for k in updates
         ), f"unsafe column names: {set(updates) - {k for k in updates if re.match(r'^[a-z_]+$', k)}}"

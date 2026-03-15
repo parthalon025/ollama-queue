@@ -635,7 +635,17 @@ def run_eval_judge(  # noqa: PLR0911
 
     data_source_url = run["data_source_url"]
     seed: int | None = run.get("seed")
-    judge_model: str = run.get("judge_model") or _eng._get_eval_setting(db, "eval.judge_model", "deepseek-r1:8b")
+    judge_model: str = run.get("judge_model") or _eng._get_eval_setting(db, "eval.judge_model", "")
+    if not judge_model:
+        _log.error("No judge model configured for run %d — set eval.judge_model in settings", run_id)
+        _eng.update_eval_run(
+            db,
+            run_id,
+            status="failed",
+            error="No judge model configured — set eval.judge_model in settings",
+            completed_at=datetime.now(UTC).isoformat(),
+        )
+        return
     judge_temperature = float(_eng._get_eval_setting(db, "eval.judge_temperature", 0.1))
     data_source_token: str = _eng._get_eval_setting(db, "eval.data_source_token", "")
     same_cluster_targets: int = int(_eng._get_eval_setting(db, "eval.same_cluster_targets", 2))

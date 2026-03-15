@@ -89,7 +89,11 @@ export default function VariantRow({ variant }) {
     setCloneError(null);
     try {
       const res = await fetch(`${API}/eval/variants/${encodeURIComponent(id)}/clone`, { method: 'POST' });
-      if (!res.ok) throw new Error(`Clone failed: ${res.status}`);
+      if (!res.ok) {
+        let detail = `Clone failed: ${res.status}`;
+        try { const body = await res.json(); if (body.detail) detail = body.detail; } catch { /* non-JSON */ }
+        throw new Error(detail);
+      }
       await fetchEvalVariants();
     } catch (err) {
       setCloneError(err.message);
@@ -104,7 +108,11 @@ export default function VariantRow({ variant }) {
       'Deleting…',
       async () => {
         const res = await fetch(`${API}/eval/variants/${id}`, { method: 'DELETE' });
-        if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
+        if (!res.ok) {
+          let detail = `Delete failed: ${res.status}`;
+          try { const body = await res.json(); if (body.detail) detail = body.detail; } catch { /* non-JSON */ }
+          throw new Error(detail);
+        }
         await fetchEvalVariants();
       },
       `Variant deleted`

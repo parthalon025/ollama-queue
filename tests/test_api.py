@@ -911,6 +911,29 @@ def test_get_status_with_active_eval_run(client_and_db):
     assert data["active_eval"]["status"] == "generating"
 
 
+def test_get_status_active_eval_includes_gen_model(client_and_db):
+    """GET /api/status active_eval includes gen_model resolved from the variant."""
+    client, db = client_and_db
+    with db._lock:
+        conn = db._connect()
+        conn.execute(
+            "INSERT INTO eval_runs (id, data_source_url, variants, variant_id, status, judge_model) "
+            "VALUES (1, 'http://localhost', '[\"A\"]', 'A', 'generating', 'qwen2.5:7b')"
+        )
+        conn.commit()
+    resp = client.get("/api/status")
+    assert resp.status_code == 200
+    data = resp.json()
+    ae = data["active_eval"]
+    assert ae is not None
+    # gen_model resolved from eval_variants row A
+    assert ae.get("gen_model") is not None
+    assert ae["judge_model"] == "qwen2.5:7b"
+    # Internal fields should not leak to frontend
+    assert "variants" not in ae
+    assert "variant_id" not in ae
+
+
 def test_get_status_with_current_job(client_and_db):
     """GET /api/status includes current_job when daemon has a current_job_id."""
     client, db = client_and_db

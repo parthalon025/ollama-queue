@@ -36,7 +36,34 @@ test('dlq: count 0 → dim', () => {
 test('eval: active eval → phosphor stroke with run info', () => {
   const ns = nodeState('eval', { activeEval: { id: 7, status: 'judging' } });
   expect(ns.stroke).toContain('sh-phosphor');
-  expect(ns.sublabel).toContain('run #7');
+  expect(ns.sublabel).toContain('#7');
+});
+
+test('eval: active eval generating → shows gen_model in sublabel', () => {
+  const ns = nodeState('eval', { activeEval: { id: 49, status: 'generating', gen_model: 'qwen3.5:9b', judge_model: 'qwen3.5:9b' } });
+  expect(ns.sublabel).toContain('#49');
+  expect(ns.sublabel).toContain('generating');
+  expect(ns.sublabel).toContain('qwen3.5:9b');
+});
+
+test('eval: active eval judging → shows judge_model in sublabel', () => {
+  const ns = nodeState('eval', { activeEval: { id: 49, status: 'judging', gen_model: 'qwen2.5:7b', judge_model: 'qwen3.5:9b' } });
+  expect(ns.sublabel).toContain('#49');
+  expect(ns.sublabel).toContain('judging');
+  expect(ns.sublabel).toContain('qwen3.5:9b');
+  // Should NOT show gen_model when judging
+  expect(ns.sublabel).not.toContain('qwen2.5:7b');
+});
+
+test('eval: active eval without model data → falls back to status only', () => {
+  const ns = nodeState('eval', { activeEval: { id: 10, status: 'generating' } });
+  expect(ns.sublabel).toBe('run #10 · generating');
+});
+
+test('eval: idle → dim with default sublabel', () => {
+  const ns = nodeState('eval', {});
+  expect(ns.stroke).toContain('border');
+  expect(ns.opacity).toBe(0.6);
 });
 
 test('proxy: proxy in flight (current_job_id=-1) → amber stroke', () => {

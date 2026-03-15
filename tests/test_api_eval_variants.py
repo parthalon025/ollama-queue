@@ -85,7 +85,7 @@ def test_create_user_variant_appears_in_list(client):
         json={
             "label": "Test variant",
             "prompt_template_id": "fewshot",
-            "model": "deepseek-r1:8b",
+            "model": "qwen2.5:7b",
         },
     )
     resp = client.get("/api/eval/variants")
@@ -703,7 +703,7 @@ def test_update_variant_no_updatable_fields(client):
         json={
             "label": "Test",
             "prompt_template_id": "zero-shot-causal",
-            "model": "test",
+            "model": "qwen2.5:7b",
         },
     )
     var_id = create_resp.json()["id"]
@@ -719,7 +719,7 @@ def test_update_variant_validates_template(client):
         json={
             "label": "Test",
             "prompt_template_id": "zero-shot-causal",
-            "model": "test",
+            "model": "qwen2.5:7b",
         },
     )
     var_id = create_resp.json()["id"]
@@ -1117,3 +1117,81 @@ def test_update_variant_invalid_params_returns_400(client):
     var_id = create_resp.json()["id"]
     update_resp = client.put(f"/api/eval/variants/{var_id}", json={"params": {"badparam": 1}})
     assert update_resp.status_code == 400
+
+
+# --- Model validation tests ---
+
+
+def test_create_variant_rejects_missing_ollama_model(client):
+    """POST with provider=ollama and model not installed should return 422."""
+    from unittest.mock import patch
+
+    with patch(
+        "ollama_queue.api.eval_variants._installed_ollama_models",
+        return_value={"qwen2.5:7b", "llama3.2:3b"},
+    ):
+        resp = client.post(
+            "/api/eval/variants",
+            json={
+                "label": "Missing model",
+                "prompt_template_id": "zero-shot-causal",
+                "model": "nonexistent:9b",
+                "provider": "ollama",
+            },
+        )
+    assert resp.status_code == 422
+    assert "not installed" in resp.json()["detail"].lower()
+
+
+def test_create_variant_accepts_claude_model_without_ollama_check(client):
+    """POST with provider=claude should NOT check Ollama models."""
+    from unittest.mock import patch
+
+    with patch(
+        "ollama_queue.api.eval_variants._installed_ollama_models",
+        return_value=set(),
+    ):
+        resp = client.post(
+            "/api/eval/variants",
+            json={
+                "label": "Claude variant skip check",
+                "prompt_template_id": "zero-shot-causal",
+                "model": "claude-sonnet-4-6",
+                "provider": "claude",
+            },
+        )
+    assert resp.status_code == 201
+
+
+def test_update_variant_rejects_missing_ollama_model(client):
+    """PUT updating model to nonexistent Ollama model should return 422."""
+    from unittest.mock import patch
+
+    # Create a user variant first (no model validation mock needed for create
+    # since we'll mock only during the update)
+    with patch(
+        "ollama_queue.api.eval_variants._installed_ollama_models",
+        return_value={"qwen2.5:7b"},
+    ):
+        create_resp = client.post(
+            "/api/eval/variants",
+            json={
+                "label": "Update model test",
+                "prompt_template_id": "zero-shot-causal",
+                "model": "qwen2.5:7b",
+                "provider": "ollama",
+            },
+        )
+    assert create_resp.status_code == 201
+    var_id = create_resp.json()["id"]
+
+    with patch(
+        "ollama_queue.api.eval_variants._installed_ollama_models",
+        return_value={"qwen2.5:7b"},
+    ):
+        update_resp = client.put(
+            f"/api/eval/variants/{var_id}",
+            json={"model": "nonexistent:9b"},
+        )
+    assert update_resp.status_code == 422
+    assert "not installed" in update_resp.json()["detail"].lower()
