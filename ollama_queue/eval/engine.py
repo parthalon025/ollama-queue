@@ -724,7 +724,9 @@ def run_eval_session(
 
         # Resolve backend URLs: run-level override > setting > None (auto)
         def _resolve_backend(run_key: str, setting_key: str) -> str | None:
-            val = run.get(run_key) or db.get_setting(setting_key)
+            val = run.get(run_key)
+            if not val:
+                val = db.get_setting(setting_key)
             return val if val and val != "auto" else None
 
         gen_backend = _resolve_backend("gen_backend_url", "eval.generator_backend_url")

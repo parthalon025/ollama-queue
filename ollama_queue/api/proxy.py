@@ -240,6 +240,24 @@ async def _proxy_ollama_request(
     )
     db.start_job(job_id)
 
+    # Validate forced backend before entering the try/except block (HTTPException
+    # inherits from Exception, so the generic handler would swallow it).
+    if forced_backend and forced_backend != "auto":
+        registered = {b["url"] for b in _api.db.list_backends()}
+        if forced_backend not in registered:
+            db.complete_job(
+                job_id,
+                exit_code=1,
+                stdout_tail="",
+                stderr_tail=f"unregistered backend: {forced_backend}",
+                outcome_reason="unregistered_backend",
+            )
+            db.release_proxy_claim()
+            raise HTTPException(
+                status_code=422,
+                detail=f"Backend {forced_backend!r} is not registered. Registered: {sorted(registered)}",
+            )
+
     try:
         backend = forced_backend if forced_backend and forced_backend != "auto" else await select_backend(model)
         async with httpx.AsyncClient(timeout=httpx.Timeout(float(req_timeout))) as client:
@@ -364,6 +382,24 @@ async def proxy_generate(body: dict = Body(...)):
         resource_profile="ollama",
     )
     db.start_job(job_id)
+
+    # Validate forced backend before entering the try/except block (HTTPException
+    # inherits from Exception, so the generic handler would swallow it).
+    if forced_backend and forced_backend != "auto":
+        registered = {b["url"] for b in _api.db.list_backends()}
+        if forced_backend not in registered:
+            db.complete_job(
+                job_id,
+                exit_code=1,
+                stdout_tail="",
+                stderr_tail=f"unregistered backend: {forced_backend}",
+                outcome_reason="unregistered_backend",
+            )
+            db.release_proxy_claim()
+            raise HTTPException(
+                status_code=422,
+                detail=f"Backend {forced_backend!r} is not registered. Registered: {sorted(registered)}",
+            )
 
     # Guard the entire pre-StreamingResponse window against BaseException (including
     # CancelledError, which inherits from BaseException not Exception in Python 3.8+).

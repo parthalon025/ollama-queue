@@ -566,7 +566,10 @@ class TestProxyBackendExtraction:
 
         mock_client = self._mock_httpx_client({"response": "ok", "done": True})
 
-        with patch("httpx.AsyncClient", return_value=mock_client):
+        with (
+            patch("httpx.AsyncClient", return_value=mock_client),
+            patch("ollama_queue.api.proxy._api.db.list_backends", return_value=[{"url": "http://remote:11434"}]),
+        ):
             client.post(
                 "/api/generate",
                 json={
@@ -581,7 +584,7 @@ class TestProxyBackendExtraction:
         assert "_backend" not in forwarded_body
 
     def test_forced_backend_skips_select_backend(self, client):
-        """When _backend is a real URL, select_backend should not be called."""
+        """When _backend is a registered URL, select_backend should not be called."""
         from unittest.mock import AsyncMock, patch
 
         mock_client = self._mock_httpx_client({"response": "ok", "done": True})
@@ -590,6 +593,7 @@ class TestProxyBackendExtraction:
         with (
             patch("httpx.AsyncClient", return_value=mock_client),
             patch("ollama_queue.api.proxy.select_backend", mock_select),
+            patch("ollama_queue.api.proxy._api.db.list_backends", return_value=[{"url": "http://remote:11434"}]),
         ):
             resp = client.post(
                 "/api/generate",
@@ -606,6 +610,23 @@ class TestProxyBackendExtraction:
         call_args = mock_client.post.call_args
         posted_url = call_args.args[0] if call_args.args else call_args.kwargs.get("url", "")
         assert "remote:11434" in posted_url
+
+    def test_forced_backend_unregistered_returns_422(self, client):
+        """When _backend is not a registered backend, proxy returns 422."""
+        from unittest.mock import patch
+
+        with patch("ollama_queue.api.proxy._api.db.list_backends", return_value=[{"url": "http://127.0.0.1:11434"}]):
+            resp = client.post(
+                "/api/generate",
+                json={
+                    "model": "test-model",
+                    "prompt": "hello",
+                    "_backend": "http://evil-host:11434",
+                },
+            )
+
+        assert resp.status_code == 422
+        assert "not registered" in resp.json()["detail"]
 
     def test_auto_backend_calls_select_backend(self, client):
         """When _backend is 'auto', select_backend should be called normally."""
