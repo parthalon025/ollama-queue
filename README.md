@@ -39,7 +39,7 @@ Running multiple services against a local Ollama instance creates a resource con
 | **Stall detection** | Bayesian detection of jobs that started but stopped producing output. |
 | **Circuit breaker** | Isolates Ollama failures automatically; exponential backoff before retry; prevents cascading failures. |
 | **Burst detection** | Classifies traffic regime (burst / steady / trough) and adapts dequeue rate accordingly. |
-| **Ollama proxy** | Drop-in `/api/generate` and `/api/embed` proxy — point existing apps at `localhost:7683` and they queue automatically. Routes requests across multiple Ollama backends (`OLLAMA_BACKENDS` env var) and captures per-backend throughput metrics. Per-backend routing weights are live-configurable via `PUT /api/backends/{url}/weight` without restarting. |
+| **Ollama proxy** | Drop-in `/api/generate` and `/api/embed` proxy — point existing apps at `localhost:7683` and they queue automatically. Routes requests across multiple Ollama backends (`OLLAMA_BACKENDS` env var) and captures per-backend throughput metrics. Per-backend routing weights are live-configurable via `PUT /api/backends/{url}/weight`. Per-backend inference mode (`PUT /api/backends/{url}/inference-mode`) controls whether a backend may use CPU RAM overflow (`cpu_shared`) or must stay GPU-VRAM-only (`gpu_only`). |
 | **BitNet routing** | Models prefixed with `bitnet:` are forwarded directly to BitNet llama-server (`BITNET_URL`, default `http://127.0.0.1:11435`) via an independent semaphore lock — BitNet and Ollama run concurrently; BitNet requests serialize among themselves. |
 | **Consumer detection** | 4-phase scanner finds every service calling Ollama directly. Config patcher rewrites them to route through the queue. Optional iptables REDIRECT intercept catches unpatched callers at the network layer. |
 | **Eval pipeline** | Run A/B–E prompt variant evaluations with an LLM judge (F1/recall/precision). Auto-promote the winning config when quality gates pass. Thompson Sampling routes production traffic to the recommended variant. |
@@ -143,6 +143,18 @@ ollama-queue settings set ram_threshold_high 85
 The server exposes `/api/generate` and `/api/embed` as a drop-in Ollama proxy. Redirect your apps from `localhost:11434` to `localhost:7683` and they queue automatically — no other code changes required.
 
 **Multi-backend routing:** Set `OLLAMA_BACKENDS=http://host1:11434,http://host2:11434` to distribute requests across multiple Ollama instances. Weights are configurable live via `PUT /api/backends/{url}/weight`. Single-backend setups skip routing logic entirely.
+
+**Per-backend inference mode:** Control whether each backend may overflow model loading to CPU RAM:
+
+```bash
+# Restrict to GPU VRAM only — models that don't fit are routed elsewhere
+PUT /api/backends/http%3A%2F%2Fhost1%3A11434/inference-mode?mode=gpu_only
+
+# Allow CPU RAM overflow (default)
+PUT /api/backends/http%3A%2F%2Fhost1%3A11434/inference-mode?mode=cpu_shared
+```
+
+The router checks estimated model VRAM vs available GPU VRAM before routing to `gpu_only` backends. Toggle is also available in the Backends panel of the dashboard.
 
 **BitNet routing:** Models with a `bitnet:` prefix are forwarded to BitNet llama-server instead of Ollama. Set `BITNET_URL` (default: `http://127.0.0.1:11435`). BitNet and Ollama run concurrently — each has its own semaphore so they don't block each other.
 
@@ -259,13 +271,14 @@ The REST API runs at `http://localhost:7683/api/`. Key endpoint groups:
 | Group | Endpoints |
 |---|---|
 | **Queue** | `GET /api/queue`, `GET /api/history`, `POST /api/jobs/{id}/cancel` |
-| **Health** | `GET /api/health`, `GET /api/health/detail` |
+| **Health** | `GET /api/health` (full telemetry log), `GET /api/health/status` (lightweight liveness probe) |
 | **Schedule** | `GET/POST /api/schedule`, `DELETE /api/schedule/{id}`, `GET /api/schedule/load-map`, `POST /api/schedule/suggest` |
 | **DLQ** | `GET /api/dlq`, `POST /api/dlq/{id}/retry`, `DELETE /api/dlq`, `GET /api/dlq/schedule-preview`, `POST /api/dlq/{id}/reschedule` |
 | **Deferral** | `POST /api/defer/{job_id}`, `GET /api/deferred`, `POST /api/deferred/{id}/resume` |
 | **Metrics** | `GET /api/metrics/models`, `GET /api/metrics/performance-curve`, `GET /api/metrics/backends` |
 | **Settings** | `GET/PUT /api/settings` |
 | **Eval** | `GET/POST /api/eval/runs`, `POST /api/eval/runs/{id}/promote`, `GET/POST /api/eval/variants`, `GET /api/eval/trends`, `GET/PUT /api/eval/settings` |
+| **Backends** | `GET /api/backends`, `POST /api/backends`, `DELETE /api/backends/{url}`, `PUT /api/backends/{url}/weight`, `PUT /api/backends/{url}/inference-mode`, `GET /api/backends/{url}/test` |
 | **Consumers** | `POST /api/consumers/scan`, `POST /api/consumers/{id}/include`, `POST /api/consumers/intercept/enable` |
 | **Proxy** | `POST /api/generate`, `POST /api/embed` |
 
