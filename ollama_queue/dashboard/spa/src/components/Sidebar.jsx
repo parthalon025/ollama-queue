@@ -4,19 +4,9 @@ import { scheduledEvalCount } from '../stores/eval.js';
 import SystemHealthChip from './SystemHealthChip.jsx';
 import SystemSummaryLine from './SystemSummaryLine.jsx';
 import EvalWinnerChip from './EvalWinnerChip.jsx';
+import { TAB_CONFIG } from '../config/tabs.js';
 
 // NOTE: callback params use descriptive names (item, etc.) — never 'h' (shadows JSX factory)
-const NAV_ITEMS = [
-    { id: 'now',      icon: '●', label: 'Now',      tooltip: "Live view — what's running right now" },
-    { id: 'plan',     icon: '◫', label: 'Schedule', tooltip: 'Recurring jobs and upcoming run times' },
-    { id: 'history',  icon: '◷', label: 'History',  tooltip: 'Completed and failed jobs' },
-    { id: 'models',   icon: '⊞', label: 'Models',   tooltip: 'Installed AI models and downloads' },
-    { id: 'settings', icon: '⚙', label: 'Settings', tooltip: 'Configure queue thresholds and defaults' },
-    { id: 'eval',      icon: '⊡', label: 'Eval',      tooltip: 'Test and compare AI model configurations' },
-    { id: 'consumers', icon: '⇄', label: 'Consumers', tooltip: 'Detected Ollama consumers and routing' },
-    { id: 'performance', icon: '⊘', label: 'Perf', tooltip: 'Model performance stats and system health' },
-    { id: 'backends', icon: '⊟', label: 'Backends', tooltip: 'Multi-backend fleet management and routing intelligence' },
-];
 
 // What it shows: Sidebar navigation + aggregate system health chip at the top.
 // Decision it drives: User can navigate between tabs and see at a glance whether the
@@ -75,7 +65,7 @@ export default function Sidebar({ active, onNavigate, daemonState, dlqCount, the
 
             {/* Nav items */}
             <nav style="flex: 1; padding: 0.5rem 0; overflow-y: auto;">
-                {NAV_ITEMS.map(item => {
+                {TAB_CONFIG.map(item => {
                     const isActive = active === item.id;
                     const badge = item.id === 'history' && dlqCount > 0 ? dlqCount : null;
                     return (
@@ -102,7 +92,14 @@ export default function Sidebar({ active, onNavigate, daemonState, dlqCount, the
                                 whiteSpace: 'nowrap',
                             }}
                         >
-                            <span style="font-size: 1rem; flex-shrink: 0;">{item.icon}</span>
+                            <img
+                                src={item.icon}
+                                width={18}
+                                height={18}
+                                alt=""
+                                aria-hidden="true"
+                                style={{ imageRendering: 'pixelated', opacity: isActive ? 1.0 : 0.55, flexShrink: 0 }}
+                            />
                             <span class="sidebar-label">{item.label}</span>
                             {item.id === 'plan' && scheduledEvalCount.value > 0 && (
                                 <span class="nav-badge nav-badge--eval" title={`${scheduledEvalCount.value} eval run(s) in next 4h`}>EVAL</span>
