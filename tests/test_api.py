@@ -568,7 +568,7 @@ class TestProxyBackendExtraction:
 
         with (
             patch("httpx.AsyncClient", return_value=mock_client),
-            patch("ollama_queue.api.proxy._api.db.list_backends", return_value=[{"url": "http://remote:11434"}]),
+            patch("ollama_queue.api.proxy.BACKENDS", ["http://remote:11434"]),
         ):
             client.post(
                 "/api/generate",
@@ -593,7 +593,7 @@ class TestProxyBackendExtraction:
         with (
             patch("httpx.AsyncClient", return_value=mock_client),
             patch("ollama_queue.api.proxy.select_backend", mock_select),
-            patch("ollama_queue.api.proxy._api.db.list_backends", return_value=[{"url": "http://remote:11434"}]),
+            patch("ollama_queue.api.proxy.BACKENDS", ["http://remote:11434"]),
         ):
             resp = client.post(
                 "/api/generate",
@@ -615,7 +615,7 @@ class TestProxyBackendExtraction:
         """When _backend is not a registered backend, proxy returns 422."""
         from unittest.mock import patch
 
-        with patch("ollama_queue.api.proxy._api.db.list_backends", return_value=[{"url": "http://127.0.0.1:11434"}]):
+        with patch("ollama_queue.api.proxy.BACKENDS", ["http://127.0.0.1:11434"]):
             resp = client.post(
                 "/api/generate",
                 json={

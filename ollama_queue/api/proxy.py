@@ -16,7 +16,7 @@ from starlette.background import BackgroundTask
 from starlette.responses import StreamingResponse
 
 import ollama_queue.api as _api
-from ollama_queue.api.backend_router import select_backend
+from ollama_queue.api.backend_router import BACKENDS, select_backend
 from ollama_queue.models.client import OllamaModels
 
 _log = logging.getLogger(__name__)
@@ -243,7 +243,7 @@ async def _proxy_ollama_request(
     # Validate forced backend before entering the try/except block (HTTPException
     # inherits from Exception, so the generic handler would swallow it).
     if forced_backend and forced_backend != "auto":
-        registered = {b["url"] for b in _api.db.list_backends()}
+        registered = set(BACKENDS)
         if forced_backend not in registered:
             db.complete_job(
                 job_id,
@@ -386,7 +386,7 @@ async def proxy_generate(body: dict = Body(...)):
     # Validate forced backend before entering the try/except block (HTTPException
     # inherits from Exception, so the generic handler would swallow it).
     if forced_backend and forced_backend != "auto":
-        registered = {b["url"] for b in _api.db.list_backends()}
+        registered = set(BACKENDS)
         if forced_backend not in registered:
             db.complete_job(
                 job_id,
