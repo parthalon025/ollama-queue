@@ -706,3 +706,50 @@ class TestTimezoneAwareCron:
             dt = schedule._local_dt(1_700_000_000.0)
             assert dt.tzinfo is not None
             assert dt.tzinfo == datetime.UTC
+
+
+def test_promote_due_jobs_check_and_submit_atomic(tmp_path):
+    """has_pending_or_running_recurring and submit_job must execute under one db._lock.
+
+    Regression test for M4: without a shared lock, a concurrent API call can
+    submit a duplicate recurring job between the coalesce check and the submit,
+    causing two jobs for the same recurring job to run simultaneously.
+
+    We verify atomicity by checking that db._lock is held continuously across
+    both operations (no release between check and submit).
+    """
+    db = Database(str(tmp_path / "test.db"))
+    db.initialize()
+
+    rj_id = db.add_recurring_job(
+        name="test-job",
+        command="echo test",
+        interval_seconds=60,
+        model="",
+        priority=5,
+        timeout=60,
+        source="test",
+    )
+    # Set next_run to the past so the job is due
+    db._set_recurring_next_run(rj_id, time.time() - 10)
+
+    scheduler = Scheduler(db)
+
+    lock_held_during_submit = []
+    original_submit = db.submit_job
+
+    def tracking_submit(*args, **kwargs):
+        # Check if db._lock is currently held (owner is current thread)
+        # RLock._is_owned() is an internal method but available on CPython
+        lock_held_during_submit.append(db._lock._is_owned())
+        return original_submit(*args, **kwargs)
+
+    db.submit_job = tracking_submit
+
+    scheduler.promote_due_jobs()
+
+    assert lock_held_during_submit, "submit_job was never called"
+    assert all(lock_held_during_submit), (
+        "db._lock must be held when submit_job is called — "
+        "check and submit must be atomic to prevent duplicate job submissions"
+    )
