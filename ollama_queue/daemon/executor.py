@@ -411,7 +411,17 @@ class ExecutorMixin:
                     _log.warning("Job #%d proc.wait() timed out after drain — sending SIGKILL", job["id"])
                     with contextlib.suppress(ProcessLookupError):
                         proc.kill()
-                    proc.wait(timeout=5)  # reap zombie
+                    try:
+                        proc.wait(timeout=5)  # reap zombie
+                    except subprocess.TimeoutExpired:
+                        _log.warning(
+                            "Job #%d still alive after SIGKILL (D-state?) — closing pipes",
+                            job["id"],
+                        )
+                        with contextlib.suppress(Exception):
+                            proc.stdout.close()
+                        with contextlib.suppress(Exception):
+                            proc.stderr.close()
             else:
                 try:
                     out, err = proc.communicate(timeout=job["timeout"])

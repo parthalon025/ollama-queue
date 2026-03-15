@@ -3625,3 +3625,65 @@ def test_recover_orphans_no_null_pid_warning_for_valid_pid(db, caplog):
         d._recover_orphans()
 
     assert not any("has no PID" in r.message for r in caplog.records)
+
+
+def test_run_job_handles_timeout_expired_after_sigkill(db):
+    """proc.wait(timeout=5) after SIGKILL must be guarded against TimeoutExpired.
+
+    Regression test for H6: a D-state process ignores SIGKILL. proc.wait(5)
+    raises TimeoutExpired, which previously propagated unhandled, leaving stdout
+    and stderr pipes open indefinitely.
+    """
+    import subprocess
+
+    job_id = db.submit_job(
+        command="sleep 9999",
+        model="",
+        priority=5,
+        timeout=1,
+        source="test",
+        resource_profile="ollama",
+    )
+    db.start_job(job_id)
+    job = db.get_job(job_id)
+
+    # Mock Popen so we can control proc.wait behavior
+    mock_proc = MagicMock()
+    mock_proc.pid = 99999
+    mock_proc.returncode = -9
+    mock_proc.stdout = MagicMock()
+    mock_proc.stderr = MagicMock()
+
+    wait_call_count = [0]
+
+    def wait_side_effect(timeout=None):
+        wait_call_count[0] += 1
+        if wait_call_count[0] == 1:
+            # First call (timeout=30): raise TimeoutExpired to trigger SIGKILL path
+            raise subprocess.TimeoutExpired("sleep 9999", 30)
+        if wait_call_count[0] == 2:
+            # Second call (timeout=5 after SIGKILL): also raise (D-state)
+            raise subprocess.TimeoutExpired("sleep 9999", 5)
+        return 0
+
+    mock_proc.wait.side_effect = wait_side_effect
+    mock_proc.kill.return_value = None
+
+    daemon = Daemon(db)
+
+    with (
+        patch("subprocess.Popen", return_value=mock_proc),
+        patch("ollama_queue.daemon.executor._drain_pipes_with_tracking", return_value=(b"", b"")),
+    ):
+        # Must not raise — TimeoutExpired from proc.wait(5) must be caught
+        try:
+            daemon._run_job(job)
+        except subprocess.TimeoutExpired:
+            pytest.fail(
+                "TimeoutExpired from proc.wait(timeout=5) after SIGKILL must be caught, "
+                "not propagated. Pipes must be closed."
+            )
+
+    # After the fix: pipes must be explicitly closed on D-state timeout
+    mock_proc.stdout.close.assert_called_once()
+    mock_proc.stderr.close.assert_called_once()
