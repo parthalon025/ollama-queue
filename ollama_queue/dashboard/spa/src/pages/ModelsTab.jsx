@@ -7,6 +7,8 @@ import {
 } from '../stores';
 import { ModelBadge } from '../components/ModelBadge';
 import { ShPageBanner } from 'superhot-ui/preact';
+import { ShDataTable } from 'superhot-ui/preact';
+import { MODEL_COLUMNS } from '../config/modelColumns.js';
 import { TAB_CONFIG } from '../config/tabs.js';
 import { currentJob } from '../stores/index.js';
 import { evalVariants, evalActiveRun } from '../stores/eval.js';
@@ -266,6 +268,13 @@ export default function ModelsTab() {
                     </table>
                 </div>
             </section>
+
+            {/* Installed models — searchable, sortable view */}
+            <ShDataTable
+                label="Installed Models"
+                columns={MODEL_COLUMNS}
+                rows={models.value || []}
+            />
 
             {/* Download Panel */}
             <section>

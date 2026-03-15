@@ -13,6 +13,8 @@ import ActivityHeatmap from '../components/ActivityHeatmap.jsx';
 import HistoryList from '../components/HistoryList.jsx';
 import TimeChart from '../components/TimeChart.jsx';
 import { ShPageBanner } from 'superhot-ui/preact';
+import { ShDataTable } from 'superhot-ui/preact';
+import { HISTORY_COLUMNS } from '../config/historyColumns.js';
 import { TAB_CONFIG } from '../config/tabs.js';
 
 // NOTE: all .map() callbacks use descriptive names — never 'h' (shadows JSX factory)
@@ -226,6 +228,13 @@ export default function History() {
 
             {/* HistoryList renders its own t-frame wrapper internally */}
             <HistoryList jobs={hist} />
+
+            {/* Compact tabular job history — searchable and sortable via ShDataTable */}
+            <ShDataTable
+                label="Job History"
+                columns={HISTORY_COLUMNS}
+                rows={hist || []}
+            />
         </div>
     );
 }
