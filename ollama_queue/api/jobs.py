@@ -49,11 +49,25 @@ def get_status():
     with db._lock:
         conn = db._connect()
         row = conn.execute(
-            "SELECT id, status, judge_model FROM eval_runs"
+            "SELECT id, status, judge_model, variants, variant_id FROM eval_runs"
             " WHERE status IN ('generating', 'judging') ORDER BY id DESC LIMIT 1"
         ).fetchone()
         if row:
             active_eval = dict(row)
+            # Resolve gen_model from the variant so the topology diagram can show it.
+            # Same resolution logic as /api/eval/runs/{id}/progress.
+            _raw_variants = row["variants"] or ""
+            try:
+                _parsed = json.loads(_raw_variants)
+                _fallback_id = _parsed[0] if isinstance(_parsed, list) and _parsed else _raw_variants
+            except (ValueError, TypeError):
+                _fallback_id = _raw_variants.strip()
+            _variant_id = row["variant_id"] or _fallback_id
+            _variant_row = conn.execute("SELECT model FROM eval_variants WHERE id = ?", (_variant_id,)).fetchone()
+            active_eval["gen_model"] = _variant_row["model"] if _variant_row else None
+            # Remove internal fields not needed by the frontend
+            active_eval.pop("variants", None)
+            active_eval.pop("variant_id", None)
     return {"daemon": daemon, "queue": queue, "kpis": kpis, "current_job": current_job, "active_eval": active_eval}
 
 

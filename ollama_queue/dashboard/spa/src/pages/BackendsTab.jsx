@@ -338,6 +338,7 @@ export default function BackendsTab() {
           dlqCount={dlqCount.value ?? 0}
           activeEval={status.value?.active_eval ?? null}
           queueDepth={queue.value?.length ?? 0}
+          queueList={queue.value || []}
         />
       </div>
     </div>

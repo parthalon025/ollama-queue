@@ -1,10 +1,13 @@
+import { useState } from 'preact/hooks';
 import LiveIndicator from './LiveIndicator.jsx';
 
 // What it shows: The full ollama-queue system as a live directed-graph topology.
 //   Four columns: Inputs → Queue/Scheduler → Daemon/DLQ/Sensing → Router/Backends.
 //   Active paths animate with marching-ant arrows; nodes reflect live health state.
+//   Clicking a node expands a detail panel below the SVG (L2 progressive disclosure).
 // Decision it drives: At a glance — is the system healthy? Which GPU is active?
 //   Is the DLQ accumulating? Is sensing throttling the daemon? Are both GPUs busy?
+//   Click for operational details: models, VRAM, job info, failure reasons.
 
 // ── Colour tokens (CSS vars) ─────────────────────────────────────────────────
 const C = {
@@ -82,9 +85,15 @@ export function nodeState(name, {
       if (dlqCount > 0) return { stroke: C.AMBER, filter: 'url(#topo-glow-amber)', opacity: 1, sublabel: `${dlqCount} entries`, sublabelColor: C.AMBER, pulse: false };
       return { ...dim('dead letter'), opacity: 0.6 };
 
-    case 'eval':
-      if (activeEval) return glow(C.PHOSPHOR, 'url(#topo-glow-phosphor)', `run #${activeEval.id} · ${activeEval.status}`);
+    case 'eval': {
+      if (activeEval) {
+        const isJudging = activeEval.status === 'judging';
+        const model = isJudging ? activeEval.judge_model : activeEval.gen_model;
+        const label = model ? `#${activeEval.id} ${activeEval.status} · ${model}` : `run #${activeEval.id} · ${activeEval.status}`;
+        return glow(C.PHOSPHOR, 'url(#topo-glow-phosphor)', label);
+      }
       return { ...dim('A/B eval · judge'), opacity: 0.6 };
+    }
 
     case 'proxy':
       if (isProxy) return glow(C.AMBER, 'url(#topo-glow-amber)', '/generate · /embed');
@@ -306,7 +315,8 @@ function Edge({ id, es }) {
 
 // What it shows: A single topology node — rect + label + sublabel.
 // Decision it drives: Node colour/glow/opacity reflects live system state for that subsystem.
-function Node({ name, ns, tprops }) {
+//   Clicking a node toggles the L2 detail panel below the SVG.
+function Node({ name, ns, tprops, selected, onSelect }) {
   const n = NODES[name];
   const sub = ns.sublabel ?? n.sub;
   const subColor = ns.sublabelColor ?? 'var(--text-tertiary)';
@@ -340,7 +350,14 @@ function Node({ name, ns, tprops }) {
   }
 
   return (
-    <g class={cls}>
+    <g class={cls} style={{ cursor: 'pointer' }} onClick={() => onSelect(name)} role="button" tabIndex={0}>
+      {/* Selection highlight ring */}
+      {selected && (
+        <rect
+          x={n.x - 2} y={n.y - 2} width={NW + 4} height={NH + 4} rx="6"
+          fill="none" stroke={C.PHOSPHOR} stroke-width="1.5" stroke-dasharray="4 2" opacity="0.7"
+        />
+      )}
       <rect
         x={n.x} y={n.y} width={NW} height={NH} rx="4"
         fill="var(--bg-elevated)"
@@ -370,14 +387,209 @@ function Node({ name, ns, tprops }) {
   );
 }
 
+// ── Detail panel data builders (L2 progressive disclosure) ──────────────────
+// What it shows: Key-value pairs for the clicked topology node.
+// Decision it drives: Operational details — models, VRAM, job info, failure reasons.
+//   Data comes from existing props (no new API calls needed).
+
+// Helper: shorten a model name for compact display (e.g. "qwen2.5-coder:14b" → "qwen2.5-coder:14b")
+function _shortModel(model) { return model || '(none)'; }
+
+function _buildDetailRows(name, tprops) {
+  const { daemonStatus, currentJob, backends, dlqCount, activeEval, queueDepth } = tprops;
+  const rows = [];
+
+  switch (name) {
+    case 'eval': {
+      if (activeEval) {
+        rows.push(['Status', activeEval.status]);
+        rows.push(['Run', `#${activeEval.id}`]);
+        if (activeEval.gen_model) rows.push(['Gen model', _shortModel(activeEval.gen_model)]);
+        if (activeEval.judge_model) rows.push(['Judge model', _shortModel(activeEval.judge_model)]);
+      } else {
+        rows.push(['Status', 'idle']);
+        rows.push(['Info', 'No active eval run']);
+      }
+      break;
+    }
+
+    case 'daemon': {
+      const st = daemonStatus?.state ?? 'offline';
+      rows.push(['State', st]);
+      if (currentJob) {
+        rows.push(['Job', `#${currentJob.id}`]);
+        rows.push(['Model', _shortModel(currentJob.model)]);
+        rows.push(['Source', currentJob.source ?? '(unknown)']);
+        if (currentJob.started_at) {
+          const elapsed = Math.round(Date.now() / 1000 - currentJob.started_at);
+          rows.push(['Runtime', `${elapsed}s`]);
+        }
+      }
+      if (daemonStatus?.circuit_breaker_open) rows.push(['Circuit breaker', 'OPEN']);
+      break;
+    }
+
+    case 'queue': {
+      rows.push(['Pending', `${queueDepth} jobs`]);
+      const queueList = tprops._queueList || [];
+      if (queueList.length > 0) {
+        const top3 = queueList.slice(0, 3);
+        top3.forEach((job, idx) => {
+          rows.push([`#${idx + 1}`, `${_shortModel(job.model)} (p${job.priority ?? '?'})`]);
+        });
+        if (queueList.length > 3) rows.push(['...', `+${queueList.length - 3} more`]);
+      }
+      break;
+    }
+
+    case 'router': {
+      const backendList = backends || [];
+      rows.push(['Backends', `${backendList.length} configured`]);
+      rows.push(['Strategy', '5-tier weighted selection']);
+      backendList.forEach(bk => {
+        const host = (() => { try { return new URL(bk.url).hostname; } catch (_e) { return bk.url; } })();
+        rows.push([host, bk.healthy ? 'healthy' : 'unhealthy']);
+      });
+      break;
+    }
+
+    case 'gtx1650':
+    case 'rtx5080': {
+      const isLocal = name === 'gtx1650';
+      const bk = (backends || []).find(b => {
+        try {
+          const host = new URL(b.url).hostname;
+          return isLocal ? (host === '127.0.0.1' || host === 'localhost') : (host !== '127.0.0.1' && host !== 'localhost');
+        } catch (_e) { return false; }
+      });
+      if (bk) {
+        rows.push(['Health', bk.healthy ? 'healthy' : 'UNHEALTHY']);
+        rows.push(['VRAM', `${bk.vram_pct ?? 0}%`]);
+        if (bk.gpu_name) rows.push(['GPU', bk.gpu_name]);
+        const models = bk.loaded_models || [];
+        rows.push(['Loaded', models.length > 0 ? models.join(', ') : '(none)']);
+        if (bk.last_checked) {
+          const ago = Math.round(Date.now() / 1000 - bk.last_checked);
+          rows.push(['Last check', `${ago}s ago`]);
+        }
+      } else {
+        rows.push(['Status', 'No backend data']);
+      }
+      break;
+    }
+
+    case 'dlq': {
+      rows.push(['Entries', `${dlqCount}`]);
+      if (dlqCount === 0) {
+        rows.push(['Info', 'Dead letter queue is empty']);
+      } else {
+        rows.push(['Info', 'Failed jobs awaiting review or retry']);
+      }
+      break;
+    }
+
+    case 'sensing': {
+      const st = daemonStatus?.state ?? 'offline';
+      const isPaused = st.startsWith('paused');
+      rows.push(['Status', isPaused ? `PAUSED (${st})` : 'monitoring']);
+      rows.push(['Monitors', 'RAM, VRAM, CPU load, swap, ollama-ps']);
+      rows.push(['Mode', 'hysteresis (pause high, resume low)']);
+      break;
+    }
+
+    case 'recurring':
+    case 'cli':
+    case 'intercept': {
+      const burst = daemonStatus?.burst_regime ?? 'unknown';
+      rows.push(['Burst regime', burst]);
+      if (name === 'recurring') rows.push(['Type', 'Scheduled recurring jobs']);
+      if (name === 'cli') rows.push(['Type', 'CLI / API submissions']);
+      if (name === 'intercept') rows.push(['Type', 'iptables consumer intercept']);
+      break;
+    }
+
+    case 'proxy': {
+      const isProxy = daemonStatus?.current_job_id === -1;
+      rows.push(['Status', isProxy ? 'proxy in flight' : 'idle']);
+      rows.push(['Endpoints', '/api/generate, /api/embed']);
+      rows.push(['Priority', 'Bypasses queue (direct to router)']);
+      break;
+    }
+
+    case 'scheduler': {
+      rows.push(['Role', 'Recurring job promotion + DLQ retry + deferral']);
+      rows.push(['Trigger', 'Daemon poll cycle (every 5s)']);
+      break;
+    }
+
+    default:
+      rows.push(['Node', NODES[name]?.label ?? name]);
+  }
+
+  return rows;
+}
+
+// What it shows: A compact card below the SVG with key-value details for the selected node.
+// Decision it drives: L2 operational detail — answers "what exactly is this node doing right now?"
+function DetailPanel({ name, tprops, onClose }) {
+  const node = NODES[name];
+  const rows = _buildDetailRows(name, tprops);
+
+  return (
+    <div
+      class="data-mono"
+      style={{
+        marginTop: '0.5rem',
+        padding: '0.75rem 1rem',
+        background: 'var(--bg-elevated)',
+        border: '1px solid var(--border)',
+        borderRadius: '6px',
+        fontSize: 'var(--type-body, 13px)',
+        lineHeight: '1.6',
+        position: 'relative',
+      }}
+      aria-label={`Detail panel for ${node?.label ?? name}`}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+        <span style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: 'var(--type-label, 12px)', letterSpacing: '0.05em' }}>
+          {(node?.label ?? name).toUpperCase()}
+        </span>
+        <button
+          onClick={onClose}
+          style={{
+            background: 'none', border: 'none', color: 'var(--text-tertiary)',
+            cursor: 'pointer', fontSize: '16px', lineHeight: 1, padding: '2px 6px',
+          }}
+          aria-label="Close detail panel"
+        >x</button>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '0.15rem 1rem' }}>
+        {rows.map(([key, val], idx) => (
+          <div key={idx} style={{ display: 'contents' }}>
+            <span style={{ color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>{key}</span>
+            <span style={{ color: 'var(--text-secondary)', wordBreak: 'break-all' }}>{val}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Main component ──────────────────────────────────────────────────────────────
 // What it shows: Section header (live indicator dot + "SYSTEM TOPOLOGY" label + optional burst
-//   regime badge) above the full directed-graph SVG.
+//   regime badge) above the full directed-graph SVG. Clicking a node opens an L2 detail panel.
 // Decision it drives: At a glance — is the system live? Is a burst regime active?
-export default function TopologyDiagram({ daemonStatus, currentJob, backends, dlqCount, activeEval, queueDepth }) {
-  const tprops = { daemonStatus, currentJob, backends: backends || [], dlqCount: dlqCount || 0, activeEval, queueDepth: queueDepth || 0 };
+//   Click a node for operational details (models, health, job info).
+export default function TopologyDiagram({ daemonStatus, currentJob, backends, dlqCount, activeEval, queueDepth, queueList }) {
+  const [expandedNode, setExpandedNode] = useState(null);
+  const tprops = {
+    daemonStatus, currentJob, backends: backends || [], dlqCount: dlqCount || 0,
+    activeEval, queueDepth: queueDepth || 0, _queueList: queueList || [],
+  };
   const burst = daemonStatus?.burst_regime;
   const burstActive = burst && burst !== 'calm' && burst !== 'unknown';
+
+  const handleNodeSelect = (name) => setExpandedNode(prev => prev === name ? null : name);
 
   return (
     <>
@@ -411,11 +623,26 @@ export default function TopologyDiagram({ daemonStatus, currentJob, backends, dl
           {Object.keys(EDGE_PATHS).map(id => (
             <Edge key={id} id={id} es={edgeState(id, tprops)} />
           ))}
-          {Object.keys(NODES).map(name => (
-            <Node key={name} name={name} ns={nodeState(name, tprops)} tprops={tprops} />
+          {Object.keys(NODES).map(nodeName => (
+            <Node
+              key={nodeName}
+              name={nodeName}
+              ns={nodeState(nodeName, tprops)}
+              tprops={tprops}
+              selected={expandedNode === nodeName}
+              onSelect={handleNodeSelect}
+            />
           ))}
         </svg>
       </div>
+      {/* L2 detail panel — rendered outside SVG as HTML for accessibility and rich content */}
+      {expandedNode && (
+        <DetailPanel
+          name={expandedNode}
+          tprops={tprops}
+          onClose={() => setExpandedNode(null)}
+        />
+      )}
     </>
   );
 }
