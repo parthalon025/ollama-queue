@@ -1,6 +1,14 @@
 import { API, evalActiveRun, cancelEvalRun, startEvalPoll } from '../../stores';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
-import EvalPipelineSwimline from './EvalPipelineSwimline.jsx';
+import { ShPipeline } from 'superhot-ui/preact';
+
+const PIPELINE_STAGES = [
+    { id: 'queued',     label: 'Waiting' },
+    { id: 'generating', label: 'Writing' },
+    { id: 'judging',    label: 'Scoring' },
+    { id: 'done',       label: 'Done' },
+];
+const PIPELINE_ORDER = ['queued', 'generating', 'judging', 'done'];
 // What it shows: Live progress of the currently-running eval run, including
 //   stage (Writing/Scoring), overall % complete, per-variant progress bars,
 //   ETA, failure rate, and circuit breaker banner if the run is paused.
@@ -124,16 +132,36 @@ export default function ActiveRunProgress() {
       )}
 
       {/* Pipeline swimlane: shows all stages, active step, model, per-phase progress */}
-      <EvalPipelineSwimline
-        stage={stage}
-        status={status}
-        generated={activeRun.generated ?? 0}
-        judged={activeRun.judged ?? 0}
-        total={total}
-        pct={pct}
-        gen_model={activeRun.gen_model}
-        judge_model={activeRun.judge_model}
-      />
+      {(() => {
+          const _activeRun = evalActiveRun.value;
+          const _pipelineNodes = PIPELINE_STAGES.map(stg => {
+              let nodeStatus = 'pending';
+              if (_activeRun) {
+                  const currStatus = _activeRun.status === 'completed' ? 'done'
+                      : _activeRun.stage === 'judging' ? 'judging'
+                      : _activeRun.stage === 'generating' ? 'generating'
+                      : 'queued';
+                  const currIdx = PIPELINE_ORDER.indexOf(currStatus);
+                  const nodeIdx = PIPELINE_ORDER.indexOf(stg.id);
+                  nodeStatus = nodeIdx < currIdx ? 'done'
+                      : nodeIdx === currIdx ? 'active'
+                      : 'pending';
+              }
+              return { id: stg.id, label: stg.label, status: nodeStatus };
+          });
+          const _pipelineEdges = PIPELINE_ORDER.slice(0, -1).map((fromId, i) => ({
+              from: fromId,
+              to: PIPELINE_ORDER[i + 1],
+          }));
+          return (
+              <ShPipeline
+                  nodes={_pipelineNodes}
+                  edges={_pipelineEdges}
+                  ariaLabel="Eval pipeline progress"
+                  compact={true}
+              />
+          );
+      })()}
       {etaLabel && (
         <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', marginBottom: '0.5rem', textAlign: 'right' }}>
           {etaLabel}
