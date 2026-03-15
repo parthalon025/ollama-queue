@@ -722,12 +722,23 @@ def run_eval_session(
                 )
                 return
 
-        run_eval_generate(run_id, db, http_base)
+        # Resolve backend URLs: run-level override > setting > None (auto)
+        def _resolve_backend(run_key: str, setting_key: str) -> str | None:
+            val = run.get(run_key) or db.get_setting(setting_key)
+            return val if val and val != "auto" else None
+
+        gen_backend = _resolve_backend("gen_backend_url", "eval.generator_backend_url")
+        judge_backend = _resolve_backend("judge_backend_url", "eval.judge_backend_url")
+
+        # Persist resolved backends on the run row for observability
+        update_eval_run(db, run_id, gen_backend_url=gen_backend, judge_backend_url=judge_backend)
+
+        run_eval_generate(run_id, db, http_base, backend=gen_backend)
         # Check if generate phase failed
         run = get_eval_run(db, run_id)
         if run is None or run.get("status") in ("failed", "cancelled"):
             return
-        run_eval_judge(run_id, db, http_base)
+        run_eval_judge(run_id, db, http_base, backend=judge_backend)
         # Generate Ollama analysis after judging (non-blocking for run status —
         # failures here are logged but never change the completed run record)
         run = get_eval_run(db, run_id)

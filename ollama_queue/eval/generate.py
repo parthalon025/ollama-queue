@@ -262,6 +262,7 @@ def _self_critique(
     source: str,
     extra_params: dict | None = None,
     system_prompt: str | None = None,
+    backend: str | None = None,
 ) -> str:
     """Run self-critique pass. Returns refined principle or original."""
     if not diff_cluster_items:
@@ -279,6 +280,7 @@ def _self_critique(
         priority=2,
         extra_params=extra_params,
         system_prompt=system_prompt,
+        backend=backend,
     )
 
     if refined and len(refined.strip()) > 10:
@@ -301,6 +303,7 @@ def _generate_one(
     source_item: dict,
     items_by_cluster: dict[str, list[dict]],
     http_base: str,
+    backend: str | None = None,
 ) -> bool:
     """Generate a principle for one (variant, source_item) pair. Returns True on success."""
     is_chunked = bool(template.get("is_chunked"))
@@ -335,6 +338,7 @@ def _generate_one(
         priority=2,
         extra_params=_extra_params or None,
         system_prompt=_system_prompt,
+        backend=backend,
     )
     generation_time_s = round(time.monotonic() - t0, 1)
 
@@ -351,6 +355,7 @@ def _generate_one(
             source=f"eval-run-{run_id}-critique",
             extra_params=_extra_params or None,
             system_prompt=_system_prompt,
+            backend=backend,
         )
 
     # Clean CoT artifacts before storing
@@ -379,6 +384,7 @@ def run_eval_generate(  # noqa: PLR0911
     db: Database,
     http_base: str = "http://127.0.0.1:7683",
     _sleep: Any = None,
+    backend: str | None = None,
 ) -> None:
     """Main generation loop. Supports batch, opportunistic, fill-open-slots, and scheduled modes.
 
@@ -558,6 +564,7 @@ def run_eval_generate(  # noqa: PLR0911
                     source_item=source_item,
                     items_by_cluster=items_by_cluster,
                     http_base=http_base,
+                    backend=backend,
                 )
             except _eng._ProxyDownError as exc:
                 # Proxy is unreachable — service is restarting. Abort cleanly.
