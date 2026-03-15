@@ -42,6 +42,9 @@ client_secret*.json
 # Embeddings
 .embeddings/
 
+# Local DB (runtime state — canonical path is ~/.local/share/ollama-queue/)
+ollama_queue.db
+
 # Autonomous Coding Toolkit (runtime state)
 tasks/
 logs/
