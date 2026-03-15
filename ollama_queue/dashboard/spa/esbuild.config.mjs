@@ -28,7 +28,7 @@ const config = {
   jsxFactory: 'h',
   jsxFragment: 'Fragment',
   inject: ['./src/preact-shim.js'],
-  loader: { '.jsx': 'jsx' },
+  loader: { '.jsx': 'jsx', '.png': 'dataurl' },
   minify: !isWatch,
   sourcemap: isWatch,
   logLevel: 'info',

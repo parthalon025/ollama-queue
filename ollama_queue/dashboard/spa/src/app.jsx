@@ -34,6 +34,7 @@ import SubmitJobModal from './components/SubmitJobModal.jsx';
 import OnboardingOverlay from './components/OnboardingOverlay.jsx';
 import ShToastContainer from './components/ShToastContainer.jsx';
 import { ShCommandPalette } from 'superhot-ui/preact';
+import { TAB_CONFIG } from './config/tabs.js';
 import Now from './pages/Now.jsx';
 import Plan from './pages/Plan';
 import History from './pages/History.jsx';
@@ -93,7 +94,7 @@ function EvalActivityBanner({ activeEval, onNavigate }) {
 }
 
 // Tab list — tabs must be named with descriptive keys (not 'h', never 'tab' alone)
-const ALL_TABS = ['now', 'plan', 'history', 'models', 'settings', 'eval', 'consumers', 'performance', 'backends'];
+const ALL_TABS = TAB_CONFIG.map(t => t.id);
 
 export function App() {
     // Component-scoped signal — controls the app-wide SubmitJobModal.
@@ -207,13 +208,13 @@ export function App() {
     const paletteItems = [
         { id: 'action-submit', icon: '●', label: 'Submit job', group: 'Actions', action: handleSubmitRequest },
         { id: 'action-eval', icon: '⊡', label: 'Trigger eval run', group: 'Actions', action: () => handleNavigate('eval') },
-        ...ALL_TABS.map((tabId, i) => ({
-            id: `nav-${tabId}`,
-            icon: ['●','◫','◷','⊞','⚙','⊡','⇄','⊘','⊟'][i] || '→',
-            label: `Go to ${tabId.charAt(0).toUpperCase() + tabId.slice(1)}`,
+        ...TAB_CONFIG.map((tab, i) => ({
+            id: `nav-${tab.id}`,
+            icon: tab.icon,
+            label: `Go to ${tab.label}`,
             group: 'Navigate',
             shortcut: `${i + 1}`,
-            action: () => handleNavigate(tabId),
+            action: () => handleNavigate(tab.id),
         })),
     ];
 

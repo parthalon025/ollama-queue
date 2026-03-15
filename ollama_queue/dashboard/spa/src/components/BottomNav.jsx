@@ -1,19 +1,9 @@
 import { Fragment } from 'preact';
 import { useRef } from 'preact/hooks';
 import { scheduledEvalCount } from '../stores/eval.js';
+import { TAB_CONFIG } from '../config/tabs.js';
 
 // NOTE: callback params use descriptive names — never 'h'
-const NAV_ITEMS = [
-    { id: 'now',      icon: '●', label: 'Now',      tooltip: "Live view — what's running right now" },
-    { id: 'plan',     icon: '◫', label: 'Schedule', tooltip: 'Recurring jobs and upcoming run times' },
-    { id: 'history',  icon: '◷', label: 'History',  tooltip: 'Completed and failed jobs' },
-    { id: 'models',   icon: '⊞', label: 'Models',   tooltip: 'Installed AI models and downloads' },
-    { id: 'settings', icon: '⚙', label: 'Settings', tooltip: 'Configure queue thresholds and defaults' },
-    { id: 'eval',      icon: '⊡', label: 'Eval',      tooltip: 'Test and compare AI model configurations' },
-    { id: 'consumers', icon: '⇄', label: 'Consumers', tooltip: 'Detected Ollama consumers and routing' },
-    { id: 'performance', icon: '⊘', label: 'Perf', tooltip: 'Model performance stats and system health' },
-    { id: 'backends', icon: '⊟', label: 'Backends', tooltip: 'Multi-backend fleet management and routing intelligence' },
-];
 
 // What it shows: Mobile bottom tab bar for navigating between views, plus a floating action
 //   button (FAB) above the bar when onSubmitRequest is wired in.
@@ -57,7 +47,7 @@ export default function BottomNav({ active, onNavigate, dlqCount, onSubmitReques
                 zIndex: 50,
             }}
         >
-            {NAV_ITEMS.map(item => {
+            {TAB_CONFIG.map(item => {
                 const isActive = active === item.id;
                 const showBadge = item.id === 'now' && issueCount > 0;
                 return (
@@ -80,7 +70,14 @@ export default function BottomNav({ active, onNavigate, dlqCount, onSubmitReques
                             position: 'relative',
                         }}
                     >
-                        <span style="font-size: 1.1rem;">{item.icon}</span>
+                        <img
+                            src={item.icon}
+                            width={18}
+                            height={18}
+                            alt=""
+                            aria-hidden="true"
+                            style={{ imageRendering: 'pixelated', opacity: isActive ? 1.0 : 0.55 }}
+                        />
                         <span>{item.label}</span>
                         {item.id === 'plan' && scheduledEvalCount.value > 0 && (
                             <span class="nav-badge nav-badge--eval" title={`${scheduledEvalCount.value} eval run(s) in next 4h`}>EVAL</span>
