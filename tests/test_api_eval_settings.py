@@ -731,3 +731,15 @@ def test_unknown_backend_rejected_422(client):
     detail = resp.json()["detail"]
     detail_text = " ".join(str(e) for e in detail) if isinstance(detail, list) else str(detail)
     assert "not registered" in detail_text.lower() or "registered backends" in detail_text.lower()
+
+
+def test_backend_url_validation_works_with_bare_key(client):
+    """PUT with bare key (no eval. prefix) also validates backend URL."""
+    resp = client.put(
+        "/api/eval/settings",
+        json={"generator_backend_url": "http://unknown-host:11434"},
+    )
+    assert resp.status_code == 422
+    detail = resp.json()["detail"]
+    detail_text = " ".join(str(e) for e in detail) if isinstance(detail, list) else str(detail)
+    assert "not registered" in detail_text.lower()

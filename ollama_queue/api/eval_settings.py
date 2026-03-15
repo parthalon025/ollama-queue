@@ -263,9 +263,10 @@ def put_eval_settings(body: dict = Body(...)):
                 )
 
     # Validate backend URL references point to registered backends
-    for key in _BACKEND_URL_KEYS & set(body.keys()):
-        val = body[key]
-        if val and val != "auto":
+    # Body keys may be "eval.generator_backend_url" or "generator_backend_url" — normalize
+    for key, val in body.items():
+        full_key = key if key.startswith("eval.") else f"eval.{key}"
+        if full_key in _BACKEND_URL_KEYS and val and val != "auto":
             registered = {b["url"] for b in db.list_backends()}
             if val not in registered:
                 validation_errors.append(
