@@ -44,7 +44,7 @@ Running multiple services against a local Ollama instance creates a resource con
 | **Consumer detection** | 4-phase scanner finds every service calling Ollama directly. Config patcher rewrites them to route through the queue. Optional iptables REDIRECT intercept catches unpatched callers at the network layer. |
 | **Eval pipeline** | Run A/B–E prompt variant evaluations with an LLM judge (F1/recall/precision). Auto-promote the winning config when quality gates pass. Thompson Sampling routes production traffic to the recommended variant. |
 | **Intelligence layer** | Bayesian log-normal runtime estimation (4-tier hierarchy), log-linear cross-model performance curves, 10-factor slot scoring with VRAM hard gates, hourly/daily load pattern learning. |
-| **Web dashboard** | 9-view Preact SPA: Now, Plan, History, Models, Performance, Backends, Settings, Eval, Consumers. SUPERHOT terminal aesthetic — CRT page banners, VT323 pixel font, glitch/shatter effects on state transitions, ThreatPulse gauges with three-state ambient animation, KPI degradation glitch on warning transitions. |
+| **Web dashboard** | 9-view Preact SPA: Now, Plan, History, Models, Performance, Backends, Settings, Eval, Consumers. SUPERHOT terminal aesthetic — CRT page banners (ShPageBanner, TAB_CONFIG-driven), VT323 pixel font, glitch/shatter effects on state transitions, ThreatPulse gauges with three-state ambient animation, KPI degradation glitch on warning transitions. ShStatsGrid KPI section on Now tab; ShCollapsible tag groups on Plan; ShDataTable on History and Models; ShTimeChart RAM trend on Performance; ShPipeline on Eval. |
 | **Accessible, science-backed UI** | Non-color priority discriminators (Treisman multi-channel encoding), progressive disclosure on queue row hover (Shneiderman), sparklines on every KPI card (Tufte), semantic `data-chroma` tokens, three-tier animation system with `prefers-reduced-motion` opt-in, `@starting-style` tab entrance animations. |
 | **REST API** | 90+ endpoints covering all features. |
 
@@ -240,14 +240,14 @@ Nine views served from `http://localhost:7683/ui/`:
 
 | View | Description |
 |---|---|
-| **Now** | Running job, queue, ThreatPulse resource gauges (RAM/VRAM with three-state ambient animation — normal/warning/critical), KPI cards with sparkline trends and chroma-coded severity, KPI degradation glitch on warning transitions, burst regime badge, alert strip |
-| **Plan** | 24h Gantt timeline with "now" needle, 48-bucket load-map strip with DLQ/deferral slot markers, traffic intensity badge, "Suggest slot" button, tag-grouped recurring jobs |
-| **History** | Job history, DLQ entries with reschedule status badges and reasoning, deferred jobs panel, duration trends, activity heatmap |
-| **Models** | Model table with active model tracking |
-| **Perf** | Per-model performance table, cross-model performance curve chart (SVG scatter, log-scale), 24h×7d load heatmap, system health gauges, per-backend throughput table showing tok/min per GPU |
+| **Now** | Running job, queue, ThreatPulse resource gauges (RAM/VRAM with three-state ambient animation — normal/warning/critical), ShStatsGrid KPI section (daemon state, queue depth, 24h jobs, RAM/VRAM), KPI cards with sparkline trends and chroma-coded severity, KPI degradation glitch on warning transitions, burst regime badge, alert strip |
+| **Plan** | 24h Gantt timeline with "now" needle, 48-bucket load-map strip with DLQ/deferral slot markers, traffic intensity badge, "Suggest slot" button, tag-grouped recurring jobs in ShCollapsible sections (defaultOpen=true, job count in summary) |
+| **History** | ShDataTable for searchable/sortable job history, DLQ entries with reschedule status badges and reasoning, deferred jobs panel, duration trends, activity heatmap |
+| **Models** | ShDataTable for searchable/sortable model list with active model tracking |
+| **Perf** | Per-model performance table, cross-model performance curve chart (SVG scatter, log-scale), 24h×7d load heatmap, system health gauges, ShTimeChart showing RAM % trend (last 24h from health log), per-backend throughput table showing tok/min per GPU |
 | **Backends** | Full fleet overview of all configured Ollama backends — health, throughput, routing weights, add/remove/test controls |
 | **Settings** | Thresholds, defaults, retention, DLQ auto-reschedule, proactive deferral, daemon controls (14+ tunable parameters), CRT scanline display preference (off/low/medium/high) |
-| **Eval** | Runs, Variants, Trends, Settings sub-views for the prompt eval pipeline |
+| **Eval** | Runs, Variants, Trends, Settings sub-views for the prompt eval pipeline; active run progress via ShPipeline |
 | **Consumers** | Scan results, consumer cards with status badges, include/ignore/revert actions, intercept toggle |
 
 ---
