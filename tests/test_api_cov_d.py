@@ -864,52 +864,48 @@ def test_intercept_status(client_and_db):
 def test_spa_static_serves_file(tmp_path):
     """GET /ui/{path} serves files from the SPA dist directory.
 
-    Creates a real dist directory so create_app registers the SPA routes,
-    then tests file serving, index fallback, and the null-byte guard.
+    Uses an isolated dist directory in tmp_path (never writes to the real package
+    tree) so this test is safe under pytest-xdist — no shared filesystem state with
+    other parallel workers that may shutil.rmtree the same directory.
+
+    app.py computes: spa_dir = Path(__file__).parent / "dashboard" / "spa" / "dist"
+    Patching app_mod.__file__ to a fake path inside tmp_path makes create_app()
+    resolve spa_dir to our isolated directory.
     """
+    from unittest.mock import patch
+
     import ollama_queue.app as app_mod
 
-    # Create the dist directory at the path create_app expects (app.py is in ollama_queue/)
-    real_spa_dir = Path(app_mod.__file__).parent / "dashboard" / "spa" / "dist"
-    created = False
-    if not real_spa_dir.exists():
-        real_spa_dir.mkdir(parents=True, exist_ok=True)
-        created = True
+    # Build isolated package tree in tmp_path:
+    #   fake __file__ = tmp_path/ollama_queue/app.py
+    #   → Path(__file__).parent = tmp_path/ollama_queue
+    #   → spa_dir = tmp_path/ollama_queue/dashboard/spa/dist
+    fake_dist = tmp_path / "ollama_queue" / "dashboard" / "spa" / "dist"
+    fake_dist.mkdir(parents=True)
+    (fake_dist / "index.html").write_text("<html>test</html>")
+    (fake_dist / "app.js").write_text("console.log('test');")
 
-    try:
-        # Write test files
-        index = real_spa_dir / "index.html"
-        index.write_text("<html>test</html>")
-        js_file = real_spa_dir / "app.js"
-        js_file.write_text("console.log('test');")
+    fake_app_file = str(tmp_path / "ollama_queue" / "app.py")
 
-        db = Database(str(tmp_path / "test.db"))
-        db.initialize()
+    db = Database(str(tmp_path / "test.db"))
+    db.initialize()
+
+    with patch.object(app_mod, "__file__", fake_app_file):
         app = create_app(db)
-        client = TestClient(app)
 
-        # Test serving an existing file (line 2740)
-        resp = client.get("/ui/app.js")
-        assert resp.status_code == 200
+    client = TestClient(app)
 
-        # Test fallback to index.html for unknown paths (lines 2742-2745)
-        resp = client.get("/ui/nonexistent/route")
-        assert resp.status_code == 200
+    # Test serving an existing file (line 2740)
+    resp = client.get("/ui/app.js")
+    assert resp.status_code == 200
 
-        # Test empty path (line 2738: path is empty string)
-        resp = client.get("/ui/")
-        assert resp.status_code == 200
+    # Test fallback to index.html for unknown paths (lines 2742-2745)
+    resp = client.get("/ui/nonexistent/route")
+    assert resp.status_code == 200
 
-    finally:
-        # Clean up created files
-        for f in (real_spa_dir / "app.js", real_spa_dir / "index.html"):
-            if f.exists():
-                f.unlink()
-        if created and real_spa_dir.exists():
-            # Only remove if we created it; remove dirs up to dashboard level
-            import shutil
-
-            shutil.rmtree(real_spa_dir, ignore_errors=True)
+    # Test empty path (line 2738: path is empty string)
+    resp = client.get("/ui/")
+    assert resp.status_code == 200
 
 
 def test_spa_static_null_byte_guard(tmp_path):
