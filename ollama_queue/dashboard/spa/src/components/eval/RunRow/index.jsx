@@ -6,7 +6,7 @@ import { API, evalActiveRun, evalSubTab, evalVariants, fetchEvalRuns, fetchEvalV
 import { useActionFeedback } from '../../../hooks/useActionFeedback.js';
 import StatusDot from './StatusDot.jsx';
 import ModelChip from '../../ModelChip.jsx';
-import { formatDate, fmtPct, simpleRenderMd } from './helpers.js';
+import { formatDate, fmtPct, simpleRenderMd, resolveGenModel } from './helpers.js';
 
 // What it shows: A single eval run row with 3-level progressive disclosure.
 //   L1: status dot, winner config, quality score, date, item count.
@@ -179,6 +179,17 @@ export default function RunRow({ run }) {
               {winnerQualityLabel}: {fmtPct(winnerQuality)}
             </span>
           )}
+          {/* Active model — shows which model is working when run is in progress */}
+          {(status === 'generating' || status === 'judging') && (() => {
+            const activeModel = status === 'judging'
+              ? judge_model
+              : resolveGenModel(run, evalVariants.value);
+            return activeModel ? (
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)' }}>
+                {status === 'judging' ? 'scoring' : 'generating'} with {activeModel}
+              </span>
+            ) : null;
+          })()}
           {started_at && (
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)' }}>
               {formatDate(started_at)}

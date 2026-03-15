@@ -26,6 +26,34 @@ export function fmtPct(val) {
   return `${Math.round(val * 100)}%`;
 }
 
+// What it does: Resolves the generator model name for a run by cross-referencing
+//   the run's variant list against the loaded evalVariants signal data.
+// Decision it drives: Lets the RunRow L1 show which model is actively generating,
+//   so the user knows what's running without expanding the row.
+export function resolveGenModel(run, variants) {
+  if (!variants || !run) return null;
+  // run.variants is a comma-separated string of variant IDs (or a JSON array)
+  let variantIds = [];
+  try {
+    if (typeof run.variants === 'string') {
+      variantIds = run.variants.includes(',')
+        ? run.variants.split(',').map(s => s.trim())
+        : JSON.parse(run.variants);
+    } else if (Array.isArray(run.variants)) {
+      variantIds = run.variants;
+    }
+  } catch { /* fallback to empty */ }
+  if (variantIds.length === 0) return null;
+  // Collect unique model names from variants used in this run
+  const modelNames = variantIds
+    .map(vid => (variants || []).find(v => v.id === vid)?.model)
+    .filter(Boolean);
+  const unique = [...new Set(modelNames)];
+  if (unique.length === 0) return null;
+  if (unique.length === 1) return unique[0];
+  return unique.join(', ');
+}
+
 // Converts AI-generated markdown prose to readable plain text.
 // Handles: ## headers -> bold label, **x** -> x, - bullet -> bullet.
 // No library needed — analysis_md is structured prose, not full markdown.

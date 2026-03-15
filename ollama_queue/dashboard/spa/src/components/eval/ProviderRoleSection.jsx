@@ -51,7 +51,14 @@ export default function ProviderRoleSection({ role, settings, onSave }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ provider, model, api_key: apiKey || undefined }),
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) {
+        let detail = `Test failed: ${res.status}`;
+        try {
+          const body = await res.json();
+          if (body.detail) detail = body.detail;
+        } catch { /* non-JSON response body */ }
+        throw new Error(detail);
+      }
       return await res.json();
     }, () => 'Connected ✓');
   }

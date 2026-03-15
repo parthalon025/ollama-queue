@@ -1229,6 +1229,35 @@ body {
   padding: 0 2px;
 }
 
+/* ── Eval run filter bar ── */
+.eval-run-filter-bar {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  padding-bottom: 0.5rem;
+  margin-bottom: 0.25rem;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.eval-run-filter-btn {
+  font-size: var(--type-label) !important;
+  padding: 2px 8px !important;
+}
+.eval-run-filter-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  margin-left: 4px;
+  border-radius: 8px;
+  background: var(--status-error);
+  color: var(--bg-base);
+  font-size: 0.65rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
 /* ── EvalRuns / EvalVariants shared row layout ── */
 
 /* L1 row — clickable summary line */

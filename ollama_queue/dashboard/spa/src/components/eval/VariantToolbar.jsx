@@ -48,7 +48,11 @@ export default function VariantToolbar() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newVariant),
       });
-      if (!res.ok) throw new Error(`Save failed: ${res.status}`);
+      if (!res.ok) {
+        let detail = `Save failed: ${res.status}`;
+        try { const body = await res.json(); if (body.detail) detail = body.detail; } catch { /* non-JSON */ }
+        throw new Error(detail);
+      }
       await fetchEvalVariants();
       setShowNewForm(false);
       setNewVariant({ label: '', model: '', prompt_template_id: 'fewshot', temperature: 0.6, num_ctx: 8192 });
@@ -75,7 +79,11 @@ export default function VariantToolbar() {
       'Generating variants…',
       async () => {
         const res = await fetch(`${API}/eval/variants/generate`, { method: 'POST' });
-        if (!res.ok) throw new Error(`Generate failed: ${res.status}`);
+        if (!res.ok) {
+          let detail = `Generate failed: ${res.status}`;
+          try { const body = await res.json(); if (body.detail) detail = body.detail; } catch { /* non-JSON */ }
+          throw new Error(detail);
+        }
         const data = await res.json();
         await fetchEvalVariants();
         setGenPreview(null);
