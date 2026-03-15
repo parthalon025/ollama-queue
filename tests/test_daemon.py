@@ -2413,7 +2413,7 @@ def test_run_job_timeout_dlq_exception(db, caplog):
 
     with (
         patch("ollama_queue.daemon.executor.subprocess") as mock_sub,
-        patch.object(d.dlq, "handle_failure", side_effect=Exception("dlq boom")),
+        patch.object(d.dlq, "_handle_failure_locked", side_effect=Exception("dlq boom")),
         caplog.at_level(logging.ERROR),
     ):
         proc = MagicMock()
@@ -2443,7 +2443,7 @@ def test_run_job_failed_dlq_exception(db, caplog):
     with (
         patch("ollama_queue.daemon.executor.subprocess") as mock_sub,
         patch("ollama_queue.daemon.executor._drain_pipes_with_tracking", return_value=(b"", b"error")),
-        patch.object(d.dlq, "handle_failure", side_effect=Exception("dlq boom")),
+        patch.object(d.dlq, "_handle_failure_locked", side_effect=Exception("dlq boom")),
         caplog.at_level(logging.ERROR),
     ):
         proc = MagicMock()
@@ -2649,7 +2649,7 @@ def test_run_job_unhandled_exception_dlq_fails(db, caplog):
 
     with (
         patch("ollama_queue.daemon.executor.subprocess") as mock_sub,
-        patch.object(d.dlq, "handle_failure", side_effect=Exception("dlq boom")),
+        patch.object(d.dlq, "_handle_failure_locked", side_effect=Exception("dlq boom")),
         caplog.at_level(logging.ERROR),
     ):
         mock_sub.Popen.side_effect = RuntimeError("Popen exploded")

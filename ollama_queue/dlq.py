@@ -26,18 +26,31 @@ class DLQManager:
         self.db = db
 
     def handle_failure(self, job_id: int, failure_reason: str) -> str:
-        """Route a failed job. Returns 'retry' or 'dlq'."""
+        """Route a failed job. Returns 'retry' or 'dlq'.
+
+        Acquires db._lock for the full decision. Do NOT call this from inside
+        an existing db._lock block — use _handle_failure_locked instead to
+        preserve the single-lock atomicity guarantee.
+        """
         with self.db._lock:
-            job = self.db.get_job(job_id)
-            if not job:
-                _log.warning("handle_failure: job #%d not found", job_id)
-                return "dlq"
-            retry_count = job.get("retry_count", 0)
-            max_retries = job.get("max_retries", 0)
-            if retry_count < max_retries:
-                return self._schedule_retry(job_id, retry_count, job=job)
-            else:
-                return self._move_to_dlq(job_id, failure_reason)
+            return self._handle_failure_locked(job_id, failure_reason)
+
+    def _handle_failure_locked(self, job_id: int, failure_reason: str) -> str:
+        """Route a failed job — assumes db._lock is already held by the caller.
+
+        Used by executor.py which calls this from inside its own db._lock block.
+        The RLock would re-enter handle_failure's lock silently, breaking atomicity.
+        """
+        job = self.db.get_job(job_id)
+        if not job:
+            _log.warning("handle_failure: job #%d not found", job_id)
+            return "dlq"
+        retry_count = job.get("retry_count", 0)
+        max_retries = job.get("max_retries", 0)
+        if retry_count < max_retries:
+            return self._schedule_retry(job_id, retry_count, job=job)
+        else:
+            return self._move_to_dlq(job_id, failure_reason)
 
     def _schedule_retry(self, job_id: int, retry_count: int, job: dict | None = None) -> str:
         settings = self.db.get_all_settings()
