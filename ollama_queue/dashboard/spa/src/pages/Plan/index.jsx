@@ -15,7 +15,7 @@ import { ModelBadge } from '../../components/ModelBadge';
 import LoadMapStrip from '../../components/LoadMapStrip.jsx';
 import AddRecurringJobModal from '../../components/AddRecurringJobModal.jsx';
 import ScheduleHistory from './ScheduleHistory.jsx';
-import { ShPageBanner } from 'superhot-ui/preact';
+import { ShPageBanner, ShCollapsible } from 'superhot-ui/preact';
 import { TAB_CONFIG } from '../../config/tabs.js';
 import {
     formatCountdown, formatInterval, parseInterval, formatDuration,
@@ -56,12 +56,6 @@ export default function Plan() {
     const [saveFb, saveAct] = useActionFeedback();
     const [generateFb, generateAct] = useActionFeedback();
     const [batchToggleFb, batchToggleAct] = useActionFeedback();
-
-    // Group collapse state (persisted in localStorage)
-    const [collapsedGroups, setCollapsedGroups] = useState(() => {
-        try { return JSON.parse(localStorage.getItem('schedule-collapsed') || '[]'); }
-        catch { return []; }
-    });
 
     // Detail panel
     const [expandedJobId, setExpandedJobId] = useState(null);
@@ -115,14 +109,6 @@ export default function Plan() {
     }, [ganttExpanded]);
 
     // --- Handlers ---
-
-    function toggleGroup(tag) {
-        setCollapsedGroups(prev => {
-            const next = prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag];
-            localStorage.setItem('schedule-collapsed', JSON.stringify(next));
-            return next;
-        });
-    }
 
     async function toggleJobDetail(rjId) {
         if (expandedJobId === rjId) {
@@ -358,75 +344,49 @@ export default function Plan() {
 
     // --- Render helpers ---
 
+    // What it shows: Tag group header — label, job count, next-due time, bulk run/toggle controls.
+    // Sits above the ShCollapsible body; clicking the ShCollapsible toggle opens/closes job rows.
     function renderGroupHeader(group) {
         const { tag, jobs: groupJobs } = group;
-        const collapsed = collapsedGroups.includes(tag);
         const nextDue = groupNextDue(groupJobs);
         const allEnabled = groupJobs.every(rj => rj.enabled);
         const isBatchRunning = batchRunningTags.has(tag);
 
         return (
-            <tr key={`group-${tag}`}
-                style={{
-                    background: 'var(--bg-surface-raised)',
-                    borderBottom: '2px solid var(--border-subtle)',
-                    cursor: 'pointer',
-                    userSelect: 'none',
-                }}
-                onClick={() => toggleGroup(tag)}>
-                <td colSpan={COL_COUNT} style={{ padding: '0.6rem 0.75rem' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-body)',
-                                           color: 'var(--text-tertiary)', width: '1rem', textAlign: 'center' }}>
-                                {collapsed ? '\u25B6' : '\u25BC'}
-                            </span>
-                            <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700,
-                                           fontSize: 'var(--type-body)', color: 'var(--text-primary)',
-                                           textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                                {tag}
-                            </span>
-                            <span style={{
-                                fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)',
-                                color: 'var(--text-secondary)',
-                                background: 'var(--bg-inset)', padding: '0.1rem 0.4rem',
-                                borderRadius: 'var(--radius)',
-                            }}>
-                                {groupJobs.length} {groupJobs.length === 1 ? 'job' : 'jobs'}
-                            </span>
-                            {nextDue && (
-                                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)',
-                                               color: 'var(--text-tertiary)', fontVariantNumeric: 'tabular-nums' }}>
-                                    next: {formatCountdown(nextDue)}
-                                </span>
-                            )}
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
-                             onClick={ev => ev.stopPropagation()}>
-                            <div>
-                                <button
-                                    class="t-btn t-btn-secondary"
-                                    style={{ fontSize: 'var(--type-label)', padding: '0.15rem 0.5rem',
-                                             opacity: (isBatchRunning || batchRunFb.phase === 'loading') ? 0.5 : 1 }}
-                                    disabled={isBatchRunning || batchRunFb.phase === 'loading'}
-                                    onClick={() => handleBatchRun(tag)}>
-                                    {(isBatchRunning || batchRunFb.phase === 'loading') ? '\u2026' : '\u25B6 Run All'}
-                                </button>
-                                {batchRunFb.msg && <div class={`action-fb action-fb--${batchRunFb.phase}`}>{batchRunFb.msg}</div>}
-                            </div>
-                            <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem',
-                                            fontSize: 'var(--type-label)', fontFamily: 'var(--font-mono)',
-                                            color: 'var(--text-secondary)', cursor: 'pointer' }}>
-                                <input type="checkbox" checked={allEnabled}
-                                       style={{ accentColor: 'var(--accent)', width: 14, height: 14 }}
-                                       onChange={() => handleBatchToggle(tag, !allEnabled)} />
-                                All
-                            </label>
-                            {batchToggleFb.msg && <div class={`action-fb action-fb--${batchToggleFb.phase}`}>{batchToggleFb.msg}</div>}
-                        </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                          padding: '0.4rem 0.75rem 0',
+                          borderTop: '2px solid var(--border-subtle)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    {nextDue && (
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)',
+                                       color: 'var(--text-tertiary)', fontVariantNumeric: 'tabular-nums' }}>
+                            next: {formatCountdown(nextDue)}
+                        </span>
+                    )}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <div>
+                        <button
+                            class="t-btn t-btn-secondary"
+                            style={{ fontSize: 'var(--type-label)', padding: '0.15rem 0.5rem',
+                                     opacity: (isBatchRunning || batchRunFb.phase === 'loading') ? 0.5 : 1 }}
+                            disabled={isBatchRunning || batchRunFb.phase === 'loading'}
+                            onClick={() => handleBatchRun(tag)}>
+                            {(isBatchRunning || batchRunFb.phase === 'loading') ? '\u2026' : '\u25B6 Run All'}
+                        </button>
+                        {batchRunFb.msg && <div class={`action-fb action-fb--${batchRunFb.phase}`}>{batchRunFb.msg}</div>}
                     </div>
-                </td>
-            </tr>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem',
+                                    fontSize: 'var(--type-label)', fontFamily: 'var(--font-mono)',
+                                    color: 'var(--text-secondary)', cursor: 'pointer' }}>
+                        <input type="checkbox" checked={allEnabled}
+                               style={{ accentColor: 'var(--accent)', width: 14, height: 14 }}
+                               onChange={() => handleBatchToggle(tag, !allEnabled)} />
+                        All
+                    </label>
+                    {batchToggleFb.msg && <div class={`action-fb action-fb--${batchToggleFb.phase}`}>{batchToggleFb.msg}</div>}
+                </div>
+            </div>
         );
     }
 
@@ -1174,7 +1134,11 @@ export default function Plan() {
                             ))}
                         </div>
                     )}
-                    <div class="t-frame" style={{ padding: 0, overflowX: 'auto' }}>
+                    {/* What it shows: Recurring jobs grouped by tag, each group in a collapsible section.
+                        Decision: Expand/collapse individual tag groups to focus on the relevant set
+                        of jobs without scrolling through the entire schedule. */}
+                    <div class="t-frame" style={{ padding: 0 }}>
+                        {/* Sticky column header — shown once above all groups */}
                         <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
                             <table style={{ width: '100%', minWidth: 700, borderCollapse: 'collapse',
                                             fontSize: 'var(--type-body)' }}>
@@ -1201,22 +1165,33 @@ export default function Plan() {
                                         ))}
                                     </tr>
                                 </thead>
-                                {groups.map(group => {
-                                    const collapsed = collapsedGroups.includes(group.tag);
-                                    return (
-                                        <tbody key={group.tag}>
-                                            {renderGroupHeader(group)}
-                                            {!collapsed && group.jobs.map(rj => (
-                                                <Fragment key={rj.id}>
-                                                    {renderJobRow(rj)}
-                                                    {expandedJobId === rj.id && renderDetailPanel(rj.id)}
-                                                </Fragment>
-                                            ))}
-                                        </tbody>
-                                    );
-                                })}
                             </table>
                         </div>
+                        {/* Per-group sections: tag label + bulk actions above, ShCollapsible wrapping job rows */}
+                        {groups.map(group => (
+                            <div key={group.tag}>
+                                {renderGroupHeader(group)}
+                                <ShCollapsible
+                                    title={group.tag || 'Untagged'}
+                                    defaultOpen={true}
+                                    summary={`${group.jobs.length} job${group.jobs.length !== 1 ? 's' : ''}`}
+                                >
+                                    <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+                                        <table style={{ width: '100%', minWidth: 700, borderCollapse: 'collapse',
+                                                        fontSize: 'var(--type-body)' }}>
+                                            <tbody>
+                                                {group.jobs.map(rj => (
+                                                    <Fragment key={rj.id}>
+                                                        {renderJobRow(rj)}
+                                                        {expandedJobId === rj.id && renderDetailPanel(rj.id)}
+                                                    </Fragment>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </ShCollapsible>
+                            </div>
+                        ))}
                     </div>
                 </>
             )}
