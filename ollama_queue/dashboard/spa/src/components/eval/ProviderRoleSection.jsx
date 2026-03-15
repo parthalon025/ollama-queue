@@ -92,8 +92,8 @@ export default function ProviderRoleSection({ role, settings, onSave }) {
         </label>
 
         {/* Backend host selector — only shown for Ollama provider when multiple backends
-            are configured. Saves to eval.{role}_backend_url setting on change. */}
-        {provider === 'ollama' && backendsData.value.length > 1 && (
+            are configured. Limited to generator/judge roles (API allowlist). */}
+        {provider === 'ollama' && backendsData.value.length > 1 && (role === 'generator' || role === 'judge') && (
           <label>
             Backend host
             <select value={backendUrl} onChange={e => {
