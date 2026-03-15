@@ -2,13 +2,14 @@ import { useEffect } from 'preact/hooks';
 import {
     modelPerformance, performanceCurve,
     fetchModelPerformance, fetchPerformanceCurve,
+    healthData,
 } from '../stores';
 import { backendMetrics, fetchBackendMetrics } from '../stores/health.js';
 import { evalVariants, fetchEvalVariants } from '../stores/eval.js';
 import { SystemHealth } from '../components/SystemHealth.jsx';
 import PerformanceCurveChart from '../components/PerformanceCurveChart.jsx';
 import LoadHeatmap from '../components/LoadHeatmap.jsx';
-import { ShPageBanner } from 'superhot-ui/preact';
+import { ShPageBanner, ShTimeChart } from 'superhot-ui/preact';
 import { TAB_CONFIG } from '../config/tabs.js';
 import ModelChip from '../components/ModelChip.jsx';
 import F1Score from '../components/F1Score.jsx';
@@ -24,6 +25,14 @@ export default function Performance() {
     const stats = modelPerformance.value;
     const curve = performanceCurve.value;
     const backends = backendMetrics.value;
+
+    // What it shows: RAM usage trend over the last 24h from the health log.
+    // Decision it drives: Is RAM pressure increasing over time? Should concurrency
+    //   be reduced or a job deferred to avoid an OOM condition?
+    const ramChartData = (healthData.value || [])
+        .filter(entry => entry.timestamp != null && entry.ram_pct != null)
+        .map(entry => ({ t: entry.timestamp, v: entry.ram_pct }))
+        .reverse(); // healthData is newest-first; ShTimeChart expects oldest-first
 
     // What it shows: Which eval variant is currently in production and which model it uses as judge.
     // Decision it drives: User can see the eval judge model's performance context alongside
@@ -51,6 +60,15 @@ export default function Performance() {
 
             {/* System Health — always visible at top */}
             <SystemHealth />
+
+            {/* RAM usage trend — last 24h from health log */}
+            {ramChartData.length > 0 && (
+                <ShTimeChart
+                    data={ramChartData}
+                    label="RAM %"
+                    color="var(--sh-phosphor)"
+                />
+            )}
 
             {/* Model Performance Table */}
             <div class="t-frame" data-label="Model Performance">
