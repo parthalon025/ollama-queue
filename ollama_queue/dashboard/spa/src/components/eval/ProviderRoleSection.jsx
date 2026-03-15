@@ -11,6 +11,8 @@
 import { h } from 'preact';
 import { useState } from 'preact/hooks';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
+import { backendsData } from '../../stores/health.js';
+import { evalSettings, saveEvalSettings } from '../../stores/eval.js';
 
 const ROLE_DESCRIPTIONS = {
   generator: 'Creates the test outputs that the judge will score.',
@@ -26,6 +28,9 @@ export default function ProviderRoleSection({ role, settings, onSave }) {
   const [model, setModel] = useState(settings?.model || '');
   const [apiKey, setApiKey] = useState('');
   const [models, setModels] = useState([]);
+  const [backendUrl, setBackendUrl] = useState(
+    evalSettings.value?.[`eval.${role}_backend_url`] || 'auto'
+  );
   const [fb, act] = useActionFeedback();
 
   async function loadModels(prov) {
@@ -85,6 +90,30 @@ export default function ProviderRoleSection({ role, settings, onSave }) {
             {models.map(m => <option key={m} value={m}>{m}</option>)}
           </select>
         </label>
+
+        {/* Backend host selector — only shown for Ollama provider when multiple backends
+            are configured. Limited to generator/judge roles (API allowlist). */}
+        {provider === 'ollama' && backendsData.value.length > 1 && (role === 'generator' || role === 'judge') && (
+          <label>
+            Backend host
+            <select value={backendUrl} onChange={e => {
+              const val = e.target.value;
+              setBackendUrl(val);
+              saveEvalSettings({ [`eval.${role}_backend_url`]: val }).catch(err => {
+                console.error('Failed to save backend_url:', err);
+              });
+            }}>
+              <option value="auto">Auto (smart routing)</option>
+              {backendsData.value
+                .filter(b => b.healthy)
+                .map(b => (
+                  <option key={b.url} value={b.url}>
+                    {b.gpu_name || b.url} — {Math.round(b.vram_pct)}% VRAM
+                  </option>
+                ))}
+            </select>
+          </label>
+        )}
 
         {provider !== 'ollama' && (
           <label>

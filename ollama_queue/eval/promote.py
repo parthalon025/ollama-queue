@@ -382,6 +382,11 @@ def generate_eval_analysis(  # noqa: PLR0911 — guard-and-return pattern is int
         _log.warning("No analysis model configured — skipping analysis for run %d", run_id)
         return
 
+    # Resolve analysis backend: setting value "auto" → None (normal proxy routing)
+    analysis_backend = db.get_setting("eval.analysis_backend_url")
+    if analysis_backend == "auto":
+        analysis_backend = None
+
     try:
         variant_ids: list[str] = json.loads(run.get("variants") or "[]")
         if not isinstance(variant_ids, list):
@@ -441,6 +446,7 @@ def generate_eval_analysis(  # noqa: PLR0911 — guard-and-return pattern is int
             timeout=180,
             source=f"eval-analysis-{run_id}",
             priority=9,  # background — must not displace user work (critical tier = 1-2)
+            backend=analysis_backend,
         )
     except _eng._ProxyDownError as exc:
         _log.warning("generate_eval_analysis: proxy down for run_id=%d: %s", run_id, exc)

@@ -692,3 +692,54 @@ def test_provider_test_missing_model(client):
         },
     )
     assert resp.status_code == 422
+
+
+# --- Task 4: Backend URL validation ---
+
+
+def test_valid_backend_url_accepted(client_and_db):
+    """PUT with a registered backend URL should be accepted."""
+    client, db = client_and_db
+    db.add_backend("http://100.114.197.57:11434", weight=1.0)
+    resp = client.put(
+        "/api/eval/settings",
+        json={"eval.generator_backend_url": "http://100.114.197.57:11434"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["eval.generator_backend_url"] == "http://100.114.197.57:11434"
+
+
+def test_auto_backend_accepted(client):
+    """PUT with 'auto' backend URL should always be accepted (no registration required)."""
+    resp = client.put(
+        "/api/eval/settings",
+        json={"eval.generator_backend_url": "auto"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["eval.generator_backend_url"] == "auto"
+
+
+def test_unknown_backend_rejected_422(client):
+    """PUT with an unknown backend URL should return 422 with 'registered' in detail."""
+    resp = client.put(
+        "/api/eval/settings",
+        json={"eval.judge_backend_url": "http://unknown-host:11434"},
+    )
+    assert resp.status_code == 422
+    detail = resp.json()["detail"]
+    detail_text = " ".join(str(e) for e in detail) if isinstance(detail, list) else str(detail)
+    assert "not registered" in detail_text.lower() or "registered backends" in detail_text.lower()
+
+
+def test_backend_url_validation_works_with_bare_key(client):
+    """PUT with bare key (no eval. prefix) also validates backend URL."""
+    resp = client.put(
+        "/api/eval/settings",
+        json={"generator_backend_url": "http://unknown-host:11434"},
+    )
+    assert resp.status_code == 422
+    detail = resp.json()["detail"]
+    detail_text = " ".join(str(e) for e in detail) if isinstance(detail, list) else str(detail)
+    assert "not registered" in detail_text.lower()

@@ -337,6 +337,18 @@ export default function RunRow({ run }) {
             </div>
           )}
 
+          {/* Backend URLs — shown when a run was pinned to a specific backend */}
+          {(run.gen_backend_url || run.judge_backend_url) && (
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)', marginBottom: '0.5rem', display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+              {run.gen_backend_url && run.gen_backend_url !== 'auto' && (
+                <span>Gen: {run.gen_backend_url}</span>
+              )}
+              {run.judge_backend_url && run.judge_backend_url !== 'auto' && (
+                <span>Judge: {run.judge_backend_url}</span>
+              )}
+            </div>
+          )}
+
           {/* Per-item breakdown — shows which items were hardest for this variant */}
           {status === 'complete' && analysis?.per_item?.length > 0 && analysis.per_item[0]?.status !== 'no_cluster_data' && (
             <div style={{

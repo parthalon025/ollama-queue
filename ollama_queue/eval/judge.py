@@ -502,6 +502,7 @@ def _judge_one_target(
     source_cluster_id: str = "",
     judge_mode: str = "rubric",
     diff_target: dict | None = None,
+    backend: str | None = None,
 ) -> bool:
     """Call judge for one (principle, target) pair and store the result.
 
@@ -528,6 +529,7 @@ def _judge_one_target(
             timeout=180,
             source=source_tag,
             priority=2,
+            backend=backend,
         )
         answer = parse_paired_judge(raw_response) if raw_response else None
 
@@ -573,6 +575,7 @@ def _judge_one_target(
             timeout=180,
             source=source_tag,
             priority=2,
+            backend=backend,
         )
         _judge_fail: dict = {
             "transfer": 1,
@@ -618,6 +621,7 @@ def run_eval_judge(  # noqa: PLR0911
     run_id: int,
     db: Database,
     http_base: str = "http://127.0.0.1:7683",
+    backend: str | None = None,
 ) -> None:
     """Score generated principles against transfer targets.
 
@@ -736,6 +740,7 @@ def run_eval_judge(  # noqa: PLR0911
                         source_cluster_id=source_cid,
                         judge_mode=judge_mode,
                         diff_target=diff_t,
+                        backend=backend,
                     )
                     if _was_parse_fail:
                         parse_failures += 1
@@ -776,6 +781,7 @@ def run_eval_judge(  # noqa: PLR0911
                             http_base=http_base,
                             source_cluster_id=source_cid,
                             judge_mode=judge_mode,
+                            backend=backend,
                         )
                         if _was_parse_fail:
                             parse_failures += 1

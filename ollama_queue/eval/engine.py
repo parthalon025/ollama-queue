@@ -63,6 +63,8 @@ def create_eval_run(
     per_cluster: int = 4,
     max_runs: int | None = None,
     max_time_s: int | None = None,
+    gen_backend_url: str | None = None,
+    judge_backend_url: str | None = None,
 ) -> int:
     """Insert a new eval_runs row with status='queued' and return the new id.
 
@@ -87,8 +89,9 @@ def create_eval_run(
             """INSERT INTO eval_runs
                (variant_id, variants, run_mode, label, cluster_id, scheduled_by,
                 data_source_url, data_source_token, seed, item_ids, status,
-                per_cluster, max_runs, max_time_s, created_at, started_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?)""",
+                per_cluster, max_runs, max_time_s, created_at, started_at,
+                gen_backend_url, judge_backend_url)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?)""",
             (
                 variant_id,
                 variants_value,
@@ -105,6 +108,8 @@ def create_eval_run(
                 max_time_s,
                 now,
                 now,  # started_at = created_at for compatibility (NOT NULL constraint)
+                gen_backend_url,
+                judge_backend_url,
             ),
         )
         conn.commit()
@@ -211,6 +216,7 @@ def _call_proxy(
     priority: int = 2,
     extra_params: dict | None = None,
     system_prompt: str | None = None,
+    backend: str | None = None,
 ) -> tuple[str | None, int | None]:
     """POST to the ollama-queue proxy and return (response_text, queue_job_id).
 
@@ -243,6 +249,10 @@ def _call_proxy(
     # Add system prompt if provided
     if system_prompt is not None:
         body["system"] = system_prompt
+
+    # Route to a specific backend when requested (skip "auto" — let proxy decide)
+    if backend and backend != "auto":
+        body["_backend"] = backend
 
     last_exc: Exception | None = None
     for attempt in range(_MAX_RETRIES + 1):
@@ -712,12 +722,25 @@ def run_eval_session(
                 )
                 return
 
-        run_eval_generate(run_id, db, http_base)
+        # Resolve backend URLs: run-level override > setting > None (auto)
+        def _resolve_backend(run_key: str, setting_key: str) -> str | None:
+            val = run.get(run_key)
+            if not val:
+                val = db.get_setting(setting_key)
+            return val if val and val != "auto" else None
+
+        gen_backend = _resolve_backend("gen_backend_url", "eval.generator_backend_url")
+        judge_backend = _resolve_backend("judge_backend_url", "eval.judge_backend_url")
+
+        # Persist resolved backends on the run row for observability
+        update_eval_run(db, run_id, gen_backend_url=gen_backend, judge_backend_url=judge_backend)
+
+        run_eval_generate(run_id, db, http_base, backend=gen_backend)
         # Check if generate phase failed
         run = get_eval_run(db, run_id)
         if run is None or run.get("status") in ("failed", "cancelled"):
             return
-        run_eval_judge(run_id, db, http_base)
+        run_eval_judge(run_id, db, http_base, backend=judge_backend)
         # Generate Ollama analysis after judging (non-blocking for run status —
         # failures here are logged but never change the completed run record)
         run = get_eval_run(db, run_id)

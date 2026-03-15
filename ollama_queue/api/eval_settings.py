@@ -106,6 +106,9 @@ _PROVIDER_SETTINGS = {
 }
 _VALID_PROVIDERS = {"ollama", "claude", "openai"}
 
+# Backend URL settings — values must be "auto" or a registered backend URL
+_BACKEND_URL_KEYS = {"eval.generator_backend_url", "eval.judge_backend_url", "eval.analysis_backend_url"}
+
 
 def _installed_ollama_models() -> set[str]:
     """Return set of locally installed Ollama model names (normalized)."""
@@ -185,6 +188,10 @@ def put_eval_settings(body: dict = Body(...)):
         "openai_api_key",
         "openai_base_url",
         "max_cost_per_run_usd",
+        # Backend URL overrides
+        "generator_backend_url",
+        "judge_backend_url",
+        "analysis_backend_url",
     }
 
     # Validation rules — validate ALL before writing any
@@ -253,6 +260,18 @@ def put_eval_settings(body: dict = Body(...)):
             if check_name not in installed:
                 validation_errors.append(
                     f"{key}={value!r} is not installed in Ollama. " f"Installed models: {', '.join(sorted(installed))}"
+                )
+
+    # Validate backend URL references point to registered backends
+    # Body keys may be "eval.generator_backend_url" or "generator_backend_url" — normalize
+    for key, val in body.items():
+        full_key = key if key.startswith("eval.") else f"eval.{key}"
+        if full_key in _BACKEND_URL_KEYS and val and val != "auto":
+            registered = {b["url"] for b in db.list_backends()}
+            if val not in registered:
+                validation_errors.append(
+                    f"Backend {val!r} is not registered. "
+                    f"Registered backends: {', '.join(sorted(registered)) or '(none)'}"
                 )
 
     if validation_errors:

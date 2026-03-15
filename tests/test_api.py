@@ -545,6 +545,135 @@ class TestProxyPriority:
         assert "_timeout" not in forwarded_body
 
 
+class TestProxyBackendExtraction:
+    """Proxy /api/generate extracts _backend and routes accordingly."""
+
+    def _mock_httpx_client(self, response_data):
+        from unittest.mock import AsyncMock, MagicMock
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = response_data
+
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        return mock_client
+
+    def test_backend_not_forwarded_to_ollama(self, client):
+        """_backend must be extracted from body and not forwarded to Ollama."""
+        from unittest.mock import patch
+
+        mock_client = self._mock_httpx_client({"response": "ok", "done": True})
+
+        with (
+            patch("httpx.AsyncClient", return_value=mock_client),
+            patch("ollama_queue.api.proxy._api.db.list_backends", return_value=[{"url": "http://remote:11434"}]),
+        ):
+            client.post(
+                "/api/generate",
+                json={
+                    "model": "test-model",
+                    "prompt": "hello",
+                    "_backend": "http://remote:11434",
+                },
+            )
+
+        call_args = mock_client.post.call_args
+        forwarded_body = call_args.kwargs.get("json", call_args[1].get("json", {}))
+        assert "_backend" not in forwarded_body
+
+    def test_forced_backend_skips_select_backend(self, client):
+        """When _backend is a registered URL, select_backend should not be called."""
+        from unittest.mock import AsyncMock, patch
+
+        mock_client = self._mock_httpx_client({"response": "ok", "done": True})
+        mock_select = AsyncMock(return_value="http://127.0.0.1:11434")
+
+        with (
+            patch("httpx.AsyncClient", return_value=mock_client),
+            patch("ollama_queue.api.proxy.select_backend", mock_select),
+            patch("ollama_queue.api.proxy._api.db.list_backends", return_value=[{"url": "http://remote:11434"}]),
+        ):
+            resp = client.post(
+                "/api/generate",
+                json={
+                    "model": "test-model",
+                    "prompt": "hello",
+                    "_backend": "http://remote:11434",
+                },
+            )
+
+        assert resp.status_code == 200
+        mock_select.assert_not_called()
+        # Verify the forced backend URL was used
+        call_args = mock_client.post.call_args
+        posted_url = call_args.args[0] if call_args.args else call_args.kwargs.get("url", "")
+        assert "remote:11434" in posted_url
+
+    def test_forced_backend_unregistered_returns_422(self, client):
+        """When _backend is not a registered backend, proxy returns 422."""
+        from unittest.mock import patch
+
+        with patch("ollama_queue.api.proxy._api.db.list_backends", return_value=[{"url": "http://127.0.0.1:11434"}]):
+            resp = client.post(
+                "/api/generate",
+                json={
+                    "model": "test-model",
+                    "prompt": "hello",
+                    "_backend": "http://evil-host:11434",
+                },
+            )
+
+        assert resp.status_code == 422
+        assert "not registered" in resp.json()["detail"]
+
+    def test_auto_backend_calls_select_backend(self, client):
+        """When _backend is 'auto', select_backend should be called normally."""
+        from unittest.mock import AsyncMock, patch
+
+        mock_client = self._mock_httpx_client({"response": "ok", "done": True})
+        mock_select = AsyncMock(return_value="http://127.0.0.1:11434")
+
+        with (
+            patch("httpx.AsyncClient", return_value=mock_client),
+            patch("ollama_queue.api.proxy.select_backend", mock_select),
+        ):
+            resp = client.post(
+                "/api/generate",
+                json={
+                    "model": "test-model",
+                    "prompt": "hello",
+                    "_backend": "auto",
+                },
+            )
+
+        assert resp.status_code == 200
+        mock_select.assert_called_once()
+
+    def test_absent_backend_calls_select_backend(self, client):
+        """When _backend is not present, select_backend should be called (default)."""
+        from unittest.mock import AsyncMock, patch
+
+        mock_client = self._mock_httpx_client({"response": "ok", "done": True})
+        mock_select = AsyncMock(return_value="http://127.0.0.1:11434")
+
+        with (
+            patch("httpx.AsyncClient", return_value=mock_client),
+            patch("ollama_queue.api.proxy.select_backend", mock_select),
+        ):
+            resp = client.post(
+                "/api/generate",
+                json={
+                    "model": "test-model",
+                    "prompt": "hello",
+                },
+            )
+
+        assert resp.status_code == 200
+        mock_select.assert_called_once()
+
+
 def test_add_recurring_job_with_check_command(client):
     r = client.post(
         "/api/schedule",
@@ -932,6 +1061,26 @@ def test_get_status_active_eval_includes_gen_model(client_and_db):
     # Internal fields should not leak to frontend
     assert "variants" not in ae
     assert "variant_id" not in ae
+
+
+def test_active_eval_includes_backend_urls(client_and_db):
+    """GET /api/status active_eval includes gen_backend_url and judge_backend_url."""
+    client, db = client_and_db
+    with db._lock:
+        conn = db._connect()
+        conn.execute(
+            "INSERT INTO eval_runs (id, data_source_url, variants, variant_id, status,"
+            " judge_model, gen_backend_url, judge_backend_url) "
+            "VALUES (1, 'http://localhost', '[\"A\"]', 'A', 'generating',"
+            " 'qwen2.5:7b', 'http://100.114.197.57:11434', 'http://127.0.0.1:11434')"
+        )
+        conn.commit()
+    resp = client.get("/api/status")
+    assert resp.status_code == 200
+    ae = resp.json()["active_eval"]
+    assert ae is not None
+    assert ae["gen_backend_url"] == "http://100.114.197.57:11434"
+    assert ae["judge_backend_url"] == "http://127.0.0.1:11434"
 
 
 def test_get_status_with_current_job(client_and_db):

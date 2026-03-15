@@ -49,7 +49,8 @@ def get_status():
     with db._lock:
         conn = db._connect()
         row = conn.execute(
-            "SELECT id, status, judge_model, variants, variant_id FROM eval_runs"
+            "SELECT id, status, judge_model, variants, variant_id,"
+            " gen_backend_url, judge_backend_url FROM eval_runs"
             " WHERE status IN ('generating', 'judging') ORDER BY id DESC LIMIT 1"
         ).fetchone()
         if row:
@@ -65,6 +66,9 @@ def get_status():
             _variant_id = row["variant_id"] or _fallback_id
             _variant_row = conn.execute("SELECT model FROM eval_variants WHERE id = ?", (_variant_id,)).fetchone()
             active_eval["gen_model"] = _variant_row["model"] if _variant_row else None
+            # Expose backend URL overrides for topology display
+            active_eval["gen_backend_url"] = row["gen_backend_url"]
+            active_eval["judge_backend_url"] = row["judge_backend_url"]
             # Remove internal fields not needed by the frontend
             active_eval.pop("variants", None)
             active_eval.pop("variant_id", None)

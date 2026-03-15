@@ -49,7 +49,8 @@ def list_eval_runs(limit: int = 20, offset: int = 0):
             """SELECT id, status, variants, variant_id, winner_variant, metrics,
                       item_count, item_ids, started_at, completed_at,
                       judge_model, analysis_md, error, label, scheduled_by,
-                      error_budget, run_mode, judge_mode
+                      error_budget, run_mode, judge_mode,
+                      gen_backend_url, judge_backend_url
                FROM eval_runs
                ORDER BY id DESC
                LIMIT ? OFFSET ?""",
@@ -85,6 +86,8 @@ def list_eval_runs(limit: int = 20, offset: int = 0):
                 "scheduled_by": r.get("scheduled_by"),
                 "error_budget": r.get("error_budget"),
                 "run_mode": r.get("run_mode"),
+                "gen_backend_url": r.get("gen_backend_url"),
+                "judge_backend_url": r.get("judge_backend_url"),
             }
         )
     return result
@@ -134,6 +137,10 @@ def trigger_eval_run(body: dict = Body(...)):
     max_runs = int(max_runs_raw) if max_runs_raw is not None else None
     max_time_s = int(max_time_s_raw) if max_time_s_raw is not None else None
 
+    # Backend URL overrides (optional — per-run override of eval settings)
+    gen_backend_url = body.get("gen_backend_url")
+    judge_backend_url = body.get("judge_backend_url")
+
     # Create the run row
     run_id = create_eval_run(
         db,
@@ -146,6 +153,8 @@ def trigger_eval_run(body: dict = Body(...)):
         per_cluster=int(per_cluster) if per_cluster else 4,
         max_runs=max_runs,
         max_time_s=max_time_s,
+        gen_backend_url=gen_backend_url,
+        judge_backend_url=judge_backend_url,
     )
 
     # Persist judge_model from request body so run_eval_judge uses it instead of the setting default

@@ -3963,10 +3963,10 @@ class TestRunEvalSession:
 
         call_order = []
 
-        def mock_generate(run_id, db, http_base):
+        def mock_generate(run_id, db, http_base, **kwargs):
             call_order.append("generate")
 
-        def mock_judge(run_id, db, http_base):
+        def mock_judge(run_id, db, http_base, **kwargs):
             call_order.append("judge")
 
         call_count = {"n": 0}
@@ -3981,6 +3981,7 @@ class TestRunEvalSession:
             patch("ollama_queue.eval.generate.run_eval_generate", side_effect=mock_generate),
             patch("ollama_queue.eval.judge.run_eval_judge", side_effect=mock_judge),
             patch("ollama_queue.eval.engine.get_eval_run", side_effect=mock_get_run),
+            patch("ollama_queue.eval.engine.update_eval_run"),
             patch("ollama_queue.eval.engine.compute_run_analysis"),
             patch("ollama_queue.eval.promote.generate_eval_analysis"),
             patch("ollama_queue.eval.promote.check_auto_promote"),
@@ -4608,6 +4609,98 @@ class TestCallProxyExtraParamsAndSystemPrompt:
             assert body["options"]["num_ctx"] == 4096  # flat column wins
 
 
+class TestCallProxyBackendParam:
+    """_call_proxy backend parameter wiring."""
+
+    def _make_mock_client(self, response_data: dict):
+        """Build a reusable mock httpx.Client context manager."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = response_data
+        mock_client = MagicMock()
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        mock_client.post.return_value = mock_resp
+        return mock_client
+
+    def test_backend_included_in_body(self):
+        """_call_proxy should include _backend in body when backend is a real URL."""
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = self._make_mock_client({"response": "text"})
+            mock_client_class.return_value = mock_client
+
+            _call_proxy(
+                http_base="http://localhost:7683",
+                model="m",
+                prompt="p",
+                temperature=0.5,
+                num_ctx=4096,
+                timeout=30,
+                source="test",
+                backend="http://remote:11434",
+            )
+            body = mock_client.post.call_args[1]["json"]
+            assert body["_backend"] == "http://remote:11434"
+
+    def test_backend_auto_not_included_in_body(self):
+        """_call_proxy should not include _backend when backend is 'auto'."""
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = self._make_mock_client({"response": "text"})
+            mock_client_class.return_value = mock_client
+
+            _call_proxy(
+                http_base="http://localhost:7683",
+                model="m",
+                prompt="p",
+                temperature=0.5,
+                num_ctx=4096,
+                timeout=30,
+                source="test",
+                backend="auto",
+            )
+            body = mock_client.post.call_args[1]["json"]
+            assert "_backend" not in body
+
+    def test_backend_none_not_included_in_body(self):
+        """_call_proxy should not include _backend when backend is None (default)."""
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = self._make_mock_client({"response": "text"})
+            mock_client_class.return_value = mock_client
+
+            _call_proxy(
+                http_base="http://localhost:7683",
+                model="m",
+                prompt="p",
+                temperature=0.5,
+                num_ctx=4096,
+                timeout=30,
+                source="test",
+                backend=None,
+            )
+            body = mock_client.post.call_args[1]["json"]
+            assert "_backend" not in body
+
+    def test_backend_empty_string_not_included_in_body(self):
+        """_call_proxy should not include _backend when backend is empty string."""
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = self._make_mock_client({"response": "text"})
+            mock_client_class.return_value = mock_client
+
+            _call_proxy(
+                http_base="http://localhost:7683",
+                model="m",
+                prompt="p",
+                temperature=0.5,
+                num_ctx=4096,
+                timeout=30,
+                source="test",
+                backend="",
+            )
+            body = mock_client.post.call_args[1]["json"]
+            assert "_backend" not in body
+
+
 class TestRunEvalGenerateVariantsNonList:
     """Line 1997: json.loads succeeds but returns non-list value."""
 
@@ -5045,3 +5138,471 @@ class TestRunEvalSessionPreflightModelCheck:
 
         # generate was called — claude variant should not be checked against Ollama models
         mock_generate.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Task 3: Backend wiring tests
+# ---------------------------------------------------------------------------
+
+
+class TestRunEvalSessionBackendWiring:
+    """run_eval_session reads backend settings and passes to generate/judge."""
+
+    @pytest.fixture
+    def db(self, tmp_path):
+        from ollama_queue.db import Database
+
+        db = Database(str(tmp_path / "backend_wiring.db"))
+        db.initialize()
+        return db
+
+    def _make_run_and_mock_session(self, db, *, gen_setting=None, judge_setting=None, run_overrides=None):
+        """Helper: create a run, set settings, return mock patches + run_id."""
+        from ollama_queue.eval.engine import create_eval_run
+
+        if gen_setting is not None:
+            db.set_setting("eval.generator_backend_url", gen_setting)
+        if judge_setting is not None:
+            db.set_setting("eval.judge_backend_url", judge_setting)
+
+        run_id = create_eval_run(db, variant_id="A", **(run_overrides or {}))
+        return run_id
+
+    def test_generator_backend_passed(self, db):
+        """eval.generator_backend_url setting is passed to run_eval_generate."""
+        from ollama_queue.eval.engine import run_eval_session
+
+        run_id = self._make_run_and_mock_session(db, gen_setting="http://100.0.0.1:11434", judge_setting=None)
+
+        call_count = {"n": 0}
+        run_after_gen = None
+
+        def mock_generate(run_id, db, http_base, backend=None):
+            call_count["backend"] = backend
+
+        def mock_judge(run_id, db, http_base, backend=None):
+            pass
+
+        def mock_get_run(db, run_id):
+            call_count["n"] = call_count.get("n", 0) + 1
+            if call_count["n"] == 1:
+                # First call: pre-flight — return run with variants
+                return {
+                    "id": run_id,
+                    "status": "queued",
+                    "variants": json.dumps(["A"]),
+                    "judge_model": None,
+                    "gen_backend_url": None,
+                    "judge_backend_url": None,
+                }
+            if call_count["n"] == 2:
+                return {"id": run_id, "status": "judging"}
+            return {"id": run_id, "status": "complete"}
+
+        with (
+            patch("ollama_queue.models.client.OllamaModels.list_local", return_value=[]),
+            patch("ollama_queue.eval.generate.run_eval_generate", side_effect=mock_generate),
+            patch("ollama_queue.eval.judge.run_eval_judge", side_effect=mock_judge),
+            patch("ollama_queue.eval.engine.get_eval_run", side_effect=mock_get_run),
+            patch("ollama_queue.eval.engine.update_eval_run"),
+            patch("ollama_queue.eval.engine.compute_run_analysis"),
+            patch("ollama_queue.eval.promote.generate_eval_analysis"),
+            patch("ollama_queue.eval.promote.check_auto_promote"),
+        ):
+            run_eval_session(run_id, db)
+
+        assert call_count.get("backend") == "http://100.0.0.1:11434"
+
+    def test_judge_backend_passed(self, db):
+        """eval.judge_backend_url setting is passed to run_eval_judge."""
+        from ollama_queue.eval.engine import run_eval_session
+
+        run_id = self._make_run_and_mock_session(db, gen_setting=None, judge_setting="http://100.0.0.2:11434")
+
+        captured = {}
+
+        def mock_generate(run_id, db, http_base, backend=None):
+            captured["gen_backend"] = backend
+
+        def mock_judge(run_id, db, http_base, backend=None):
+            captured["judge_backend"] = backend
+
+        call_count = {"n": 0}
+
+        def mock_get_run(db, run_id):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                return {
+                    "id": run_id,
+                    "status": "queued",
+                    "variants": json.dumps(["A"]),
+                    "judge_model": None,
+                    "gen_backend_url": None,
+                    "judge_backend_url": None,
+                }
+            if call_count["n"] == 2:
+                return {"id": run_id, "status": "judging"}
+            return {"id": run_id, "status": "complete"}
+
+        with (
+            patch("ollama_queue.models.client.OllamaModels.list_local", return_value=[]),
+            patch("ollama_queue.eval.generate.run_eval_generate", side_effect=mock_generate),
+            patch("ollama_queue.eval.judge.run_eval_judge", side_effect=mock_judge),
+            patch("ollama_queue.eval.engine.get_eval_run", side_effect=mock_get_run),
+            patch("ollama_queue.eval.engine.update_eval_run"),
+            patch("ollama_queue.eval.engine.compute_run_analysis"),
+            patch("ollama_queue.eval.promote.generate_eval_analysis"),
+            patch("ollama_queue.eval.promote.check_auto_promote"),
+        ):
+            run_eval_session(run_id, db)
+
+        assert captured.get("gen_backend") is None  # no gen setting
+        assert captured.get("judge_backend") == "http://100.0.0.2:11434"
+
+    def test_run_override_beats_setting(self, db):
+        """gen_backend_url on the run row overrides the global setting."""
+        from ollama_queue.eval.engine import run_eval_session
+
+        db.set_setting("eval.generator_backend_url", "http://setting-host:11434")
+        run_id = self._make_run_and_mock_session(db, run_overrides={"gen_backend_url": "http://override-host:11434"})
+
+        captured = {}
+
+        def mock_generate(run_id, db, http_base, backend=None):
+            captured["gen_backend"] = backend
+
+        def mock_judge(run_id, db, http_base, backend=None):
+            pass
+
+        call_count = {"n": 0}
+
+        def mock_get_run(db, run_id):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                return {
+                    "id": run_id,
+                    "status": "queued",
+                    "variants": json.dumps(["A"]),
+                    "judge_model": None,
+                    "gen_backend_url": "http://override-host:11434",
+                    "judge_backend_url": None,
+                }
+            if call_count["n"] == 2:
+                return {"id": run_id, "status": "judging"}
+            return {"id": run_id, "status": "complete"}
+
+        with (
+            patch("ollama_queue.models.client.OllamaModels.list_local", return_value=[]),
+            patch("ollama_queue.eval.generate.run_eval_generate", side_effect=mock_generate),
+            patch("ollama_queue.eval.judge.run_eval_judge", side_effect=mock_judge),
+            patch("ollama_queue.eval.engine.get_eval_run", side_effect=mock_get_run),
+            patch("ollama_queue.eval.engine.update_eval_run"),
+            patch("ollama_queue.eval.engine.compute_run_analysis"),
+            patch("ollama_queue.eval.promote.generate_eval_analysis"),
+            patch("ollama_queue.eval.promote.check_auto_promote"),
+        ):
+            run_eval_session(run_id, db)
+
+        # Run-level override wins over the setting
+        assert captured["gen_backend"] == "http://override-host:11434"
+
+    def test_auto_resolves_to_none(self, db):
+        """Setting value 'auto' resolves to None (normal routing)."""
+        from ollama_queue.eval.engine import run_eval_session
+
+        run_id = self._make_run_and_mock_session(db, gen_setting="auto", judge_setting="auto")
+
+        captured = {}
+
+        def mock_generate(run_id, db, http_base, backend=None):
+            captured["gen_backend"] = backend
+
+        def mock_judge(run_id, db, http_base, backend=None):
+            captured["judge_backend"] = backend
+
+        call_count = {"n": 0}
+
+        def mock_get_run(db, run_id):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                return {
+                    "id": run_id,
+                    "status": "queued",
+                    "variants": json.dumps(["A"]),
+                    "judge_model": None,
+                    "gen_backend_url": None,
+                    "judge_backend_url": None,
+                }
+            if call_count["n"] == 2:
+                return {"id": run_id, "status": "judging"}
+            return {"id": run_id, "status": "complete"}
+
+        with (
+            patch("ollama_queue.models.client.OllamaModels.list_local", return_value=[]),
+            patch("ollama_queue.eval.generate.run_eval_generate", side_effect=mock_generate),
+            patch("ollama_queue.eval.judge.run_eval_judge", side_effect=mock_judge),
+            patch("ollama_queue.eval.engine.get_eval_run", side_effect=mock_get_run),
+            patch("ollama_queue.eval.engine.update_eval_run"),
+            patch("ollama_queue.eval.engine.compute_run_analysis"),
+            patch("ollama_queue.eval.promote.generate_eval_analysis"),
+            patch("ollama_queue.eval.promote.check_auto_promote"),
+        ):
+            run_eval_session(run_id, db)
+
+        assert captured["gen_backend"] is None
+        assert captured["judge_backend"] is None
+
+    def test_no_setting_resolves_to_none(self, db):
+        """No setting = None = auto routing."""
+        from ollama_queue.eval.engine import run_eval_session
+
+        # No settings set at all
+        run_id = self._make_run_and_mock_session(db)
+
+        captured = {}
+
+        def mock_generate(run_id, db, http_base, backend=None):
+            captured["gen_backend"] = backend
+
+        def mock_judge(run_id, db, http_base, backend=None):
+            captured["judge_backend"] = backend
+
+        call_count = {"n": 0}
+
+        def mock_get_run(db, run_id):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                return {
+                    "id": run_id,
+                    "status": "queued",
+                    "variants": json.dumps(["A"]),
+                    "judge_model": None,
+                    "gen_backend_url": None,
+                    "judge_backend_url": None,
+                }
+            if call_count["n"] == 2:
+                return {"id": run_id, "status": "judging"}
+            return {"id": run_id, "status": "complete"}
+
+        with (
+            patch("ollama_queue.models.client.OllamaModels.list_local", return_value=[]),
+            patch("ollama_queue.eval.generate.run_eval_generate", side_effect=mock_generate),
+            patch("ollama_queue.eval.judge.run_eval_judge", side_effect=mock_judge),
+            patch("ollama_queue.eval.engine.get_eval_run", side_effect=mock_get_run),
+            patch("ollama_queue.eval.engine.update_eval_run"),
+            patch("ollama_queue.eval.engine.compute_run_analysis"),
+            patch("ollama_queue.eval.promote.generate_eval_analysis"),
+            patch("ollama_queue.eval.promote.check_auto_promote"),
+        ):
+            run_eval_session(run_id, db)
+
+        assert captured["gen_backend"] is None
+        assert captured["judge_backend"] is None
+
+
+class TestRunEvalGenerateBackend:
+    """run_eval_generate passes backend kwarg through to _call_proxy."""
+
+    def test_backend_passed_to_call_proxy(self):
+        """run_eval_generate passes backend kwarg to _call_proxy via _generate_one."""
+        run = _make_run_record()
+        items = _make_items(1)
+        proxy_calls = []
+
+        def mock_proxy(**kwargs):
+            proxy_calls.append(kwargs)
+            return ("Generated principle", 1)
+
+        with (
+            patch("ollama_queue.eval.engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval.engine.get_eval_variant", return_value=_make_variant()),
+            patch("ollama_queue.eval.engine.get_eval_template", return_value=_make_template()),
+            patch("ollama_queue.eval.engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval.engine.update_eval_run"),
+            patch("ollama_queue.eval.engine.insert_eval_result"),
+            patch("ollama_queue.eval.engine._ensure_seed"),
+            patch("ollama_queue.eval.engine._call_proxy", side_effect=mock_proxy),
+        ):
+            run_eval_generate(1, MagicMock(), backend="http://remote:11434")
+
+        assert len(proxy_calls) > 0
+        assert proxy_calls[0]["backend"] == "http://remote:11434"
+
+    def test_backend_none_by_default(self):
+        """run_eval_generate defaults backend=None when not specified."""
+        run = _make_run_record()
+        items = _make_items(1)
+        proxy_calls = []
+
+        def mock_proxy(**kwargs):
+            proxy_calls.append(kwargs)
+            return ("Generated principle", 1)
+
+        with (
+            patch("ollama_queue.eval.engine.get_eval_run", return_value=run),
+            patch("ollama_queue.eval.engine.get_eval_variant", return_value=_make_variant()),
+            patch("ollama_queue.eval.engine.get_eval_template", return_value=_make_template()),
+            patch("ollama_queue.eval.engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval.engine.update_eval_run"),
+            patch("ollama_queue.eval.engine.insert_eval_result"),
+            patch("ollama_queue.eval.engine._ensure_seed"),
+            patch("ollama_queue.eval.engine._call_proxy", side_effect=mock_proxy),
+        ):
+            run_eval_generate(1, MagicMock())
+
+        assert len(proxy_calls) > 0
+        assert proxy_calls[0]["backend"] is None
+
+
+class TestRunEvalJudgeBackend:
+    """run_eval_judge passes backend kwarg through to _call_proxy."""
+
+    @pytest.fixture
+    def db(self, tmp_path):
+        from ollama_queue.db import Database
+
+        db = Database(str(tmp_path / "judge_backend.db"))
+        db.initialize()
+        return db
+
+    def test_backend_passed_to_judge_call_proxy(self, db):
+        """run_eval_judge passes backend kwarg to _judge_one_target -> _call_proxy."""
+        from ollama_queue.eval.judge import run_eval_judge
+
+        run_id = create_eval_run(db, variant_id="A", seed=42)
+        update_eval_run(db, run_id, status="judging")
+        db.set_setting("eval.judge_model", "test-judge:7b")
+
+        items = [
+            {"id": "1", "title": "T1", "one_liner": "O1", "description": "", "cluster_id": "c1"},
+            {"id": "2", "title": "T2", "one_liner": "O2", "description": "", "cluster_id": "c1"},
+            {"id": "3", "title": "T3", "one_liner": "O3", "description": "", "cluster_id": "c2"},
+        ]
+
+        # Insert a generation result so judge has something to score
+        insert_eval_result(
+            db,
+            run_id=run_id,
+            variant="A",
+            source_item_id="1",
+            source_item_title="T1",
+            target_item_id="1",
+            is_same_cluster=0,
+            row_type="generate",
+            principle="Test principle for backend wiring",
+        )
+
+        proxy_calls = []
+
+        def mock_proxy(**kwargs):
+            proxy_calls.append(kwargs)
+            return ('{"transfer": 4, "precision": 3, "actionability": 3, "reasoning": "ok"}', 1)
+
+        with (
+            patch("ollama_queue.eval.engine._fetch_items", return_value=items),
+            patch("ollama_queue.eval.engine._call_proxy", side_effect=mock_proxy),
+        ):
+            run_eval_judge(run_id, db, backend="http://judge-host:11434")
+
+        assert len(proxy_calls) > 0
+        for call in proxy_calls:
+            assert call["backend"] == "http://judge-host:11434"
+
+
+class TestGenerateEvalAnalysisBackend:
+    """generate_eval_analysis reads eval.analysis_backend_url and passes to _call_proxy."""
+
+    @pytest.fixture
+    def db(self, tmp_path):
+        from ollama_queue.db import Database
+
+        db = Database(str(tmp_path / "analysis_backend.db"))
+        db.initialize()
+        return db
+
+    def test_analysis_backend_passed_to_call_proxy(self, db):
+        """eval.analysis_backend_url setting is passed to _call_proxy."""
+        run_id = create_eval_run(db, variant_id="A", seed=42)
+        update_eval_run(
+            db,
+            run_id,
+            status="complete",
+            metrics=json.dumps({"A": {"f1": 0.8, "recall": 0.7, "precision": 0.9, "actionability": 3.5}}),
+            winner_variant="A",
+            judge_model="test-judge:7b",
+        )
+        db.set_setting("eval.analysis_model", "analysis-model:7b")
+        db.set_setting("eval.analysis_backend_url", "http://analysis-host:11434")
+
+        proxy_calls = []
+
+        def mock_proxy(**kwargs):
+            proxy_calls.append(kwargs)
+            return ("SUMMARY: Good run.\nWHY: Metrics are solid.\nRECOMMENDATIONS: 1. Keep going.", 1)
+
+        with (
+            patch("ollama_queue.eval.engine._call_proxy", side_effect=mock_proxy),
+            patch("ollama_queue.eval.engine._fetch_analysis_samples", return_value=([], [])),
+        ):
+            generate_eval_analysis(db, run_id)
+
+        assert len(proxy_calls) == 1
+        assert proxy_calls[0]["backend"] == "http://analysis-host:11434"
+
+    def test_analysis_backend_auto_resolves_to_none(self, db):
+        """eval.analysis_backend_url='auto' resolves to None."""
+        run_id = create_eval_run(db, variant_id="A", seed=42)
+        update_eval_run(
+            db,
+            run_id,
+            status="complete",
+            metrics=json.dumps({"A": {"f1": 0.8, "recall": 0.7, "precision": 0.9, "actionability": 3.5}}),
+            winner_variant="A",
+            judge_model="test-judge:7b",
+        )
+        db.set_setting("eval.analysis_model", "analysis-model:7b")
+        db.set_setting("eval.analysis_backend_url", "auto")
+
+        proxy_calls = []
+
+        def mock_proxy(**kwargs):
+            proxy_calls.append(kwargs)
+            return ("SUMMARY: ok.", 1)
+
+        with (
+            patch("ollama_queue.eval.engine._call_proxy", side_effect=mock_proxy),
+            patch("ollama_queue.eval.engine._fetch_analysis_samples", return_value=([], [])),
+        ):
+            generate_eval_analysis(db, run_id)
+
+        assert len(proxy_calls) == 1
+        assert proxy_calls[0]["backend"] is None
+
+    def test_analysis_backend_none_when_no_setting(self, db):
+        """No eval.analysis_backend_url setting means backend=None."""
+        run_id = create_eval_run(db, variant_id="A", seed=42)
+        update_eval_run(
+            db,
+            run_id,
+            status="complete",
+            metrics=json.dumps({"A": {"f1": 0.8, "recall": 0.7, "precision": 0.9, "actionability": 3.5}}),
+            winner_variant="A",
+            judge_model="test-judge:7b",
+        )
+        db.set_setting("eval.analysis_model", "analysis-model:7b")
+        # No eval.analysis_backend_url set
+
+        proxy_calls = []
+
+        def mock_proxy(**kwargs):
+            proxy_calls.append(kwargs)
+            return ("SUMMARY: ok.", 1)
+
+        with (
+            patch("ollama_queue.eval.engine._call_proxy", side_effect=mock_proxy),
+            patch("ollama_queue.eval.engine._fetch_analysis_samples", return_value=([], [])),
+        ):
+            generate_eval_analysis(db, run_id)
+
+        assert len(proxy_calls) == 1
+        assert proxy_calls[0]["backend"] is None

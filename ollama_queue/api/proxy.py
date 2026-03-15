@@ -199,6 +199,7 @@ async def _proxy_ollama_request(
     priority = body.pop("_priority", 0)
     source = body.pop("_source", "proxy")
     req_timeout = body.pop("_timeout", 600)  # default matches default_timeout_seconds; callers may override
+    forced_backend = body.pop("_backend", None)
 
     # Track request against known consumer for health monitoring
     try:
@@ -239,8 +240,26 @@ async def _proxy_ollama_request(
     )
     db.start_job(job_id)
 
+    # Validate forced backend before entering the try/except block (HTTPException
+    # inherits from Exception, so the generic handler would swallow it).
+    if forced_backend and forced_backend != "auto":
+        registered = {b["url"] for b in _api.db.list_backends()}
+        if forced_backend not in registered:
+            db.complete_job(
+                job_id,
+                exit_code=1,
+                stdout_tail="",
+                stderr_tail=f"unregistered backend: {forced_backend}",
+                outcome_reason="unregistered_backend",
+            )
+            db.release_proxy_claim()
+            raise HTTPException(
+                status_code=422,
+                detail=f"Backend {forced_backend!r} is not registered. Registered: {sorted(registered)}",
+            )
+
     try:
-        backend = await select_backend(model)
+        backend = forced_backend if forced_backend and forced_backend != "auto" else await select_backend(model)
         async with httpx.AsyncClient(timeout=httpx.Timeout(float(req_timeout))) as client:
             resp = await client.post(f"{backend}{endpoint}", json=body)
             result = resp.json()
@@ -323,6 +342,7 @@ async def proxy_generate(body: dict = Body(...)):
     priority = body.pop("_priority", 0)
     source = body.pop("_source", "proxy")
     req_timeout = body.pop("_timeout", 600)
+    forced_backend = body.pop("_backend", None)
 
     # Track request against known consumer for health monitoring (streaming path)
     try:
@@ -363,6 +383,24 @@ async def proxy_generate(body: dict = Body(...)):
     )
     db.start_job(job_id)
 
+    # Validate forced backend before entering the try/except block (HTTPException
+    # inherits from Exception, so the generic handler would swallow it).
+    if forced_backend and forced_backend != "auto":
+        registered = {b["url"] for b in _api.db.list_backends()}
+        if forced_backend not in registered:
+            db.complete_job(
+                job_id,
+                exit_code=1,
+                stdout_tail="",
+                stderr_tail=f"unregistered backend: {forced_backend}",
+                outcome_reason="unregistered_backend",
+            )
+            db.release_proxy_claim()
+            raise HTTPException(
+                status_code=422,
+                detail=f"Backend {forced_backend!r} is not registered. Registered: {sorted(registered)}",
+            )
+
     # Guard the entire pre-StreamingResponse window against BaseException (including
     # CancelledError, which inherits from BaseException not Exception in Python 3.8+).
     # If anything prevents us from returning the StreamingResponse, release the claim
@@ -371,7 +409,7 @@ async def proxy_generate(body: dict = Body(...)):
     try:
         try:
             # Use build_request + send(stream=True) so httpx doesn't buffer the body.
-            backend = await select_backend(model)
+            backend = forced_backend if forced_backend and forced_backend != "auto" else await select_backend(model)
             async_client = httpx.AsyncClient(timeout=httpx.Timeout(None, connect=10.0))
             rp_req = async_client.build_request("POST", f"{backend}/api/generate", json=body)
             rp_resp = await async_client.send(rp_req, stream=True)
@@ -503,7 +541,7 @@ def _openai_to_ollama_chat_request(body: dict) -> dict:
         options["num_predict"] = body["max_tokens"]
     if options:
         ollama["options"] = options
-    for key in ("_priority", "_source", "_timeout"):
+    for key in ("_priority", "_source", "_timeout", "_backend"):
         if key in body:
             ollama[key] = body[key]
     return ollama
