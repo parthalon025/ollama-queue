@@ -211,6 +211,7 @@ def _call_proxy(
     priority: int = 2,
     extra_params: dict | None = None,
     system_prompt: str | None = None,
+    backend: str | None = None,
 ) -> tuple[str | None, int | None]:
     """POST to the ollama-queue proxy and return (response_text, queue_job_id).
 
@@ -243,6 +244,10 @@ def _call_proxy(
     # Add system prompt if provided
     if system_prompt is not None:
         body["system"] = system_prompt
+
+    # Route to a specific backend when requested (skip "auto" — let proxy decide)
+    if backend and backend != "auto":
+        body["_backend"] = backend
 
     last_exc: Exception | None = None
     for attempt in range(_MAX_RETRIES + 1):

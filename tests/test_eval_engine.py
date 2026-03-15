@@ -4608,6 +4608,98 @@ class TestCallProxyExtraParamsAndSystemPrompt:
             assert body["options"]["num_ctx"] == 4096  # flat column wins
 
 
+class TestCallProxyBackendParam:
+    """_call_proxy backend parameter wiring."""
+
+    def _make_mock_client(self, response_data: dict):
+        """Build a reusable mock httpx.Client context manager."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = response_data
+        mock_client = MagicMock()
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        mock_client.post.return_value = mock_resp
+        return mock_client
+
+    def test_backend_included_in_body(self):
+        """_call_proxy should include _backend in body when backend is a real URL."""
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = self._make_mock_client({"response": "text"})
+            mock_client_class.return_value = mock_client
+
+            _call_proxy(
+                http_base="http://localhost:7683",
+                model="m",
+                prompt="p",
+                temperature=0.5,
+                num_ctx=4096,
+                timeout=30,
+                source="test",
+                backend="http://remote:11434",
+            )
+            body = mock_client.post.call_args[1]["json"]
+            assert body["_backend"] == "http://remote:11434"
+
+    def test_backend_auto_not_included_in_body(self):
+        """_call_proxy should not include _backend when backend is 'auto'."""
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = self._make_mock_client({"response": "text"})
+            mock_client_class.return_value = mock_client
+
+            _call_proxy(
+                http_base="http://localhost:7683",
+                model="m",
+                prompt="p",
+                temperature=0.5,
+                num_ctx=4096,
+                timeout=30,
+                source="test",
+                backend="auto",
+            )
+            body = mock_client.post.call_args[1]["json"]
+            assert "_backend" not in body
+
+    def test_backend_none_not_included_in_body(self):
+        """_call_proxy should not include _backend when backend is None (default)."""
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = self._make_mock_client({"response": "text"})
+            mock_client_class.return_value = mock_client
+
+            _call_proxy(
+                http_base="http://localhost:7683",
+                model="m",
+                prompt="p",
+                temperature=0.5,
+                num_ctx=4096,
+                timeout=30,
+                source="test",
+                backend=None,
+            )
+            body = mock_client.post.call_args[1]["json"]
+            assert "_backend" not in body
+
+    def test_backend_empty_string_not_included_in_body(self):
+        """_call_proxy should not include _backend when backend is empty string."""
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = self._make_mock_client({"response": "text"})
+            mock_client_class.return_value = mock_client
+
+            _call_proxy(
+                http_base="http://localhost:7683",
+                model="m",
+                prompt="p",
+                temperature=0.5,
+                num_ctx=4096,
+                timeout=30,
+                source="test",
+                backend="",
+            )
+            body = mock_client.post.call_args[1]["json"]
+            assert "_backend" not in body
+
+
 class TestRunEvalGenerateVariantsNonList:
     """Line 1997: json.loads succeeds but returns non-list value."""
 
