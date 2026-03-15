@@ -49,7 +49,8 @@ def list_eval_runs(limit: int = 20, offset: int = 0):
             """SELECT id, status, variants, variant_id, winner_variant, metrics,
                       item_count, item_ids, started_at, completed_at,
                       judge_model, analysis_md, error, label, scheduled_by,
-                      error_budget, run_mode, judge_mode
+                      error_budget, run_mode, judge_mode,
+                      gen_backend_url, judge_backend_url
                FROM eval_runs
                ORDER BY id DESC
                LIMIT ? OFFSET ?""",
@@ -85,6 +86,8 @@ def list_eval_runs(limit: int = 20, offset: int = 0):
                 "scheduled_by": r.get("scheduled_by"),
                 "error_budget": r.get("error_budget"),
                 "run_mode": r.get("run_mode"),
+                "gen_backend_url": r.get("gen_backend_url"),
+                "judge_backend_url": r.get("judge_backend_url"),
             }
         )
     return result

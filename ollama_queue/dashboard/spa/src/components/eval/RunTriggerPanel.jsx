@@ -5,6 +5,7 @@ import {
   triggerEvalRun, fetchEvalRuns, startEvalPoll, evalActiveRun,
   testDataSource, primeDataSource,
 } from '../../stores';
+import { backendsData } from '../../stores/health.js';
 import { EVAL_TRANSLATIONS } from './translations.js';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
 import SchedulingModeSelector from './SchedulingModeSelector.jsx';
@@ -38,6 +39,8 @@ export default function RunTriggerPanel({ defaultCollapsed }) {
   const [runMode, setRunMode] = useState('batch');
   const [modeSubFields, setModeSubFields] = useState({});
   const [dryRun, setDryRun] = useState(false);
+  const [genBackend, setGenBackend] = useState('');
+  const [judgeBackend, setJudgeBackend] = useState('');
   const [fb, act] = useActionFeedback();
 
   // null = not checked yet, 'checking', 'ready', 'needs_prime', 'offline'
@@ -95,6 +98,8 @@ export default function RunTriggerPanel({ defaultCollapsed }) {
           run_mode: runMode,
           dry_run: dryRun,
           ...modeSubFields,
+          ...(genBackend ? { gen_backend_url: genBackend } : {}),
+          ...(judgeBackend ? { judge_backend_url: judgeBackend } : {}),
         };
         const result = await triggerEvalRun(body);
         if (!dryRun && result.run_id) {
@@ -366,6 +371,38 @@ export default function RunTriggerPanel({ defaultCollapsed }) {
               </div>
             )}
           </div>
+
+          {/* Backend overrides — lets the user pin generator or judge to a specific GPU
+              when multiple backends are configured. Empty = use settings default. */}
+          {backendsData.value.length > 1 && (
+            <div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>
+                Backend overrides (optional)
+              </div>
+              <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                <label style={{ flex: 1, minWidth: '200px' }}>
+                  <span style={{ fontSize: 'var(--type-label)', color: 'var(--text-tertiary)' }}>Generator</span>
+                  <select value={genBackend} onChange={e => setGenBackend(e.target.value)} class="t-input" style={{ width: '100%' }}>
+                    <option value="">Use settings default</option>
+                    <option value="auto">Auto (smart routing)</option>
+                    {backendsData.value.filter(b => b.healthy).map(b => (
+                      <option key={b.url} value={b.url}>{b.gpu_name || b.url}</option>
+                    ))}
+                  </select>
+                </label>
+                <label style={{ flex: 1, minWidth: '200px' }}>
+                  <span style={{ fontSize: 'var(--type-label)', color: 'var(--text-tertiary)' }}>Judge</span>
+                  <select value={judgeBackend} onChange={e => setJudgeBackend(e.target.value)} class="t-input" style={{ width: '100%' }}>
+                    <option value="">Use settings default</option>
+                    <option value="auto">Auto (smart routing)</option>
+                    {backendsData.value.filter(b => b.healthy).map(b => (
+                      <option key={b.url} value={b.url}>{b.gpu_name || b.url}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            </div>
+          )}
 
           {/* Scheduling mode */}
           <SchedulingModeSelector value={runMode} onChange={handleModeChange} />
