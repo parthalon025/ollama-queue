@@ -83,17 +83,23 @@ export default function Now({ onSubmitRequest }) {
     //   RAM/VRAM utilization. Derived from live signals, not hardcoded.
     // Decision it drives: Is the daemon healthy? Is RAM under pressure? How busy was
     //   the queue today?
+    // "warm" = daemon idle but a model is still loaded in VRAM — GPU is occupied even
+    //   though no job is running. Distinguishes truly-free GPU from loaded-but-waiting.
+    const rawDaemonState = st?.daemon?.state ?? null;
+    const warmModel = rawDaemonState === 'idle' ? (latestHealth?.ollama_model ?? null) : null;
+    const daemonDisplayValue = warmModel ? 'warm' : (rawDaemonState ?? '—');
     const daemonStatStatus =
         !st ? 'waiting' :
-        st.daemon?.state === 'running' ? 'active' :
-        (st.daemon?.state || '').startsWith('paused') ? 'warning' :
-        st.daemon?.state === 'offline' ? 'error' : 'ok';
+        rawDaemonState === 'running' ? 'active' :
+        (rawDaemonState || '').startsWith('paused') ? 'warning' :
+        rawDaemonState === 'offline' ? 'error' : 'ok';
 
     const kpiStats = [
         {
             label: 'Daemon',
-            value: st?.daemon?.state ?? '—',
+            value: daemonDisplayValue,
             status: daemonStatStatus,
+            detail: warmModel ? warmModel.split(':')[0] : undefined,
         },
         {
             label: 'Queue Depth',
