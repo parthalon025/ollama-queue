@@ -262,16 +262,20 @@ def put_eval_settings(body: dict = Body(...)):
                     f"{key}={value!r} is not installed in Ollama. " f"Installed models: {', '.join(sorted(installed))}"
                 )
 
-    # Validate backend URL references point to registered backends
-    # Body keys may be "eval.generator_backend_url" or "generator_backend_url" — normalize
+    # Validate backend URL references point to known backends.
+    # Union of env-var backends (BACKENDS list) + DB-registered backends so that
+    # both sources are accepted. The old code only checked db.list_backends(),
+    # which missed env-var-only backends visible in GET /api/backends.
+    import ollama_queue.api.backend_router as _backend_router
+
     for key, val in body.items():
         full_key = key if key.startswith("eval.") else f"eval.{key}"
         if full_key in _BACKEND_URL_KEYS and val and val != "auto":
-            registered = {b["url"] for b in db.list_backends()}
-            if val not in registered:
+            known = {u.rstrip("/") for u in _backend_router.BACKENDS}
+            known |= {b["url"].rstrip("/") for b in db.list_backends()}
+            if val.rstrip("/") not in known:
                 validation_errors.append(
-                    f"Backend {val!r} is not registered. "
-                    f"Registered backends: {', '.join(sorted(registered)) or '(none)'}"
+                    f"Backend {val!r} is not registered. " f"Known backends: {', '.join(sorted(known)) or '(none)'}"
                 )
 
     if validation_errors:
