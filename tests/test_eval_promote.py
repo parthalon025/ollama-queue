@@ -334,3 +334,59 @@ class TestFirstEverRunBlocksAutoPromote:
             check_auto_promote(db, run_id, "http://127.0.0.1:7683")
 
         mock_promote.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# generate_eval_analysis skips when no analysis model configured (#6)
+# ---------------------------------------------------------------------------
+
+
+class TestAnalysisSkipsWithoutModel:
+    """generate_eval_analysis should return silently when no model is resolved."""
+
+    def test_skips_analysis_when_no_model_configured(self, db):
+        """When analysis_model, run.judge_model, and eval.judge_model are all empty,
+        generate_eval_analysis should return without calling _call_proxy."""
+        from ollama_queue.eval.promote import generate_eval_analysis
+
+        run_id = _setup_completed_run(db, variant_id="A")
+        # Ensure no judge model is set anywhere
+        update_eval_run(db, run_id, judge_model=None)
+        with db._lock:
+            conn = db._connect()
+            conn.execute("DELETE FROM settings WHERE key = 'eval.judge_model'")
+            conn.execute("DELETE FROM settings WHERE key = 'eval.analysis_model'")
+            conn.commit()
+
+        with (
+            patch("ollama_queue.eval.engine._call_proxy") as mock_proxy,
+        ):
+            generate_eval_analysis(db, run_id)
+
+        # _call_proxy should NOT be called — no model to call
+        mock_proxy.assert_not_called()
+
+    def test_proceeds_when_judge_model_set_on_run(self, db):
+        """generate_eval_analysis proceeds when judge_model is set on the run."""
+        from ollama_queue.eval.promote import generate_eval_analysis
+
+        run_id = _setup_completed_run(db, variant_id="A")
+        # Set judge_model and ensure the metrics include actionability (needed by build_analysis_prompt)
+        metrics = {
+            "A": {
+                "f1": 0.90,
+                "recall": 0.85,
+                "precision": 0.95,
+                "actionability": 4.0,
+            }
+        }
+        update_eval_run(db, run_id, judge_model="qwen2.5:7b", variants=json.dumps(["A"]), metrics=json.dumps(metrics))
+
+        with (
+            patch("ollama_queue.eval.engine._call_proxy", return_value=("Analysis text", None)) as mock_proxy,
+        ):
+            generate_eval_analysis(db, run_id)
+
+        # _call_proxy SHOULD be called with the judge model
+        mock_proxy.assert_called_once()
+        assert mock_proxy.call_args.kwargs["model"] == "qwen2.5:7b"

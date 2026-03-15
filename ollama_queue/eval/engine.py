@@ -658,12 +658,60 @@ def run_eval_session(
 
     Handles unhandled exceptions by setting status='failed' with the error message.
     Intended to be called as a FastAPI background task (runs in thread pool).
+
+    Pre-flight: verifies all referenced models (variant + judge) are installed in
+    Ollama before starting.  Fails fast with a clear error instead of burning time
+    on 504 timeouts from missing models.
     """
     from ollama_queue.eval.generate import run_eval_generate
     from ollama_queue.eval.judge import run_eval_judge
     from ollama_queue.eval.promote import check_auto_promote, generate_eval_analysis
 
     try:
+        # Pre-flight: verify all referenced models are installed in Ollama
+        run = get_eval_run(db, run_id)
+        if run is None:
+            _log.error("run_eval_session: run_id=%d not found", run_id)
+            return
+
+        from ollama_queue.models.client import OllamaModels
+
+        installed = {m["name"].removesuffix(":latest") for m in OllamaModels.list_local()}
+
+        if installed:  # skip check if Ollama is unreachable (empty list)
+            raw_variants = run.get("variants") or ""
+            if isinstance(raw_variants, str):
+                try:
+                    variant_ids = json.loads(raw_variants)
+                    if isinstance(variant_ids, str):
+                        variant_ids = [variant_ids]
+                except (json.JSONDecodeError, TypeError):
+                    # Plain variant id string (not JSON array) — single variant
+                    variant_ids = [raw_variants] if raw_variants else []
+            else:
+                variant_ids = raw_variants or []
+
+            missing: list[str] = []
+            for vid in variant_ids:
+                variant = get_eval_variant(db, vid)
+                if variant and variant.get("provider", "ollama") == "ollama":
+                    model = variant["model"].removesuffix(":latest")
+                    if model not in installed:
+                        missing.append(f"variant {vid}: {variant['model']}")
+
+            judge_model = run.get("judge_model") or _get_eval_setting(db, "eval.judge_model", "")
+            judge_provider = _get_eval_setting(db, "eval.judge_provider", "ollama")
+            if judge_provider == "ollama" and judge_model and judge_model.removesuffix(":latest") not in installed:
+                missing.append(f"judge: {judge_model}")
+
+            if missing:
+                error_msg = f"Models not installed in Ollama: {'; '.join(missing)}"
+                _log.error("pre-flight failed for run %d: %s", run_id, error_msg)
+                update_eval_run(
+                    db, run_id, status="failed", error=error_msg, completed_at=datetime.now(UTC).isoformat()
+                )
+                return
+
         run_eval_generate(run_id, db, http_base)
         # Check if generate phase failed
         run = get_eval_run(db, run_id)

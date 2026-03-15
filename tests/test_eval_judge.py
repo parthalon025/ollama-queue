@@ -181,3 +181,60 @@ class TestJudgeParseFailureTracking:
         assert run is not None
         # Should be 0 (default) — update_eval_run is not called for 0 failures
         assert run.get("judge_parse_failures", 0) == 0
+
+
+# ---------------------------------------------------------------------------
+# Missing judge model fails explicitly (#6)
+# ---------------------------------------------------------------------------
+
+
+class TestJudgeFailsWithoutJudgeModel:
+    """Judge should fail explicitly when no judge model is configured."""
+
+    def test_fails_when_no_judge_model_configured(self, db, items):
+        """run_eval_judge must fail the run when judge_model resolves to empty string."""
+        run_id = create_eval_run(db, variant_id="A")
+        # No judge_model on the run, and no eval.judge_model in settings
+        update_eval_run(db, run_id, status="judging", stage="judging", seed=42)
+        _seed_gen_results(db, run_id, source_ids=("101",))
+
+        # Ensure no judge model setting exists
+        with db._lock:
+            conn = db._connect()
+            conn.execute("DELETE FROM settings WHERE key = 'eval.judge_model'")
+            conn.commit()
+
+        with (
+            patch("ollama_queue.eval.judge._eng._fetch_items", return_value=items) as mock_fetch,
+        ):
+            run_eval_judge(run_id, db)
+
+        run = get_eval_run(db, run_id)
+        assert run is not None
+        assert run["status"] == "failed"
+        assert "judge model" in run["error"].lower() or "No judge model" in run["error"]
+        # _fetch_items should NOT have been called (we fail before fetching items)
+        mock_fetch.assert_not_called()
+
+    def test_uses_explicit_judge_model_when_set(self, db, items):
+        """run_eval_judge proceeds normally when judge_model is explicitly set on the run."""
+        run_id = create_eval_run(db, variant_id="A")
+        update_eval_run(db, run_id, status="judging", stage="judging", seed=42, judge_model="qwen2.5:7b")
+        _seed_gen_results(db, run_id, source_ids=("101",))
+
+        def fake_judge(**kwargs):
+            return False
+
+        with (
+            patch("ollama_queue.eval.judge._eng._fetch_items", return_value=items),
+            patch("ollama_queue.eval.judge._judge_one_target", side_effect=fake_judge),
+            patch("ollama_queue.eval.judge._eng._fetch_scored_rows", return_value=[]),
+            patch("ollama_queue.eval.judge._eng.compute_metrics", return_value={}),
+            patch("ollama_queue.eval.judge._eng.render_report", return_value=""),
+        ):
+            run_eval_judge(run_id, db)
+
+        run = get_eval_run(db, run_id)
+        assert run is not None
+        # Should complete (not fail) since judge_model was explicitly set
+        assert run["status"] == "complete"
