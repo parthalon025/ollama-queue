@@ -5,7 +5,7 @@
 //   add a node, rebalance weights, or remove a failing backend?
 
 import { useEffect, useState } from 'preact/hooks';
-import { ShFrozen, ShGlitch, ShShatter, ShThreatPulse } from 'superhot-ui/preact';
+import { ShFrozen, ShGlitch, ShPageBanner, ShShatter, ShThreatPulse } from 'superhot-ui/preact';
 import TopologyDiagram from '../components/TopologyDiagram.jsx';
 import {
   backendsData, backendsError, fetchBackends,
@@ -14,7 +14,7 @@ import {
 } from '../stores';
 import { ShStatusBadge } from 'superhot-ui/preact';
 import { useActionFeedback } from '../hooks/useActionFeedback.js';
-import PageBanner from '../components/PageBanner.jsx';
+import { TAB_CONFIG } from '../config/tabs.js';
 
 // NOTE: all .map() callbacks use descriptive names — never 'h' (shadows JSX factory)
 
@@ -244,6 +244,7 @@ function AddBackendForm({ onAdded }) {
 // ── Main BackendsTab ────────────────────────────────────────────────────────
 
 export default function BackendsTab() {
+  const _tab = TAB_CONFIG.find(t => t.id === 'backends');
   const backends = backendsData.value || [];
   const fetchError = backendsError.value;
 
@@ -268,7 +269,7 @@ export default function BackendsTab() {
 
   return (
     <div class="flex flex-col gap-6 animate-page-enter tab-content">
-      <PageBanner title="Backends" subtitle="multi-gpu fleet management and routing" />
+      <ShPageBanner namespace={_tab.namespace} page={_tab.page} subtitle={_tab.subtitle} />
 
       {/* 6.1 Fleet Overview */}
       <div class="t-frame" data-label="Fleet Overview">
