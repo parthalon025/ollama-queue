@@ -15,7 +15,8 @@ import { ModelBadge } from '../../components/ModelBadge';
 import LoadMapStrip from '../../components/LoadMapStrip.jsx';
 import AddRecurringJobModal from '../../components/AddRecurringJobModal.jsx';
 import ScheduleHistory from './ScheduleHistory.jsx';
-import PageBanner from '../../components/PageBanner.jsx';
+import { ShPageBanner } from 'superhot-ui/preact';
+import { TAB_CONFIG } from '../../config/tabs.js';
 import {
     formatCountdown, formatInterval, parseInterval, formatDuration,
     computeRho, rhoStatus, priorityCategory, groupJobsByTag, groupNextDue,

@@ -3,8 +3,8 @@ import { useSignal } from '@preact/signals';
 import { settings, status, API, restartDaemon } from '../stores';
 import SettingsForm from '../components/SettingsForm';
 import { useActionFeedback } from '../hooks/useActionFeedback.js';
-import PageBanner from '../components/PageBanner.jsx';
-import { ShCrtToggle } from 'superhot-ui/preact';
+import { ShCrtToggle, ShPageBanner } from 'superhot-ui/preact';
+import { TAB_CONFIG } from '../config/tabs.js';
 
 // Intensity → CSS var opacity map. Matches the values used by ShCrtToggleNative.
 const CRT_OPACITY = { off: 0, low: 0.02, medium: 0.05, high: 0.1 };
@@ -41,6 +41,7 @@ const RESTART_REQUIRED_KEYS = new Set(['concurrency', 'stall_threshold_seconds',
 //   How long before a non-LLM job is killed for timeout? How many days of job history to keep?
 //   The banner tells the user they need to restart the daemon for certain changes to take effect.
 export default function Settings() {
+  const _tab = TAB_CONFIG.find(t => t.id === 'settings');
   const sett = settings.value;
   const st = status.value;
   const daemonState = st && st.daemon ? st.daemon.state : null;
@@ -126,7 +127,7 @@ export default function Settings() {
 
   return (
     <div class="flex flex-col gap-4 animate-page-enter" data-mood="nostalgic">
-      <PageBanner title="Settings" subtitle="queue configuration and thresholds" />
+      <ShPageBanner namespace={_tab.namespace} page={_tab.page} subtitle={_tab.subtitle} />
       {restartRequired.value && (
         <div role="alert" style="background:color-mix(in srgb,var(--status-warning) 12%,transparent);border:1px solid var(--status-warning);border-radius:var(--radius);padding:10px 14px;display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;">
           <span style="font-size:var(--type-label);color:var(--status-warning);">

@@ -8,7 +8,8 @@ import { evalVariants, fetchEvalVariants } from '../stores/eval.js';
 import { SystemHealth } from '../components/SystemHealth.jsx';
 import PerformanceCurveChart from '../components/PerformanceCurveChart.jsx';
 import LoadHeatmap from '../components/LoadHeatmap.jsx';
-import PageBanner from '../components/PageBanner.jsx';
+import { ShPageBanner } from 'superhot-ui/preact';
+import { TAB_CONFIG } from '../config/tabs.js';
 import ModelChip from '../components/ModelChip.jsx';
 import F1Score from '../components/F1Score.jsx';
 
@@ -19,6 +20,7 @@ import F1Score from '../components/F1Score.jsx';
 //   should only be used for batch jobs? Is a new model underperforming its size class?
 
 export default function Performance() {
+    const _tab = TAB_CONFIG.find(t => t.id === 'performance');
     const stats = modelPerformance.value;
     const curve = performanceCurve.value;
     const backends = backendMetrics.value;
@@ -45,7 +47,7 @@ export default function Performance() {
 
     return (
         <div class="flex flex-col gap-6 animate-page-enter">
-            <PageBanner title="Performance" subtitle="model benchmarks and system metrics" />
+            <ShPageBanner namespace={_tab.namespace} page={_tab.page} subtitle={_tab.subtitle} />
 
             {/* System Health — always visible at top */}
             <SystemHealth />

@@ -12,7 +12,8 @@ import { useActionFeedback } from '../hooks/useActionFeedback.js';
 import ActivityHeatmap from '../components/ActivityHeatmap.jsx';
 import HistoryList from '../components/HistoryList.jsx';
 import TimeChart from '../components/TimeChart.jsx';
-import PageBanner from '../components/PageBanner.jsx';
+import { ShPageBanner } from 'superhot-ui/preact';
+import { TAB_CONFIG } from '../config/tabs.js';
 
 // NOTE: all .map() callbacks use descriptive names — never 'h' (shadows JSX factory)
 
@@ -35,6 +36,7 @@ const DLQ_FRESHNESS = { cooling: 3600, frozen: 21600, stale: 86400 };
 //   time-of-day pattern to failures (visible in the heatmap)? Are jobs getting slower over
 //   time (visible in the duration chart)?
 export default function History() {
+    const _tab = TAB_CONFIG.find(t => t.id === 'history');
     const dlq = dlqEntries.value;
     const dlqCnt = dlqCount.value;
     const durations = durationData.value;
@@ -125,7 +127,7 @@ export default function History() {
 
     return (
         <div class="flex flex-col gap-6 animate-page-enter" data-mood="dread">
-            <PageBanner title="History" subtitle="completed and failed jobs" />
+            <ShPageBanner namespace={_tab.namespace} page={_tab.page} subtitle={_tab.subtitle} />
 
             {/* DLQ section — only shown when entries exist */}
             {dlqCnt > 0 && (

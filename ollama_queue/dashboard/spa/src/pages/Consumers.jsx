@@ -12,7 +12,8 @@ import {
   enableIntercept, disableIntercept,
 } from '../stores';
 import { ConsumerRow } from '../components/consumers/ConsumerRow.jsx';
-import PageBanner from '../components/PageBanner.jsx';
+import { ShPageBanner } from 'superhot-ui/preact';
+import { TAB_CONFIG } from '../config/tabs.js';
 
 // What it shows: System-wide iptables intercept mode status + enable/disable toggle.
 // Decision it drives: Lets user activate comprehensive Ollama MITM that catches
@@ -60,6 +61,7 @@ function InterceptBanner() {
 }
 
 export default function Consumers() {
+  const _tab = TAB_CONFIG.find(t => t.id === 'consumers');
   const [scanFb, runScan] = useActionFeedback();
 
   useEffect(() => { fetchConsumers(); }, []);
@@ -70,7 +72,7 @@ export default function Consumers() {
 
   return (
     <div class="consumers-page">
-      <PageBanner title="Consumers" subtitle="ollama traffic routing and patching" />
+      <ShPageBanner namespace={_tab.namespace} page={_tab.page} subtitle={_tab.subtitle} />
 
       {/* What it shows: A plain-language explanation of what consumers are and how the
           scanner works. Decision it drives: User understands why services appear here

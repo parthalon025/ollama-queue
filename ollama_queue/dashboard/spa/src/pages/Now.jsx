@@ -9,7 +9,8 @@ import { useActionFeedback } from '../hooks/useActionFeedback.js';
 import CurrentJob from '../components/CurrentJob.jsx';
 import QueueList from '../components/QueueList.jsx';
 import HeroCard from '../components/HeroCard.jsx';
-import PageBanner from '../components/PageBanner.jsx';
+import { ShPageBanner } from 'superhot-ui/preact';
+import { TAB_CONFIG } from '../config/tabs.js';
 import InfrastructurePanel from '../components/InfrastructurePanel.jsx';
 
 // NOTE: all .map() callbacks use descriptive names — never 'h' (shadows JSX factory)
@@ -21,6 +22,7 @@ import InfrastructurePanel from '../components/InfrastructurePanel.jsx';
 //   something, or go investigate a problem in History? The alert strip makes issues impossible
 //   to miss. The + FAB opens SubmitJobModal to queue a one-off job immediately.
 export default function Now({ onSubmitRequest }) {
+    const _tab = TAB_CONFIG.find(t => t.id === 'now');
     const st = status.value;
     const q = queue.value;
     const hist = history.value;
@@ -80,7 +82,7 @@ export default function Now({ onSubmitRequest }) {
     return (
         <div ref={pageRef} class="flex flex-col gap-4 animate-page-enter"
              data-mood={showAlerts ? 'dread' : 'dawn'}>
-            <PageBanner title="Now" subtitle="live queue status" />
+            <ShPageBanner namespace={_tab.namespace} page={_tab.page} subtitle={_tab.subtitle} />
             {/* Disconnected banner */}
             {connectionStatus.value === 'disconnected' && (
                 <div style={{

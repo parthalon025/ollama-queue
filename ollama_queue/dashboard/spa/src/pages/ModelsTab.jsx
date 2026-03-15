@@ -6,7 +6,8 @@ import {
     modelFilter,
 } from '../stores';
 import { ModelBadge } from '../components/ModelBadge';
-import PageBanner from '../components/PageBanner.jsx';
+import { ShPageBanner } from 'superhot-ui/preact';
+import { TAB_CONFIG } from '../config/tabs.js';
 import { currentJob } from '../stores/index.js';
 import { evalVariants, evalActiveRun } from '../stores/eval.js';
 import EvalRoleBadge from '../components/EvalRoleBadge.jsx';
@@ -27,6 +28,7 @@ function useDebounce(value, delay) {
 // Decision it drives: Which models are installed and how much space do they use? Is a model
 //   missing that I need for a job? Should I start a pull or cancel one in progress?
 export default function ModelsTab() {
+    const _tab = TAB_CONFIG.find(t => t.id === 'models');
     const [searchQuery, setSearchQuery] = useState('');
     const [activePulls, setActivePulls] = useState({});
     const [pullError, setPullError] = useState(null);
@@ -155,7 +157,7 @@ export default function ModelsTab() {
 
     return (
         <div class="flex flex-col gap-4 animate-page-enter" data-mood="nostalgic">
-            <PageBanner title="Models" subtitle="installed AI models and downloads" />
+            <ShPageBanner namespace={_tab.namespace} page={_tab.page} subtitle={_tab.subtitle} />
 
             {pullError && (
                 <div style={{ padding: '0.5rem', background: 'var(--status-error)',
