@@ -226,6 +226,37 @@ def test_dlq_handle_failure_prevents_double_retry_under_concurrency():
     assert len(retry_calls) <= 1, f"Expected at most 1 retry, got {len(retry_calls)}"
 
 
+def test_handle_failure_locked_exists_and_matches_behavior(tmp_path):
+    """DLQManager must expose _handle_failure_locked for callers already holding db._lock.
+
+    Regression test for H4: executor.py calls handle_failure from inside
+    with self.db._lock:. The RLock re-entry means handle_failure's own lock
+    acquisition is a no-op, breaking the atomicity guarantee. The fix extracts
+    _handle_failure_locked (assumes lock held) so executor can call it correctly.
+    """
+    db = Database(str(tmp_path / "test.db"))
+    db.initialize()
+    dlq = DLQManager(db)
+
+    # _handle_failure_locked must exist and be callable
+    assert hasattr(dlq, "_handle_failure_locked"), (
+        "DLQManager must have _handle_failure_locked method for callers "
+        "already holding db._lock (executor.py pattern)"
+    )
+
+    # Submit a job so there's something to fail
+    job_id = db.submit_job(command="echo test", model="", priority=5, timeout=60, source="test")
+    db.start_job(job_id)
+    db.complete_job(job_id, exit_code=1, stdout_tail="", stderr_tail="", outcome_reason="test")
+
+    # Calling _handle_failure_locked from inside db._lock must work without deadlock
+    result = None
+    with db._lock:
+        result = dlq._handle_failure_locked(job_id, "test failure")
+
+    assert result in ("retry", "dlq")
+
+
 def test_list_dlq_unscheduled_only(db):
     """list_dlq with unscheduled_only=True excludes already-rescheduled entries."""
     j1 = db.submit_job("cmd1", "m", 5, 60, "test")

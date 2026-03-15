@@ -698,16 +698,32 @@ def test_provider_test_missing_model(client):
 
 
 def test_valid_backend_url_accepted(client_and_db):
-    """PUT with a registered backend URL should be accepted."""
+    """PUT with a registered backend URL should be accepted.
+
+    Patches the module-level BACKENDS list in backend_router directly instead of
+    calling db.add_backend(), which mutates shared module-level state and races
+    with other xdist workers that may reset BACKENDS between add and PUT.
+
+    The eval_settings PUT handler validates via:
+        import ollama_queue.api.backend_router as _backend_router
+        known = {u.rstrip("/") for u in _backend_router.BACKENDS}
+        known |= {b["url"].rstrip("/") for b in db.list_backends()}
+    Patching ollama_queue.api.backend_router.BACKENDS injects our URL into the
+    known set without touching shared state.
+    """
+    from unittest.mock import patch
+
     client, db = client_and_db
-    db.add_backend("http://100.114.197.57:11434", weight=1.0)
-    resp = client.put(
-        "/api/eval/settings",
-        json={"eval.generator_backend_url": "http://100.114.197.57:11434"},
-    )
+    test_url = "http://100.114.197.57:11434"
+
+    with patch("ollama_queue.api.backend_router.BACKENDS", [test_url]):
+        resp = client.put(
+            "/api/eval/settings",
+            json={"eval.generator_backend_url": test_url},
+        )
     assert resp.status_code == 200
     data = resp.json()
-    assert data["eval.generator_backend_url"] == "http://100.114.197.57:11434"
+    assert data["eval.generator_backend_url"] == test_url
 
 
 def test_auto_backend_accepted(client):

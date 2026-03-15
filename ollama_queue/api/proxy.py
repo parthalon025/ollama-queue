@@ -258,19 +258,26 @@ async def _proxy_ollama_request(
                 detail=f"Backend {forced_backend!r} is not registered. Registered: {sorted(registered)}",
             )
 
+    _job_completed = False
     try:
         backend = forced_backend if forced_backend and forced_backend != "auto" else await select_backend(model)
         async with httpx.AsyncClient(timeout=httpx.Timeout(float(req_timeout))) as client:
             resp = await client.post(f"{backend}{endpoint}", json=body)
             result = resp.json()
 
-        db.complete_job(
-            job_id=job_id,
-            exit_code=0,
-            stdout_tail=extract_stdout_fn(result),
-            stderr_tail="",
-            outcome_reason=None,
-        )
+        try:
+            db.complete_job(
+                job_id=job_id,
+                exit_code=0,
+                stdout_tail=extract_stdout_fn(result),
+                stderr_tail="",
+                outcome_reason=None,
+            )
+        finally:
+            # Mark the attempt regardless of whether complete_job succeeded or raised.
+            # This prevents the outer except Exception from calling complete_job a second
+            # time (with exit_code=1), which would mark the job failed despite Ollama 200.
+            _job_completed = True
         if result.get("eval_count"):
             try:
                 db.store_backend_metrics(backend_url=backend, model=model, metrics=result)
@@ -281,23 +288,25 @@ async def _proxy_ollama_request(
     except httpx.ReadTimeout as e:
         # ReadTimeout is expected for slow models (e.g. deepseek-r1); log as WARNING not ERROR
         _log.warning("%s timed out for job %d after %ss (pass _timeout to override)", command, job_id, req_timeout)
-        db.complete_job(
-            job_id=job_id,
-            exit_code=1,
-            stdout_tail="",
-            stderr_tail=str(e)[:500],
-            outcome_reason=f"proxy timeout after {req_timeout}s",
-        )
+        if not _job_completed:
+            db.complete_job(
+                job_id=job_id,
+                exit_code=1,
+                stdout_tail="",
+                stderr_tail=str(e)[:500],
+                outcome_reason=f"proxy timeout after {req_timeout}s",
+            )
         raise HTTPException(status_code=504, detail=f"{error_prefix}: read timeout after {req_timeout}s") from e
     except Exception as e:
         _log.error("%s failed for job %d: %s", command, job_id, e, exc_info=True)
-        db.complete_job(
-            job_id=job_id,
-            exit_code=1,
-            stdout_tail="",
-            stderr_tail=str(e)[:500],
-            outcome_reason=f"proxy error: {e}",
-        )
+        if not _job_completed:
+            db.complete_job(
+                job_id=job_id,
+                exit_code=1,
+                stdout_tail="",
+                stderr_tail=str(e)[:500],
+                outcome_reason=f"proxy error: {e}",
+            )
         raise HTTPException(status_code=502, detail=f"{error_prefix}: {e}") from e
     finally:
         try:
@@ -434,6 +443,7 @@ async def proxy_generate(body: dict = Body(...)):
                 db.release_proxy_claim()
             except Exception:
                 _log.exception("release_proxy_claim failed for streaming job %d", job_id)
+                _released = True  # attempt was made — prevent BackgroundTask double-release
                 return
             _released = True
 

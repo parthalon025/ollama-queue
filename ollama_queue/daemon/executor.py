@@ -411,7 +411,17 @@ class ExecutorMixin:
                     _log.warning("Job #%d proc.wait() timed out after drain — sending SIGKILL", job["id"])
                     with contextlib.suppress(ProcessLookupError):
                         proc.kill()
-                    proc.wait(timeout=5)  # reap zombie
+                    try:
+                        proc.wait(timeout=5)  # reap zombie
+                    except subprocess.TimeoutExpired:
+                        _log.warning(
+                            "Job #%d still alive after SIGKILL (D-state?) — closing pipes",
+                            job["id"],
+                        )
+                        with contextlib.suppress(Exception):
+                            proc.stdout.close()
+                        with contextlib.suppress(Exception):
+                            proc.stderr.close()
             else:
                 try:
                     out, err = proc.communicate(timeout=job["timeout"])
@@ -422,8 +432,7 @@ class ExecutorMixin:
                         out, err = proc.communicate(timeout=5)
                     except _TimeoutExpired:
                         out, err = b"", b""
-                    # Atomic: no reader sees 'killed' before DLQ routing decides retry/dead.
-                    # db._lock is RLock — kill_job and handle_failure re-acquire safely. (#3)
+                    # db._lock is held — call _handle_failure_locked (not handle_failure) to preserve atomicity.
                     with self.db._lock:
                         self.db.kill_job(
                             job["id"],
@@ -433,7 +442,7 @@ class ExecutorMixin:
                         )
                         self._record_ollama_failure()
                         try:
-                            self.dlq.handle_failure(job["id"], f"timeout after {job['timeout']}s")
+                            self.dlq._handle_failure_locked(job["id"], f"timeout after {job['timeout']}s")
                         except Exception:
                             _log.exception("DLQ routing failed for timed-out job #%d", job["id"])
                     return
@@ -462,8 +471,7 @@ class ExecutorMixin:
             if exit_code != 0:
                 outcome_reason = f"exit code {exit_code}"
 
-            # Atomic: no reader sees 'failed' before DLQ routing decides retry/dead.
-            # db._lock is RLock — complete_job and handle_failure re-acquire safely. (#3)
+            # db._lock is held — call _handle_failure_locked (not handle_failure) to preserve atomicity.
             with self.db._lock:
                 self.db.complete_job(
                     job["id"],
@@ -475,7 +483,7 @@ class ExecutorMixin:
                 if exit_code != 0:
                     self._record_ollama_failure()
                     try:
-                        self.dlq.handle_failure(job["id"], f"exit code {exit_code}")
+                        self.dlq._handle_failure_locked(job["id"], f"exit code {exit_code}")
                     except Exception:
                         _log.exception("DLQ routing failed for job #%d", job["id"])
                 else:
@@ -572,8 +580,7 @@ class ExecutorMixin:
 
         except Exception as exc:
             _log.exception("Unhandled exception in worker thread for job #%d; marking failed", job["id"])
-            # Atomic: complete_job + handle_failure under one lock so no reader
-            # sees a transient 'failed' state before DLQ decides retry/dead. (#3)
+            # db._lock is held — call _handle_failure_locked (not handle_failure) to preserve atomicity.
             with self.db._lock:
                 try:
                     self.db.complete_job(
@@ -587,7 +594,7 @@ class ExecutorMixin:
                     _log.exception("Failed to mark job #%d failed after worker exception", job["id"])
                 self._record_ollama_failure()
                 try:
-                    self.dlq.handle_failure(
+                    self.dlq._handle_failure_locked(
                         job["id"],
                         f"internal error: {type(exc).__name__}",
                     )

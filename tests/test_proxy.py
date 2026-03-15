@@ -1228,11 +1228,17 @@ def test_streaming_proxy_cancelled_error_releases_claim(db):
 
 
 def test_streaming_background_task_forces_release_on_generator_release_failure(client, db):
-    """BackgroundTask safety net must release proxy claim if _release() threw in generator.
+    """BackgroundTask safety net must NOT double-release when _release() attempted release.
 
     Scenario: _iter_ndjson's finally block calls _release(), but both
-    complete_job AND release_proxy_claim raise.  Without the BackgroundTask
-    safety net, the proxy sentinel stays stuck at -1 forever.
+    complete_job AND release_proxy_claim raise. After the H2 fix, _released is
+    set to True before the early return, so the BackgroundTask safety net skips
+    its retry (it only retries when _released is still False, meaning _release()
+    was never called at all).
+
+    This test verifies that with the H2 fix, release_proxy_claim is called
+    exactly ONCE — not twice — preventing a double-release that could clear a
+    new proxy request's sentinel.
     """
     chunks = [
         json.dumps({"response": "ok", "done": True}).encode() + b"\n",
@@ -1274,6 +1280,140 @@ def test_streaming_background_task_forces_release_on_generator_release_failure(c
                 json={"model": "llama3.2:3b", "prompt": "hi", "stream": True},
             )
 
-    # The BackgroundTask safety net should have retried release_proxy_claim
-    # Total calls: 1 from _release() in generator finally + 1 from BackgroundTask
-    assert release_calls["count"] >= 2, f"Expected BackgroundTask to retry release; got {release_calls['count']} calls"
+    # H2 fix: _released=True after _release() sets it before early return.
+    # BackgroundTask sees _released=True → skips retry → exactly 1 call total.
+    assert release_calls["count"] == 1, (
+        f"Expected exactly 1 release_proxy_claim call (H2 fix prevents BackgroundTask "
+        f"retry when _released=True); got {release_calls['count']} calls"
+    )
+
+
+def test_streaming_release_flag_set_when_release_proxy_claim_raises(tmp_path):
+    """_released must be set True even when release_proxy_claim() raises.
+
+    Regression test for H2: if release_proxy_claim() raises in _release(),
+    _released must still be set True so the BackgroundTask safety net does NOT
+    call release_proxy_claim() a second time, which would clear a new proxy
+    request's sentinel.
+
+    We verify this by driving the real streaming endpoint with a mocked
+    release_proxy_claim that raises once, then counting total calls: with the
+    fix, the BackgroundTask sees _released=True and skips its retry, so we
+    get exactly 1 call; without the fix (_released stays False) the BackgroundTask
+    retries, giving 2 calls.
+    """
+    db = Database(str(tmp_path / "test.db"))
+    db.initialize()
+
+    release_calls = {"count": 0}
+    original_release = db.release_proxy_claim
+
+    def counting_release_raises():
+        release_calls["count"] += 1
+        raise RuntimeError("DB locked")
+
+    chunks = [
+        json.dumps({"response": "ok", "done": True}).encode() + b"\n",
+    ]
+
+    async def fake_aiter_raw():
+        for chunk in chunks:
+            yield chunk
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.aiter_raw = fake_aiter_raw
+    mock_resp.aclose = AsyncMock()
+    mock_resp.headers = {"content-type": "application/x-ndjson"}
+
+    app = create_app(db)
+    client = TestClient(app)
+
+    with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
+        mock_client = AsyncMock()
+        mock_client.send = AsyncMock(return_value=mock_resp)
+        mock_client.build_request = MagicMock(return_value=MagicMock())
+        mock_client.aclose = AsyncMock()
+        mock_cls.return_value = mock_client
+
+        with (
+            patch.object(db, "release_proxy_claim", side_effect=counting_release_raises),
+            contextlib.suppress(Exception),
+        ):
+            client.post(
+                "/api/generate",
+                json={"model": "llama3.2:3b", "prompt": "hi", "stream": True},
+            )
+
+    # With the H2 fix: _released=True after the first (raising) call to release_proxy_claim.
+    # BackgroundTask checks `if not _released` → False → skips second call.
+    # Total calls must be exactly 1 (not 2).
+    assert release_calls["count"] == 1, (
+        f"release_proxy_claim was called {release_calls['count']} times — "
+        "with H2 fix, _released=True after first raise prevents BackgroundTask retry"
+    )
+
+
+def test_proxy_ollama_request_no_double_complete_job_when_first_raises(tmp_path):
+    """complete_job must not be called twice when the first call raises.
+
+    Regression test for H1: if db.complete_job raises on a successful Ollama
+    response, the outer except Exception block calls complete_job again,
+    marking the job failed despite Ollama returning 200.
+    """
+    import asyncio
+
+    import ollama_queue.api as _api
+    from ollama_queue.api.proxy import _proxy_ollama_request
+
+    db = MagicMock()
+    db.get_daemon_state.return_value = {"state": "running"}
+    db.list_consumers.return_value = []
+    db.try_claim_for_proxy.return_value = True
+    db.submit_job.return_value = 42
+    db.start_job.return_value = None
+
+    complete_job_calls = []
+
+    def raising_complete_job(**kwargs):
+        complete_job_calls.append(kwargs)
+        if len(complete_job_calls) == 1:
+            raise RuntimeError("SQLITE_BUSY")
+        # Second call should NOT happen — if it does, the bug is present
+
+    db.complete_job.side_effect = raising_complete_job
+    db.release_proxy_claim.return_value = None
+
+    mock_response = MagicMock()
+    mock_response.json.return_value = {"response": "hello", "eval_count": None}
+
+    _api.db = db
+
+    with (
+        patch("ollama_queue.api.proxy.select_backend", new=AsyncMock(return_value="http://localhost:11434")),
+        patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_client_cls,
+    ):
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_client.post = AsyncMock(return_value=mock_response)
+        mock_client_cls.return_value = mock_client
+
+        with pytest.raises(Exception):  # expect HTTPException(502) from outer except
+            asyncio.run(
+                _proxy_ollama_request(
+                    endpoint="/api/generate",
+                    command="proxy:/api/generate",
+                    body={"model": "test", "stream": False},
+                    resource_profile="ollama",
+                    extract_stdout_fn=lambda r: str(r.get("response", ""))[:500],
+                    error_prefix="test",
+                )
+            )
+
+    # The fix: complete_job should only be called once (the first call that raised)
+    assert len(complete_job_calls) == 1, (
+        f"complete_job was called {len(complete_job_calls)} times — " "must not call it twice when first call raises"
+    )
+    # And the one call must be the success path (exit_code=0)
+    assert complete_job_calls[0]["exit_code"] == 0

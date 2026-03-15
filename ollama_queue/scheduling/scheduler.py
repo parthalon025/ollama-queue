@@ -107,41 +107,45 @@ class Scheduler:
                     )
                 return now + (rj.get("interval_seconds") or 300)
 
-            if self.db.has_pending_or_running_recurring(rj["id"]):
-                # A previous run is still pending or running — skip this trigger.
-                # Fixed-delay semantics: the real next_run is set by the completion handler
-                # (completed_at + interval), not by wall-clock cadence.
-                # Advance next_run temporarily to suppress further poll evaluations until
-                # the completion handler overwrites it with the authoritative value.
-                self.db.log_schedule_event(
-                    "skipped_duplicate",
-                    recurring_job_id=rj["id"],
-                    details={"name": rj["name"], "reason": "already pending or running"},
-                )
-                try:
-                    next_run_updates[rj["id"]] = _compute_next_run()
-                except CroniterBadCronError as exc:
-                    _log.warning(
-                        "promote_due_jobs: skipping next_run update for recurring job %r (id=%s)"
-                        " — bad cron expression %r: %s",
-                        rj.get("name"),
-                        rj.get("id"),
-                        rj.get("cron_expression"),
-                        exc,
+            with self.db._lock:
+                # Atomic check-and-submit: prevents duplicate promotion under concurrent
+                # POST /api/schedule/{id}/run. db._lock is RLock — reentrant. (M4)
+                if self.db.has_pending_or_running_recurring(rj["id"]):
+                    # A previous run is still pending or running — skip this trigger.
+                    # Fixed-delay semantics: the real next_run is set by the completion handler
+                    # (completed_at + interval), not by wall-clock cadence.
+                    # Advance next_run temporarily to suppress further poll evaluations until
+                    # the completion handler overwrites it with the authoritative value.
+                    self.db.log_schedule_event(
+                        "skipped_duplicate",
+                        recurring_job_id=rj["id"],
+                        details={"name": rj["name"], "reason": "already pending or running"},
                     )
-                continue
+                    try:
+                        next_run_updates[rj["id"]] = _compute_next_run()
+                    except CroniterBadCronError as exc:
+                        _log.warning(
+                            "promote_due_jobs: skipping next_run update for recurring job %r (id=%s)"
+                            " — bad cron expression %r: %s",
+                            rj.get("name"),
+                            rj.get("id"),
+                            rj.get("cron_expression"),
+                            exc,
+                        )
+                    continue
 
-            job_id = self.db.submit_job(
-                command=rj["command"],
-                model=rj["model"],
-                priority=rj["priority"],
-                timeout=rj["timeout"],
-                source=rj["source"] or rj["name"],
-                tag=rj.get("tag"),
-                max_retries=rj.get("max_retries", 0),
-                resource_profile=rj.get("resource_profile", "ollama"),
-                recurring_job_id=rj["id"],
-            )
+                job_id = self.db.submit_job(
+                    command=rj["command"],
+                    model=rj["model"],
+                    priority=rj["priority"],
+                    timeout=rj["timeout"],
+                    source=rj["source"] or rj["name"],
+                    tag=rj.get("tag"),
+                    max_retries=rj.get("max_retries", 0),
+                    resource_profile=rj.get("resource_profile", "ollama"),
+                    recurring_job_id=rj["id"],
+                )
+            # log_schedule_event and append outside the lock (not part of the atomic window)
             self.db.log_schedule_event(
                 "promoted",
                 recurring_job_id=rj["id"],
