@@ -9,7 +9,7 @@ import { useActionFeedback } from '../hooks/useActionFeedback.js';
 import CurrentJob from '../components/CurrentJob.jsx';
 import QueueList from '../components/QueueList.jsx';
 import HeroCard from '../components/HeroCard.jsx';
-import { ShPageBanner } from 'superhot-ui/preact';
+import { ShPageBanner, ShStatCard, ShStatsGrid } from 'superhot-ui/preact';
 import { TAB_CONFIG } from '../config/tabs.js';
 import InfrastructurePanel from '../components/InfrastructurePanel.jsx';
 
@@ -79,10 +79,54 @@ export default function Now({ onSubmitRequest }) {
     ).length;
     const showProxyStat = proxyGenerate > 0 || proxyEmbed > 0;
 
+    // What it shows: KPI summary cards — daemon state, queue depth, 24h job count,
+    //   RAM/VRAM utilization. Derived from live signals, not hardcoded.
+    // Decision it drives: Is the daemon healthy? Is RAM under pressure? How busy was
+    //   the queue today?
+    const daemonStatStatus =
+        !st ? 'waiting' :
+        st.daemon?.state === 'running' ? 'active' :
+        (st.daemon?.state || '').startsWith('paused') ? 'warning' :
+        st.daemon?.state === 'offline' ? 'error' : 'ok';
+
+    const kpiStats = [
+        {
+            label: 'Daemon',
+            value: st?.daemon?.state ?? '—',
+            status: daemonStatStatus,
+        },
+        {
+            label: 'Queue Depth',
+            value: q?.length ?? 0,
+            status: (q?.length ?? 0) > 0 ? 'warning' : 'ok',
+            detail: sett?.concurrency ? `max ${sett.concurrency}` : undefined,
+        },
+        {
+            label: 'Jobs (24h)',
+            value: kpis?.jobs_24h ?? '—',
+            status: 'ok',
+            detail: kpis?.success_rate_24h != null ? `${Math.round(kpis.success_rate_24h * 100)}% success` : undefined,
+        },
+        {
+            label: 'RAM',
+            value: latestHealth?.ram_pct != null ? `${Math.round(latestHealth.ram_pct)}%` : '—',
+            status: (latestHealth?.ram_pct || 0) > 85 ? 'error' : (latestHealth?.ram_pct || 0) > 70 ? 'warning' : 'ok',
+        },
+    ];
+    if (latestHealth?.vram_pct != null) {
+        kpiStats.push({
+            label: 'VRAM',
+            value: `${Math.round(latestHealth.vram_pct)}%`,
+            status: latestHealth.vram_pct > 85 ? 'error' : latestHealth.vram_pct > 70 ? 'warning' : 'ok',
+        });
+    }
+
     return (
         <div ref={pageRef} class="flex flex-col gap-4 animate-page-enter"
              data-mood={showAlerts ? 'dread' : 'dawn'}>
             <ShPageBanner namespace={_tab.namespace} page={_tab.page} subtitle={_tab.subtitle} />
+            {/* KPI stat cards — live queue health at a glance */}
+            <ShStatsGrid stats={kpiStats} />
             {/* Disconnected banner */}
             {connectionStatus.value === 'disconnected' && (
                 <div style={{
