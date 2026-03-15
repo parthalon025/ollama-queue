@@ -1228,11 +1228,17 @@ def test_streaming_proxy_cancelled_error_releases_claim(db):
 
 
 def test_streaming_background_task_forces_release_on_generator_release_failure(client, db):
-    """BackgroundTask safety net must release proxy claim if _release() threw in generator.
+    """BackgroundTask safety net must NOT double-release when _release() attempted release.
 
     Scenario: _iter_ndjson's finally block calls _release(), but both
-    complete_job AND release_proxy_claim raise.  Without the BackgroundTask
-    safety net, the proxy sentinel stays stuck at -1 forever.
+    complete_job AND release_proxy_claim raise. After the H2 fix, _released is
+    set to True before the early return, so the BackgroundTask safety net skips
+    its retry (it only retries when _released is still False, meaning _release()
+    was never called at all).
+
+    This test verifies that with the H2 fix, release_proxy_claim is called
+    exactly ONCE — not twice — preventing a double-release that could clear a
+    new proxy request's sentinel.
     """
     chunks = [
         json.dumps({"response": "ok", "done": True}).encode() + b"\n",
@@ -1274,9 +1280,12 @@ def test_streaming_background_task_forces_release_on_generator_release_failure(c
                 json={"model": "llama3.2:3b", "prompt": "hi", "stream": True},
             )
 
-    # The BackgroundTask safety net should have retried release_proxy_claim
-    # Total calls: 1 from _release() in generator finally + 1 from BackgroundTask
-    assert release_calls["count"] >= 2, f"Expected BackgroundTask to retry release; got {release_calls['count']} calls"
+    # H2 fix: _released=True after _release() sets it before early return.
+    # BackgroundTask sees _released=True → skips retry → exactly 1 call total.
+    assert release_calls["count"] == 1, (
+        f"Expected exactly 1 release_proxy_claim call (H2 fix prevents BackgroundTask "
+        f"retry when _released=True); got {release_calls['count']} calls"
+    )
 
 
 def test_streaming_release_flag_set_when_release_proxy_claim_raises(tmp_path):
