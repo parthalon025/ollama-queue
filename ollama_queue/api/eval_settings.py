@@ -10,6 +10,7 @@ import httpx
 from fastapi import APIRouter, Body, HTTPException
 
 import ollama_queue.api as _api
+from ollama_queue.models.client import OllamaModels
 
 _log = logging.getLogger(__name__)
 
@@ -104,6 +105,11 @@ _PROVIDER_SETTINGS = {
     "eval.oracle_provider",
 }
 _VALID_PROVIDERS = {"ollama", "claude", "openai"}
+
+
+def _installed_ollama_models() -> set[str]:
+    """Return set of locally installed Ollama model names (normalized)."""
+    return {m["name"].removesuffix(":latest") for m in OllamaModels.list_local()}
 
 
 def _mask_value(key: str, value: str) -> str:
@@ -224,6 +230,30 @@ def put_eval_settings(body: dict = Body(...)):
             validation_errors.append(f"positive_threshold must be an integer 1-5, got {value!r}")
         elif f"eval.{bare_key}" in _PROVIDER_SETTINGS and value not in _VALID_PROVIDERS:
             validation_errors.append(f"Invalid provider {value!r}: must be one of {sorted(_VALID_PROVIDERS)}")
+
+    # Validate Ollama model references exist locally
+    model_settings = {"judge_model", "analysis_model", "generator_model"}
+    # Resolve current provider for each model role — body values take precedence over DB
+    judge_provider = body.get("eval.judge_provider") or db.get_setting("eval.judge_provider") or "ollama"
+    generator_provider = body.get("eval.generator_provider") or db.get_setting("eval.generator_provider") or "ollama"
+
+    provider_for_setting = {
+        "judge_model": judge_provider,
+        "analysis_model": judge_provider,
+        "generator_model": generator_provider,
+    }
+
+    installed: set[str] | None = None  # lazy fetch
+    for key, value in body.items():
+        bare = key.removeprefix("eval.")
+        if bare in model_settings and value and provider_for_setting.get(bare) == "ollama":
+            if installed is None:
+                installed = _installed_ollama_models()
+            check_name = value.removesuffix(":latest")
+            if check_name not in installed:
+                validation_errors.append(
+                    f"{key}={value!r} is not installed in Ollama. " f"Installed models: {', '.join(sorted(installed))}"
+                )
 
     if validation_errors:
         raise HTTPException(status_code=422, detail=validation_errors)

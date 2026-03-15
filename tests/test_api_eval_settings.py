@@ -595,6 +595,45 @@ def test_short_api_key_fully_masked(client_and_db):
 # --- Task 11: Provider test endpoint ---
 
 
+# --- Task 4: Ollama model existence validation ---
+
+
+def test_put_eval_settings_rejects_missing_ollama_model(client):
+    """PUT with eval.judge_model set to a nonexistent model should return 422."""
+    with patch(
+        "ollama_queue.api.eval_settings._installed_ollama_models",
+        return_value={"qwen3.5:9b", "qwen3:14b"},
+    ):
+        resp = client.put("/api/eval/settings", json={"eval.judge_model": "nonexistent:7b"})
+    assert resp.status_code == 422
+    detail = resp.json()["detail"]
+    detail_text = " ".join(str(e) for e in detail) if isinstance(detail, list) else str(detail)
+    assert "not installed" in detail_text.lower()
+
+
+def test_put_eval_settings_accepts_installed_ollama_model(client):
+    """PUT with an installed model should succeed (200)."""
+    with patch(
+        "ollama_queue.api.eval_settings._installed_ollama_models",
+        return_value={"qwen3.5:9b", "qwen3:14b"},
+    ):
+        resp = client.put("/api/eval/settings", json={"eval.judge_model": "qwen3.5:9b"})
+    assert resp.status_code == 200
+
+
+def test_put_eval_settings_skips_model_check_for_empty_string(client):
+    """Empty string model should be accepted (it means 'use default')."""
+    with patch(
+        "ollama_queue.api.eval_settings._installed_ollama_models",
+        return_value={"qwen3.5:9b", "qwen3:14b"},
+    ):
+        resp = client.put("/api/eval/settings", json={"eval.judge_model": ""})
+    assert resp.status_code == 200
+
+
+# --- Task 11: Provider test endpoint ---
+
+
 def test_provider_test_ollama_success(client):
     """POST /api/eval/providers/test with ollama should succeed when proxy responds."""
     from unittest.mock import patch
