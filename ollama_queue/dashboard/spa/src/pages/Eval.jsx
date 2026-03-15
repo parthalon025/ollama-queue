@@ -2,7 +2,8 @@
 // Decision it drives: Entry point for all eval functionality (runs, variants, trends, settings)
 
 import { evalSubTab } from '../stores';
-import PageBanner from '../components/PageBanner.jsx';
+import { ShPageBanner } from 'superhot-ui/preact';
+import { TAB_CONFIG } from '../config/tabs.js';
 import EvalRuns from '../views/EvalRuns.jsx';
 import EvalVariants from '../views/EvalVariants.jsx';
 import EvalTrends from '../views/EvalTrends.jsx';
@@ -17,12 +18,13 @@ const TABS = [
 ];
 
 export default function Eval() {
+  const _tab = TAB_CONFIG.find(t => t.id === 'eval');
   // Read .value at top of render body so Preact subscribes this component to signal changes.
   // Without this, clicking sub-tabs would update the signal but Eval would not re-render.
   const subTab = evalSubTab.value;
   return (
     <div class="eval-page">
-      <PageBanner title="Eval" subtitle="test and compare AI model configurations" />
+      <ShPageBanner namespace={_tab.namespace} page={_tab.page} subtitle={_tab.subtitle} />
       <nav class="eval-subnav">
         {TABS.map(tab => (
           <button
