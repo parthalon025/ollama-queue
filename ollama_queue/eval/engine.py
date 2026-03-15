@@ -63,6 +63,8 @@ def create_eval_run(
     per_cluster: int = 4,
     max_runs: int | None = None,
     max_time_s: int | None = None,
+    gen_backend_url: str | None = None,
+    judge_backend_url: str | None = None,
 ) -> int:
     """Insert a new eval_runs row with status='queued' and return the new id.
 
@@ -87,8 +89,9 @@ def create_eval_run(
             """INSERT INTO eval_runs
                (variant_id, variants, run_mode, label, cluster_id, scheduled_by,
                 data_source_url, data_source_token, seed, item_ids, status,
-                per_cluster, max_runs, max_time_s, created_at, started_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?)""",
+                per_cluster, max_runs, max_time_s, created_at, started_at,
+                gen_backend_url, judge_backend_url)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?)""",
             (
                 variant_id,
                 variants_value,
@@ -105,6 +108,8 @@ def create_eval_run(
                 max_time_s,
                 now,
                 now,  # started_at = created_at for compatibility (NOT NULL constraint)
+                gen_backend_url,
+                judge_backend_url,
             ),
         )
         conn.commit()

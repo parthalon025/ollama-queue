@@ -157,6 +157,9 @@ class SchemaMixin:
         self._add_column_if_missing(conn, "eval_runs", "suggestions_json", "TEXT")
         # Judge parse failure tracking (#22)
         self._add_column_if_missing(conn, "eval_runs", "judge_parse_failures", "INTEGER DEFAULT 0")
+        # Eval backend host URLs (gen + judge)
+        self._add_column_if_missing(conn, "eval_runs", "gen_backend_url", "TEXT")
+        self._add_column_if_missing(conn, "eval_runs", "judge_backend_url", "TEXT")
         # Per-backend inference mode: 'gpu_only' restricts to VRAM-only; 'cpu_shared' allows CPU overflow
         self._add_column_if_missing(conn, "backends", "inference_mode", "TEXT NOT NULL DEFAULT 'cpu_shared'")
         # Backfill pre-existing rows
@@ -440,7 +443,9 @@ class SchemaMixin:
                 completed_at    TEXT,
                 max_runs        INTEGER,
                 max_time_s      INTEGER,
-                runs_completed  INTEGER DEFAULT 0
+                runs_completed  INTEGER DEFAULT 0,
+                gen_backend_url   TEXT,
+                judge_backend_url TEXT
             );
 
             CREATE TABLE IF NOT EXISTS eval_results (
