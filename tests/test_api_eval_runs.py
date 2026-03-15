@@ -1655,3 +1655,46 @@ def test_list_eval_runs_limit_is_capped(client_and_db):
     client, db = client_and_db
     resp = client.get("/api/eval/runs?limit=999999")
     assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Task 4: Backend URL overrides on run trigger
+# ---------------------------------------------------------------------------
+
+
+def test_gen_backend_url_stored_on_run(client_and_db):
+    """POST /api/eval/runs with gen_backend_url stores it on the created run."""
+    client, db = client_and_db
+    resp = client.post(
+        "/api/eval/runs",
+        json={
+            "variant_id": "A",
+            "run_mode": "batch",
+            "gen_backend_url": "http://100.114.197.57:11434",
+        },
+    )
+    assert resp.status_code == 201
+    run_id = resp.json()["run_id"]
+    from ollama_queue.eval.engine import get_eval_run
+
+    run = get_eval_run(db, run_id)
+    assert run["gen_backend_url"] == "http://100.114.197.57:11434"
+
+
+def test_judge_backend_url_stored_on_run(client_and_db):
+    """POST /api/eval/runs with judge_backend_url stores it on the created run."""
+    client, db = client_and_db
+    resp = client.post(
+        "/api/eval/runs",
+        json={
+            "variant_id": "A",
+            "run_mode": "batch",
+            "judge_backend_url": "http://100.114.197.57:11434",
+        },
+    )
+    assert resp.status_code == 201
+    run_id = resp.json()["run_id"]
+    from ollama_queue.eval.engine import get_eval_run
+
+    run = get_eval_run(db, run_id)
+    assert run["judge_backend_url"] == "http://100.114.197.57:11434"

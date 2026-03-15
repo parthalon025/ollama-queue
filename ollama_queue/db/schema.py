@@ -96,6 +96,10 @@ EVAL_SETTINGS_DEFAULTS = {
     "eval.openai_api_key": "",
     "eval.openai_base_url": "",
     "eval.max_cost_per_run_usd": "1.00",
+    # Backend URL overrides — "auto" or a registered backend URL
+    "eval.generator_backend_url": "auto",
+    "eval.judge_backend_url": "auto",
+    "eval.analysis_backend_url": "auto",
 }
 
 

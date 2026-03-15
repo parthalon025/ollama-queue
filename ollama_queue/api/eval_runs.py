@@ -134,6 +134,10 @@ def trigger_eval_run(body: dict = Body(...)):
     max_runs = int(max_runs_raw) if max_runs_raw is not None else None
     max_time_s = int(max_time_s_raw) if max_time_s_raw is not None else None
 
+    # Backend URL overrides (optional — per-run override of eval settings)
+    gen_backend_url = body.get("gen_backend_url")
+    judge_backend_url = body.get("judge_backend_url")
+
     # Create the run row
     run_id = create_eval_run(
         db,
@@ -146,6 +150,8 @@ def trigger_eval_run(body: dict = Body(...)):
         per_cluster=int(per_cluster) if per_cluster else 4,
         max_runs=max_runs,
         max_time_s=max_time_s,
+        gen_backend_url=gen_backend_url,
+        judge_backend_url=judge_backend_url,
     )
 
     # Persist judge_model from request body so run_eval_judge uses it instead of the setting default

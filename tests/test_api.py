@@ -1042,6 +1042,26 @@ def test_get_status_active_eval_includes_gen_model(client_and_db):
     assert "variant_id" not in ae
 
 
+def test_active_eval_includes_backend_urls(client_and_db):
+    """GET /api/status active_eval includes gen_backend_url and judge_backend_url."""
+    client, db = client_and_db
+    with db._lock:
+        conn = db._connect()
+        conn.execute(
+            "INSERT INTO eval_runs (id, data_source_url, variants, variant_id, status,"
+            " judge_model, gen_backend_url, judge_backend_url) "
+            "VALUES (1, 'http://localhost', '[\"A\"]', 'A', 'generating',"
+            " 'qwen2.5:7b', 'http://100.114.197.57:11434', 'http://127.0.0.1:11434')"
+        )
+        conn.commit()
+    resp = client.get("/api/status")
+    assert resp.status_code == 200
+    ae = resp.json()["active_eval"]
+    assert ae is not None
+    assert ae["gen_backend_url"] == "http://100.114.197.57:11434"
+    assert ae["judge_backend_url"] == "http://127.0.0.1:11434"
+
+
 def test_get_status_with_current_job(client_and_db):
     """GET /api/status includes current_job when daemon has a current_job_id."""
     client, db = client_and_db
