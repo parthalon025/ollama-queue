@@ -434,6 +434,7 @@ async def proxy_generate(body: dict = Body(...)):
                 db.release_proxy_claim()
             except Exception:
                 _log.exception("release_proxy_claim failed for streaming job %d", job_id)
+                _released = True  # attempt was made — prevent BackgroundTask double-release
                 return
             _released = True
 
