@@ -41,6 +41,7 @@ function useDebounce(value, delay) {
 }
 
 export default function Plan() {
+    const _tab = TAB_CONFIG.find(t => t.id === 'plan');
     const [tick, setTick] = useState(0);
     const [search, setSearch] = useState('');
     const [ganttExpanded, setGanttExpanded] = useState(false);
@@ -866,7 +867,7 @@ export default function Plan() {
 
     return (
         <div class="flex flex-col gap-4 animate-page-enter" data-mood="wonder">
-            <PageBanner title="Schedule" subtitle="recurring jobs and upcoming run times" />
+            <ShPageBanner namespace={_tab.namespace} page={_tab.page} subtitle={_tab.subtitle} />
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                     <AddRecurringJobModal onAdded={() => { fetchSchedule(); fetchLoadMap(); }} />
