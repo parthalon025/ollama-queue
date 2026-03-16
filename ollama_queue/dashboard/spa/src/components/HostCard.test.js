@@ -449,15 +449,16 @@ describe('HostCard render — expand toggle', () => {
             stall_detected_at: 1700001000,
         };
         // The stall panel is gated behind `expanded.value && isRunning`.
-        // useSignal is a jest.fn() — override it to return expanded=true for this render.
+        // useSignal call order in HostCard: logLines (1st), expanded (2nd), glitchActive (3rd).
+        // mockReturnValueOnce queues in FIFO — first queue entry goes to logLines, second to expanded.
         const { useSignal } = require('../__mocks__/preact-signals.cjs');
         useSignal
-            .mockReturnValueOnce({ value: true })   // expanded = true
-            .mockReturnValueOnce({ value: [] });     // logLines = []
+            .mockReturnValueOnce({ value: [] })     // logLines = []
+            .mockReturnValueOnce({ value: true });  // expanded = true
         const vnode = HostCard(props);
         const text = findText(vnode);
         expect(text).toContain('frozen');
-        useSignal.mockClear(); // clear call history but keep default implementation for subsequent tests
+        useSignal.mockClear(); // clear call history; default implementation is preserved (mockReset would strip it)
     });
 });
 
