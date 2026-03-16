@@ -251,3 +251,228 @@ describe('computeAllUnhealthy', () => {
         expect(computeAllUnhealthy([])).toBe(false);
     });
 });
+
+// ── Render test infrastructure ────────────────────────────────────────────────
+
+// NOTE: HostCard (default export) is already imported at top of this file.
+// Do not re-import here.
+
+// Recursively find first node matching predicate in the POJO vnode tree.
+// When a node's type is a function (unresolved component), it calls the function
+// with the node's props so the mock's rendered output is traversed too.
+function findNode(v, pred) {
+    if (!v || v === true || v === false) return null;
+    // Resolve function components (e.g. ShGlitch, ShStatusBadge) by calling them
+    if (v && typeof v === 'object' && typeof v.type === 'function') {
+        const resolved = v.type(v.props || {});
+        // Check the resolved result first, then continue traversal on it
+        const r = findNode(resolved, pred);
+        if (r) return r;
+        return null;
+    }
+    if (pred(v)) return v;
+    if (Array.isArray(v)) {
+        for (const child of v) { const r = findNode(child, pred); if (r) return r; }
+    }
+    if (v && typeof v === 'object' && v.props?.children) {
+        return findNode(v.props.children, pred);
+    }
+    return null;
+}
+
+// Concatenate all string/number leaves in the tree.
+// Also resolves function components for text extraction.
+function findText(v) {
+    if (!v || v === true || v === false) return '';
+    if (typeof v === 'string' || typeof v === 'number') return String(v);
+    if (Array.isArray(v)) return v.map(findText).join('');
+    // Resolve function components
+    if (v && typeof v === 'object' && typeof v.type === 'function') {
+        const resolved = v.type(v.props || {});
+        return findText(resolved);
+    }
+    if (v && typeof v === 'object' && v.props?.children) return findText(v.props.children);
+    return '';
+}
+
+const baseProps = () => ({
+    backend: {
+        url: 'http://127.0.0.1:11434',
+        healthy: true,
+        gpu_name: 'RTX 5080',
+        vram_pct: 50,
+        loaded_models: [],
+        inference_mode: 'local',
+    },
+    currentJob: null,
+    activeEval: null,
+    evalActiveRun: null,
+    latestHealth: { ram_pct: 60, load_avg: 2, swap_pct: 5 },
+    settings: {},
+    cpuCount: 4,
+});
+
+// ── Render tests ──────────────────────────────────────────────────────────────
+
+describe('HostCard render — running state', () => {
+    test('renders ShStatusBadge with status="active"', () => {
+        const props = baseProps();
+        props.backend.loaded_models = ['qwen2.5:7b'];
+        props.currentJob = { model: 'qwen2.5:7b', source: 'aria-engine', started_at: 1700000000, id: 42 };
+        const vnode = HostCard(props);
+        const badge = findNode(vnode, n => n.props?.['data-sh-effect'] === 'status-badge');
+        expect(badge).toBeTruthy();
+        expect(badge.props['data-sh-status']).toBe('active');
+    });
+
+    test('renders source name text', () => {
+        const props = baseProps();
+        props.backend.loaded_models = ['qwen2.5:7b'];
+        props.currentJob = { model: 'qwen2.5:7b', source: 'aria-engine', started_at: 1700000000, id: 42 };
+        const vnode = HostCard(props);
+        expect(findText(vnode)).toContain('aria-engine');
+    });
+
+    test('renders ShFrozen with timestamp in ms (started_at * 1000)', () => {
+        const props = baseProps();
+        props.backend.loaded_models = ['qwen2.5:7b'];
+        props.currentJob = { model: 'qwen2.5:7b', source: 'aria-engine', started_at: 1700000000, id: 42 };
+        const vnode = HostCard(props);
+        const frozen = findNode(vnode, n => n.props?.['data-sh-effect'] === 'frozen');
+        expect(frozen).toBeTruthy();
+        // started_at is seconds; ShFrozen expects ms — verify the * 1000 conversion
+        expect(frozen.props['data-sh-ts']).toBe(1700000000 * 1000);
+    });
+});
+
+describe('HostCard render — offline state', () => {
+    test('renders ShThreatPulse with data-sh-active="true"', () => {
+        const props = baseProps();
+        props.backend.healthy = false;
+        const vnode = HostCard(props);
+        const pulse = findNode(vnode, n => n.props?.['data-sh-effect'] === 'threat-pulse');
+        expect(pulse).toBeTruthy();
+        expect(pulse.props['data-sh-active']).toBe('true');
+    });
+
+    test('renders unreachable text', () => {
+        const props = baseProps();
+        props.backend.healthy = false;
+        const vnode = HostCard(props);
+        expect(findText(vnode)).toContain('unreachable');
+    });
+
+    test('gpuLabel falls back to URL hostname when gpu_name is null', () => {
+        const props = baseProps();
+        props.backend.healthy = false;
+        props.backend.gpu_name = null;
+        props.backend.url = 'http://desktop-fbl9e0c:11434';
+        const vnode = HostCard(props);
+        // The t-frame should have data-label set to the hostname
+        const frame = findNode(vnode, n => n.props?.['data-label']);
+        expect(frame).toBeTruthy();
+        expect(frame.props['data-label']).toBe('desktop-fbl9e0c');
+    });
+});
+
+describe('HostCard render — eval state', () => {
+    test('renders ShStatusBadge with status="waiting"', () => {
+        const props = baseProps();
+        props.backend.url = 'http://100.1.2.3:11434';
+        props.activeEval = { id: 5, gen_backend_url: 'http://100.1.2.3:11434', status: 'generating' };
+        const vnode = HostCard(props);
+        const badge = findNode(vnode, n => n.props?.['data-sh-effect'] === 'status-badge');
+        expect(badge).toBeTruthy();
+        expect(badge.props['data-sh-status']).toBe('waiting');
+    });
+});
+
+describe('HostCard render — warm state', () => {
+    test('renders loaded model name', () => {
+        const props = baseProps();
+        props.backend.loaded_models = ['qwen2.5:7b'];
+        const vnode = HostCard(props);
+        expect(findText(vnode)).toContain('qwen2.5');
+    });
+});
+
+describe('HostCard render — idle state', () => {
+    test('renders ShStatusBadge with status="ok"', () => {
+        const props = baseProps();
+        props.backend.loaded_models = [];
+        const vnode = HostCard(props);
+        const badge = findNode(vnode, n => n.props?.['data-sh-effect'] === 'status-badge');
+        expect(badge).toBeTruthy();
+        expect(badge.props['data-sh-status']).toBe('ok');
+    });
+});
+
+describe('HostCard render — local vs remote backend', () => {
+    test('local backend: renders gauge labels (RAM, CPU, Swap)', () => {
+        const props = baseProps();
+        // 127.0.0.1 is local — gauges should render
+        const vnode = HostCard(props);
+        const text = findText(vnode);
+        expect(text).toContain('RAM');
+        expect(text).toContain('CPU');
+        expect(text).toContain('Swap');
+    });
+
+    test('remote backend: renders "remote host" note, no RAM/CPU/Swap labels', () => {
+        const props = baseProps();
+        props.backend.url = 'http://100.114.197.57:11434';
+        props.latestHealth = null; // remote — no health data
+        const vnode = HostCard(props);
+        const text = findText(vnode);
+        expect(text).toContain('remote host');
+        expect(text).not.toContain('RAM');
+    });
+});
+
+describe('HostCard render — expand toggle', () => {
+    test('renders expand toggle button in all states', () => {
+        for (const state of ['idle', 'warm', 'offline']) {
+            const props = baseProps();
+            if (state === 'offline') props.backend.healthy = false;
+            if (state === 'warm') props.backend.loaded_models = ['llama3:8b'];
+            const vnode = HostCard(props);
+            const btn = findNode(vnode, n => n.type === 'button' && findText(n).includes('details'));
+            expect(btn).toBeTruthy();
+        }
+    });
+
+    test('stall warning renders when expanded and currentJob.stall_detected_at is set', () => {
+        const props = baseProps();
+        props.backend.loaded_models = ['qwen2.5:7b'];
+        props.currentJob = {
+            model: 'qwen2.5:7b', source: 'test', started_at: 1700000000, id: 1,
+            stall_detected_at: 1700001000,
+        };
+        // The stall panel is gated behind `expanded.value && isRunning`.
+        // useSignal is a jest.fn() — override it to return expanded=true for this render.
+        const { useSignal } = require('../__mocks__/preact-signals.cjs');
+        useSignal
+            .mockReturnValueOnce({ value: true })   // expanded = true
+            .mockReturnValueOnce({ value: [] });     // logLines = []
+        const vnode = HostCard(props);
+        const text = findText(vnode);
+        expect(text).toContain('frozen');
+        useSignal.mockClear(); // clear call history but keep default implementation for subsequent tests
+    });
+});
+
+describe('HostCard render — VRAM thresholds', () => {
+    test('VRAM bar renders with error color when vram_pct > 90', () => {
+        const props = baseProps();
+        props.backend.vram_pct = 95;
+        const vnode = HostCard(props);
+        // The VRAM fill div has background set to vramColor
+        const vramFill = findNode(vnode, n =>
+            n.props?.style && (
+                (typeof n.props.style === 'object' && n.props.style.background === 'var(--status-error)') ||
+                (typeof n.props.style === 'string' && n.props.style.includes('--status-error'))
+            )
+        );
+        expect(vramFill).toBeTruthy();
+    });
+});
