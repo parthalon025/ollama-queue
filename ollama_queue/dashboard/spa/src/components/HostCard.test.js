@@ -177,6 +177,8 @@ describe('hostGauges', () => {
         expect(gauges[0].pause).toBe(85);
         expect(gauges[0].resume).toBe(75);
         expect(gauges[1].label).toBe('CPU');
+        expect(gauges[1].pause).toBe(200);   // 2 × 100 (not × 50 — see CLAUDE.md gotcha)
+        expect(gauges[1].resume).toBe(150);  // 1.5 × 100
         expect(gauges[2].label).toBe('Swap');
     });
 
