@@ -684,9 +684,23 @@ def run_eval_session(
             _log.error("run_eval_session: run_id=%d not found", run_id)
             return
 
+        from ollama_queue.api.backend_router import BACKENDS
         from ollama_queue.models.client import OllamaModels
 
         installed = {m["name"].removesuffix(":latest") for m in OllamaModels.list_local()}
+        # Also include models from remote backends — the proxy can route to any of them.
+        for backend_url in BACKENDS:
+            if backend_url.startswith("http://127.0.0.1") or backend_url.startswith("http://localhost"):
+                continue  # already covered by list_local()
+            try:
+                import httpx as _httpx
+
+                r = _httpx.get(f"{backend_url}/api/tags", timeout=3.0)
+                if r.status_code == 200:
+                    for m in r.json().get("models", []):
+                        installed.add(m["name"].removesuffix(":latest"))
+            except Exception:
+                _log.debug("preflight: could not reach %s for model list", backend_url)
 
         if installed:  # skip check if Ollama is unreachable (empty list)
             raw_variants = run.get("variants") or ""
