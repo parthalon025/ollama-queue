@@ -181,8 +181,21 @@ class LoopMixin:
         # the sentinel (-1), it persists and blocks all future proxy requests.
         with self.db._lock:
             conn = self.db._connect()
-            conn.execute("UPDATE daemon_state SET current_job_id = NULL " "WHERE id = 1 AND current_job_id = -1")
+            cleared_sentinel = conn.execute(
+                "UPDATE daemon_state SET current_job_id = NULL WHERE id = 1 AND current_job_id = -1"
+            ).rowcount
             conn.commit()
+
+        total_orphans = len(stuck) + len(orphans) + cleared_sentinel
+        if total_orphans:
+            _log.info(
+                "Orphan recovery: %d eval run(s), %d job(s), %d proxy sentinel(s)",
+                len(stuck),
+                len(orphans),
+                cleared_sentinel,
+            )
+        else:
+            _log.info("Orphan recovery: clean startup")
 
     # --- Circuit breaker ---
 
@@ -546,6 +559,7 @@ class LoopMixin:
 
         self._recover_orphans()
         self.db.update_daemon_state(state="idle", uptime_since=time.time())
+        _log.info("Daemon started (poll_interval=%ds)", poll_interval)
 
         try:
             while True:

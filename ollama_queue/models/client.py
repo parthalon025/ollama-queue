@@ -17,7 +17,7 @@ import signal
 import subprocess
 import threading
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 if TYPE_CHECKING:
     from ollama_queue.db import Database
@@ -63,6 +63,9 @@ class OllamaModels:
     _list_local_cache: tuple[float, list[dict]] | None = None
     _LIST_LOCAL_TTL = 15.0  # seconds
     _list_local_lock = threading.Lock()
+
+    # Dedup set for VRAM estimate fallback warnings — log once per model per process
+    _vram_warned: ClassVar[set[str]] = set()
 
     @classmethod
     def _invalidate_list_cache(cls) -> None:
@@ -259,9 +262,12 @@ class OllamaModels:
             if m["name"] == model_name and m["size_bytes"]:
                 return (m["size_bytes"] / 1_000_000) * safety
 
-        _log.warning(
-            "VRAM estimate for model '%s' using 4000MB default — model not in registry or local list", model_name
-        )
+        if model_name not in self._vram_warned:
+            self._vram_warned.add(model_name)
+            _log.warning(
+                "VRAM estimate for model '%s' using 4000MB default — model not in registry or local list",
+                model_name,
+            )
         return 4000.0  # 4 GB unknown default
 
     def record_observed_vram(self, model_name: str, vram_mb: float, db: Database) -> None:
