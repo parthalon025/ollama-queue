@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'preact/hooks';
 import { useSignal } from '@preact/signals';
-import EmptyState from './EmptyState.jsx';
+import { ShEmptyState } from 'superhot-ui/preact';
 import { retryJob } from '../stores/queue.js';
 import ModelChip from './ModelChip.jsx';
 
@@ -34,7 +34,7 @@ export default function HistoryList({ jobs }) {
   if (allItems.length === 0) {
     return (
       <div class="t-frame" data-label="Recent Jobs">
-        <EmptyState headline="No history yet" body="Run your first job to see results here." />
+        <ShEmptyState mantra="NO DATA" hint="run a job to see results" />
       </div>
     );
   }

@@ -3,7 +3,7 @@ import { useSignal } from '@preact/signals';
 import { applyMantra, removeMantra } from 'superhot-ui';
 import StatusBadge from './StatusBadge.jsx';
 import ResourceGauges from './ResourceGauges.jsx';
-import EmptyState from './EmptyState.jsx';
+import { ShEmptyState } from 'superhot-ui/preact';
 import ModelChip from './ModelChip.jsx';
 import { formatDuration } from '../utils/time.js';
 import { API, cpuCount, backendsData } from '../stores';
@@ -250,11 +250,13 @@ export default function CurrentJob({ daemon, currentJob, latestHealth, settings,
           </span>
         </div>
       ) : (
-        <EmptyState
-          headline="Ready — nothing in queue"
-          body="Jobs you submit will appear here."
-          action={onSubmitRequest ? { label: '+ Submit a job', onClick: onSubmitRequest } : undefined}
-        />
+        <ShEmptyState mantra="STANDBY" hint="submit a job to begin">
+          {onSubmitRequest && (
+            <button class="t-btn" onClick={onSubmitRequest} style="margin-top:8px;font-size:var(--type-label);">
+              + SUBMIT
+            </button>
+          )}
+        </ShEmptyState>
       )}
     </div>
   );
