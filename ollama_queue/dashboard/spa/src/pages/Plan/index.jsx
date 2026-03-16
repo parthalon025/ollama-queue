@@ -58,16 +58,18 @@ export default function Plan() {
     const [generateFb, generateAct] = useActionFeedback();
     const [batchToggleFb, batchToggleAct] = useActionFeedback();
 
-    // Shatter hooks — one per distinct action type
+    // Shatter hooks — one per distinct action type.
+    // Loop-rendered buttons pass the click event to fire(ev) so the correct
+    // element shatters (a single ref would always point to the last-rendered row).
     const [deleteShRef, deleteShatter] = useShatter('earned');
-    const [runNowShRef, runNowShatter] = useShatter('complete');
-    const [pinShRef, pinShatter] = useShatter('routine');
-    const [batchRunShRef, batchRunShatter] = useShatter('complete');
+    const [, runNowShatter] = useShatter('complete');
+    const [, pinShatter] = useShatter('routine');
+    const [, batchRunShatter] = useShatter('complete');
     const [rebalanceShRef, rebalanceShatter] = useShatter('routine');
-    const [reenableShRef, reenableShatter] = useShatter('routine');
+    const [, reenableShatter] = useShatter('routine');
     const [saveShRef, saveShatter] = useShatter('complete');
     const [generateShRef, generateShatter] = useShatter('routine');
-    const [batchToggleShRef, batchToggleShatter] = useShatter('routine');
+    const [, batchToggleShatter] = useShatter('routine');
 
     // Detail panel
     const [expandedJobId, setExpandedJobId] = useState(null);
@@ -153,8 +155,8 @@ export default function Plan() {
     }
 
     async function handleDetailSave() {
-        saveShatter();
         if (!editForm || saveFb.phase === 'loading') return;
+        saveShatter();
         const rj = jobs.find(j => j.id === editForm.id);
         if (!rj) return;
         const updates = {};
@@ -231,12 +233,12 @@ export default function Plan() {
         setPendingDeleteId(null);
     }
 
-    async function handleRunNow(rj) {
-        runNowShatter();
+    async function handleRunNow(ev, rj) {
         if (rj.estimated_duration > 300) {
             const ok = window.confirm(`Run "${rj.name}" now? Estimated duration: ~${Math.round(rj.estimated_duration / 60)}m`);
             if (!ok) return;
         }
+        runNowShatter(ev);
         await runNowAct(
             'TRIGGERING',
             async () => {
@@ -246,8 +248,8 @@ export default function Plan() {
         );
     }
 
-    async function handlePinToggle(rj) {
-        pinShatter();
+    async function handlePinToggle(ev, rj) {
+        pinShatter(ev);
         await pinAct(
             rj.pinned ? 'UNPINNING' : 'PINNING',
             async () => {
@@ -257,8 +259,8 @@ export default function Plan() {
         );
     }
 
-    async function handleBatchRun(tag) {
-        batchRunShatter();
+    async function handleBatchRun(ev, tag) {
+        batchRunShatter(ev);
         setBatchRunningTags(prev => new Set([...prev, tag]));
         await batchRunAct(
             'TRIGGERING',
@@ -274,8 +276,8 @@ export default function Plan() {
         });
     }
 
-    async function handleBatchToggle(tag, enabled) {
-        batchToggleShatter();
+    async function handleBatchToggle(ev, tag, enabled) {
+        batchToggleShatter(ev);
         await batchToggleAct(
             enabled ? 'ENABLING' : 'DISABLING',
             async () => {
@@ -298,8 +300,8 @@ export default function Plan() {
         );
     }
 
-    async function handleReenableJob(name) {
-        reenableShatter();
+    async function handleReenableJob(ev, name) {
+        reenableShatter(ev);
         await reenableAct(
             'RE-ENABLING',
             async () => {
@@ -388,12 +390,11 @@ export default function Plan() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                     <div>
                         <button
-                            ref={batchRunShRef}
                             class="t-btn t-btn-secondary"
                             style={{ fontSize: 'var(--type-label)', padding: '0.15rem 0.5rem',
                                      opacity: (isBatchRunning || batchRunFb.phase === 'loading') ? 0.5 : 1 }}
                             disabled={isBatchRunning || batchRunFb.phase === 'loading'}
-                            onClick={() => handleBatchRun(tag)}>
+                            onClick={(ev) => handleBatchRun(ev, tag)}>
                             {(isBatchRunning || batchRunFb.phase === 'loading') ? '\u2026' : '\u25B6 Run All'}
                         </button>
                         {batchRunFb.msg && <div class={`action-fb action-fb--${batchRunFb.phase}`}>{batchRunFb.msg}</div>}
@@ -401,9 +402,9 @@ export default function Plan() {
                     <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem',
                                     fontSize: 'var(--type-label)', fontFamily: 'var(--font-mono)',
                                     color: 'var(--text-secondary)', cursor: 'pointer' }}>
-                        <input ref={batchToggleShRef} type="checkbox" checked={allEnabled}
+                        <input type="checkbox" checked={allEnabled}
                                style={{ accentColor: 'var(--accent)', width: 14, height: 14 }}
-                               onChange={() => handleBatchToggle(tag, !allEnabled)} />
+                               onChange={(ev) => handleBatchToggle(ev, tag, !allEnabled)} />
                         All
                     </label>
                     {batchToggleFb.msg && <div class={`action-fb action-fb--${batchToggleFb.phase}`}>{batchToggleFb.msg}</div>}
@@ -515,10 +516,9 @@ export default function Plan() {
                 <td style={{ textAlign: 'center' }}>
                     <div>
                         <button
-                            ref={pinShRef}
                             title={rj.pinned ? 'Locked \u2014 click to unlock this time slot' : 'Lock this time slot so the scheduler won\'t move it when you rebalance'}
                             disabled={pinFb.phase === 'loading'}
-                            onClick={() => handlePinToggle(rj)}
+                            onClick={(ev) => handlePinToggle(ev, rj)}
                             style={{
                                 background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.1rem',
                                 color: rj.pinned ? 'var(--status-warning)' : 'var(--text-tertiary)',
@@ -536,9 +536,8 @@ export default function Plan() {
                                 {rj.outcome_reason}
                             </span>
                             <button
-                                ref={reenableShRef}
                                 disabled={reenableFb.phase === 'loading'}
-                                onClick={() => handleReenableJob(rj.name)}
+                                onClick={(ev) => handleReenableJob(ev, rj.name)}
                                 style={{
                                     fontFamily: 'var(--font-mono)', fontSize: '9px',
                                     background: 'transparent', border: '1px solid var(--status-warning)',
@@ -560,12 +559,11 @@ export default function Plan() {
                 <td style={{ textAlign: 'center', padding: '0.25rem 0.5rem' }}>
                     <div>
                         <button
-                            ref={runNowShRef}
                             class="t-btn t-btn-secondary"
                             style={{ fontSize: 'var(--type-label)', padding: '0.2rem 0.6rem',
                                      opacity: runNowFb.phase === 'loading' ? 0.5 : 1 }}
                             disabled={runNowFb.phase === 'loading'}
-                            onClick={() => handleRunNow(rj)}>
+                            onClick={(ev) => handleRunNow(ev, rj)}>
                             {runNowFb.phase === 'loading' ? '\u2026' : '\u25B6'}
                         </button>
                         {runNowFb.msg && <div class={`action-fb action-fb--${runNowFb.phase}`}>{runNowFb.msg}</div>}
@@ -802,7 +800,7 @@ export default function Plan() {
                                         style={{ padding: '0.3rem 0.75rem', fontSize: 'var(--type-body)',
                                                  opacity: runNowFb.phase === 'loading' ? 0.5 : 1 }}
                                         disabled={runNowFb.phase === 'loading'}
-                                        onClick={() => handleRunNow(rj)}>
+                                        onClick={(ev) => handleRunNow(ev, rj)}>
                                     {runNowFb.phase === 'loading' ? '\u2026' : '\u25B6 Run Now'}
                                 </button>
                                 {runNowFb.msg && <div class={`action-fb action-fb--${runNowFb.phase}`}>{runNowFb.msg}</div>}

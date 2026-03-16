@@ -15,15 +15,21 @@ const TIER_PRESETS = {
 export function useShatter(tier = 'routine') {
   const ref = useRef(null);
 
-  const fire = useCallback(() => {
-    if (!ref.current) return;
+  // fire() accepts an optional event or element for loop contexts where
+  // a single ref can't target the correct button (ref.current always
+  // points to the last-rendered element in a .map() loop).
+  const fire = useCallback((evOrEl) => {
+    const el = evOrEl?.currentTarget || evOrEl || ref.current;
+    if (!el) return;
     // Routine tier skips effect budget — too fast and small to count
     if (tier !== 'routine') {
       const cleanup = canFireEffect('shatter-' + tier);
       if (!cleanup) return;
-      // cleanup is called automatically when fragment animation ends
+      // Release budget slot when fragment animation completes
+      shatterElement(el, { ...(TIER_PRESETS[tier] || TIER_PRESETS.routine), onComplete: cleanup });
+      return;
     }
-    shatterElement(ref.current, TIER_PRESETS[tier] || TIER_PRESETS.routine);
+    shatterElement(el, TIER_PRESETS[tier] || TIER_PRESETS.routine);
   }, [tier]);
 
   return [ref, fire];

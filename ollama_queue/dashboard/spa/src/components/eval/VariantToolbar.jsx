@@ -39,11 +39,11 @@ export default function VariantToolbar() {
 
   async function handleSaveNew(e) {
     e.preventDefault();
-    saveShatter();
     if (!newVariant.label || !newVariant.model) {
       setError('Label and model are required.');
       return;
     }
+    saveShatter();
     setSaving(true);
     setError(null);
     try {
