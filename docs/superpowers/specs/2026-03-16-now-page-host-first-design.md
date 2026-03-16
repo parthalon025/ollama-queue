@@ -128,10 +128,12 @@ Compact view stays visible. Adds below:
 
 ### CSS Classes
 
-- Outer: `.t-frame[data-label={gpuLabel}]` — existing frame pattern, mood-aware
-- Running state: `data-mood="dawn"` on the card
-- Offline state: `data-mood="dread"` on the card
+- Structure: `<div data-mood={mood}><div class="t-frame" data-label={gpuLabel}>...</div></div>` — mood on a wrapper div, NOT on the `.t-frame` itself. The CSS cascade is `[data-mood="X"] .t-frame {}` (descendant selector); putting `data-mood` directly on `.t-frame` skips the box-shadow effects.
+- Running state: `data-mood="dawn"` on the wrapper div (phosphor glow on inner frame)
+- Offline state: `data-mood="dread"` on the wrapper div (threat-red glow on inner frame)
+- All other states: no `data-mood` wrapper (neutral)
 - Bars: same gradient pattern as current `InfrastructurePanel` `HostGaugeBar` (reuse inline style logic)
+- Text values (model names, GPU labels, percentages, elapsed time, source): `.data-mono` class — consistent with all other components
 - Expand toggle: `.t-btn` for consistency with existing button styles
 
 ---
