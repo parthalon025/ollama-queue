@@ -44,7 +44,7 @@ Running multiple services against a local Ollama instance creates a resource con
 | **Consumer detection** | 4-phase scanner finds every service calling Ollama directly. Config patcher rewrites them to route through the queue. Optional iptables REDIRECT intercept catches unpatched callers at the network layer. |
 | **Eval pipeline** | Run A/B–E prompt variant evaluations with an LLM judge (F1/recall/precision). Auto-promote the winning config when quality gates pass. Thompson Sampling routes production traffic to the recommended variant. |
 | **Intelligence layer** | Bayesian log-normal runtime estimation (4-tier hierarchy), log-linear cross-model performance curves, 10-factor slot scoring with VRAM hard gates, hourly/daily load pattern learning. |
-| **Web dashboard** | 9-view Preact SPA: Now, Plan, History, Models, Performance, Backends, Settings, Eval, Consumers. SUPERHOT terminal aesthetic — CRT page banners (ShPageBanner, TAB_CONFIG-driven), VT323 pixel font, glitch/shatter effects on state transitions, ThreatPulse gauges with three-state ambient animation, KPI degradation glitch on warning transitions. ShStatsGrid KPI section on Now tab; ShCollapsible tag groups on Plan; ShDataTable on History and Models; ShTimeChart RAM trend on Performance; ShPipeline on Eval. |
+| **Web dashboard** | 9-view Preact SPA: Now, Plan, History, Models, Performance, Backends, Settings, Eval, Consumers. SUPERHOT terminal aesthetic — CRT page banners (ShPageBanner, TAB_CONFIG-driven), VT323 pixel font, terminal-voice ALL CAPS piOS copy throughout. Full atmosphere system: health-mode escalation (operational/degraded/critical), effect density budget (max 3 simultaneous effects), entry stagger choreography on all pages, tiered button shatter (7/6/3 fragments for earned/complete/routine actions), ShFrozen staleness indicators on time-sensitive data, ShGlitch on connection/health transitions, ShThreatPulse on resource breaches and offline backends, ShEmptyState with terminal mantras, escalation-driven OFFLINE watermark, opt-in procedural audio SFX. |
 | **Accessible, science-backed UI** | Non-color priority discriminators (Treisman multi-channel encoding), progressive disclosure on queue row hover (Shneiderman), sparklines on every KPI card (Tufte), semantic `data-chroma` tokens, three-tier animation system with `prefers-reduced-motion` opt-in, `@starting-style` tab entrance animations. |
 | **REST API** | 90+ endpoints covering all features. |
 
@@ -250,13 +250,13 @@ Nine views served from `http://localhost:7683/ui/`:
 
 | View | Description |
 |---|---|
-| **Now** | Running job, queue, ThreatPulse resource gauges (RAM/VRAM with three-state ambient animation — normal/warning/critical), ShStatsGrid KPI section (daemon state, queue depth, 24h jobs, RAM/VRAM), KPI cards with sparkline trends and chroma-coded severity, KPI degradation glitch on warning transitions, burst regime badge, alert strip |
+| **Now** | Host-first command center: HostCard list (one per GPU backend — current job/eval/model, VRAM/CPU gauges with gradient color ramp, data-mood cascading, ShGlitch on health transitions, ShThreatPulse on offline backends, ShFrozen on stall elapsed). ShStatsGrid KPI section with ShFrozen staleness (30s/2m/5m thresholds). DLQ dismiss wired to useShatter('earned') with 7-fragment shatter. Terminal voice ALL CAPS throughout. Alert strip with auto-disabled recurring jobs count. |
 | **Plan** | 24h Gantt timeline with "now" needle, 48-bucket load-map strip with DLQ/deferral slot markers, traffic intensity badge, "Suggest slot" button, tag-grouped recurring jobs in ShCollapsible sections (defaultOpen=true, job count in summary) |
 | **History** | ShDataTable for searchable/sortable job history, DLQ entries with reschedule status badges and reasoning, deferred jobs panel, duration trends, activity heatmap |
 | **Models** | ShDataTable for searchable/sortable model list with active model tracking |
 | **Perf** | Per-model performance table, cross-model performance curve chart (SVG scatter, log-scale), 24h×7d load heatmap, system health gauges, ShTimeChart showing RAM % trend (last 24h from health log), per-backend throughput table showing tok/min per GPU |
 | **Backends** | Full fleet overview of all configured Ollama backends — health, throughput, routing weight and `checked_at` freshness per backend, add/remove/test controls. Env-var backends (`OLLAMA_BACKENDS`) return 409 on delete with an actionable message; weight validation enforces 0.1–10.0 range. |
-| **Settings** | Thresholds, defaults, retention, DLQ auto-reschedule, proactive deferral, daemon controls (14+ tunable parameters), CRT scanline display preference (off/low/medium/high) |
+| **Settings** | Thresholds, defaults, retention, DLQ auto-reschedule, proactive deferral, daemon controls (14+ tunable parameters), CRT scanline display preference (off/low/medium/high), audio toggle for procedural SFX |
 | **Eval** | Runs, Variants, Trends, Settings sub-views for the prompt eval pipeline; active run progress via ShPipeline |
 | **Consumers** | Scan results, consumer cards with status badges, include/ignore/revert actions, intercept toggle |
 
@@ -343,7 +343,7 @@ systemd timers / apps / proxy clients
 | **Backend** | Python 3.12+, FastAPI, Uvicorn |
 | **Storage** | SQLite (WAL mode, `threading.RLock`) |
 | **Scheduling** | croniter, custom 48-slot load map |
-| **Dashboard** | Preact 10, @preact/signals, Tailwind v4, uPlot |
+| **Dashboard** | Preact 10, @preact/signals, Tailwind v4, uPlot, superhot-ui (SUPERHOT design system) |
 | **CLI** | Click |
 | **Tests** | pytest, pytest-xdist (1,951 tests, 100% line coverage) |
 
@@ -372,6 +372,8 @@ ollama_queue/
   config/             # Consumer detection (scanner), config rewriting (patcher), intercept
 
   dashboard/spa/      # Preact SPA (build with npm run build)
+    src/hooks/        # useActionFeedback, useShatter (tiered button shatter)
+    src/stores/       # Signal stores: atmosphere, eval, health, models, queue, schedule, settings
 scripts/
   migrate_timers.py              # Migrate systemd timers to recurring jobs
   migrate_dlq_max_retries.py     # Schema migration (idempotent)
@@ -433,6 +435,8 @@ Implementation plans and design decisions are in [`docs/plans/`](docs/plans/):
 | [Bug audit fixes](docs/plans/2026-03-13-bug-audit-fixes.md) | API input validation: offset bounds, limit caps, settings type enforcement |
 | [Eval backend host selection](docs/plans/2026-03-15-eval-backend-host-selection.md) | Multi-backend eval routing: SSRF prevention, `_backend` proxy param, preflight model validation |
 | [Remote backend improvements](docs/plans/2026-03-16-remote-backend-improvements.md) | `GET /api/backends` weight+checked_at fields, env-var 404→409, weight auto-register, heartbeat push endpoint |
+| [Atmosphere integration design](docs/plans/2026-03-16-atmosphere-integration-design.md) | Full superhot-ui atmosphere system: atmosphere store, useShatter hook, entry stagger, quiet world, terminal voice, ShFrozen expansion, glitch/ThreatPulse deepening |
+| [Atmosphere integration plan](docs/plans/2026-03-16-atmosphere-integration-plan.md) | 23 tasks, 7 batches — implements the atmosphere design across all 9 SPA pages and 50+ components |
 
 ---
 

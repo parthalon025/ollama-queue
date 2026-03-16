@@ -764,3 +764,43 @@ Defined in `index.css`, supplementing the expedition33-ui token system:
 | Stall Detection | "Stall Detection" | maelle | Failure detection |
 | Concurrency | "Concurrency" | lune | Resource allocation |
 | Daemon Controls | "Daemon Controls" | gustave | Primary operational control |
+
+## Appendix E: Atmosphere System
+
+The atmosphere system layers superhot-ui effects across the entire SPA, driven by real-time health data. Added in the atmosphere integration (2026-03-16).
+
+### Architecture
+
+- **`stores/atmosphere.js`** — global signal store: `healthMode` (operational/degraded/critical), `escalation` (0–3 severity), `effectBudget` (max 3 simultaneous effects via `trackEffect()`/`isOverBudget()`)
+- **`app.jsx`** — subscribes to `backendsData` health and drives `healthMode`/`escalation` signals each fetch cycle
+- **`hooks/useShatter.js`** — tiered button shatter: `earned` (7 fragments), `complete` (6), `routine` (3). Returns `[ref, fire]`. Integrates with effect budget.
+
+### Effect Mappings
+
+| Trigger | Effect | Component/Location |
+|---------|--------|--------------------|
+| Backend `healthy → false` | `ShGlitch` (edge-triggered) | `HostCard`, `CohesionHeader` |
+| Backend offline | `ShThreatPulse active persistent` | `HostCard` wrapper |
+| VRAM/RAM breach | `ShThreatPulse` | `ResourceGauges` via `ActiveEvalStrip` |
+| Stuck eval / circuit breaker | `ShThreatPulse` | `ActiveEvalStrip`, `HostCard` |
+| Connection loss | `ShGlitch` (edge on `connectionStatus`) | `CohesionHeader` |
+| Eval failure edge | `ShGlitch` | `ActiveEvalStrip` |
+| Stale time data | `ShFrozen` | KPIs (30s), HeroCards (2m), health gauges (5m), DLQ, deferrals, eval runs, consumers, Gantt bars |
+| DLQ dismiss / eval cancel | `useShatter('earned')` — 7 fragments | `Now.jsx`, eval components |
+| Form submits / promote | `useShatter('complete')` — 6 fragments | `SubmitJobModal`, eval promote |
+| Toggles / navigation | `useShatter('routine')` — 3 fragments | Settings toggles, sidebar actions |
+| `escalation >= 2` | `applyMantra` OFFLINE watermark | `app.jsx` lifecycle |
+| Page mount | `sh-stagger-children` entry animation | All 9 page root containers |
+| Empty state | `ShEmptyState` with terminal mantra | All pages (replaces deleted `EmptyState.jsx`) |
+
+### Terminal Voice
+
+All inline SPA copy uses piOS UPPERCASE style:
+- Button labels: `DISMISS`, `RETRY`, `SCAN`, `CANCEL`, `SUBMIT`, `PROMOTE`
+- Action feedback: `CANCELLING...`, `QUEUED`, `CLEARED`
+- Empty states: `NOTHING TO REPORT`, `ALL SYSTEMS NOMINAL`, `QUEUE EMPTY — SUBMIT A JOB`
+- TAB_CONFIG subtitles: `COMMAND CENTER`, `SCHEDULE OVERVIEW`, etc.
+
+### Audio
+
+Opt-in procedural SFX via `playSfx()` from superhot-ui. Toggle in Settings page. Off by default.

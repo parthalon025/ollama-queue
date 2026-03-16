@@ -85,9 +85,9 @@ ollama_queue/
     spa/              # Preact SPA (built separately, served as static)
       src/
         components/   # UI components (eval/, consumers/, SettingsForm/, RunRow/, Plan/)
-        hooks/        # Shared Preact hooks (useActionFeedback)
+        hooks/        # Shared Preact hooks (useActionFeedback, useShatter)
         pages/        # Page-level components (Now, Plan/, History, Models, etc.)
-        stores/       # Signal stores by domain (eval, health, models, queue, schedule, settings)
+        stores/       # Signal stores by domain (atmosphere, eval, health, models, queue, schedule, settings)
         views/        # Eval sub-views (Runs, Variants, Trends, Settings)
       dist/           # Production build output (gitignored)
 
@@ -152,7 +152,7 @@ ollama-queue metrics curve           # Fitted cross-model performance curve para
 
 - **Synchronous SQLite** (not aiosqlite) — daemon is single-threaded, FastAPI uses `check_same_thread=False` with WAL mode
 - **FastAPI** for REST API, serves static SPA from `dashboard/spa/dist/`
-- **Preact 10** + @preact/signals + Tailwind v4 + uPlot — ARIA design language
+- **Preact 10** + @preact/signals + Tailwind v4 + uPlot + superhot-ui design system (`file:` dependency)
 - **Polling daemon** (5s): health check → evaluate → dequeue by priority → subprocess.Popen → record result
 - **Health hysteresis**: pause at high threshold, resume only below lower threshold (prevents flapping)
 - **Click CLI** with `--db` option for testability
@@ -166,7 +166,15 @@ npm run build        # Production
 npm run dev          # Watch mode
 ```
 
-Sidebar nav (desktop) + bottom tab bar (mobile). 8 views: **Now** (host-first command center: `HostCard` list [one per GPU backend — shows current job/eval/model, VRAM/CPU gauges; resource bars use gradient color ramp — full-width gradient track + mask; load_avg to % via `load_avg / cpu_count * 100`; CPU pause/resume thresholds `multiplier × 100` not `× 50`; `data-mood` on wrapper div — NOT on `.t-frame` — cascades superhot-ui mood selectors; `ShGlitch` fires only on `healthy → false` edge transition; offline backend wraps card in `ShThreatPulse active persistent`; stall elapsed shown via `ShFrozen`]; `ShStatsGrid` KPI section — 3 stats: queue depth, 24h jobs, RAM; alert strip — amber badge for auto-disabled recurring jobs count linking to Plan tab) + **Plan** (health summary strip showing active/failing/disabled/overdue/skip counts; 24h Gantt timeline with "now" needle dynamically positioned by wall-clock within zoom window, `visibleJobs` filter prevents past-due jobs piling at left edge in zoom mode; disabled jobs render at 40% opacity + dashed outline + ⏸ prefix; skip badge ↻N shows when job was skipped N times in last 24h; bar detail card shows load/run/unload segment breakdown; warmup cap = `min(rawWarmup, floor(estDur * 0.4))` prevents body collapse; 48-bucket load-map density strip with DLQ/deferral slot markers, ρ traffic intensity badge, "Suggest slot" button highlighting top-3 low-load windows; tag-grouped recurring jobs wrapped in `ShCollapsible` [uncontrolled, defaultOpen=true, job count in summary], bulk actions, expandable detail panels) + **History** (DLQ entries with reschedule status badges/reasoning, deferred jobs panel, duration trends, activity heatmap, `ShDataTable` for searchable/sortable job history) + **Models** (`ShDataTable` for searchable/sortable model list) + **Perf** (model performance table, cross-model performance curve chart, 24h×7d load heatmap, system health gauges, `ShTimeChart` showing RAM % trend from health log — last 24h) + **Settings** (thresholds, defaults, retention, DLQ auto-reschedule, proactive deferral, daemon controls, CRT scanline display preference) + **Consumers** (scan button, consumer cards with status badges and include/ignore/revert actions, intercept toggle with status banner).
+Sidebar nav (desktop) + bottom tab bar (mobile). 9 views: **Now** (host-first command center: `HostCard` list [one per GPU backend — shows current job/eval/model, VRAM/CPU gauges; resource bars use gradient color ramp — full-width gradient track + mask; load_avg to % via `load_avg / cpu_count * 100`; CPU pause/resume thresholds `multiplier × 100` not `× 50`; `data-mood` on wrapper div — NOT on `.t-frame` — cascades superhot-ui mood selectors; `ShGlitch` fires only on `healthy → false` edge transition; offline backend wraps card in `ShThreatPulse active persistent`; stall elapsed shown via `ShFrozen`]; `ShStatsGrid` KPI section — 3 stats: queue depth, 24h jobs, RAM; `ShFrozen` wraps KPIs and HeroCards with 30s/2m/5m thresholds; DLQ dismiss button wired to `useShatter('earned')` with 7-fragment shatter; alert strip — amber badge for auto-disabled recurring jobs count linking to Plan tab) + **Plan** (health summary strip showing active/failing/disabled/overdue/skip counts; 24h Gantt timeline with "now" needle dynamically positioned by wall-clock within zoom window, `visibleJobs` filter prevents past-due jobs piling at left edge in zoom mode; disabled jobs render at 40% opacity + dashed outline + ⏸ prefix; skip badge ↻N shows when job was skipped N times in last 24h; bar detail card shows load/run/unload segment breakdown; warmup cap = `min(rawWarmup, floor(estDur * 0.4))` prevents body collapse; 48-bucket load-map density strip with DLQ/deferral slot markers, ρ traffic intensity badge, "Suggest slot" button highlighting top-3 low-load windows; tag-grouped recurring jobs wrapped in `ShCollapsible` [uncontrolled, defaultOpen=true, job count in summary], bulk actions, expandable detail panels) + **History** (DLQ entries with reschedule status badges/reasoning, deferred jobs panel, duration trends, activity heatmap, `ShDataTable` for searchable/sortable job history) + **Models** (`ShDataTable` for searchable/sortable model list) + **Perf** (model performance table, cross-model performance curve chart, 24h×7d load heatmap, system health gauges, `ShTimeChart` showing RAM % trend from health log — last 24h) + **Settings** (thresholds, defaults, retention, DLQ auto-reschedule, proactive deferral, daemon controls, CRT scanline display preference, audio toggle for procedural SFX) + **Consumers** (scan button, consumer cards with status badges and include/ignore/revert actions, intercept toggle with status banner).
+
+**Atmosphere system** — `stores/atmosphere.js` drives global health-mode escalation (operational/degraded/critical) and effect density budgeting (max 3 simultaneous effects via `trackEffect()`/`isOverBudget()`). `app.jsx` subscribes to backend health data and updates `healthMode`/`escalation` signals. Escalation-driven mantra (`applyMantra`/`removeMantra`) activates when `escalation.value >= 2`. All 9 pages use `sh-stagger-children` class for entry choreography. `ShEmptyState` replaces all custom empty states with terminal-voice mantras ("NOTHING TO REPORT", "ALL SYSTEMS NOMINAL", etc.). `ShFrozen` wraps time-sensitive data across all pages (DLQ, deferrals, eval runs, consumer scan times, Gantt bars) with configurable staleness thresholds.
+
+**Terminal voice** — all inline SPA copy uses piOS UPPERCASE voice style. `useActionFeedback` labels ("CANCELLING...", "QUEUED"), TAB_CONFIG subtitles, toast messages, button labels ("DISMISS", "RETRY", "SCAN"), empty state messages, and onboarding overlay text are all terminal-voiced.
+
+**Tiered button shatter** — `useShatter` hook (`src/hooks/useShatter.js`) provides 3 tiers: `earned` (7 fragments — DLQ dismiss, eval cancel), `complete` (6 — form submits, promote), `routine` (3 — toggles, navigation). All action buttons across all 9 pages are wired. The hook integrates with the atmosphere effect density budget.
+
+**Glitch/ThreatPulse deepening** — `ShGlitch` fires on connection loss transitions (`connectionStatus` signal), eval failure edges, and backend health transitions. `ShThreatPulse` wraps VRAM/RAM breach warnings, stuck eval runs, circuit breaker activation, and offline backends (with `persistent` flag).
 
 All 9 pages use `ShPageBanner` (namespace/page/subtitle pixel-art header, TAB_CONFIG-driven) — replaces the old `PageBanner` component. Eval tab uses `ShPipeline` in `ActiveRunProgress.jsx` (replaces `EvalPipelineSwimline`). Tab metadata (id, icon, label, tooltip, namespace, page, subtitle) is the single source of truth in `src/config/tabs.js` (TAB_CONFIG) — eliminates duplicate NAV_ITEMS constants. Column configs for ShDataTable: `src/config/historyColumns.js` (History tab), `src/config/modelColumns.js` (Models tab).
 
@@ -323,6 +331,12 @@ This applies to: component files, store transformations in `stores/`, computed v
 - **DLQ `_do_sweep()` logs at DEBUG when `dlq.auto_reschedule` is disabled** — previously silent; now visible in debug logs without polluting INFO.
 - **`_safeJson(resp)` in SPA stores** — checks `Content-Type` includes `application/json` before calling `.json()`; applied to all fetch calls in `stores/index.js`. Prevents JSON parse errors on unexpected HTML error responses.
 - **`HostCard` derives serving state per-backend** — `matchesBackend(backend, currentJob)` cross-references `currentJob.model` against `backend.loaded_models`. The serving backend gets a highlighted state via `data-mood="dawn"`. All-unreachable state renders each card with `data-mood="dread"` + `ShThreatPulse active persistent` wrapper. `evalActiveRun` is passed as `.value` (raw) from `Now.jsx` — `HostCard` must NOT import the signal from stores directly.
+- **`useShatter` hook integrates with atmosphere effect budget** — `trackEffect('shatter')` is called before firing; if `isOverBudget()` returns true, the shatter is suppressed. The `onComplete` callback passed to `shatterElement()` calls the cleanup function from `trackEffect()`. Three tiers: `earned` (7 fragments), `complete` (6), `routine` (3). The hook returns `[ref, fire]` — attach `ref` to the button element, call `fire()` in `onClick`.
+- **`atmosphere.js` store signals are global singletons** — `healthMode`, `escalation`, `effectBudget` are module-level `@preact/signals` values. `app.jsx` drives `healthMode` from backend health data on each fetch cycle. Components read these signals reactively — do not import and cache `.value` in a closure.
+- **`sh-stagger-children` CSS class for entry choreography** — applied to the root container of each page. superhot-ui's CSS handles the stagger timing via `nth-child` selectors. The class must be on the immediate parent of the elements to stagger, not on a wrapper div above it.
+- **Terminal voice is ALL CAPS in all UI copy** — every string visible to the user (button labels, empty states, action feedback, toast messages, tab subtitles, onboarding text) uses UPPERCASE. Tests must assert uppercase strings. This is intentional piOS aesthetic, not a bug.
+- **`ShEmptyState` replaces all custom empty states** — `EmptyState.jsx` and `ErrorState.jsx` were deleted. All pages now use `ShEmptyState` from `superhot-ui/preact` with terminal mantras. Import: `import { ShEmptyState } from 'superhot-ui/preact'`.
+- **Audio toggle in Settings** — opt-in procedural SFX via `playSfx()` from superhot-ui. Controlled by a setting in the Settings page. Off by default — user must explicitly enable.
 - **`ganttInteractingRef` in Plan/index.jsx** — suppresses the 10s load-map refresh while user hovers Gantt or LoadMapStrip, preventing mid-interaction repaints.
 - **`normalizeTrends()` surfaces `no_cluster_data: true`** — F1LineChart shows a specific actionable message (not a generic empty state) when cluster labels are missing from the eval results.
 - **`_get_weights()` reads DB first, env var fallback** — `backend_router._get_weights()` uses a deferred import (`import ollama_queue.api as _api` inside the function body) to read `db.list_backends()` weights at call time. Deferred import is required because `backend_router` is imported by `api/__init__.py` — a module-level import would create a circular dependency. DB weight wins; env var is the fallback; default is 1.0.
@@ -351,15 +365,21 @@ Pipeline: ui-template (base) → superhot-ui (theme) → ollama-queue (consumer)
 - **Host state** → `HostCard` (one per GPU backend — job/eval/model/gauges; `data-mood` wrapper cascades mood)
 - **Running job** → `ShStatusBadge` (running) + `ShFrozen` elapsed timer
 - **Queued job** → QueueList rows + `ShStatusBadge` (queued/waiting)
-- **Failed/DLQ** → `ShShatter` dismiss + `ShStatusBadge` (error); `dread` mood on page/card
-- **Health degraded** → `ShGlitch` (edge-triggered on `healthy → false`) + `ShThreatPulse` (offline)
+- **Failed/DLQ** → `ShShatter` dismiss (earned tier, 7 fragments) + `ShStatusBadge` (error); `dread` mood on page/card
+- **Health degraded** → `ShGlitch` (edge-triggered on `healthy → false`, connection loss, eval failure) + `ShThreatPulse` (offline backends, VRAM/RAM breach, stuck eval, circuit breaker)
 - **Resources** → `HostGaugeBar` + gradient color ramp (VRAM >90% error, >80% warning; CPU `multiplier × 100`)
-- **KPI summary** → `ShStatsGrid` / `ShStatCard`
+- **KPI summary** → `ShStatsGrid` / `ShStatCard`; `ShFrozen` wraps time-sensitive KPIs (30s/2m/5m thresholds)
 - **Page headers** → `ShPageBanner` (namespace/page/subtitle pixel-art header, TAB_CONFIG-driven)
 - **Eval progress** → `ShPipeline` in `ActiveRunProgress.jsx`
 - **Tables** → `ShDataTable` (History, Models tabs)
 - **Loading** → `ShSkeleton`; **CRT scanline toggle** → `ShCrtToggle`
-- **OFFLINE watermark** → `applyMantra` / `removeMantra`; **Tabs:** Now=dawn, Plan=wonder, History=dread, Models=nostalgic
+- **OFFLINE watermark** → `applyMantra` / `removeMantra` (escalation-driven, triggers at `escalation >= 2`)
+- **Entry choreography** → `sh-stagger-children` class on all 9 page root containers
+- **Empty states** → `ShEmptyState` with terminal mantras (replaces deleted `EmptyState.jsx` / `ErrorState.jsx`)
+- **Button actions** → `useShatter` hook: earned (7 fragments) for DLQ/eval cancel, complete (6) for submits/promote, routine (3) for toggles
+- **Atmosphere** → `stores/atmosphere.js`: `healthMode` (operational/degraded/critical), `escalation` (0–3), effect density budget (max 3 simultaneous)
+- **Terminal voice** → ALL CAPS piOS style on all UI copy; **Audio** → opt-in procedural SFX via `playSfx()`
+- **Tabs:** Now=dawn, Plan=wonder, History=dread, Models=nostalgic
 
 ## Code Factory
 
