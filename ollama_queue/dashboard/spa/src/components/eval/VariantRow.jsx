@@ -2,6 +2,7 @@ import { useState, useEffect } from 'preact/hooks';
 import { API, fetchEvalVariants } from '../../stores';
 import { EVAL_TRANSLATIONS } from './translations.js';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
+import { useShatter } from '../../hooks/useShatter.js';
 import ModelChip from '../ModelChip.jsx';
 // What it shows: A single eval variant config with 3-level progressive disclosure.
 //   L1: ★ badge, variant ID/label, model, recommended/production badges, latest quality.
@@ -47,6 +48,8 @@ function getTemplateLabelFromId(templateId) {
 
 export default function VariantRow({ variant }) {
   const [deleteFb, deleteAct] = useActionFeedback();
+  const [deleteRef, deleteShatter] = useShatter('earned');
+  const [cloneRef, cloneShatter] = useShatter('routine');
 
   const [level, setLevel] = useState(1); // 1 | 2 | 3
   const [cloning, setCloning] = useState(false);
@@ -208,9 +211,10 @@ export default function VariantRow({ variant }) {
               </span>
             )}
             <button
+              ref={cloneRef}
               class="t-btn t-btn-secondary"
               style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }}
-              onClick={handleClone}
+              onClick={() => { cloneShatter(); handleClone(); }}
               disabled={cloning}
             >
               {cloning ? 'Cloning…' : 'Copy to customize'}
@@ -244,10 +248,11 @@ export default function VariantRow({ variant }) {
                       Delete "{label}"?
                     </span>
                     <button
+                      ref={deleteRef}
                       class="t-btn t-btn-secondary"
                       style={{ fontSize: 'var(--type-label)', padding: '3px 8px', color: 'var(--status-error)', borderColor: 'var(--status-error)' }}
                       disabled={deleteFb.phase === 'loading'}
-                      onClick={handleDelete}
+                      onClick={evt => { deleteShatter(); handleDelete(evt); }}
                     >
                       {deleteFb.phase === 'loading' ? 'Deleting…' : 'Yes, delete'}
                     </button>

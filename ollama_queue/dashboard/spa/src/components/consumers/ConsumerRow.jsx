@@ -5,6 +5,7 @@
 //   apply patch immediately or defer until next restart.
 import { useState, useEffect, useRef } from 'preact/hooks';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
+import { useShatter } from '../../hooks/useShatter.js';
 import { includeConsumer, ignoreConsumer, revertConsumer } from '../../stores';
 import { applyFreshness } from 'superhot-ui';
 
@@ -27,6 +28,9 @@ const HEALTH_BADGE = {
 
 export function ConsumerRow({ consumer }) {
   const [fb, run] = useActionFeedback();
+  const [includeRef, includeShatter] = useShatter('complete');
+  const [ignoreRef, ignoreShatter] = useShatter('earned');
+  const [revertRef, revertShatter] = useShatter('earned');
   const [showStreamingConfirm, setShowStreamingConfirm] = useState(false);
   const [restartPolicy, setRestartPolicy] = useState('deferred');
   // Freshness ref: applied directly to <tr> (can't wrap a table row in a <div>).
@@ -110,7 +114,8 @@ export function ConsumerRow({ consumer }) {
               <option value="immediate">Apply now (restarts service)</option>
             </select>
             <button
-              onClick={handleInclude}
+              ref={includeRef}
+              onClick={() => { includeShatter(); handleInclude(); }}
               disabled={isDisabled}
               title={consumer.is_managed_job ? 'Cannot include managed queue jobs' : undefined}
             >
@@ -120,14 +125,14 @@ export function ConsumerRow({ consumer }) {
               <div class={`action-fb action-fb--${fb.phase}`}>{fb.msg}</div>
             )}
             {consumer.status !== 'ignored' && (
-              <button onClick={() => run('IGNORING', () => ignoreConsumer(consumer.id), () => 'IGNORED')}>
+              <button ref={ignoreRef} onClick={() => { ignoreShatter(); run('IGNORING', () => ignoreConsumer(consumer.id), () => 'IGNORED'); }}>
                 Ignore
               </button>
             )}
           </span>
         )}
         {(consumer.status === 'pending_restart' || consumer.status === 'patched') && (
-          <button onClick={() => run('REVERTING', () => revertConsumer(consumer.id), () => 'REVERTED')}>
+          <button ref={revertRef} onClick={() => { revertShatter(); run('REVERTING', () => revertConsumer(consumer.id), () => 'REVERTED'); }}>
             Revert
           </button>
         )}

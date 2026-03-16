@@ -5,6 +5,7 @@
 //   applies patches, and optionally enables system-wide iptables interception.
 import { useEffect } from 'preact/hooks';
 import { useActionFeedback } from '../hooks/useActionFeedback.js';
+import { useShatter } from '../hooks/useShatter.js';
 import {
   consumers, consumersScanning,
   fetchConsumers, scanConsumers,
@@ -20,6 +21,7 @@ import { TAB_CONFIG } from '../config/tabs.js';
 //   hardcoded URLs env-var patching can't reach.
 function InterceptBanner() {
   const [fb, run] = useActionFeedback();
+  const [interceptRef, interceptShatter] = useShatter('routine');
   const status = interceptStatus.value;
 
   useEffect(() => { fetchInterceptStatus(); }, []);
@@ -38,16 +40,18 @@ function InterceptBanner() {
       <div class="intercept-banner__action">
         {status.enabled ? (
           <button
+            ref={interceptRef}
             class={`action-fb--${fb.phase}`}
-            onClick={() => run('DISABLING', disableIntercept, () => 'INTERCEPT DISABLED')}
+            onClick={() => { interceptShatter(); run('DISABLING', disableIntercept, () => 'INTERCEPT DISABLED'); }}
             disabled={fb.phase === 'loading'}
           >
             {fb.phase === 'loading' ? fb.msg : 'Disable intercept'}
           </button>
         ) : (
           <button
+            ref={interceptRef}
             class={`action-fb--${fb.phase}`}
-            onClick={() => run('ENABLING', enableIntercept, () => 'INTERCEPT ACTIVE')}
+            onClick={() => { interceptShatter(); run('ENABLING', enableIntercept, () => 'INTERCEPT ACTIVE'); }}
             disabled={fb.phase === 'loading'}
           >
             {fb.phase === 'loading' ? fb.msg : 'Enable intercept mode'}
@@ -63,6 +67,7 @@ function InterceptBanner() {
 export default function Consumers() {
   const _tab = TAB_CONFIG.find(t => t.id === 'consumers');
   const [scanFb, runScan] = useActionFeedback();
+  const [scanRef, scanShatter] = useShatter('routine');
 
   useEffect(() => { fetchConsumers(); }, []);
 
@@ -93,8 +98,9 @@ export default function Consumers() {
       <div class="consumers-header">
         <h2 style="margin:0">Consumers</h2>
         <button
+          ref={scanRef}
           class={`action-fb--${scanFb.phase}`}
-          onClick={() => runScan('SCANNING', scanConsumers, () => `FOUND ${consumers.value.length} CONSUMER(S)`)}
+          onClick={() => { scanShatter(); runScan('SCANNING', scanConsumers, () => `FOUND ${consumers.value.length} CONSUMER(S)`); }}
           disabled={consumersScanning.value || scanFb.phase === 'loading'}
         >
           {scanFb.phase === 'loading' ? 'Scanning…' : 'Scan Now'}

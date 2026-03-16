@@ -4,6 +4,7 @@ import ResultsTable from '../ResultsTable.jsx';
 import ConfusionMatrix from '../ConfusionMatrix.jsx';
 import { API, evalActiveRun, evalSubTab, evalVariants, fetchEvalRuns, fetchEvalVariants, fetchRunAnalysis, startEvalPoll } from '../../../stores';
 import { useActionFeedback } from '../../../hooks/useActionFeedback.js';
+import { useShatter } from '../../../hooks/useShatter.js';
 import StatusDot from './StatusDot.jsx';
 import ModelChip from '../../ModelChip.jsx';
 import { formatDate, fmtPct, simpleRenderMd, resolveGenModel } from './helpers.js';
@@ -25,6 +26,10 @@ export default function RunRow({ run }) {
   const [analyzeFb, analyzeAct] = useActionFeedback();
   const [promoteFb, promoteAct] = useActionFeedback();
   const [reanalyzeFb, reanalyzeAct] = useActionFeedback();
+  const [promoteRef, promoteShatter] = useShatter('complete');
+  const [analyzeRef, analyzeShatter] = useShatter('routine');
+  const [repeatRef, repeatShatter] = useShatter('complete');
+  const [reanalyzeRef, reanalyzeShatter] = useShatter('routine');
   const [analysis, setAnalysis] = useState(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [showBreakdown, setShowBreakdown] = useState(false);
@@ -442,9 +447,10 @@ export default function RunRow({ run }) {
             }}>
               Analysis not computed
               <button
+                ref={reanalyzeRef}
                 style={{ fontSize: 'var(--type-label)', color: 'var(--accent)', background: 'none', border: '1px solid var(--accent)', borderRadius: '3px', padding: '2px 8px', cursor: 'pointer' }}
                 disabled={reanalyzeFb.phase === 'loading'}
-                onClick={() => reanalyzeAct(
+                onClick={() => { reanalyzeShatter(); reanalyzeAct(
                   'COMPUTING',
                   async () => {
                     const res = await fetch(`${API}/eval/runs/${id}/reanalyze`, { method: 'POST' });
@@ -455,7 +461,7 @@ export default function RunRow({ run }) {
                     fetchRunAnalysis(id).then(data => setAnalysis(data));
                     return 'ANALYSIS COMPUTED';
                   }
-                )}
+                ); }}
               >
                 {reanalyzeFb.phase === 'loading' ? 'Computing\u2026' : 'Compute'}
               </button>
@@ -497,10 +503,11 @@ export default function RunRow({ run }) {
             {status === 'complete' && winner_variant && (
               <div>
                 <button
+                  ref={promoteRef}
                   class="t-btn t-btn-primary"
                   style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }}
                   disabled={promoteFb.phase === 'loading'}
-                  onClick={handlePromote}
+                  onClick={ev => { promoteShatter(); handlePromote(ev); }}
                   title="Promote winning config to production"
                 >
                   {promoteFb.phase === 'loading' ? 'Promoting\u2026' : 'Use this config'}
@@ -511,10 +518,11 @@ export default function RunRow({ run }) {
             {status === 'complete' && (
               <div>
                 <button
+                  ref={analyzeRef}
                   class="t-btn t-btn-secondary"
                   style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }}
                   disabled={analyzeFb.phase === 'loading'}
-                  onClick={handleAnalyze}
+                  onClick={ev => { analyzeShatter(); handleAnalyze(ev); }}
                   title={analysis_md ? 'Regenerate analysis' : 'Analyze this run with Ollama'}
                 >
                   {analyzeFb.phase === 'loading' ? 'Analysing\u2026' : (analysis_md ? '\u21BA Re-analyze' : '\u2726 Analyze')}
@@ -525,10 +533,11 @@ export default function RunRow({ run }) {
             {canRepeat && (
               <div>
                 <button
+                  ref={repeatRef}
                   class="t-btn t-btn-secondary"
                   style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }}
                   disabled={repeatFb.phase === 'loading'}
-                  onClick={handleRepeat}
+                  onClick={ev => { repeatShatter(); handleRepeat(ev); }}
                   title="Re-run this eval with the same items and seed"
                 >
                   {repeatFb.phase === 'loading' ? 'Repeating\u2026' : '\u21BA Repeat'}

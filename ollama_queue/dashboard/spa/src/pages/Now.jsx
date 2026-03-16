@@ -6,6 +6,7 @@ import {
     scheduleJobs, fetchSchedule,
 } from '../stores';
 import { useActionFeedback } from '../hooks/useActionFeedback.js';
+import { useShatter } from '../hooks/useShatter.js';
 import CurrentJob from '../components/CurrentJob.jsx';
 import QueueList from '../components/QueueList.jsx';
 import HeroCard from '../components/HeroCard.jsx';
@@ -33,6 +34,7 @@ export default function Now({ onSubmitRequest }) {
 
     // Action feedback hook for "Dismiss all" — must precede any conditional return
     const [dismissFb, dismissAct] = useActionFeedback();
+    const [dismissRef, dismissShatter] = useShatter('earned');
 
     // Ref for the page container — target for the OFFLINE mantra overlay.
     const pageRef = useRef(null);
@@ -217,10 +219,11 @@ export default function Now({ onSubmitRequest }) {
                                     >VIEW</button>
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                                         <button
+                                            ref={dismissRef}
                                             class="t-btn"
                                             style={{ fontSize: 'var(--type-micro)', padding: '2px 8px', color: 'var(--text-tertiary)' }}
                                             disabled={dismissFb.phase === 'loading'}
-                                            onClick={() => dismissAct('CLEARING', clearDLQ, () => 'CLEARED')}
+                                            onClick={() => { dismissShatter(); dismissAct('CLEARING', clearDLQ, () => 'CLEARED'); }}
                                         >DISMISS ALL</button>
                                         {dismissFb.msg && <span class={`action-fb action-fb--${dismissFb.phase}`}>{dismissFb.msg}</span>}
                                     </div>

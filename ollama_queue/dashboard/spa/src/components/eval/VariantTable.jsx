@@ -3,6 +3,7 @@ import { useState } from 'preact/hooks';
 import { evalVariants, fetchEvalVariants } from '../../stores';
 import { API } from '../../stores/_shared.js';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
+import { useShatter } from '../../hooks/useShatter.js';
 import VariantRow from './VariantRow.jsx';
 import { ShEmptyState } from 'superhot-ui/preact';
 // What it shows: The full list of eval variant configs — system defaults first,
@@ -23,6 +24,7 @@ const PROVIDER_OPTIONS = ['ollama', 'claude', 'openai'];
 //   cloning a new variant for every small tweak.
 function VariantEditPanel({ variant, onClose }) {
   const [saveFb, saveAct] = useActionFeedback();
+  const [saveRef, saveShatter] = useShatter('complete');
   const [system_prompt, setSystemPrompt] = useState(variant.system_prompt || '');
   const [provider, setProvider] = useState(variant.provider || 'ollama');
   const [params, setParams] = useState(
@@ -38,6 +40,7 @@ function VariantEditPanel({ variant, onClose }) {
   async function handleSave(evt) {
     evt.preventDefault();
     if (!validateParams(params)) return;
+    saveShatter();
     await saveAct(
       'SAVING',
       async () => {
@@ -96,7 +99,7 @@ function VariantEditPanel({ variant, onClose }) {
         </div>
       </div>
       <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
-        <button type="submit" class="t-btn t-btn-primary" style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }} disabled={saveFb.phase === 'loading' || !!paramsError}>
+        <button ref={saveRef} type="submit" class="t-btn t-btn-primary" style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }} disabled={saveFb.phase === 'loading' || !!paramsError}>
           {saveFb.phase === 'loading' ? 'Saving…' : 'Save'}
         </button>
         <button type="button" class="t-btn t-btn-secondary" style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }} onClick={onClose}>

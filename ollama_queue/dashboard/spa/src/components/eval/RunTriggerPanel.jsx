@@ -8,6 +8,7 @@ import {
 import { backendsData } from '../../stores/health.js';
 import { EVAL_TRANSLATIONS } from './translations.js';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
+import { useShatter } from '../../hooks/useShatter.js';
 import SchedulingModeSelector from './SchedulingModeSelector.jsx';
 import ModelSelect from '../ModelSelect.jsx';
 // What it shows: Form to configure and start a new eval run.
@@ -42,6 +43,8 @@ export default function RunTriggerPanel({ defaultCollapsed }) {
   const [genBackend, setGenBackend] = useState('');
   const [judgeBackend, setJudgeBackend] = useState('');
   const [fb, act] = useActionFeedback();
+  const [startRef, startShatter] = useShatter('complete');
+  const [primeRef, primeShatter] = useShatter('routine');
 
   // null = not checked yet, 'checking', 'ready', 'needs_prime', 'offline'
   const [readiness, setReadiness] = useState(null);
@@ -87,6 +90,7 @@ export default function RunTriggerPanel({ defaultCollapsed }) {
     if (selectedVariants.length === 0) {
       return;
     }
+    startShatter();
     await act(
       'STARTING',
       async () => {
@@ -152,11 +156,12 @@ export default function RunTriggerPanel({ defaultCollapsed }) {
                   &#x26A0; Not enough data to run — {readiness.item_count} lessons / {readiness.cluster_count} groups (need 10+ lessons, 2+ groups)
                   {' '}
                   <button
+                    ref={primeRef}
                     type="button"
                     class="t-btn t-btn-secondary"
                     style={{ fontSize: 'var(--type-label)', padding: '2px 8px', marginLeft: '0.5rem' }}
                     disabled={primeFb.phase === 'loading'}
-                    onClick={() => primeAct('PRIMING', () => primeDataSource(), result => {
+                    onClick={() => { primeShatter(); primeAct('PRIMING', () => primeDataSource(), result => {
                       // After prime succeeds, update readiness from returned counts
                       if (result.cluster_count >= 2 && result.item_count >= 10) {
                         setReadiness({ phase: 'ready', item_count: result.item_count, cluster_count: result.cluster_count });
@@ -164,7 +169,7 @@ export default function RunTriggerPanel({ defaultCollapsed }) {
                         setReadiness({ phase: 'needs_prime', item_count: result.item_count ?? 0, cluster_count: result.cluster_count ?? 0 });
                       }
                       return `PRIMED \u00b7 ${result.updated} UPDATED`;
-                    })}
+                    }); }}
                   >
                     {primeFb.phase === 'loading' ? 'Priming\u2026' : 'Prepare Data'}
                   </button>
@@ -422,6 +427,7 @@ export default function RunTriggerPanel({ defaultCollapsed }) {
           {/* Submit */}
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
             <button
+              ref={startRef}
               type="submit"
               class="t-btn t-btn-primary"
               style={{ fontSize: 'var(--type-label)', padding: '4px 12px' }}

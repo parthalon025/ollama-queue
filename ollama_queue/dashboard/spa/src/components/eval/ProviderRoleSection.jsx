@@ -11,6 +11,7 @@
 import { h } from 'preact';
 import { useState } from 'preact/hooks';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
+import { useShatter } from '../../hooks/useShatter.js';
 import { backendsData } from '../../stores/health.js';
 import { evalSettings, saveEvalSettings } from '../../stores/eval.js';
 
@@ -32,6 +33,7 @@ export default function ProviderRoleSection({ role, settings, onSave }) {
     evalSettings.value?.[`eval.${role}_backend_url`] || 'auto'
   );
   const [fb, act] = useActionFeedback();
+  const [testRef, testShatter] = useShatter('routine');
 
   async function loadModels(prov) {
     try {
@@ -50,6 +52,7 @@ export default function ProviderRoleSection({ role, settings, onSave }) {
   }
 
   function handleTest() {
+    testShatter();
     act('TESTING', async () => {
       const res = await fetch('/api/eval/providers/test', {
         method: 'POST',
@@ -136,6 +139,7 @@ export default function ProviderRoleSection({ role, settings, onSave }) {
 
         <div class="provider-role-section__actions">
           <button
+            ref={testRef}
             disabled={!model || fb.phase === 'loading'}
             onClick={handleTest}
           >

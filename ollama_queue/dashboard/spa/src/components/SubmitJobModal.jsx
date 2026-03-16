@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { settings, submitJob } from '../stores';
 import { useActionFeedback } from '../hooks/useActionFeedback.js';
+import { useShatter } from '../hooks/useShatter.js';
 import PrioritySelector from './PrioritySelector.jsx';
 
 const inputStyle = {
@@ -41,6 +42,7 @@ export default function SubmitJobModal({ onJobSubmitted, open: controlledOpen, o
     const [timeout, setTimeout_] = useState(120);
     const [error, setError] = useState(null);
     const [fb, act] = useActionFeedback();
+    const [submitRef, submitShatter] = useShatter('complete');
     const dialogRef = useRef(null);
 
     // Sync form defaults when settings signal updates
@@ -107,6 +109,7 @@ export default function SubmitJobModal({ onJobSubmitted, open: controlledOpen, o
             return;
         }
         setError(null);
+        submitShatter();
 
         await act(
             'SUBMITTING',
@@ -287,6 +290,7 @@ export default function SubmitJobModal({ onJobSubmitted, open: controlledOpen, o
                                     CANCEL
                                 </button>
                                 <button
+                                    ref={submitRef}
                                     type="submit"
                                     disabled={fb.phase === 'loading'}
                                     style={{

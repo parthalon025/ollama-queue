@@ -1,5 +1,6 @@
 import { deferredJobs, resumeDeferred } from '../stores';
 import { useActionFeedback } from '../hooks/useActionFeedback';
+import { useShatter } from '../hooks/useShatter.js';
 
 // What it shows: Jobs that the system has paused because they can't run right now —
 //   GPU too hot, not enough memory, system overloaded, or user-deferred.
@@ -15,6 +16,7 @@ const REASON_LABELS = {
 
 function DeferredRow({ entry }) {
     const [fb, act] = useActionFeedback();
+    const [resumeRef, resumeShatter] = useShatter('routine');
     const reason = REASON_LABELS[entry.reason] || entry.reason || 'Unknown';
     const scheduledFor = entry.scheduled_for
         ? new Date(entry.scheduled_for * 1000).toLocaleTimeString()
@@ -28,13 +30,14 @@ function DeferredRow({ entry }) {
             </span>
             <span class="deferred-row__scheduled">{scheduledFor}</span>
             <button
+                ref={resumeRef}
                 class="deferred-row__resume"
                 disabled={fb.phase === 'loading'}
-                onClick={() => act(
+                onClick={() => { resumeShatter(); act(
                     'RESUMING',
                     () => resumeDeferred(entry.id),
                     () => `JOB #${entry.job_id} RESUMED`
-                )}
+                ); }}
             >
                 Resume
             </button>

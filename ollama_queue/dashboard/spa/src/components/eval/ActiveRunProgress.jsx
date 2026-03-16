@@ -1,5 +1,6 @@
 import { API, evalActiveRun, cancelEvalRun, startEvalPoll } from '../../stores';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
+import { useShatter } from '../../hooks/useShatter.js';
 import { ShPipeline } from 'superhot-ui/preact';
 
 const PIPELINE_STAGES = [
@@ -35,6 +36,9 @@ export default function ActiveRunProgress() {
   const [cancelFb, cancelAct] = useActionFeedback();
   const [resumeFb, resumeAct] = useActionFeedback();
   const [retryFb, retryAct] = useActionFeedback();
+  const [cancelRef, cancelShatter] = useShatter('earned');
+  const [resumeRef2, resumeShatter] = useShatter('routine');
+  const [retryRef, retryShatter] = useShatter('routine');
 
   const terminalStatuses = ['complete', 'failed', 'cancelled'];
   if (!activeRun || terminalStatuses.includes(activeRun.status)) return null;
@@ -57,10 +61,12 @@ export default function ActiveRunProgress() {
 
   async function handleCancel() {
     if (!confirm('Stop this test run? Any jobs already submitted will still finish, but no new ones will start.')) return;
+    cancelShatter();
     await cancelAct('CANCELLING', () => cancelEvalRun(run_id), `RUN #${run_id} CANCELLED`);
   }
 
   async function handleResume() {
+    resumeShatter();
     await resumeAct(
       'RESUMING',
       async () => {
@@ -73,6 +79,7 @@ export default function ActiveRunProgress() {
   }
 
   async function handleRetryFailed() {
+    retryShatter();
     await retryAct(
       'RETRYING FAILED',
       async () => {
@@ -96,6 +103,7 @@ export default function ActiveRunProgress() {
           <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.4rem', flexWrap: 'wrap' }}>
             <div>
               <button
+                ref={resumeRef2}
                 class="t-btn t-btn-secondary"
                 style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }}
                 disabled={resumeFb.phase === 'loading'}
@@ -107,6 +115,7 @@ export default function ActiveRunProgress() {
             </div>
             <div>
               <button
+                ref={retryRef}
                 class="t-btn t-btn-secondary"
                 style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }}
                 disabled={retryFb.phase === 'loading'}
@@ -223,6 +232,7 @@ export default function ActiveRunProgress() {
       {!isPaused && (
         <div>
           <button
+            ref={cancelRef}
             class="t-btn t-btn-secondary"
             style={{ fontSize: 'var(--type-label)', padding: '3px 10px', color: 'var(--status-error)' }}
             disabled={cancelFb.phase === 'loading'}

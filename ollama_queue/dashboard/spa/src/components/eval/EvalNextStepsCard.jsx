@@ -7,6 +7,7 @@
  */
 import { h } from 'preact';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
+import { useShatter } from '../../hooks/useShatter.js';
 import { currentTab } from '../../stores/health.js';
 import { evalSubTab, focusVariantId } from '../../stores/eval.js';
 
@@ -28,6 +29,7 @@ const ACTION_HANDLERS = {
 
 function SuggestionCard({ suggestion }) {
   const [fb, act] = useActionFeedback();
+  const [actionRef, actionShatter] = useShatter('routine');
   const handler = ACTION_HANDLERS[suggestion.action_type] || (() => {});
 
   return (
@@ -35,9 +37,10 @@ function SuggestionCard({ suggestion }) {
       <div class="suggestion-card__title">{suggestion.title}</div>
       {suggestion.description && <div class="suggestion-card__desc">{suggestion.description}</div>}
       <button
+        ref={actionRef}
         class="suggestion-card__action"
         disabled={fb.phase === 'loading'}
-        onClick={() => act('OPENING', async () => { handler(suggestion); }, () => 'DONE')}
+        onClick={() => { actionShatter(); act('OPENING', async () => { handler(suggestion); }, () => 'DONE'); }}
       >
         {fb.phase === 'loading' ? '…' : (suggestion.action_label || 'Try this')}
       </button>

@@ -16,6 +16,7 @@ import {
 } from '../stores';
 import { ShStatusBadge } from 'superhot-ui/preact';
 import { useActionFeedback } from '../hooks/useActionFeedback.js';
+import { useShatter } from '../hooks/useShatter.js';
 import { TAB_CONFIG } from '../config/tabs.js';
 
 // NOTE: all .map() callbacks use descriptive names — never 'h' (shadows JSX factory)
@@ -32,6 +33,7 @@ function BackendCard({ backend, onRemove, onUpdateWeight }) {
   const [testing, setTesting] = useState(false);
   const [weightFb, setWeightFb] = useState('');
   const cardRef = useRef(null);
+  const [testBtnRef, testShatter] = useShatter('routine');
 
   const isUnhealthy = !backend.healthy;
   const vramPct = backend.vram_pct ?? 0;
@@ -48,6 +50,7 @@ function BackendCard({ backend, onRemove, onUpdateWeight }) {
     (backend.loaded_models || []).some(m => m === activeModel || m.startsWith(activeModel.split(':')[0] + ':'));
 
   async function handleTest() {
+    testShatter();
     setTesting(true);
     setTestResult(null);
     try {
@@ -154,7 +157,7 @@ function BackendCard({ backend, onRemove, onUpdateWeight }) {
 
         {/* Test + Remove actions */}
         <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.25rem' }}>
-          <button class="t-btn t-btn-secondary" style={{ fontSize: 'var(--type-micro)', padding: '2px 8px' }} onClick={handleTest} disabled={testing}>
+          <button ref={testBtnRef} class="t-btn t-btn-secondary" style={{ fontSize: 'var(--type-micro)', padding: '2px 8px' }} onClick={handleTest} disabled={testing}>
             {testing ? 'Testing…' : 'Test'}
           </button>
           {testResult && (
@@ -182,10 +185,13 @@ function AddBackendForm({ onAdded }) {
   const [weight, setWeight] = useState('1');
   const [fb, setFb] = useState('');
   const [loading, setLoading] = useState(false);
+  const [addTestRef, addTestShatter] = useShatter('routine');
+  const [addNodeRef, addNodeShatter] = useShatter('complete');
 
   async function handleSubmit(e) {
     e.preventDefault();
     if (!url.trim()) return;
+    addNodeShatter();
     setLoading(true);
     setFb('Adding…');
     try {
@@ -204,6 +210,7 @@ function AddBackendForm({ onAdded }) {
 
   async function handleTest() {
     if (!url.trim()) return;
+    addTestShatter();
     setFb('Testing…');
     try {
       const res = await testBackend(url.trim());
@@ -234,10 +241,10 @@ function AddBackendForm({ onAdded }) {
           style={{ width: '4rem', fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)', padding: '4px 6px', color: 'var(--text-primary)' }}
         />
       </div>
-      <button class="t-btn t-btn-secondary" type="button" style={{ fontSize: 'var(--type-label)', padding: '4px 10px' }} onClick={handleTest}>
+      <button ref={addTestRef} class="t-btn t-btn-secondary" type="button" style={{ fontSize: 'var(--type-label)', padding: '4px 10px' }} onClick={handleTest}>
         Test
       </button>
-      <button class="t-btn t-btn-primary" type="submit" disabled={loading} style={{ fontSize: 'var(--type-label)', padding: '4px 10px' }}>
+      <button ref={addNodeRef} class="t-btn t-btn-primary" type="submit" disabled={loading} style={{ fontSize: 'var(--type-label)', padding: '4px 10px' }}>
         Add node
       </button>
       {fb && (

@@ -8,6 +8,7 @@ import {
     generateJobDescription,
 } from '../../stores';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
+import { useShatter } from '../../hooks/useShatter.js';
 import { GanttChart, runStatus } from '../../components/GanttChart';
 import { scheduledEvalRuns, fetchScheduledEvalRuns } from '../../stores/eval.js';
 import { currentTab } from '../../stores/health.js';
@@ -56,6 +57,17 @@ export default function Plan() {
     const [saveFb, saveAct] = useActionFeedback();
     const [generateFb, generateAct] = useActionFeedback();
     const [batchToggleFb, batchToggleAct] = useActionFeedback();
+
+    // Shatter hooks — one per distinct action type
+    const [deleteShRef, deleteShatter] = useShatter('earned');
+    const [runNowShRef, runNowShatter] = useShatter('complete');
+    const [pinShRef, pinShatter] = useShatter('routine');
+    const [batchRunShRef, batchRunShatter] = useShatter('complete');
+    const [rebalanceShRef, rebalanceShatter] = useShatter('routine');
+    const [reenableShRef, reenableShatter] = useShatter('routine');
+    const [saveShRef, saveShatter] = useShatter('complete');
+    const [generateShRef, generateShatter] = useShatter('routine');
+    const [batchToggleShRef, batchToggleShatter] = useShatter('routine');
 
     // Detail panel
     const [expandedJobId, setExpandedJobId] = useState(null);
@@ -141,6 +153,7 @@ export default function Plan() {
     }
 
     async function handleDetailSave() {
+        saveShatter();
         if (!editForm || saveFb.phase === 'loading') return;
         const rj = jobs.find(j => j.id === editForm.id);
         if (!rj) return;
@@ -181,6 +194,7 @@ export default function Plan() {
     // The backend starts a background thread and returns immediately; description arrives via
     // the next 10s schedule refresh (or sooner if the model responds quickly).
     async function handleGenerateDescription(rjId) {
+        generateShatter();
         setGeneratingDescId(rjId);
         await generateAct(
             'GENERATING',
@@ -200,6 +214,7 @@ export default function Plan() {
     }
 
     async function handleDeleteConfirm(rjId) {
+        deleteShatter();
         setPendingDeleteId(null);
         await deleteAct(
             'DELETING',
@@ -217,6 +232,7 @@ export default function Plan() {
     }
 
     async function handleRunNow(rj) {
+        runNowShatter();
         if (rj.estimated_duration > 300) {
             const ok = window.confirm(`Run "${rj.name}" now? Estimated duration: ~${Math.round(rj.estimated_duration / 60)}m`);
             if (!ok) return;
@@ -231,6 +247,7 @@ export default function Plan() {
     }
 
     async function handlePinToggle(rj) {
+        pinShatter();
         await pinAct(
             rj.pinned ? 'UNPINNING' : 'PINNING',
             async () => {
@@ -241,6 +258,7 @@ export default function Plan() {
     }
 
     async function handleBatchRun(tag) {
+        batchRunShatter();
         setBatchRunningTags(prev => new Set([...prev, tag]));
         await batchRunAct(
             'TRIGGERING',
@@ -257,6 +275,7 @@ export default function Plan() {
     }
 
     async function handleBatchToggle(tag, enabled) {
+        batchToggleShatter();
         await batchToggleAct(
             enabled ? 'ENABLING' : 'DISABLING',
             async () => {
@@ -268,6 +287,7 @@ export default function Plan() {
     }
 
     async function handleRebalance() {
+        rebalanceShatter();
         await rebalanceAct(
             'REBALANCING',
             async () => {
@@ -279,6 +299,7 @@ export default function Plan() {
     }
 
     async function handleReenableJob(name) {
+        reenableShatter();
         await reenableAct(
             'RE-ENABLING',
             async () => {

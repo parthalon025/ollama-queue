@@ -9,6 +9,7 @@ import { currentTab } from '../stores/health.js';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { signal } from '@preact/signals';
 import { useActionFeedback } from '../hooks/useActionFeedback.js';
+import { useShatter } from '../hooks/useShatter.js';
 import ActivityHeatmap from '../components/ActivityHeatmap.jsx';
 import HistoryList from '../components/HistoryList.jsx';
 import TimeChart from '../components/TimeChart.jsx';
@@ -47,6 +48,8 @@ export default function History() {
     // Hooks must be called before any conditional early returns
     const [retryAllFb, retryAllAct] = useActionFeedback();
     const [clearFb, clearAct] = useActionFeedback();
+    const [retryAllRef, retryAllShatter] = useShatter('routine');
+    const [clearRef, clearShatter] = useShatter('earned');
     const dlqListRef = useRef(null);
 
     useEffect(() => { fetchDLQ(); }, []);
@@ -152,9 +155,10 @@ export default function History() {
                         <div class="flex gap-2" style="align-items: flex-start;">
                             <div>
                                 <button
+                                    ref={retryAllRef}
                                     class="t-btn t-btn-secondary"
                                     style="font-size: var(--type-label); padding: 3px 10px;"
-                                    onClick={handleRetryAll}
+                                    onClick={() => { retryAllShatter(); handleRetryAll(); }}
                                     disabled={retryAllFb.phase === 'loading'}
                                 >
                                     {retryAllFb.phase === 'loading' ? 'Retrying all…' : 'Re-queue all failed jobs'}
@@ -165,9 +169,10 @@ export default function History() {
                             </div>
                             <div>
                                 <button
+                                    ref={clearRef}
                                     class="t-btn t-btn-secondary"
                                     style="font-size: var(--type-label); padding: 3px 10px;"
-                                    onClick={handleClearDLQ}
+                                    onClick={() => { clearShatter(); handleClearDLQ(); }}
                                     disabled={clearFb.phase === 'loading'}
                                 >
                                     {clearFb.phase === 'loading' ? 'Clearing…' : 'Delete all'}
@@ -305,6 +310,9 @@ function DLQRow({ entry, onAction }) {
     const [retryFb, retryAct] = useActionFeedback();
     const [dismissFb, dismissAct] = useActionFeedback();
     const [rescheduleFb, rescheduleAct] = useActionFeedback();
+    const [retryBtnRef, retryShatter] = useShatter('routine');
+    const [dismissBtnRef, dismissShatter] = useShatter('earned');
+    const [rescheduleBtnRef, rescheduleShatter] = useShatter('routine');
     const [expanded, setExpanded] = useState(false);
     const rowRef = useRef(null);
 
@@ -356,14 +364,15 @@ function DLQRow({ entry, onAction }) {
                     {!alreadyRescheduled && (
                         <div>
                             <button
+                                ref={rescheduleBtnRef}
                                 class="t-btn t-btn-secondary"
                                 style="font-size: var(--type-label); padding: 2px 8px;"
                                 disabled={rescheduleFb.phase === 'loading'}
-                                onClick={() => rescheduleAct(
+                                onClick={() => { rescheduleShatter(); rescheduleAct(
                                     'SCHEDULING',
                                     () => rescheduleDLQEntry(entry.id),
                                     `DLQ #${entry.id} RESCHEDULED`,
-                                )}
+                                ); }}
                             >
                                 {rescheduleFb.phase === 'loading' ? 'Scheduling…' : 'Reschedule'}
                             </button>
@@ -374,14 +383,15 @@ function DLQRow({ entry, onAction }) {
                     )}
                     <div>
                         <button
+                            ref={retryBtnRef}
                             class="t-btn t-btn-secondary"
                             style="font-size: var(--type-label); padding: 2px 8px;"
                             disabled={retryFb.phase === 'loading'}
-                            onClick={() => retryAct(
+                            onClick={() => { retryShatter(); retryAct(
                                 'RETRYING',
                                 () => onAction('retry', entry.id),
                                 'RE-QUEUED',
-                            )}
+                            ); }}
                         >
                             {retryFb.phase === 'loading' ? 'Retrying…' : 'Re-queue'}
                         </button>
@@ -391,10 +401,12 @@ function DLQRow({ entry, onAction }) {
                     </div>
                     <div>
                         <button
+                            ref={dismissBtnRef}
                             class="t-btn t-btn-secondary"
                             style="font-size: var(--type-label); padding: 2px 8px;"
                             disabled={dismissFb.phase === 'loading'}
                             onClick={() => {
+                                dismissShatter();
                                 if (rowRef.current) {
                                     shatterElement(rowRef.current, {
                                         onComplete: () => dismissAct(

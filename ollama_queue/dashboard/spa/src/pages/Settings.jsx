@@ -4,6 +4,7 @@ import { settings, status, API, restartDaemon } from '../stores';
 import { setAudioEnabled } from '../stores/atmosphere.js';
 import SettingsForm from '../components/SettingsForm';
 import { useActionFeedback } from '../hooks/useActionFeedback.js';
+import { useShatter } from '../hooks/useShatter.js';
 import { ShCrtToggle, ShPageBanner } from 'superhot-ui/preact';
 import { TAB_CONFIG } from '../config/tabs.js';
 
@@ -73,6 +74,9 @@ export default function Settings() {
   const [pauseFb, pauseAct] = useActionFeedback();
   const [resumeFb, resumeAct] = useActionFeedback();
   const [restartFb, restartAct] = useActionFeedback();
+  const [restartRef, restartShatter] = useShatter('complete');
+  const [pauseRef, pauseShatter] = useShatter('routine');
+  const [resumeRef, resumeShatter] = useShatter('routine');
 
   /** Save a single setting key via PUT /api/settings. Returns true on success. */
   const handleSave = useCallback(async (key, value) => {
@@ -100,6 +104,7 @@ export default function Settings() {
   }, []);
 
   const handlePause = useCallback(async () => {
+    pauseShatter();
     await pauseAct(
       'PAUSING',
       async () => {
@@ -115,6 +120,7 @@ export default function Settings() {
   }, [pauseAct]);
 
   const handleResume = useCallback(async () => {
+    resumeShatter();
     await resumeAct(
       'RESUMING',
       async () => {
@@ -138,10 +144,11 @@ export default function Settings() {
             RESTART REQUIRED — CHANGES PENDING
           </span>
           <button
+            ref={restartRef}
             class="t-btn"
             style="font-size:var(--type-micro);padding:2px 10px;"
             disabled={restartFb.phase === 'loading'}
-            onClick={() => restartAct('RESTARTING', restartDaemon, () => 'RESTARTED')}
+            onClick={() => { restartShatter(); restartAct('RESTARTING', restartDaemon, () => 'RESTARTED'); }}
           >
             {restartFb.phase === 'loading' ? 'RESTARTING…' : 'RESTART DAEMON'}
           </button>
@@ -156,6 +163,8 @@ export default function Settings() {
         onResume={handleResume}
         pauseFb={pauseFb}
         resumeFb={resumeFb}
+        pauseRef={pauseRef}
+        resumeRef={resumeRef}
       />
       {/* D20: CRT scanline intensity preference */}
       <div class="t-frame" data-label="Display" style="margin-top:1rem;">
