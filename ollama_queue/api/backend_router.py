@@ -1,11 +1,12 @@
 """Multi-backend Ollama router for the proxy layer.
 
-Selects the best backend for each request using a five-tier strategy:
+Selects the best backend for each request using a six-tier strategy:
   1. Health check — skip unreachable backends (2s timeout, 30s cache)
   2. Model availability — prefer backends that have the requested model (60s cache)
   3. Warm model — prefer backends with the model already loaded in VRAM (5s cache)
   4. Hardware load — prefer backends with lower VRAM pressure (10s cache)
-  5. Weighted random among remaining tied candidates (OLLAMA_BACKEND_WEIGHTS)
+  5. CPU/RAM pressure — skip backends with CPU or RAM > 90% (30s heartbeat cache)
+  6. Weighted random among remaining tied candidates (OLLAMA_BACKEND_WEIGHTS)
 
 Configure via env vars:
   OLLAMA_BACKENDS=http://host1:11434,http://host2:11434      (multi-backend)
@@ -82,6 +83,10 @@ _LOADED_TTL = 5.0
 _HW_TTL = 10.0
 _GPU_NAME_TTL = 600.0  # GPU names don't change — refresh every 10 minutes
 _VRAM_TOTAL_TTL = 600.0  # Total VRAM is hardware-constant — refresh every 10 minutes
+_CPU_TTL = 30.0  # CPU pressure from heartbeat — stale after 30s
+_RAM_TTL = 30.0  # RAM pressure from heartbeat — stale after 30s
+_CPU_OVERLOAD_PCT = 90.0  # Skip backends with CPU above this threshold
+_RAM_OVERLOAD_PCT = 90.0  # Skip backends with RAM above this threshold
 
 # Module-level caches: url -> (timestamp, data)
 _health_cache: dict[str, tuple[float, bool]] = {}
@@ -387,7 +392,24 @@ async def _route_by_model(healthy: list[str], model: str) -> list[str]:
     min_vram = min(hw)
     # 5% tolerance — avoids penalising a backend for trivial measurement jitter
     low_vram = [b for b, v in zip(healthy, hw, strict=False) if v <= min_vram + 5.0]
-    return low_vram if low_vram else healthy
+    if low_vram:
+        healthy = low_vram
+
+    # 5. Skip backends with critically high CPU or RAM pressure (from heartbeat data)
+    now = time.monotonic()
+    not_overloaded = []
+    for b in healthy:
+        cpu_entry = _cpu_cache.get(b)
+        ram_entry = _ram_cache.get(b)
+        cpu_ok = not cpu_entry or (now - cpu_entry[0]) > _CPU_TTL or cpu_entry[1] < _CPU_OVERLOAD_PCT
+        ram_ok = not ram_entry or (now - ram_entry[0]) > _RAM_TTL or ram_entry[1] < _RAM_OVERLOAD_PCT
+        if cpu_ok and ram_ok:
+            not_overloaded.append(b)
+    # Fail-open: if all are overloaded, use the original list
+    if not_overloaded:
+        healthy = not_overloaded
+
+    return healthy
 
 
 async def select_backend(model: str = "") -> str:
