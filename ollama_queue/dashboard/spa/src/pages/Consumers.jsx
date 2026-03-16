@@ -12,7 +12,7 @@ import {
   enableIntercept, disableIntercept,
 } from '../stores';
 import { ConsumerRow } from '../components/consumers/ConsumerRow.jsx';
-import { ShPageBanner } from 'superhot-ui/preact';
+import { ShPageBanner, ShEmptyState } from 'superhot-ui/preact';
 import { TAB_CONFIG } from '../config/tabs.js';
 
 // What it shows: System-wide iptables intercept mode status + enable/disable toggle.
@@ -111,9 +111,7 @@ export default function Consumers() {
       )}
 
       {list.length === 0 ? (
-        <div class="consumers-empty">
-          <p>No Ollama consumers detected. Click <strong>Scan Now</strong> to search.</p>
-        </div>
+        <ShEmptyState mantra="DARK" hint="scan to detect services" />
       ) : (
         <table class="consumers-table">
           <thead>

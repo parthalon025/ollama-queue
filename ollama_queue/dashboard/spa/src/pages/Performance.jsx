@@ -9,7 +9,7 @@ import { evalVariants, fetchEvalVariants } from '../stores/eval.js';
 import { SystemHealth } from '../components/SystemHealth.jsx';
 import PerformanceCurveChart from '../components/PerformanceCurveChart.jsx';
 import LoadHeatmap from '../components/LoadHeatmap.jsx';
-import { ShPageBanner, ShTimeChart } from 'superhot-ui/preact';
+import { ShPageBanner, ShTimeChart, ShEmptyState } from 'superhot-ui/preact';
 import { TAB_CONFIG } from '../config/tabs.js';
 import ModelChip from '../components/ModelChip.jsx';
 import F1Score from '../components/F1Score.jsx';
@@ -73,9 +73,7 @@ export default function Performance() {
             {/* Model Performance Table */}
             <div class="t-frame" data-label="Model Performance">
                 {models.length === 0 ? (
-                    <p style="color: var(--text-tertiary); font-size: var(--type-body); text-align: center;">
-                        No performance data yet — run some jobs first
-                    </p>
+                    <ShEmptyState mantra="NO DATA" />
                 ) : (
                     <div style="overflow-x: auto;">
                         <table style={{

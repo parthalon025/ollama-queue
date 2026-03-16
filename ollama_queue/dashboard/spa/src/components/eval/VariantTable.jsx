@@ -4,6 +4,7 @@ import { evalVariants, fetchEvalVariants } from '../../stores';
 import { API } from '../../stores/_shared.js';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
 import VariantRow from './VariantRow.jsx';
+import { ShEmptyState } from 'superhot-ui/preact';
 // What it shows: The full list of eval variant configs — system defaults first,
 //   then user-created. Each row is expandable to model/template details and
 //   run history. Non-system variants have an Edit button that opens an inline
@@ -115,9 +116,7 @@ export default function VariantTable() {
   if (!variants || variants.length === 0) {
     return (
       <div class="t-frame" data-label="Configurations">
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)' }}>
-          No configurations yet. Use the toolbar above to generate or create one.
-        </div>
+        <ShEmptyState mantra="UNCONFIGURED" />
       </div>
     );
   }

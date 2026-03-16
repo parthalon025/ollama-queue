@@ -12,8 +12,7 @@ import { useActionFeedback } from '../hooks/useActionFeedback.js';
 import ActivityHeatmap from '../components/ActivityHeatmap.jsx';
 import HistoryList from '../components/HistoryList.jsx';
 import TimeChart from '../components/TimeChart.jsx';
-import { ShPageBanner } from 'superhot-ui/preact';
-import { ShDataTable } from 'superhot-ui/preact';
+import { ShPageBanner, ShDataTable, ShEmptyState } from 'superhot-ui/preact';
 import { HISTORY_COLUMNS } from '../config/historyColumns.js';
 import { TAB_CONFIG } from '../config/tabs.js';
 
@@ -216,9 +215,7 @@ export default function History() {
                             </div>
                         ))
                     ) : (
-                        <p style="color: var(--text-tertiary); font-size: var(--type-body); text-align: center;">
-                            No timing data yet — run some jobs first
-                        </p>
+                        <ShEmptyState mantra="NO DATA" />
                     )}
                 </div>
 

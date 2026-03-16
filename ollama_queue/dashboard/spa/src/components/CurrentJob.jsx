@@ -220,7 +220,7 @@ export default function CurrentJob({ daemon, currentJob, latestHealth, settings,
             <div style="margin-top:6px;padding:8px;background:var(--bg-terminal,var(--bg-inset));border-radius:var(--radius);font-family:var(--font-mono);font-size:var(--type-micro);color:var(--text-secondary);white-space:pre-wrap;word-break:break-all;max-height:120px;overflow-y:auto;">
               {logLines.value.length > 0
                 ? logLines.value.map((line, i) => <div key={i}>{line}</div>)
-                : <span style="color:var(--text-tertiary);">No output yet</span>
+                : <span style="color:var(--text-tertiary);">NO OUTPUT</span>
               }
             </div>
           </details>
