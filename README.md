@@ -334,7 +334,7 @@ systemd timers / apps / proxy clients
 | **Scheduling** | croniter, custom 48-slot load map |
 | **Dashboard** | Preact 10, @preact/signals, Tailwind v4, uPlot |
 | **CLI** | Click |
-| **Tests** | pytest, pytest-xdist (1,883 tests, 100% line coverage) |
+| **Tests** | pytest, pytest-xdist (1,943 tests, 100% line coverage) |
 
 ---
 
@@ -364,7 +364,7 @@ ollama_queue/
 scripts/
   migrate_timers.py              # Migrate systemd timers to recurring jobs
   migrate_dlq_max_retries.py     # Schema migration (idempotent)
-tests/                           # 1,883 tests, 100% line coverage (pytest-xdist parallel)
+tests/                           # 1,943 tests, 100% line coverage (pytest-xdist parallel)
 ```
 
 ---
@@ -394,7 +394,7 @@ Dev/test: `pip install -r requirements-dev.txt`
 
 ```bash
 source .venv/bin/activate
-pytest  # 1,883 tests, 100% line coverage, parallel by default
+pytest  # 1,943 tests, 100% line coverage, parallel by default
 ```
 
 ---
@@ -420,6 +420,7 @@ Implementation plans and design decisions are in [`docs/plans/`](docs/plans/):
 | [UX Phase 4 — Visualization Science](docs/plans/2026-03-11-ux-phase4-viz-science-plan.md) | Treisman priority encoding, Shneiderman disclosure, Tufte sparklines, animation tiers |
 | [Edge case audit & fixes](docs/plans/2026-03-13-edge-case-fixes.md) | 27 edge cases across 6 subsystems — proxy deadlock, SQLITE_BUSY retry, health pause escape hatch, eval safety gates |
 | [Bug audit fixes](docs/plans/2026-03-13-bug-audit-fixes.md) | API input validation: offset bounds, limit caps, settings type enforcement |
+| [Eval backend host selection](docs/plans/2026-03-15-eval-backend-host-selection.md) | Multi-backend eval routing: SSRF prevention, `_backend` proxy param, preflight model validation |
 
 ---
 
