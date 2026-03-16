@@ -61,7 +61,7 @@ Additionally, three subsystems (daemon job, eval progress, loaded models) are cu
   backend,        // from backendsData — { url, healthy, gpu_name, vram_pct, loaded_models, inference_mode }
   currentJob,     // from status.current_job — null if nothing running
   activeEval,     // from status.active_eval — null if no eval running
-  evalActiveRun,  // from stores/eval.js evalActiveRun signal — for progress detail
+  evalActiveRun,  // plain object from stores/eval.js evalActiveRun signal (passed as .value) — for progress detail; HostCard must NOT import evalActiveRun from stores directly
   latestHealth,   // healthData[0] — RAM/CPU/Swap for local host only
   settings,       // for pause thresholds on gauge bars
   cpuCount,       // for CPU % conversion (load_avg / cpuCount * 100)
@@ -84,7 +84,7 @@ Priority: `running` wins over `eval` when both conditions are true.
 
 **Eval backend URL note:** `gen_backend_url` and `judge_backend_url` can be `'auto'` (meaning the router chose the backend dynamically). `'auto'` never equals a real URL so it will never match — no explicit guard needed, but implementers must not add a fallback that treats `'auto'` as a match. When both fields are `'auto'` or null, no HostCard shows eval state (acceptable — routing was dynamic and backend affinity is unknown).
 
-**`deriveHostState` return type:** `{ state, mood, statusBadgeStatus, gpuLabel, loadedLabel, modelsTooltip, isServing, vramPct, vramColor }`. `vramPct` is `backend.vram_pct` (passed through). `vramColor` is derived from thresholds: `>= 90` → `'crit'` (#ff4c4c), `>= 75` → `'warn'` (#e07b00), otherwise `'ok'` (#4cff91) — same gradient used in the existing `BackendsPanel` row. The `gpuLabel` field must apply the same NVIDIA prefix abbreviation logic from the existing `backendRowState` in `InfrastructurePanel.jsx`: strip `"NVIDIA GeForce "` and `"NVIDIA "` prefixes (case-insensitive), fall back to hostname from URL if `gpu_name` is null.
+**`deriveHostState` return type:** `{ state, mood, statusBadgeStatus, gpuLabel, loadedLabel, modelsTooltip, isServing, vramPct, vramColor }`. `vramPct` is `backend.vram_pct ?? 0`. `vramColor` uses the **same thresholds and CSS var strings** as the existing `backendRowState`: `vramPct > 90` → `'var(--status-error)'`, `vramPct > 80` → `'var(--status-warning)'`, otherwise `'var(--sh-phosphor)'`. The `gpuLabel` field applies the same NVIDIA prefix abbreviation logic from `backendRowState` in `InfrastructurePanel.jsx`: strip `"NVIDIA GeForce "` and `"NVIDIA "` prefixes (case-insensitive), then extract the URL hostname as fallback if `gpu_name` is null — wrap `new URL(backend.url).hostname` in `try/catch` and fall back to `backend.url` raw string on parse failure (same defensive pattern as existing code).
 
 Model matching uses the same prefix logic as existing `backendRowState`: `loaded.some(m => m === activeModel || m.startsWith(activeModel.split(':')[0] + ':'))`. **`deriveHostState` must call `matchesBackend(backend, currentJob.model)` internally** — do not duplicate the matching logic.
 
@@ -121,10 +121,10 @@ Compact view stays visible. Adds below:
 |---|---|
 | `state === 'running'` | `applyMantra(cardRef.current, 'RUNNING')` scoped to this card's ref |
 | `state !== 'running'` | `removeMantra(cardRef.current)` |
-| `state === 'offline'` | `ShThreatPulse` wraps entire card with `persistent={true}` |
-| Job elapsed time display | `ShFrozen` with `timestamp={currentJob.started_at * 1000}` — ages if job stalls |
+| `state === 'offline'` | `<ShThreatPulse active={state === 'offline'} persistent={true}>` wraps entire card — `active` prop required or no effect renders |
+| Job elapsed time display | `ShFrozen` with `timestamp={currentJob.started_at * 1000}` — `started_at` is Unix epoch **seconds** from DB; multiply by 1000 for the ms value ShFrozen expects |
 | `backend.healthy` transitions false | `ShGlitch` on `ShStatusBadge` — **edge-triggered, not level-triggered**: track previous healthy value in a `useRef`; set `glitchActive` to `true` for one render cycle when `backend.healthy` transitions `true → false`, then clear it (do NOT keep `active={!backend.healthy}` — that would glitch continuously while offline) |
-| Cancel eval button | `ShShatter` wrapping the cancel button — `ShShatter` intercepts `onClick`, runs the shatter animation, then calls `onDismiss`. Place the cancel API call in `onDismiss`, not in `onClick`: `<ShShatter onDismiss={() => act('Cancelling…', () => cancelEvalRun(activeEval.id), () => 'Cancelled')}><button ...>✕ cancel</button></ShShatter>` — use `useActionFeedback` per existing button patterns |
+| Cancel eval button | `ShShatter` wrapping the cancel button. `ShShatter`'s wrapper `<div>` intercepts the click — the inner `<button>` must NOT have its own `onClick` (double-fire). Use `onDismiss` for the API call: `<ShShatter onDismiss={() => act('Cancelling…', () => cancelEvalRun(activeEval.id), () => 'Cancelled')}><button class="t-btn">✕ cancel</button></ShShatter>` — use `useActionFeedback` per existing button patterns |
 
 ### CSS Classes
 
@@ -157,6 +157,7 @@ export function hostGauges(latestHealth, settings, cpuCount)
 
 export function matchesBackend(backend, model)
 // Returns true if model matches any entry in backend.loaded_models
+// Guards against null/undefined backend.loaded_models — treats as empty array
 // Same prefix logic as backendRowState.isServing in InfrastructurePanel.jsx
 
 export function computeAllUnhealthy(backends)
@@ -177,7 +178,8 @@ export function computeAllUnhealthy(backends)
 - `HostCard` from `../components/HostCard.jsx`
 - `backendsData`, `fetchBackends` from `../stores` (already exported via health.js re-export)
 - `evalActiveRun` from `../stores`
-- `applyMantra`, `removeMantra` from `superhot-ui` (HostCard.jsx imports these, not Now.jsx directly)
+
+Note: `applyMantra` and `removeMantra` belong in `HostCard.jsx` only — do not import them into `Now.jsx`.
 
 ### fetchBackends polling (replaces InfrastructurePanel's interval)
 
@@ -273,6 +275,8 @@ deriveHostState()
 isLocalBackend()
   ✓ returns true for 127.0.0.1
   ✓ returns true for localhost
+  ✓ returns true for http://127.0.0.1:11434 (with port)
+  ✓ returns true for http://localhost:11434 (with port)
   ✓ returns false for remote IP
   ✓ returns false for Tailscale hostname
 
@@ -298,16 +302,19 @@ HostCard render tests (JSDOM)
   ✓ eval state: renders phase label and progress bar
   ✓ warm state: renders loaded model name
   ✓ idle state: renders idle message
-  ✓ offline state: renders unreachable message; assert container.querySelector('[data-sh-effect="threat-pulse"]') is non-null
+  ✓ offline state: renders unreachable message; container.querySelector('[data-sh-effect="threat-pulse"]') is non-null (ShThreatPulse active prop set)
+  ✓ offline state: gpuLabel falls back to URL hostname when gpu_name is null
   ✓ local backend: renders RAM/CPU/Swap gauges
   ✓ remote backend: renders "remote host" note, no gauges
-  ✓ expand toggle: shows stdout section after click (guard: stdout poll must not fire with null currentJob.id)
+  ✓ expand toggle: renders in all states (offline/idle/warm — not just running)
+  ✓ expand toggle: stdout poll does not fire when currentJob is null (non-running state)
+  ✓ expand toggle: shows stdout section after click in running state
   ✓ expand toggle: collapses on second click
   ✓ stall warning: renders when currentJob.stall_detected_at is set
   ✓ eval expanded: renders per-variant progress bars
-  ✓ deriveHostState returns vramColor='crit' when vram_pct >= 90
-  ✓ deriveHostState returns vramColor='warn' when vram_pct >= 75
-  ✓ deriveHostState returns vramColor='ok' when vram_pct < 75
+  ✓ deriveHostState returns vramColor='var(--status-error)' when vram_pct > 90
+  ✓ deriveHostState returns vramColor='var(--status-warning)' when vram_pct > 80 and <= 90
+  ✓ deriveHostState returns vramColor='var(--sh-phosphor)' when vram_pct <= 80
 ```
 
 ### Now.jsx
@@ -332,7 +339,7 @@ No new fetch calls. No polling interval changes. `models` signal from `stores/mo
 ## Edge Cases
 
 - **No backends configured:** Render nothing in the host section; existing alert strip covers connection issues.
-- **All backends unreachable:** All HostCards show `offline` state with `ShThreatPulse`. No special "all unreachable" message needed — the cards communicate it directly.
+- **All backends unreachable:** All HostCards show `offline` state with `ShThreatPulse`. The "All backends unreachable — routing unavailable" string message from `InfrastructurePanel` is **intentionally dropped** — individual HostCard offline states communicate this directly without a redundant banner.
 - **currentJob model not in any backend's loaded_models yet (still loading):** `deriveHostState` returns `warm` or `idle` — the `running` state badge only shows when model is confirmed warm on that backend. This matches existing `ActiveGpuBadge` behavior.
 - **eval active but no backend URL match:** When `gen_backend_url` and `judge_backend_url` are both `'auto'` or null, no HostCard matches and no card shows `eval` state — the eval is running but backend affinity is unknown. This is acceptable. No fallback display is needed; the eval progress is visible on the Eval tab.
 - **Single backend:** One HostCard renders. No layout change needed — flex-col stacks fine.
