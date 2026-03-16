@@ -34,9 +34,9 @@ export function ConsumerRow({ consumer }) {
 
   async function doInclude(opts = {}) {
     await run(
-      'Including…',
+      'INCLUDING',
       () => includeConsumer(consumer.id, { restart_policy: restartPolicy, ...opts }),
-      result => `Included — ${result.patch_type || 'snippet generated'}`,
+      result => `INCLUDED — ${result.patch_type || 'snippet generated'}`,
     );
   }
 
@@ -108,14 +108,14 @@ export function ConsumerRow({ consumer }) {
               <div class={`action-fb action-fb--${fb.phase}`}>{fb.msg}</div>
             )}
             {consumer.status !== 'ignored' && (
-              <button onClick={() => run('Ignoring…', () => ignoreConsumer(consumer.id), () => 'Ignored')}>
+              <button onClick={() => run('IGNORING', () => ignoreConsumer(consumer.id), () => 'IGNORED')}>
                 Ignore
               </button>
             )}
           </span>
         )}
         {(consumer.status === 'pending_restart' || consumer.status === 'patched') && (
-          <button onClick={() => run('Reverting…', () => revertConsumer(consumer.id), () => 'Reverted')}>
+          <button onClick={() => run('REVERTING', () => revertConsumer(consumer.id), () => 'REVERTED')}>
             Revert
           </button>
         )}

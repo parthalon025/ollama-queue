@@ -57,30 +57,30 @@ export default function ActiveRunProgress() {
 
   async function handleCancel() {
     if (!confirm('Stop this test run? Any jobs already submitted will still finish, but no new ones will start.')) return;
-    await cancelAct('Cancelling…', () => cancelEvalRun(run_id), `Run #${run_id} cancelled`);
+    await cancelAct('CANCELLING', () => cancelEvalRun(run_id), `RUN #${run_id} CANCELLED`);
   }
 
   async function handleResume() {
     await resumeAct(
-      'Resuming…',
+      'RESUMING',
       async () => {
         const res = await fetch(`${API}/eval/runs/${run_id}/resume`, { method: 'POST' });
         if (!res.ok) throw new Error(`Resume failed: ${res.status}`);
         startEvalPoll(run_id);
       },
-      'Resumed'
+      'RESUMED'
     );
   }
 
   async function handleRetryFailed() {
     await retryAct(
-      'Retrying failed…',
+      'RETRYING FAILED',
       async () => {
         const res = await fetch(`${API}/eval/runs/${run_id}/retry-failed`, { method: 'POST' });
         if (!res.ok) throw new Error(`Retry failed: ${res.status}`);
         startEvalPoll(run_id);
       },
-      'Failed jobs re-queued'
+      'FAILED JOBS RE-QUEUED'
     );
   }
 

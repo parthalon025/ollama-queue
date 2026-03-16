@@ -45,7 +45,7 @@ export default function TemplateRow({ template }) {
   async function handleDelete(evt) {
     evt.stopPropagation();
     await deleteAct(
-      'Deleting…',
+      'DELETING',
       async () => {
         const res = await fetch(`${API}/eval/templates/${id}`, { method: 'DELETE' });
         if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
@@ -53,7 +53,7 @@ export default function TemplateRow({ template }) {
         await fetchEvalVariants(); // variants may reference this template
         setPendingDelete(false);
       },
-      `Template deleted`
+      'DELETED'
     );
   }
 

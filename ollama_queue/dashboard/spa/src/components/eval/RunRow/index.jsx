@@ -59,7 +59,7 @@ export default function RunRow({ run }) {
   async function handleAnalyze(evt) {
     evt.stopPropagation();
     await analyzeAct(
-      'Generating analysis\u2026',
+      'ANALYZING',
       async () => {
         const res = await fetch(`${API}/eval/runs/${id}/analyze`, { method: 'POST' });
         let data = null;
@@ -70,14 +70,14 @@ export default function RunRow({ run }) {
         refreshTimer.current = setTimeout(() => fetchEvalRuns(), 8000);
         return data;
       },
-      () => `Analysis started for run #${id} \u2014 refresh in a moment`
+      () => `ANALYSIS STARTED FOR RUN #${id} \u2014 REFRESH IN A MOMENT`
     );
   }
 
   async function handleRepeat(evt) {
     evt.stopPropagation();
     await repeatAct(
-      'Repeating run\u2026',
+      'REPEATING',
       async () => {
         const res = await fetch(`${API}/eval/runs/${id}/repeat`, { method: 'POST' });
         let data = null;
@@ -91,7 +91,7 @@ export default function RunRow({ run }) {
         await fetchEvalRuns();
         return data;
       },
-      data => `Run #${data.run_id} started`
+      data => `RUN #${data.run_id} STARTED`
     );
   }
 
@@ -99,7 +99,7 @@ export default function RunRow({ run }) {
   async function handlePromote(evt) {
     evt.stopPropagation();
     await promoteAct(
-      'Promoting\u2026',
+      'PROMOTING',
       async () => {
         const res = await fetch(`${API}/eval/runs/${id}/promote`, {
           method: 'POST',
@@ -113,7 +113,7 @@ export default function RunRow({ run }) {
         await fetchEvalVariants();
         return data;
       },
-      data => `Config ${data?.variant_id ?? winner_variant} promoted to production`
+      data => `CONFIG ${data?.variant_id ?? winner_variant} PROMOTED TO PRODUCTION`
     );
   }
 
@@ -424,7 +424,7 @@ export default function RunRow({ run }) {
                 style={{ fontSize: 'var(--type-label)', color: 'var(--accent)', background: 'none', border: '1px solid var(--accent)', borderRadius: '3px', padding: '2px 8px', cursor: 'pointer' }}
                 disabled={reanalyzeFb.phase === 'loading'}
                 onClick={() => reanalyzeAct(
-                  'Computing\u2026',
+                  'COMPUTING',
                   async () => {
                     const res = await fetch(`${API}/eval/runs/${id}/reanalyze`, { method: 'POST' });
                     if (!res.ok) throw new Error('Reanalyze failed');
@@ -432,7 +432,7 @@ export default function RunRow({ run }) {
                   },
                   () => {
                     fetchRunAnalysis(id).then(data => setAnalysis(data));
-                    return 'Analysis computed';
+                    return 'ANALYSIS COMPUTED';
                   }
                 )}
               >

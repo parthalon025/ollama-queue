@@ -42,7 +42,7 @@ export default function ActiveEvalStrip() {
       <button
         class="active-eval-strip__cancel"
         disabled={fb.phase === 'loading'}
-        onClick={() => act('Cancelling…', () => cancelEvalRun(run.run_id), () => 'Cancelled')}
+        onClick={() => act('CANCELLING', () => cancelEvalRun(run.run_id), () => 'CANCELLED')}
       >
         {fb.phase === 'loading' ? '…' : '✕'}
       </button>

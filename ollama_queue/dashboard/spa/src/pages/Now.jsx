@@ -211,7 +211,7 @@ export default function Now({ onSubmitRequest }) {
                                             class="t-btn"
                                             style={{ fontSize: 'var(--type-micro)', padding: '2px 8px', color: 'var(--text-tertiary)' }}
                                             disabled={dismissFb.phase === 'loading'}
-                                            onClick={() => dismissAct('Clearing…', clearDLQ, () => 'Cleared')}
+                                            onClick={() => dismissAct('CLEARING', clearDLQ, () => 'CLEARED')}
                                         >Dismiss all</button>
                                         {dismissFb.msg && <span class={`action-fb action-fb--${dismissFb.phase}`}>{dismissFb.msg}</span>}
                                     </div>

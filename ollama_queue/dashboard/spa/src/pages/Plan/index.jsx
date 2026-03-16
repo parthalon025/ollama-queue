@@ -167,13 +167,13 @@ export default function Plan() {
             return;
         }
         await saveAct(
-            'Saving\u2026',
+            'SAVING',
             async () => {
                 await updateScheduleJob(editForm.id, updates);
                 setExpandedJobId(null);
                 setEditForm(null);
             },
-            'Saved'
+            'SAVED'
         );
     }
 
@@ -183,12 +183,12 @@ export default function Plan() {
     async function handleGenerateDescription(rjId) {
         setGeneratingDescId(rjId);
         await generateAct(
-            'Generating description\u2026',
+            'GENERATING',
             async () => {
                 await generateJobDescription(rjId);
                 await fetchSchedule(); // refresh now; background thread may already be done
             },
-            'Queued \u2014 description arriving shortly'
+            'QUEUED \u2014 DESCRIPTION ARRIVING SHORTLY'
         );
         setGeneratingDescId(null);
     }
@@ -202,13 +202,13 @@ export default function Plan() {
     async function handleDeleteConfirm(rjId) {
         setPendingDeleteId(null);
         await deleteAct(
-            'Deleting\u2026',
+            'DELETING',
             async () => {
                 await deleteScheduleJob(rjId);
                 setExpandedJobId(null);
                 setEditForm(null);
             },
-            'Deleted'
+            'DELETED'
         );
     }
 
@@ -222,32 +222,32 @@ export default function Plan() {
             if (!ok) return;
         }
         await runNowAct(
-            `Triggering ${rj.name}\u2026`,
+            'TRIGGERING',
             async () => {
                 await runScheduleJobNow(rj.id);
             },
-            `${rj.name} triggered`
+            `${rj.name.toUpperCase()} TRIGGERED`
         );
     }
 
     async function handlePinToggle(rj) {
         await pinAct(
-            rj.pinned ? 'Unpinning\u2026' : 'Pinning\u2026',
+            rj.pinned ? 'UNPINNING' : 'PINNING',
             async () => {
                 await updateScheduleJob(rj.id, { pinned: !rj.pinned });
             },
-            rj.pinned ? 'Unpinned' : 'Pinned'
+            rj.pinned ? 'UNPINNED' : 'PINNED'
         );
     }
 
     async function handleBatchRun(tag) {
         setBatchRunningTags(prev => new Set([...prev, tag]));
         await batchRunAct(
-            `Running all ${tag} jobs\u2026`,
+            'TRIGGERING',
             async () => {
                 await batchRunJobs(tag);
             },
-            `All ${tag} jobs triggered`
+            `ALL ${tag.toUpperCase()} TRIGGERED`
         );
         setBatchRunningTags(prev => {
             const next = new Set(prev);
@@ -258,34 +258,34 @@ export default function Plan() {
 
     async function handleBatchToggle(tag, enabled) {
         await batchToggleAct(
-            enabled ? `Enabling ${tag}\u2026` : `Disabling ${tag}\u2026`,
+            enabled ? 'ENABLING' : 'DISABLING',
             async () => {
                 await batchToggleJobs(tag, enabled);
                 await fetchSchedule();
             },
-            enabled ? `${tag} jobs enabled` : `${tag} jobs disabled`
+            enabled ? `${tag.toUpperCase()} ENABLED` : `${tag.toUpperCase()} DISABLED`
         );
     }
 
     async function handleRebalance() {
         await rebalanceAct(
-            'Rebalancing\u2026',
+            'REBALANCING',
             async () => {
                 await triggerRebalance();
                 await fetchSchedule();
             },
-            'Schedule rebalanced'
+            'REBALANCED'
         );
     }
 
     async function handleReenableJob(name) {
         await reenableAct(
-            `Re-enabling ${name}\u2026`,
+            'RE-ENABLING',
             async () => {
                 await enableJobByName(name);
                 await fetchSchedule();
             },
-            `${name} re-enabled`
+            `${name.toUpperCase()} RE-ENABLED`
         );
     }
 

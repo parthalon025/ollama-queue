@@ -109,7 +109,7 @@ export default function SubmitJobModal({ onJobSubmitted, open: controlledOpen, o
         setError(null);
 
         await act(
-            'Submitting job\u2026',
+            'SUBMITTING',
             async () => {
                 const body = {
                     command: command.trim(),
@@ -128,7 +128,7 @@ export default function SubmitJobModal({ onJobSubmitted, open: controlledOpen, o
                 }, 1500);
                 return result;
             },
-            result => `Job #${result.job_id} queued`,
+            result => `JOB #${result.job_id} QUEUED`,
         );
     }
 

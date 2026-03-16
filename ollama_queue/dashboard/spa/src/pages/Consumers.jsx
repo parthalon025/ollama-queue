@@ -39,7 +39,7 @@ function InterceptBanner() {
         {status.enabled ? (
           <button
             class={`action-fb--${fb.phase}`}
-            onClick={() => run('Disabling…', disableIntercept, () => 'Intercept disabled')}
+            onClick={() => run('DISABLING', disableIntercept, () => 'INTERCEPT DISABLED')}
             disabled={fb.phase === 'loading'}
           >
             {fb.phase === 'loading' ? fb.msg : 'Disable intercept'}
@@ -47,7 +47,7 @@ function InterceptBanner() {
         ) : (
           <button
             class={`action-fb--${fb.phase}`}
-            onClick={() => run('Enabling…', enableIntercept, () => 'Intercept active')}
+            onClick={() => run('ENABLING', enableIntercept, () => 'INTERCEPT ACTIVE')}
             disabled={fb.phase === 'loading'}
           >
             {fb.phase === 'loading' ? fb.msg : 'Enable intercept mode'}
@@ -94,7 +94,7 @@ export default function Consumers() {
         <h2 style="margin:0">Consumers</h2>
         <button
           class={`action-fb--${scanFb.phase}`}
-          onClick={() => runScan('Scanning…', scanConsumers, () => `Found ${consumers.value.length} consumer(s)`)}
+          onClick={() => runScan('SCANNING', scanConsumers, () => `FOUND ${consumers.value.length} CONSUMER(S)`)}
           disabled={consumersScanning.value || scanFb.phase === 'loading'}
         >
           {scanFb.phase === 'loading' ? 'Scanning…' : 'Scan Now'}

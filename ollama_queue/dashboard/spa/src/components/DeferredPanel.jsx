@@ -31,9 +31,9 @@ function DeferredRow({ entry }) {
                 class="deferred-row__resume"
                 disabled={fb.phase === 'loading'}
                 onClick={() => act(
-                    'Resuming…',
+                    'RESUMING',
                     () => resumeDeferred(entry.id),
-                    () => `Job #${entry.job_id} resumed`
+                    () => `JOB #${entry.job_id} RESUMED`
                 )}
             >
                 Resume

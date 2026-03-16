@@ -62,7 +62,7 @@ export default function VariantCard({ variant, selected = false, onSelect, onClo
         <button
           class="variant-card__delete"
           disabled={fb.phase === 'loading'}
-          onClick={() => act('Deleting\u2026', () => onDelete?.(), () => 'Deleted')}
+          onClick={() => act('DELETING', () => onDelete?.(), () => 'DELETED')}
         >
           {fb.phase === 'loading' ? '\u2026' : 'Delete'}
         </button>

@@ -39,7 +39,7 @@ function VariantEditPanel({ variant, onClose }) {
     evt.preventDefault();
     if (!validateParams(params)) return;
     await saveAct(
-      'Saving…',
+      'SAVING',
       async () => {
         const res = await fetch(`${API}/eval/variants/${encodeURIComponent(variant.id)}`, {
           method: 'PUT',
@@ -52,7 +52,7 @@ function VariantEditPanel({ variant, onClose }) {
         }
         await fetchEvalVariants();
       },
-      'Saved'
+      'SAVED'
     );
   }
 

@@ -105,7 +105,7 @@ export default function VariantRow({ variant }) {
   async function handleDelete(evt) {
     evt.stopPropagation();
     await deleteAct(
-      'Deleting…',
+      'DELETING',
       async () => {
         const res = await fetch(`${API}/eval/variants/${id}`, { method: 'DELETE' });
         if (!res.ok) {
@@ -115,7 +115,7 @@ export default function VariantRow({ variant }) {
         }
         await fetchEvalVariants();
       },
-      `Variant deleted`
+      'DELETED'
     );
   }
 

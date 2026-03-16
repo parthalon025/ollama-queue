@@ -76,7 +76,7 @@ export default function VariantToolbar() {
 
   async function handleGenerateConfirm() {
     await genAct(
-      'Generating variants…',
+      'GENERATING',
       async () => {
         const res = await fetch(`${API}/eval/variants/generate`, { method: 'POST' });
         if (!res.ok) {
@@ -89,7 +89,7 @@ export default function VariantToolbar() {
         setGenPreview(null);
         return data;
       },
-      data => `${data.created ?? data.count ?? 'Variants'} generated`
+      data => `${data.created ?? data.count ?? 'VARIANTS'} GENERATED`
     );
   }
 

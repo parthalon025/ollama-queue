@@ -50,7 +50,7 @@ export default function ProviderRoleSection({ role, settings, onSave }) {
   }
 
   function handleTest() {
-    act('Testing…', async () => {
+    act('TESTING', async () => {
       const res = await fetch('/api/eval/providers/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -65,7 +65,7 @@ export default function ProviderRoleSection({ role, settings, onSave }) {
         throw new Error(detail);
       }
       return await res.json();
-    }, () => 'Connected ✓');
+    }, () => 'CONNECTED');
   }
 
   return (

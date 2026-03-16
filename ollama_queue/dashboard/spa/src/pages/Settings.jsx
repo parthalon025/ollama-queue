@@ -97,7 +97,7 @@ export default function Settings() {
 
   const handlePause = useCallback(async () => {
     await pauseAct(
-      'Pausing daemon…',
+      'PAUSING',
       async () => {
         const res = await fetch(`${API}/daemon/pause`, { method: 'POST' });
         if (!res.ok) throw new Error(`Pause failed: ${res.status}`);
@@ -106,13 +106,13 @@ export default function Settings() {
           status.value = { ...status.value, daemon: { ...status.value.daemon, state: 'paused' } };
         }
       },
-      'Daemon paused'
+      'PAUSED'
     );
   }, [pauseAct]);
 
   const handleResume = useCallback(async () => {
     await resumeAct(
-      'Resuming daemon…',
+      'RESUMING',
       async () => {
         const res = await fetch(`${API}/daemon/resume`, { method: 'POST' });
         if (!res.ok) throw new Error(`Resume failed: ${res.status}`);
@@ -121,7 +121,7 @@ export default function Settings() {
           status.value = { ...status.value, daemon: { ...status.value.daemon, state: 'running' } };
         }
       },
-      'Daemon resumed'
+      'RESUMED'
     );
   }, [resumeAct]);
 
@@ -137,7 +137,7 @@ export default function Settings() {
             class="t-btn"
             style="font-size:var(--type-micro);padding:2px 10px;"
             disabled={restartFb.phase === 'loading'}
-            onClick={() => restartAct('Restarting…', restartDaemon, () => 'Restart signalled')}
+            onClick={() => restartAct('RESTARTING', restartDaemon, () => 'RESTARTED')}
           >
             {restartFb.phase === 'loading' ? 'Restarting…' : 'Restart daemon'}
           </button>

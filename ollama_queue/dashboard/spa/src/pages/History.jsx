@@ -71,7 +71,7 @@ export default function History() {
     async function handleRetryAll() {
         if (!window.confirm(`Re-queue all ${dlq.length} failed jobs so they try again?`)) return;
         await retryAllAct(
-            'Retrying all…',
+            'RETRYING ALL',
             async () => {
                 const res = await fetch(`${API}/dlq/retry-all`, { method: 'POST' });
                 if (!res.ok) throw new Error(`Retry all failed: ${res.status}`);
@@ -79,14 +79,14 @@ export default function History() {
                 await fetchDLQ();
                 return data;
             },
-            data => `${data.retried ?? data.count ?? 'All'} jobs re-queued`,
+            data => `${data.retried ?? data.count ?? 'ALL'} JOBS RE-QUEUED`,
         );
     }
 
     async function handleClearDLQ() {
         if (!window.confirm('Permanently delete all failed jobs? This cannot be undone.')) return;
         await clearAct(
-            'Clearing DLQ…',
+            'CLEARING DLQ',
             async () => {
                 // Stagger-shatter all visible DLQ row elements before clearing
                 if (dlqListRef.current) {
@@ -110,7 +110,7 @@ export default function History() {
                 if (!res.ok) throw new Error(`Clear failed: ${res.status}`);
                 await fetchDLQ();
             },
-            'All failed jobs deleted',
+            'DLQ CLEARED',
         );
     }
 
@@ -360,9 +360,9 @@ function DLQRow({ entry, onAction }) {
                                 style="font-size: var(--type-label); padding: 2px 8px;"
                                 disabled={rescheduleFb.phase === 'loading'}
                                 onClick={() => rescheduleAct(
-                                    'Scheduling…',
+                                    'SCHEDULING',
                                     () => rescheduleDLQEntry(entry.id),
-                                    `DLQ #${entry.id} rescheduled`,
+                                    `DLQ #${entry.id} RESCHEDULED`,
                                 )}
                             >
                                 {rescheduleFb.phase === 'loading' ? 'Scheduling…' : 'Reschedule'}
@@ -378,9 +378,9 @@ function DLQRow({ entry, onAction }) {
                             style="font-size: var(--type-label); padding: 2px 8px;"
                             disabled={retryFb.phase === 'loading'}
                             onClick={() => retryAct(
-                                'Retrying…',
+                                'RETRYING',
                                 () => onAction('retry', entry.id),
-                                'Job re-queued for retry',
+                                'RE-QUEUED',
                             )}
                         >
                             {retryFb.phase === 'loading' ? 'Retrying…' : 'Re-queue'}
@@ -398,16 +398,16 @@ function DLQRow({ entry, onAction }) {
                                 if (rowRef.current) {
                                     shatterElement(rowRef.current, {
                                         onComplete: () => dismissAct(
-                                            'Dismissing…',
+                                            'DISMISSING',
                                             () => onAction('dismiss', entry.id),
-                                            `DLQ #${entry.id} dismissed`,
+                                            `DLQ #${entry.id} DISMISSED`,
                                         ),
                                     });
                                 } else {
                                     dismissAct(
-                                        'Dismissing…',
+                                        'DISMISSING',
                                         () => onAction('dismiss', entry.id),
-                                        `DLQ #${entry.id} dismissed`,
+                                        `DLQ #${entry.id} DISMISSED`,
                                     );
                                 }
                             }}

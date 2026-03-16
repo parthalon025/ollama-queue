@@ -37,7 +37,7 @@ function SuggestionCard({ suggestion }) {
       <button
         class="suggestion-card__action"
         disabled={fb.phase === 'loading'}
-        onClick={() => act('Opening…', async () => { handler(suggestion); }, () => 'Done')}
+        onClick={() => act('OPENING', async () => { handler(suggestion); }, () => 'DONE')}
       >
         {fb.phase === 'loading' ? '…' : (suggestion.action_label || 'Try this')}
       </button>
