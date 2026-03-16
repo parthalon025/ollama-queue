@@ -5,8 +5,8 @@ const { h } = require('./preact.cjs');
 
 module.exports = {
     // Renders children with data-sh-status so tests can assert badge variant
-    ShStatusBadge: ({ status, children }) =>
-        h('span', { 'data-sh-effect': 'status-badge', 'data-sh-status': status }, children),
+    ShStatusBadge: ({ status, label, children }) =>
+        h('span', { 'data-sh-effect': 'status-badge', 'data-sh-status': status, 'data-sh-label': label }, children),
 
     // data-sh-active lets tests assert whether the pulse is triggered
     ShThreatPulse: ({ active, persistent, children }) =>
@@ -31,4 +31,22 @@ module.exports = {
     // onClick is forwarded from onDismiss so shatter cancel tests can call it
     ShShatter: ({ onDismiss, children }) =>
         h('div', { 'data-sh-effect': 'shatter', onClick: onDismiss }, children),
+
+    // Pass-through layout stubs — needed so imports don't silently resolve to undefined
+    ShPageBanner: ({ namespace, page, subtitle }) =>
+        h('header', { 'data-sh': 'page-banner', 'data-sh-ns': namespace, 'data-sh-page': page }),
+    ShStatsGrid: ({ stats, children }) =>
+        h('div', { 'data-sh': 'stats-grid' }, children),
+    ShStatCard: ({ label, value, children }) =>
+        h('div', { 'data-sh': 'stat-card', 'data-sh-label': label }),
+    ShCollapsible: ({ summary, children }) =>
+        h('details', { 'data-sh': 'collapsible' }, children),
+    ShDataTable: ({ rows, columns, children }) =>
+        h('div', { 'data-sh': 'data-table' }, children),
+    ShTimeChart: ({ data }) =>
+        h('div', { 'data-sh': 'time-chart' }),
+    ShCrtToggle: ({ checked, onChange }) =>
+        h('button', { 'data-sh': 'crt-toggle', onClick: onChange }),
+    ShPipeline: ({ stages, children }) =>
+        h('div', { 'data-sh': 'pipeline' }, children),
 };
