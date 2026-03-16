@@ -268,7 +268,7 @@ export default function BackendsTab() {
   // Decision it drives: User understands WHY a request went to a specific GPU.
 
   return (
-    <div class="flex flex-col gap-6 animate-page-enter tab-content">
+    <div class="flex flex-col gap-6 sh-stagger-children animate-page-enter tab-content">
       <ShPageBanner namespace={_tab.namespace} page={_tab.page} subtitle={_tab.subtitle} />
 
       {/* 6.1 Fleet Overview */}

@@ -71,7 +71,7 @@ export default function Consumers() {
   const showWizard = newlyDiscovered.length > 0 && list.every(consumer => consumer.status === 'discovered');
 
   return (
-    <div class="consumers-page">
+    <div class="consumers-page sh-stagger-children">
       <ShPageBanner namespace={_tab.namespace} page={_tab.page} subtitle={_tab.subtitle} />
 
       {/* What it shows: A plain-language explanation of what consumers are and how the

@@ -826,7 +826,7 @@ export default function Plan() {
     // --- Main render ---
 
     return (
-        <div class="flex flex-col gap-4 animate-page-enter" data-mood="wonder">
+        <div class="flex flex-col gap-4 sh-stagger-children animate-page-enter" data-mood="wonder">
             <ShPageBanner namespace={_tab.namespace} page={_tab.page} subtitle={_tab.subtitle} />
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>

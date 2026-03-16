@@ -128,7 +128,7 @@ export default function Now({ onSubmitRequest }) {
     }
 
     return (
-        <div ref={pageRef} class="flex flex-col gap-4 animate-page-enter"
+        <div ref={pageRef} class="flex flex-col gap-4 sh-stagger-children animate-page-enter"
              data-mood={showAlerts ? 'dread' : 'dawn'}>
             <ShPageBanner namespace={_tab.namespace} page={_tab.page} subtitle={_tab.subtitle} />
             {/* KPI stat cards — live queue health at a glance */}
@@ -145,7 +145,7 @@ export default function Now({ onSubmitRequest }) {
             )}
 
             {/* 2-column layout: left = operations, right = health + KPIs */}
-            <div class="now-grid">
+            <div class="now-grid sh-delay-100">
 
                 {/* LEFT: running job + queue */}
                 <div class="flex flex-col gap-4">
@@ -263,7 +263,7 @@ export default function Now({ onSubmitRequest }) {
                     />
 
                     {/* KPI cards — 2×2 grid */}
-                    <div class="grid grid-cols-2 gap-3">
+                    <div class="grid grid-cols-2 gap-3 sh-delay-200">
                         <HeroCard
                             label="Jobs Completed Today"
                             value={kpis ? kpis.jobs_24h : '--'}

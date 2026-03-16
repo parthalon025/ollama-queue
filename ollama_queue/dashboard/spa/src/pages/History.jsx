@@ -128,7 +128,7 @@ export default function History() {
     }
 
     return (
-        <div class="flex flex-col gap-6 animate-page-enter" data-mood="dread">
+        <div class="flex flex-col gap-6 sh-stagger-children animate-page-enter" data-mood="dread">
             <ShPageBanner namespace={_tab.namespace} page={_tab.page} subtitle={_tab.subtitle} />
 
             {/* DLQ section — only shown when entries exist */}

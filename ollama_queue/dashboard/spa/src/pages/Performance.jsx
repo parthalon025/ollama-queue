@@ -55,7 +55,7 @@ export default function Performance() {
         : [];
 
     return (
-        <div class="flex flex-col gap-6 animate-page-enter">
+        <div class="flex flex-col gap-6 sh-stagger-children animate-page-enter">
             <ShPageBanner namespace={_tab.namespace} page={_tab.page} subtitle={_tab.subtitle} />
 
             {/* System Health — always visible at top */}

@@ -158,7 +158,7 @@ export default function ModelsTab() {
     };
 
     return (
-        <div class="flex flex-col gap-4 animate-page-enter" data-mood="nostalgic">
+        <div class="flex flex-col gap-4 sh-stagger-children animate-page-enter" data-mood="nostalgic">
             <ShPageBanner namespace={_tab.namespace} page={_tab.page} subtitle={_tab.subtitle} />
 
             {pullError && (
