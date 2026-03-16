@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 import { useSignal } from '@preact/signals';
 import { settings, status, API, restartDaemon } from '../stores';
+import { setAudioEnabled } from '../stores/atmosphere.js';
 import SettingsForm from '../components/SettingsForm';
 import { useActionFeedback } from '../hooks/useActionFeedback.js';
 import { ShCrtToggle, ShPageBanner } from 'superhot-ui/preact';
@@ -47,6 +48,9 @@ export default function Settings() {
   const daemonState = st && st.daemon ? st.daemon.state : null;
 
   const [intensity, setIntensity] = useState(() => readCrtIntensity());
+  const [audioOn, setAudioOn] = useState(() => {
+    try { return localStorage.getItem('queue-audio') === 'true'; } catch (_) { return false; }
+  });
 
   // Apply CSS var on mount to match persisted preference
   useEffect(() => {
@@ -162,6 +166,26 @@ export default function Settings() {
             applyCrtIntensity(lvl);
           }}
         />
+      </div>
+      {/* Audio toggle — opt-in procedural SFX for state transitions */}
+      {/* What it shows: A checkbox to enable/disable procedural audio cues. */}
+      {/* Decision it drives: User can opt in to audio feedback on error, recovery, and DLQ events. Off by default. */}
+      <div class="t-frame" data-label="AUDIO" style="margin-top:1rem;">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-family:var(--font-mono);font-size:var(--type-label);color:var(--text-secondary);">
+          <input
+            type="checkbox"
+            checked={audioOn}
+            onChange={ev => {
+              const val = ev.target.checked;
+              setAudioOn(val);
+              setAudioEnabled(val);
+            }}
+          />
+          PROCEDURAL SFX
+        </label>
+        <span style="font-size:var(--type-micro);color:var(--text-tertiary);margin-top:4px;display:block;">
+          AUDIO CUES ON STATE TRANSITIONS — ERROR, RECOVERY, DLQ
+        </span>
       </div>
       <div aria-label="Keyboard shortcuts" style="margin-top:24px;padding-top:16px;border-top:1px solid var(--border-subtle);">
         <p style="font-family:var(--font-mono);font-size:var(--type-micro);color:var(--text-tertiary);">
