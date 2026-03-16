@@ -261,6 +261,18 @@ Replace the 2-column `now-grid` with:
 
 ## Testing
 
+### Test Infrastructure Prerequisites
+
+Before writing `HostCard.test.js`, two setup steps are required:
+
+1. **Add `superhot-ui/preact` mock to `jest.config.cjs`:** `HostCard.jsx` imports Sh* components from `'superhot-ui/preact'`. The existing `'^superhot-ui$'` mapper only covers the effects barrel. Add a separate entry:
+   ```js
+   '^superhot-ui/preact$': '<rootDir>/src/__mocks__/superhot-ui-preact.cjs',
+   ```
+   Create `src/__mocks__/superhot-ui-preact.cjs` with JSX pass-through stubs for `ShStatusBadge`, `ShThreatPulse`, `ShFrozen`, `ShGlitch`, `ShShatter` (each renders its children or a labeled `<span>` with a `data-sh-effect` attribute that tests can assert on). Without this, all render tests fail with `Cannot find module 'superhot-ui/preact'`.
+
+2. **`cancelEvalRun` import pattern:** HostCard imports `cancelEvalRun` directly from `'../stores'` (eval barrel) — same pattern as `ActiveEvalStrip.jsx`. Do NOT pass it as a prop. The existing `stores-eval.cjs` mock already includes `cancelEvalRun: jest.fn()` so tests will resolve correctly.
+
 ### HostCard.test.js — pure function tests
 
 ```
