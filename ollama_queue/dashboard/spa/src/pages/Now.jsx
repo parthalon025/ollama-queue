@@ -9,7 +9,7 @@ import { useActionFeedback } from '../hooks/useActionFeedback.js';
 import CurrentJob from '../components/CurrentJob.jsx';
 import QueueList from '../components/QueueList.jsx';
 import HeroCard from '../components/HeroCard.jsx';
-import { ShPageBanner, ShStatCard, ShStatsGrid, ShFrozen } from 'superhot-ui/preact';
+import { ShPageBanner, ShStatCard, ShStatsGrid, ShFrozen, ShThreatPulse } from 'superhot-ui/preact';
 import { TAB_CONFIG } from '../config/tabs.js';
 import InfrastructurePanel from '../components/InfrastructurePanel.jsx';
 
@@ -55,6 +55,9 @@ export default function Now({ onSubmitRequest }) {
     }, [isOffline]);
 
     const daemon = st?.daemon ?? null;
+    // Circuit breaker open: daemon is in error state or has explicitly opened the circuit breaker.
+    // When open, no new jobs can start — ThreatPulse signals persistent danger on the job card.
+    const isCircuitOpen = daemon?.state === 'error' || daemon?.circuit_breaker_open;
     const kpis = st?.kpis ?? null;
     const currentJob = st?.current_job ?? null;
     const activeEval = st?.active_eval ?? null;
@@ -154,14 +157,16 @@ export default function Now({ onSubmitRequest }) {
                 {/* LEFT: running job + queue */}
                 <div class="flex flex-col gap-4">
                     {/* CurrentJob renders its own t-frame — no wrapper needed */}
-                    <CurrentJob
-                        daemon={daemon}
-                        currentJob={currentJob}
-                        latestHealth={latestHealth}
-                        settings={sett}
-                        activeEval={activeEval}
-                        onSubmitRequest={onSubmitRequest}
-                    />
+                    <ShThreatPulse active={isCircuitOpen} persistent>
+                        <CurrentJob
+                            daemon={daemon}
+                            currentJob={currentJob}
+                            latestHealth={latestHealth}
+                            settings={sett}
+                            activeEval={activeEval}
+                            onSubmitRequest={onSubmitRequest}
+                        />
+                    </ShThreatPulse>
                     {/* QueueList renders its own t-frame — no wrapper needed */}
                     <QueueList jobs={q} currentJob={currentJob} />
                 </div>

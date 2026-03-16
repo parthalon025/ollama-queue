@@ -10,6 +10,7 @@ import { evalActiveRun, cancelEvalRun } from '../stores/eval.js';
 import { currentTab } from '../stores/health.js';
 import F1Score from './F1Score.jsx';
 import { useActionFeedback } from '../hooks/useActionFeedback.js';
+import { ShThreatPulse } from 'superhot-ui/preact';
 
 const PHASE_LABELS = {
   generating: 'Generating outputs',
@@ -28,25 +29,31 @@ export default function ActiveEvalStrip() {
   const phaseLabel = PHASE_LABELS[run.phase] || run.phase || 'Running';
   const progress = run.progress_pct ?? 0;
 
+  // Stuck eval: generating phase running for more than 10 minutes without completing
+  const isStuck = run.status === 'generating' &&
+    run.started_at && (Date.now() / 1000 - run.started_at > 600);
+
   function handleClick() { currentTab.value = 'eval'; }
 
   return (
-    <div class="active-eval-strip" role="status" aria-live="polite">
-      <span class="active-eval-strip__label" onClick={handleClick} style="cursor:pointer">
-        Eval: {phaseLabel}
-      </span>
-      <div class="active-eval-strip__bar">
-        <div class="active-eval-strip__fill" style={`width:${progress}%`} />
+    <ShThreatPulse active={isStuck}>
+      <div class="active-eval-strip" role="status" aria-live="polite">
+        <span class="active-eval-strip__label" onClick={handleClick} style="cursor:pointer">
+          Eval: {phaseLabel}
+        </span>
+        <div class="active-eval-strip__bar">
+          <div class="active-eval-strip__fill" style={`width:${progress}%`} />
+        </div>
+        {run.best_f1_so_far != null && <F1Score value={run.best_f1_so_far} />}
+        <button
+          class="active-eval-strip__cancel"
+          disabled={fb.phase === 'loading'}
+          onClick={() => act('CANCELLING', () => cancelEvalRun(run.run_id), () => 'CANCELLED')}
+        >
+          {fb.phase === 'loading' ? '…' : '✕'}
+        </button>
+        {fb.msg && <span class={`action-fb action-fb--${fb.phase}`}>{fb.msg}</span>}
       </div>
-      {run.best_f1_so_far != null && <F1Score value={run.best_f1_so_far} />}
-      <button
-        class="active-eval-strip__cancel"
-        disabled={fb.phase === 'loading'}
-        onClick={() => act('CANCELLING', () => cancelEvalRun(run.run_id), () => 'CANCELLED')}
-      >
-        {fb.phase === 'loading' ? '…' : '✕'}
-      </button>
-      {fb.msg && <span class={`action-fb action-fb--${fb.phase}`}>{fb.msg}</span>}
-    </div>
+    </ShThreatPulse>
   );
 }
