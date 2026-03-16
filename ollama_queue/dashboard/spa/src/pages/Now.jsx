@@ -4,24 +4,25 @@ import {
     status, queue, history, healthData, cpuCount, durationData, settings,
     dlqCount, connectionStatus, currentTab, clearDLQ,
     scheduleJobs, fetchSchedule,
+    backendsData, fetchBackends,
 } from '../stores';
+import { evalActiveRun } from '../stores/eval.js';
 import { useActionFeedback } from '../hooks/useActionFeedback.js';
-import CurrentJob from '../components/CurrentJob.jsx';
+import HostCard from '../components/HostCard.jsx';
 import QueueList from '../components/QueueList.jsx';
 import HeroCard from '../components/HeroCard.jsx';
 import { ShPageBanner, ShStatCard, ShStatsGrid } from 'superhot-ui/preact';
 import { TAB_CONFIG } from '../config/tabs.js';
-import InfrastructurePanel from '../components/InfrastructurePanel.jsx';
 
 // NOTE: all .map() callbacks use descriptive names — never 'h' (shadows JSX factory)
 
-// What it shows: The live command center — what's running right now, what's waiting in the
-//   queue, how healthy the system is, and whether anything needs attention (DLQ entries,
-//   recent failures). KPI cards summarize the last 24h/7d at a glance.
-// Decision it drives: Is the queue healthy and progressing? Should I submit more work, cancel
-//   something, or go investigate a problem in History? The alert strip makes issues impossible
-//   to miss. The + FAB opens SubmitJobModal to queue a one-off job immediately.
-export default function Now({ onSubmitRequest }) {
+// What it shows: The live command center — what's running right now on each backend,
+//   what's waiting in the queue, how healthy the system is, and whether anything needs
+//   attention (DLQ entries, recent failures). KPI cards summarize the last 24h/7d at a
+//   glance. HostCards show per-GPU state (idle/running/eval/warm/offline).
+// Decision it drives: Is the queue healthy and progressing? Which GPU is doing what?
+//   Should I submit more work, cancel something, or go investigate a problem in History?
+export default function Now() {
     const _tab = TAB_CONFIG.find(t => t.id === 'now');
     const st = status.value;
     const q = queue.value;
@@ -41,6 +42,14 @@ export default function Now({ onSubmitRequest }) {
     // even if the Plan tab hasn't been visited yet.
     useEffect(() => { fetchSchedule(); }, []);
 
+    // Take over the 15s backend refresh — InfrastructurePanel owned this interval;
+    // when it is deleted, Now.jsx must own it so backendsData stays fresh.
+    useEffect(() => {
+        fetchBackends();
+        const id = setInterval(fetchBackends, 15000);
+        return () => clearInterval(id);
+    }, []);
+
     // OFFLINE mantra: stamp "OFFLINE" watermark on the page when the WebSocket
     // connection to the server is lost. Removes itself when reconnected.
     const isOffline = connectionStatus.value === 'disconnected';
@@ -54,7 +63,6 @@ export default function Now({ onSubmitRequest }) {
         return () => { if (pageRef.current) removeMantra(pageRef.current); };
     }, [isOffline]);
 
-    const daemon = st?.daemon ?? null;
     const kpis = st?.kpis ?? null;
     const currentJob = st?.current_job ?? null;
     const activeEval = st?.active_eval ?? null;
@@ -79,28 +87,9 @@ export default function Now({ onSubmitRequest }) {
     ).length;
     const showProxyStat = proxyGenerate > 0 || proxyEmbed > 0;
 
-    // What it shows: KPI summary cards — daemon state, queue depth, 24h job count,
-    //   RAM/VRAM utilization. Derived from live signals, not hardcoded.
-    // Decision it drives: Is the daemon healthy? Is RAM under pressure? How busy was
-    //   the queue today?
-    // "warm" = daemon idle but a model is still loaded in VRAM — GPU is occupied even
-    //   though no job is running. Distinguishes truly-free GPU from loaded-but-waiting.
-    const rawDaemonState = st?.daemon?.state ?? null;
-    const warmModel = rawDaemonState === 'idle' ? (latestHealth?.ollama_model ?? null) : null;
-    const daemonDisplayValue = warmModel ? 'warm' : (rawDaemonState ?? '—');
-    const daemonStatStatus =
-        !st ? 'waiting' :
-        rawDaemonState === 'running' ? 'active' :
-        (rawDaemonState || '').startsWith('paused') ? 'warning' :
-        rawDaemonState === 'offline' ? 'error' : 'ok';
-
+    // What it shows: KPI summary cards — queue depth, 24h job count, RAM utilization.
+    // Decision it drives: Is RAM under pressure? How busy was the queue today?
     const kpiStats = [
-        {
-            label: 'Daemon',
-            value: daemonDisplayValue,
-            status: daemonStatStatus,
-            detail: warmModel ? warmModel.split(':')[0] : undefined,
-        },
         {
             label: 'Queue Depth',
             value: q?.length ?? 0,
@@ -119,13 +108,6 @@ export default function Now({ onSubmitRequest }) {
             status: (latestHealth?.ram_pct || 0) > 85 ? 'error' : (latestHealth?.ram_pct || 0) > 70 ? 'warning' : 'ok',
         },
     ];
-    if (latestHealth?.vram_pct != null) {
-        kpiStats.push({
-            label: 'VRAM',
-            value: `${Math.round(latestHealth.vram_pct)}%`,
-            status: latestHealth.vram_pct > 85 ? 'error' : latestHealth.vram_pct > 70 ? 'warning' : 'ok',
-        });
-    }
 
     return (
         <div ref={pageRef} class="flex flex-col gap-4 animate-page-enter"
@@ -144,124 +126,120 @@ export default function Now({ onSubmitRequest }) {
                 </div>
             )}
 
-            {/* 2-column layout: left = operations, right = health + KPIs */}
-            <div class="now-grid">
-
-                {/* LEFT: running job + queue */}
-                <div class="flex flex-col gap-4">
-                    {/* CurrentJob renders its own t-frame — no wrapper needed */}
-                    <CurrentJob
-                        daemon={daemon}
+            {/* Host cards — one per configured backend, shows what each GPU is doing */}
+            <div class="flex flex-col gap-3">
+                {(backendsData.value || []).map(backend => (
+                    <HostCard
+                        key={backend.url}
+                        backend={backend}
                         currentJob={currentJob}
-                        latestHealth={latestHealth}
-                        settings={sett}
                         activeEval={activeEval}
-                        onSubmitRequest={onSubmitRequest}
-                    />
-                    {/* QueueList renders its own t-frame — no wrapper needed */}
-                    <QueueList jobs={q} currentJob={currentJob} />
-                </div>
-
-                {/* RIGHT: alerts + resource gauges + KPI cards */}
-                <div class="flex flex-col gap-4">
-                    {/* Alert strip — only when something needs attention */}
-                    {showAlerts && (
-                        <div style={{
-                            display: 'flex',
-                            flexWrap: 'wrap',
-                            gap: '0.5rem',
-                            padding: '0.625rem 0.75rem',
-                            background: 'var(--status-error-glow)',
-                            border: '1px solid var(--status-error)',
-                            borderRadius: 'var(--radius)',
-                            alignItems: 'center',
-                        }}>
-                            <span style={{
-                                fontSize: 'var(--type-label)',
-                                color: 'var(--status-error)',
-                                fontWeight: 700,
-                                fontFamily: 'var(--font-mono)',
-                                flexShrink: 0,
-                            }}>
-                                ⚠ Needs Attention
-                            </span>
-                            {dlqCnt > 0 && (
-                                // What it shows: DLQ count + two quick-action buttons to navigate
-                                //   to History or bulk-clear the DLQ without leaving the Now tab.
-                                // Decision it drives: User can dismiss noise or jump to detail
-                                //   without hunting through tabs.
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                                    <span
-                                        title="Dead-letter queue — jobs that ran out of retries"
-                                        style={{
-                                            fontSize: 'var(--type-label)',
-                                            color: 'var(--status-error)',
-                                            fontFamily: 'var(--font-mono)',
-                                        }}
-                                    >
-                                        {dlqCnt} failed {dlqCnt === 1 ? 'job' : 'jobs'} need attention
-                                    </span>
-                                    <button
-                                        class="t-btn"
-                                        style={{ fontSize: 'var(--type-micro)', padding: '2px 8px' }}
-                                        onClick={() => { currentTab.value = 'history'; }}
-                                    >View failed</button>
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                        <button
-                                            class="t-btn"
-                                            style={{ fontSize: 'var(--type-micro)', padding: '2px 8px', color: 'var(--text-tertiary)' }}
-                                            disabled={dismissFb.phase === 'loading'}
-                                            onClick={() => dismissAct('Clearing…', clearDLQ, () => 'Cleared')}
-                                        >Dismiss all</button>
-                                        {dismissFb.msg && <span class={`action-fb action-fb--${dismissFb.phase}`}>{dismissFb.msg}</span>}
-                                    </div>
-                                </div>
-                            )}
-                            {recentFailures > 0 && (
-                                <button
-                                    onClick={() => { currentTab.value = 'history'; }}
-                                    style={{
-                                        fontSize: 'var(--type-label)',
-                                        color: 'var(--status-error)',
-                                        background: 'transparent',
-                                        border: 'none',
-                                        cursor: 'pointer',
-                                        textDecoration: 'underline',
-                                        fontFamily: 'var(--font-mono)',
-                                        padding: 0,
-                                    }}
-                                >
-                                    {recentFailures} job{recentFailures > 1 ? 's' : ''} failed in the last 24h
-                                </button>
-                            )}
-                            {disabledRecurring > 0 && (
-                                <button
-                                    onClick={() => { currentTab.value = 'plan'; }}
-                                    title="Recurring jobs that were auto-disabled — click to view in Schedule tab"
-                                    style={{
-                                        fontSize: 'var(--type-label)',
-                                        color: 'var(--status-warning)',
-                                        background: 'transparent',
-                                        border: 'none',
-                                        cursor: 'pointer',
-                                        textDecoration: 'underline',
-                                        fontFamily: 'var(--font-mono)',
-                                        padding: 0,
-                                    }}
-                                >
-                                    {disabledRecurring} scheduled job{disabledRecurring > 1 ? 's' : ''} auto-disabled
-                                </button>
-                            )}
-                        </div>
-                    )}
-
-                    {/* Infrastructure panel — host scheduler metrics + per-backend GPU rows */}
-                    <InfrastructurePanel
+                        evalActiveRun={evalActiveRun.value}
                         latestHealth={latestHealth}
                         settings={sett}
                         cpuCount={cpuCount.value}
                     />
+                ))}
+            </div>
 
+            {/* Alert strip — only when something needs attention */}
+            {showAlerts && (
+                <div style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: '0.5rem',
+                    padding: '0.625rem 0.75rem',
+                    background: 'var(--status-error-glow)',
+                    border: '1px solid var(--status-error)',
+                    borderRadius: 'var(--radius)',
+                    alignItems: 'center',
+                }}>
+                    <span style={{
+                        fontSize: 'var(--type-label)',
+                        color: 'var(--status-error)',
+                        fontWeight: 700,
+                        fontFamily: 'var(--font-mono)',
+                        flexShrink: 0,
+                    }}>
+                        ⚠ Needs Attention
+                    </span>
+                    {dlqCnt > 0 && (
+                        // What it shows: DLQ count + two quick-action buttons to navigate
+                        //   to History or bulk-clear the DLQ without leaving the Now tab.
+                        // Decision it drives: User can dismiss noise or jump to detail
+                        //   without hunting through tabs.
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                            <span
+                                title="Dead-letter queue — jobs that ran out of retries"
+                                style={{
+                                    fontSize: 'var(--type-label)',
+                                    color: 'var(--status-error)',
+                                    fontFamily: 'var(--font-mono)',
+                                }}
+                            >
+                                {dlqCnt} failed {dlqCnt === 1 ? 'job' : 'jobs'} need attention
+                            </span>
+                            <button
+                                class="t-btn"
+                                style={{ fontSize: 'var(--type-micro)', padding: '2px 8px' }}
+                                onClick={() => { currentTab.value = 'history'; }}
+                            >View failed</button>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                <button
+                                    class="t-btn"
+                                    style={{ fontSize: 'var(--type-micro)', padding: '2px 8px', color: 'var(--text-tertiary)' }}
+                                    disabled={dismissFb.phase === 'loading'}
+                                    onClick={() => dismissAct('Clearing…', clearDLQ, () => 'Cleared')}
+                                >Dismiss all</button>
+                                {dismissFb.msg && <span class={`action-fb action-fb--${dismissFb.phase}`}>{dismissFb.msg}</span>}
+                            </div>
+                        </div>
+                    )}
+                    {recentFailures > 0 && (
+                        <button
+                            onClick={() => { currentTab.value = 'history'; }}
+                            style={{
+                                fontSize: 'var(--type-label)',
+                                color: 'var(--status-error)',
+                                background: 'transparent',
+                                border: 'none',
+                                cursor: 'pointer',
+                                textDecoration: 'underline',
+                                fontFamily: 'var(--font-mono)',
+                                padding: 0,
+                            }}
+                        >
+                            {recentFailures} job{recentFailures > 1 ? 's' : ''} failed in the last 24h
+                        </button>
+                    )}
+                    {disabledRecurring > 0 && (
+                        <button
+                            onClick={() => { currentTab.value = 'plan'; }}
+                            title="Recurring jobs that were auto-disabled — click to view in Schedule tab"
+                            style={{
+                                fontSize: 'var(--type-label)',
+                                color: 'var(--status-warning)',
+                                background: 'transparent',
+                                border: 'none',
+                                cursor: 'pointer',
+                                textDecoration: 'underline',
+                                fontFamily: 'var(--font-mono)',
+                                padding: 0,
+                            }}
+                        >
+                            {disabledRecurring} scheduled job{disabledRecurring > 1 ? 's' : ''} auto-disabled
+                        </button>
+                    )}
+                </div>
+            )}
+
+            {/* Bottom grid: queue list on left, hero cards on right */}
+            <div class="now-grid">
+                {/* LEFT: queue */}
+                <QueueList jobs={q} currentJob={currentJob} />
+
+                {/* RIGHT: hero cards + proxy stat */}
+                <div class="flex flex-col gap-4">
                     {/* KPI cards — 2×2 grid */}
                     <div class="grid grid-cols-2 gap-3">
                         <HeroCard
