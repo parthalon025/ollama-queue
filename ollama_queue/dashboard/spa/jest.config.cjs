@@ -12,6 +12,7 @@ module.exports = {
     // Also mock uplot to avoid canvas/DOM requirements in tests.
     moduleNameMapper: {
         '^superhot-ui$': '<rootDir>/src/__mocks__/superhot-ui.cjs',
+        '^superhot-ui/preact$': '<rootDir>/src/__mocks__/superhot-ui-preact.cjs',
         '^preact$': '<rootDir>/src/__mocks__/preact.cjs',
         '^preact/hooks$': '<rootDir>/src/__mocks__/preact-hooks.cjs',
         '^@preact/signals$': '<rootDir>/src/__mocks__/preact-signals.cjs',
@@ -22,6 +23,8 @@ module.exports = {
         '^\\.\\./stores/health\\.js$': '<rootDir>/src/__mocks__/stores.cjs',
         '^\\.\\./stores/eval\\.js$': '<rootDir>/src/__mocks__/stores-eval.cjs',
         '^\\.\\./hooks/useActionFeedback\\.js$': '<rootDir>/src/__mocks__/useActionFeedback.cjs',
+        '^\\.\\./hooks/useShatter\\.js$': '<rootDir>/src/__mocks__/useShatter.cjs',
+        '^\\.\\./stores/atmosphere\\.js$': '<rootDir>/src/__mocks__/atmosphere.cjs',
         '^\\.\\./utils/time\\.js$': '<rootDir>/src/__mocks__/utils-time.cjs',
         // Depth-2 patterns for components in src/components/<subdirectory>/ (e.g. eval/)
         '^\\.\\./\\.\\./stores$': '<rootDir>/src/__mocks__/stores.cjs',
@@ -30,6 +33,8 @@ module.exports = {
         '^\\.\\./\\.\\./stores/health\\.js$': '<rootDir>/src/__mocks__/stores.cjs',
         '^\\.\\./\\.\\./stores/eval\\.js$': '<rootDir>/src/__mocks__/stores-eval.cjs',
         '^\\.\\./\\.\\./hooks/useActionFeedback\\.js$': '<rootDir>/src/__mocks__/useActionFeedback.cjs',
+        '^\\.\\./\\.\\./hooks/useShatter\\.js$': '<rootDir>/src/__mocks__/useShatter.cjs',
+        '^\\.\\./\\.\\./stores/atmosphere\\.js$': '<rootDir>/src/__mocks__/atmosphere.cjs',
         '^\\.\\./\\.\\./utils/time\\.js$': '<rootDir>/src/__mocks__/utils-time.cjs',
     },
     testMatch: ['**/*.test.js'],

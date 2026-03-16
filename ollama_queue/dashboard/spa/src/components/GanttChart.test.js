@@ -11,31 +11,31 @@ describe('sourceColor', () => {
     it('returns accent for aria-intraday (prefix match)', () => {
         expect(sourceColor('aria-intraday')).toBe('var(--accent)');
     });
-    it('returns orange for telegram', () => {
-        expect(sourceColor('telegram')).toBe('#f97316');
+    it('returns telegram token for telegram', () => {
+        expect(sourceColor('telegram')).toBe('var(--source-telegram)');
     });
-    it('returns orange for telegram-brief-morning (prefix match)', () => {
-        expect(sourceColor('telegram-brief-morning')).toBe('#f97316');
+    it('returns telegram token for telegram-brief-morning (prefix match)', () => {
+        expect(sourceColor('telegram-brief-morning')).toBe('var(--source-telegram)');
     });
-    it('returns purple for notion', () => {
-        expect(sourceColor('notion')).toBe('#a78bfa');
+    it('returns notion token for notion', () => {
+        expect(sourceColor('notion')).toBe('var(--source-notion)');
     });
-    it('returns purple for notion-vector-sync (prefix match)', () => {
-        expect(sourceColor('notion-vector-sync')).toBe('#a78bfa');
+    it('returns notion token for notion-vector-sync (prefix match)', () => {
+        expect(sourceColor('notion-vector-sync')).toBe('var(--source-notion)');
     });
-    it('returns tertiary for unknown source', () => {
-        expect(sourceColor('unknown')).toBe('var(--text-tertiary)');
+    it('returns default for unknown source', () => {
+        expect(sourceColor('unknown')).toBe('var(--source-default)');
     });
-    it('returns tertiary for "none"', () => {
-        expect(sourceColor('none')).toBe('var(--text-tertiary)');
+    it('returns default for "none"', () => {
+        expect(sourceColor('none')).toBe('var(--source-default)');
     });
     it('is case-insensitive', () => {
         expect(sourceColor('Aria')).toBe('var(--accent)');
         expect(sourceColor('Aria-Full')).toBe('var(--accent)');
     });
     it('handles null/undefined', () => {
-        expect(sourceColor(null)).toBe('var(--text-tertiary)');
-        expect(sourceColor(undefined)).toBe('var(--text-tertiary)');
+        expect(sourceColor(null)).toBe('var(--source-default)');
+        expect(sourceColor(undefined)).toBe('var(--source-default)');
     });
 });
 
@@ -368,8 +368,8 @@ describe('alignLoadMapToNow', () => {
 
 describe('loadMapSlotColor', () => {
     it('returns amber for pinned slot (score >= 999)', () => {
-        expect(loadMapSlotColor(999)).toBe('rgba(251,146,60,0.85)');
-        expect(loadMapSlotColor(1000)).toBe('rgba(251,146,60,0.85)');
+        expect(loadMapSlotColor(999)).toBe('color-mix(in oklch, var(--status-warning) 85%, transparent)');
+        expect(loadMapSlotColor(1000)).toBe('color-mix(in oklch, var(--status-warning) 85%, transparent)');
     });
 
     it('returns bg-inset for zero score', () => {

@@ -20,4 +20,12 @@ module.exports = {
     fetchPerformanceCurve: () => {},
     refreshQueue: () => {},
     retryJob: async () => {},
+    // Eval barrel re-exports needed by eval/ components
+    evalSettings: signal({}),
+    evalTemplates: signal([]),
+    fetchEvalVariants: async () => {},
+    // Health store exports needed by eval/ components
+    backendsData: signal({ backends: [] }),
+    // Connection/status signals needed by CohesionHeader
+    connectionStatus: signal('connected'),
 };
