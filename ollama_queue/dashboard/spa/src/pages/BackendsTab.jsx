@@ -34,6 +34,7 @@ function BackendCard({ backend, onRemove, onUpdateWeight }) {
   const [weightFb, setWeightFb] = useState('');
   const cardRef = useRef(null);
   const [testBtnRef, testShatter] = useShatter('routine');
+  const [weightSaveRef, weightSaveShatter] = useShatter('routine');
 
   const isUnhealthy = !backend.healthy;
   const vramPct = backend.vram_pct ?? 0;
@@ -141,7 +142,7 @@ function BackendCard({ backend, onRemove, onUpdateWeight }) {
                 onInput={e => setWeightVal(e.target.value)}
                 style={{ width: '4rem', fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)', padding: '2px 4px', color: 'var(--text-primary)' }}
               />
-              <button class="t-btn t-btn-secondary" style={{ fontSize: 'var(--type-micro)', padding: '1px 6px' }} onClick={handleWeightSave}>✓</button>
+              <button ref={weightSaveRef} class="t-btn t-btn-secondary" style={{ fontSize: 'var(--type-micro)', padding: '1px 6px' }} onClick={() => { weightSaveShatter(); handleWeightSave(); }}>✓</button>
               <button class="t-btn" style={{ fontSize: 'var(--type-micro)', padding: '1px 6px', background: 'none', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer' }} onClick={() => setEditWeight(false)}>✕</button>
               {weightFb && <span class="data-mono" style={{ fontSize: 'var(--type-micro)', color: 'var(--status-error)' }}>{weightFb}</span>}
             </>

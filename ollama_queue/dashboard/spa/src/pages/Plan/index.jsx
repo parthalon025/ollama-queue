@@ -388,6 +388,7 @@ export default function Plan() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                     <div>
                         <button
+                            ref={batchRunShRef}
                             class="t-btn t-btn-secondary"
                             style={{ fontSize: 'var(--type-label)', padding: '0.15rem 0.5rem',
                                      opacity: (isBatchRunning || batchRunFb.phase === 'loading') ? 0.5 : 1 }}
@@ -400,7 +401,7 @@ export default function Plan() {
                     <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem',
                                     fontSize: 'var(--type-label)', fontFamily: 'var(--font-mono)',
                                     color: 'var(--text-secondary)', cursor: 'pointer' }}>
-                        <input type="checkbox" checked={allEnabled}
+                        <input ref={batchToggleShRef} type="checkbox" checked={allEnabled}
                                style={{ accentColor: 'var(--accent)', width: 14, height: 14 }}
                                onChange={() => handleBatchToggle(tag, !allEnabled)} />
                         All
@@ -514,6 +515,7 @@ export default function Plan() {
                 <td style={{ textAlign: 'center' }}>
                     <div>
                         <button
+                            ref={pinShRef}
                             title={rj.pinned ? 'Locked \u2014 click to unlock this time slot' : 'Lock this time slot so the scheduler won\'t move it when you rebalance'}
                             disabled={pinFb.phase === 'loading'}
                             onClick={() => handlePinToggle(rj)}
@@ -534,6 +536,7 @@ export default function Plan() {
                                 {rj.outcome_reason}
                             </span>
                             <button
+                                ref={reenableShRef}
                                 disabled={reenableFb.phase === 'loading'}
                                 onClick={() => handleReenableJob(rj.name)}
                                 style={{
@@ -557,6 +560,7 @@ export default function Plan() {
                 <td style={{ textAlign: 'center', padding: '0.25rem 0.5rem' }}>
                     <div>
                         <button
+                            ref={runNowShRef}
                             class="t-btn t-btn-secondary"
                             style={{ fontSize: 'var(--type-label)', padding: '0.2rem 0.6rem',
                                      opacity: runNowFb.phase === 'loading' ? 0.5 : 1 }}
@@ -589,6 +593,7 @@ export default function Plan() {
                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem' }}>
                                 <label style={labelStyle}>What it does</label>
                                 <button
+                                    ref={generateShRef}
                                     class="t-btn"
                                     style={{
                                         fontSize: 'var(--type-micro)', padding: '0.1rem 0.5rem',
@@ -777,7 +782,7 @@ export default function Plan() {
                         {/* Actions */}
                         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
                             <div>
-                                <button class="t-btn t-btn-primary"
+                                <button ref={saveShRef} class="t-btn t-btn-primary"
                                         style={{ padding: '0.3rem 1rem', fontSize: 'var(--type-body)',
                                                  opacity: saveFb.phase === 'loading' ? 0.6 : 1 }}
                                         disabled={saveFb.phase === 'loading'}
@@ -819,7 +824,7 @@ export default function Plan() {
                                         <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--status-error)' }}>
                                             Delete "{jobs.find(j => j.id === rjId)?.name}"?
                                         </span>
-                                        <button class="t-btn"
+                                        <button ref={deleteShRef} class="t-btn"
                                                 style={{
                                                     padding: '0.2rem 0.6rem', fontSize: 'var(--type-label)',
                                                     color: 'var(--status-error)', borderColor: 'var(--status-error)',
@@ -854,6 +859,7 @@ export default function Plan() {
                     <AddRecurringJobModal onAdded={() => { fetchSchedule(); fetchLoadMap(); }} />
                     <div>
                         <button
+                            ref={rebalanceShRef}
                             class="t-btn t-btn-primary px-4 py-2 text-sm"
                             onClick={handleRebalance}
                             disabled={rebalanceFb.phase === 'loading'}
