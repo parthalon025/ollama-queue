@@ -24,6 +24,7 @@ class PlanErrorBoundary extends Component {
 import {
     currentTab, dlqCount, fetchModels, fetchSchedule,
     startPolling, stopPolling, stopEvalPoll, status, refreshQueue,
+    initAtmosphere, disposeAtmosphere, healthMode, escalationLevel, failedServices,
 } from './stores';
 import Sidebar from './components/Sidebar.jsx';
 import CohesionHeader from './components/CohesionHeader.jsx';
@@ -122,6 +123,11 @@ export function App() {
         return () => stopPolling();
     }, []);
 
+    useEffect(() => {
+        initAtmosphere();
+        return () => disposeAtmosphere();
+    }, []);
+
     // What it does: Flashes the main content area when connection recovers after an outage.
     // Design system §7.2 stage 4: "t2-tick-flash on data containers" on recovery.
     // Only fires on disconnected → ok transitions (not on initial load).
@@ -218,9 +224,15 @@ export function App() {
     ];
 
     return (
-        <div class="layout-root sh-crt" style="background: var(--bg-base); color: var(--text-primary);">
-            {/* App-level SYSTEM PAUSED mantra — stamps watermark when daemon is paused */}
-            <ShMantra text="SYSTEM PAUSED" active={isDaemonPaused} />
+        <div class="layout-root sh-crt" data-sh-health={healthMode.value} style="background: var(--bg-base); color: var(--text-primary);">
+            {/* App-level mantra — shows SYSTEM PAUSED when daemon is paused, or failed service
+                name when health is critical and escalation reaches level 3 (60s+) */}
+            <ShMantra
+                text={healthMode.value === 'critical'
+                    ? (failedServices.value[0] || 'SYSTEM DOWN')
+                    : (isDaemonPaused ? 'SYSTEM PAUSED' : '')}
+                active={isDaemonPaused || escalationLevel.value >= 3}
+            />
             <Sidebar
                 active={currentTab.value}
                 onNavigate={handleNavigate}
