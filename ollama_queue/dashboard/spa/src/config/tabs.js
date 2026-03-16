@@ -12,7 +12,7 @@ export const TAB_CONFIG = [
     tooltip:   "Live view — what's running right now",
     namespace: 'QUEUE',
     page:      'NOW',
-    subtitle:  "live command center",
+    subtitle:  "LIVE COMMAND CENTER",
   },
   {
     id:        'plan',
@@ -21,7 +21,7 @@ export const TAB_CONFIG = [
     tooltip:   'Recurring jobs and upcoming run times',
     namespace: 'QUEUE',
     page:      'PLAN',
-    subtitle:  "recurring jobs and upcoming run times",
+    subtitle:  "RECURRING JOBS AND RUN TIMES",
   },
   {
     id:        'history',
@@ -30,7 +30,7 @@ export const TAB_CONFIG = [
     tooltip:   'Completed and failed jobs',
     namespace: 'QUEUE',
     page:      'HISTORY',
-    subtitle:  "completed and failed jobs",
+    subtitle:  "COMPLETED AND FAILED JOBS",
   },
   {
     id:        'models',
@@ -39,7 +39,7 @@ export const TAB_CONFIG = [
     tooltip:   'Installed AI models and downloads',
     namespace: 'QUEUE',
     page:      'MODELS',
-    subtitle:  "installed models and downloads",
+    subtitle:  "INSTALLED MODELS AND DOWNLOADS",
   },
   {
     id:        'settings',
@@ -48,7 +48,7 @@ export const TAB_CONFIG = [
     tooltip:   'Configure queue thresholds and defaults',
     namespace: 'QUEUE',
     page:      'CONFIG',
-    subtitle:  "thresholds, defaults, and daemon controls",
+    subtitle:  "THRESHOLDS, DEFAULTS, DAEMON CONTROLS",
   },
   {
     id:        'eval',
@@ -57,7 +57,7 @@ export const TAB_CONFIG = [
     tooltip:   'Test and compare AI model configurations',
     namespace: 'QUEUE',
     page:      'EVAL',
-    subtitle:  "test and compare ai model configurations",
+    subtitle:  "TEST AND COMPARE MODEL CONFIGURATIONS",
   },
   {
     id:        'consumers',
@@ -66,7 +66,7 @@ export const TAB_CONFIG = [
     tooltip:   'Detected Ollama consumers and routing',
     namespace: 'QUEUE',
     page:      'CONSUMERS',
-    subtitle:  "ollama consumer detection and routing",
+    subtitle:  "CONSUMER DETECTION AND ROUTING",
   },
   {
     id:        'performance',
@@ -75,7 +75,7 @@ export const TAB_CONFIG = [
     tooltip:   'Model performance stats and system health',
     namespace: 'QUEUE',
     page:      'PERF',
-    subtitle:  "model throughput and system health",
+    subtitle:  "MODEL THROUGHPUT AND SYSTEM HEALTH",
   },
   {
     id:        'backends',
@@ -84,6 +84,6 @@ export const TAB_CONFIG = [
     tooltip:   'Multi-backend fleet management and routing intelligence',
     namespace: 'QUEUE',
     page:      'BACKENDS',
-    subtitle:  "multi-gpu fleet management and routing",
+    subtitle:  "MULTI-GPU FLEET MANAGEMENT AND ROUTING",
   },
 ];

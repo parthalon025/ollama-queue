@@ -259,7 +259,7 @@ export default function BackendsTab() {
       await removeBackend(url);
     } catch (e) {
       console.error('Remove backend failed:', e);
-      addToast(`Remove failed: ${e.message}`, 'error', true);
+      addToast(`REMOVE FAILED: ${e.message}`, 'error', true);
     }
   }
 
