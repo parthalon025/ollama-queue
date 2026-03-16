@@ -50,6 +50,28 @@ def test_command_invalid_action(client):
     assert resp.status_code == 400
 
 
+def test_command_status_uses_get(client):
+    """POST /command with action=status dispatches GET (not POST) to agent."""
+    url = "http://testhost:11434"
+    encoded = urllib.parse.quote(url, safe="")
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"backend_url": url, "version": "0.1.0"}
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.get = AsyncMock(return_value=mock_resp)
+    mock_client.post = AsyncMock()
+    with patch("ollama_queue.api.backends.httpx.AsyncClient", return_value=mock_client):
+        resp = client.post(f"/api/backends/{encoded}/command", json={"action": "status"})
+    assert resp.status_code == 200
+    mock_client.get.assert_called_once()
+    mock_client.post.assert_not_called()
+    call_url = mock_client.get.call_args[0][0]
+    assert ":11435/" in call_url
+    assert "status" in call_url
+
+
 def test_command_agent_unreachable(client):
     """POST /command returns 502 when agent is unreachable."""
     url = "http://testhost:11434"
@@ -59,5 +81,5 @@ def test_command_agent_unreachable(client):
     mock_client.__aexit__ = AsyncMock(return_value=False)
     mock_client.post = AsyncMock(side_effect=httpx.ConnectError("refused"))
     with patch("ollama_queue.api.backends.httpx.AsyncClient", return_value=mock_client):
-        resp = client.post(f"/api/backends/{encoded}/command", json={"action": "status"})
+        resp = client.post(f"/api/backends/{encoded}/command", json={"action": "sync-models"})
     assert resp.status_code == 502

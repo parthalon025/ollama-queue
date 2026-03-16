@@ -421,6 +421,7 @@ async def backend_heartbeat(url: str = Path(...), req: HeartbeatRequest = None):
 # ── POST /api/backends/{url}/command ─────────────────────────────────────────
 
 _ALLOWED_ACTIONS = frozenset({"sync-models", "update-ollama", "restart-ollama", "status"})
+_GET_ACTIONS = frozenset({"status"})
 _AGENT_PORT = 11435
 
 
@@ -453,7 +454,10 @@ async def backend_command(url: str = Path(...), req: CommandRequest = None):
 
     try:
         async with httpx.AsyncClient(timeout=30.0, verify=False) as client:  # noqa: S501
-            resp = await client.post(agent_endpoint)
+            if req.action in _GET_ACTIONS:
+                resp = await client.get(agent_endpoint)
+            else:
+                resp = await client.post(agent_endpoint)
             return resp.json()
     except (httpx.ConnectError, httpx.TimeoutException) as e:
         _log.warning("command %s to agent %s failed: %s", req.action, agent_base, e)

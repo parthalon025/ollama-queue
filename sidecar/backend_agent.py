@@ -63,6 +63,56 @@ _cached_models_path = DATA_DIR / "required-models.json"
 # -- System metrics ------------------------------------------------------------
 
 
+def _read_gpu() -> tuple[str | None, float, float]:
+    """Read GPU name, VRAM used %, and VRAM total GB via nvidia-smi.
+
+    Returns (gpu_name, vram_pct, vram_total_gb). Falls back to (None, 0, 0)
+    if nvidia-smi is unavailable (e.g. no GPU or not installed).
+    """
+    try:
+        import subprocess
+
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=name,memory.used,memory.total",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode != 0:
+            return None, 0.0, 0.0
+        line = result.stdout.strip().split("\n")[0]
+        parts = [p.strip() for p in line.split(",")]
+        if len(parts) < 3:
+            return None, 0.0, 0.0
+        gpu_name = parts[0]
+        used_mb = float(parts[1])
+        total_mb = float(parts[2])
+        if total_mb == 0:
+            return gpu_name, 0.0, 0.0
+        vram_pct = round(used_mb / total_mb * 100, 1)
+        vram_total_gb = round(total_mb / 1024, 1)
+        return gpu_name, vram_pct, vram_total_gb
+    except Exception:
+        _log.debug("nvidia-smi unavailable or failed")
+        return None, 0.0, 0.0
+
+
+async def _ollama_ps() -> list[str]:
+    """Fetch currently loaded model names from Ollama /api/ps."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as c:
+            resp = await c.get(f"{OLLAMA_URL}/api/ps")
+            if resp.status_code == 200:
+                return [m["name"] for m in resp.json().get("models", [])]
+    except Exception as e:
+        _log.debug("Failed to get Ollama ps: %s", e)
+    return []
+
+
 def _read_cpu_pct() -> float:
     """Read CPU usage from /proc/stat (two samples, 100ms apart)."""
     try:
@@ -252,12 +302,18 @@ async def _reconcile() -> dict:
 async def _send_heartbeat():
     """Push health + system metrics to the queue server."""
     installed = await _ollama_tags()
+    loaded = await _ollama_ps()
     ollama_ver = await _ollama_version()
     healthy = await _ollama_healthy()
+    gpu_name, vram_pct, vram_total_gb = _read_gpu()
     ram_pct, ram_total_gb = _read_ram()
     disk_pct, disk_total_gb, disk_used_gb = _read_disk()
     payload = {
         "healthy": healthy,
+        "gpu_name": gpu_name,
+        "vram_pct": vram_pct,
+        "vram_total_gb": vram_total_gb,
+        "loaded_models": loaded,
         "cpu_pct": _read_cpu_pct(),
         "ram_pct": ram_pct,
         "ram_total_gb": ram_total_gb,
