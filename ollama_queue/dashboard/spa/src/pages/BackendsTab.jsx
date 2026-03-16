@@ -24,9 +24,9 @@ import { TAB_CONFIG } from '../config/tabs.js';
 // ── Fleet Overview card ──────────────────────────────────────────────────────
 
 // What it shows: One card per backend — hostname, GPU name, VRAM bar, loaded models,
-//   routing weight, health badge, and freshness (ShFrozen when last_checked is stale).
+//   routing weight, health badge, and freshness (ShFrozen when checked_at is stale).
 // Decision it drives: Which backend is healthy and ready? Which is overloaded?
-function BackendCard({ backend, onRemove, onUpdateWeight }) {
+function BackendCard({ backend, onRemove }) {
   const [editWeight, setEditWeight] = useState(false);
   const [weightVal, setWeightVal] = useState(String(backend.weight ?? 1));
   const [testResult, setTestResult] = useState(null);
@@ -70,7 +70,8 @@ function BackendCard({ backend, onRemove, onUpdateWeight }) {
 
   async function handleWeightSave() {
     const w = parseFloat(weightVal);
-    if (isNaN(w) || w < 0) { setWeightFb('Invalid weight'); return; }
+    // Server enforces 0.1–10.0; validate client-side to give instant feedback
+    if (isNaN(w) || w < 0.1 || w > 10.0) { setWeightFb('Weight must be 0.1 – 10.0'); return; }
     try {
       await updateBackendWeight(backend.url, w);
       setEditWeight(false);
@@ -81,7 +82,7 @@ function BackendCard({ backend, onRemove, onUpdateWeight }) {
   }
 
   return (
-    <ShFrozen timestamp={backend.last_checked ? backend.last_checked * 1000 : null}>
+    <ShFrozen timestamp={backend.checked_at ? backend.checked_at * 1000 : null}>
       <div
         ref={cardRef}
         class={`backend-card${isUnhealthy ? ' backend-card--unhealthy' : ''}`}

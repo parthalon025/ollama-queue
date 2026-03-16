@@ -166,6 +166,8 @@ class SchemaMixin:
         self._add_column_if_missing(conn, "eval_runs", "judge_backend_url", "TEXT")
         # Per-backend inference mode: 'gpu_only' restricts to VRAM-only; 'cpu_shared' allows CPU overflow
         self._add_column_if_missing(conn, "backends", "inference_mode", "TEXT NOT NULL DEFAULT 'cpu_shared'")
+        # Timestamp of last heartbeat push received from this backend (unix seconds)
+        self._add_column_if_missing(conn, "backends", "last_heartbeat_at", "REAL")
         # Backfill pre-existing rows
         conn.execute("UPDATE eval_variants SET params = '{}' WHERE params IS NULL")
         conn.execute("UPDATE eval_variants SET provider = 'ollama' WHERE provider IS NULL")
@@ -545,11 +547,12 @@ class SchemaMixin:
             -- Backends table — dynamically registered Ollama backends (API-managed; env-var
             -- backends are always included separately via backend_router.py BACKENDS list)
             CREATE TABLE IF NOT EXISTS backends (
-                url      TEXT PRIMARY KEY,
-                weight   REAL NOT NULL DEFAULT 1.0,
-                enabled  INTEGER NOT NULL DEFAULT 1,
-                added_at REAL NOT NULL,
-                label    TEXT
+                url            TEXT PRIMARY KEY,
+                weight         REAL NOT NULL DEFAULT 1.0,
+                enabled        INTEGER NOT NULL DEFAULT 1,
+                added_at       REAL NOT NULL,
+                label          TEXT,
+                inference_mode TEXT NOT NULL DEFAULT 'cpu_shared'
             );
         """)
 

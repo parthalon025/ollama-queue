@@ -50,9 +50,10 @@ export default function BackendsPanel() {
                     try { host = new URL(backend.url).hostname; } catch (_) { /* keep full url */ }
                     const label = backend.gpu_name || host;
 
-                    const vramColor = backend.vram_pct > 80
+                    // Thresholds match HostCard.jsx and CLAUDE.md: >90% error, >80% warning
+                    const vramColor = backend.vram_pct > 90
                         ? 'var(--status-error)'
-                        : backend.vram_pct > 60
+                        : backend.vram_pct > 80
                             ? 'var(--status-warning)'
                             : 'var(--accent)';
 

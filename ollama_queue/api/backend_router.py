@@ -476,3 +476,46 @@ def refresh_backends_from_db() -> None:
             _log.warning("refresh_backends_from_db: DB read failed: %s", e)
     # Merge: env-var first, then DB additions. dict.fromkeys preserves insertion order + dedupes.
     BACKENDS = list(dict.fromkeys(_ENV_BACKENDS + db_urls))
+
+
+def receive_heartbeat(url: str, data: dict, now: float) -> None:
+    """Receive a health push from a remote ollama-queue instance and update all caches.
+
+    Plain English: Instead of polling each remote host on every routing decision,
+    the remote instance can call PUT /api/backends/{url}/heartbeat to push its own
+    state. This writes directly into the same in-process TTL caches that _backend_healthy,
+    _backend_vram_pct, _backend_gpu_name, _loaded_models, and _available_models read from.
+    The result: the next routing decision uses fresh pushed data with no outbound poll.
+
+    Args:
+        url:  The backend URL as registered (e.g. "http://100.x.x.x:11434").
+        data: Heartbeat payload — keys: healthy, vram_pct, vram_total_gb, gpu_name,
+              loaded_models (list[str]), available_models (list[str]).
+        now:  Monotonic timestamp for cache entries.
+    """
+    url = url.rstrip("/")
+
+    # Health cache — heartbeat implies the host is reachable
+    _health_cache[url] = (now, bool(data.get("healthy", True)))
+
+    # VRAM pressure cache (used by routing tier 4 and gpu_only filter)
+    if "vram_pct" in data:
+        _hw_cache[url] = (now, float(data["vram_pct"]))
+
+    # Total VRAM cache (used by gpu_only filter to check model fit)
+    if "vram_total_gb" in data:
+        _vram_total_cache[url] = (now, float(data.get("vram_total_gb", 0.0)))
+
+    # GPU name cache — use full TTL since pushed value is authoritative
+    if "gpu_name" in data:
+        _gpu_name_cache[url] = (now, data["gpu_name"])
+
+    # Loaded models cache (used by routing tier 3 — prefer warm backend)
+    if "loaded_models" in data:
+        _loaded_cache[url] = (now, frozenset(data["loaded_models"]))
+
+    # Available models cache (used by routing tier 2 — prefer backend with model)
+    if "available_models" in data:
+        _models_cache[url] = (now, frozenset(data["available_models"]))
+
+    _log.debug("heartbeat received from %s: healthy=%s vram=%.1f%%", url, data.get("healthy"), data.get("vram_pct", 0))

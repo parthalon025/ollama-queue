@@ -144,6 +144,16 @@ The server exposes `/api/generate` and `/api/embed` as a drop-in Ollama proxy. R
 
 **Multi-backend routing:** Set `OLLAMA_BACKENDS=http://host1:11434,http://host2:11434` to distribute requests across multiple Ollama instances. Weights are configurable live via `PUT /api/backends/{url}/weight`. Single-backend setups skip routing logic entirely.
 
+**Remote heartbeat push:** Remote Ollama instances can push their own health state to the primary instead of being polled. This eliminates 5 outbound HTTP calls per request to remote hosts. Use `PUT /api/backends/{url}/heartbeat` from the remote host (e.g. via cron every 30s):
+
+```bash
+STATE=$(curl -s http://localhost:7683/api/health | jq '{healthy: true, gpu_name: .gpu_name, vram_pct: .log[0].vram_pct, vram_total_gb: .vram_total_gb, loaded_models: .loaded_models}')
+curl -s -X PUT http://<primary>:7683/api/backends/http://<remote-ip>:11434/heartbeat \
+  -H "Content-Type: application/json" -d "$STATE"
+```
+
+Partial pushes are safe — only fields present in the payload update their cache. Omitting `vram_pct` leaves the VRAM cache untouched. Unknown backends are auto-registered on first push.
+
 **BitNet routing:** Models with a `bitnet:` prefix are forwarded to BitNet llama-server instead of Ollama. Set `BITNET_URL` (default: `http://127.0.0.1:11435`). BitNet and Ollama run concurrently — each has its own semaphore so they don't block each other.
 
 Pass priority metadata in the JSON body (stripped before forwarding to Ollama):
@@ -245,7 +255,7 @@ Nine views served from `http://localhost:7683/ui/`:
 | **History** | ShDataTable for searchable/sortable job history, DLQ entries with reschedule status badges and reasoning, deferred jobs panel, duration trends, activity heatmap |
 | **Models** | ShDataTable for searchable/sortable model list with active model tracking |
 | **Perf** | Per-model performance table, cross-model performance curve chart (SVG scatter, log-scale), 24h×7d load heatmap, system health gauges, ShTimeChart showing RAM % trend (last 24h from health log), per-backend throughput table showing tok/min per GPU |
-| **Backends** | Full fleet overview of all configured Ollama backends — health, throughput, routing weights, add/remove/test controls |
+| **Backends** | Full fleet overview of all configured Ollama backends — health, throughput, routing weight and `checked_at` freshness per backend, add/remove/test controls. Env-var backends (`OLLAMA_BACKENDS`) return 409 on delete with an actionable message; weight validation enforces 0.1–10.0 range. |
 | **Settings** | Thresholds, defaults, retention, DLQ auto-reschedule, proactive deferral, daemon controls (14+ tunable parameters), CRT scanline display preference (off/low/medium/high) |
 | **Eval** | Runs, Variants, Trends, Settings sub-views for the prompt eval pipeline; active run progress via ShPipeline |
 | **Consumers** | Scan results, consumer cards with status badges, include/ignore/revert actions, intercept toggle |
@@ -267,6 +277,7 @@ The REST API runs at `http://localhost:7683/api/`. Key endpoint groups:
 | **Settings** | `GET/PUT /api/settings` |
 | **Eval** | `GET/POST /api/eval/runs`, `POST /api/eval/runs/{id}/promote`, `GET/POST /api/eval/variants`, `GET /api/eval/trends`, `GET/PUT /api/eval/settings` |
 | **Consumers** | `POST /api/consumers/scan`, `POST /api/consumers/{id}/include`, `POST /api/consumers/intercept/enable` |
+| **Backends** | `GET /api/backends`, `POST /api/backends`, `DELETE /api/backends/{url}`, `PUT /api/backends/{url}/weight`, `PUT /api/backends/{url}/inference-mode`, `GET /api/backends/{url}/test`, `PUT /api/backends/{url}/heartbeat` |
 | **Proxy** | `POST /api/generate`, `POST /api/embed` |
 
 Full interactive docs are at `http://localhost:7683/docs` (FastAPI/Swagger).
@@ -334,7 +345,7 @@ systemd timers / apps / proxy clients
 | **Scheduling** | croniter, custom 48-slot load map |
 | **Dashboard** | Preact 10, @preact/signals, Tailwind v4, uPlot |
 | **CLI** | Click |
-| **Tests** | pytest, pytest-xdist (1,943 tests, 100% line coverage) |
+| **Tests** | pytest, pytest-xdist (1,951 tests, 100% line coverage) |
 
 ---
 
@@ -364,7 +375,7 @@ ollama_queue/
 scripts/
   migrate_timers.py              # Migrate systemd timers to recurring jobs
   migrate_dlq_max_retries.py     # Schema migration (idempotent)
-tests/                           # 1,943 tests, 100% line coverage (pytest-xdist parallel)
+tests/                           # 1,951 tests, 100% line coverage (pytest-xdist parallel)
 ```
 
 ---
@@ -394,7 +405,7 @@ Dev/test: `pip install -r requirements-dev.txt`
 
 ```bash
 source .venv/bin/activate
-pytest  # 1,943 tests, 100% line coverage, parallel by default
+pytest  # 1,951 tests, 100% line coverage, parallel by default
 ```
 
 ---
@@ -421,6 +432,7 @@ Implementation plans and design decisions are in [`docs/plans/`](docs/plans/):
 | [Edge case audit & fixes](docs/plans/2026-03-13-edge-case-fixes.md) | 27 edge cases across 6 subsystems — proxy deadlock, SQLITE_BUSY retry, health pause escape hatch, eval safety gates |
 | [Bug audit fixes](docs/plans/2026-03-13-bug-audit-fixes.md) | API input validation: offset bounds, limit caps, settings type enforcement |
 | [Eval backend host selection](docs/plans/2026-03-15-eval-backend-host-selection.md) | Multi-backend eval routing: SSRF prevention, `_backend` proxy param, preflight model validation |
+| [Remote backend improvements](docs/plans/2026-03-16-remote-backend-improvements.md) | `GET /api/backends` weight+checked_at fields, env-var 404→409, weight auto-register, heartbeat push endpoint |
 
 ---
 

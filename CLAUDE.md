@@ -96,7 +96,7 @@ scripts/
   migrate_timers.py            # Migrate 8 of 10 systemd timers to recurring jobs
   migrate_dlq_max_retries.py   # Add max_retries column to existing dlq table (idempotent)
 
-tests/                           # 1,943 tests, 100% line coverage
+tests/                           # 1,951 tests, 100% line coverage
 ```
 
 ## How to Run
@@ -106,7 +106,7 @@ tests/                           # 1,943 tests, 100% line coverage
 cd ~/Documents/projects/ollama-queue
 source .venv/bin/activate
 
-# Run tests (1,943 tests, 100% line coverage)
+# Run tests (1,951 tests, 100% line coverage)
 pytest
 
 # Start the server (daemon + API + dashboard)
@@ -333,6 +333,9 @@ This applies to: component files, store transformations in `stores/`, computed v
 - **Daemon startup logging** — `_recover_orphans()` always logs a summary line: either "clean startup" or orphan counts (eval runs, jobs, proxy sentinels). `run()` logs `"Daemon started (poll_interval=Ns)"` after recovery completes. These are the first INFO lines after service start — useful for verifying the process is alive.
 - **`get_models()` uses `asyncio.to_thread` for subprocess calls** — `api/models.py` is `async def` (needed for `await fetch_all_backend_models()`), but `om.get_loaded()` and `om.list_local()` call `subprocess.run()`. Both are wrapped in `asyncio.to_thread()` to avoid blocking the event loop for up to 15s.
 - **Eval preflight queries all `BACKENDS` for model availability** — `engine.py` preflight checks `OllamaModels.list_local()` (local binary) AND queries `/api/tags` from all remote backends in `BACKENDS`. Without this, models only available on remote backends are rejected with "Models not installed" and the eval run fails immediately. Local/localhost backends are skipped (already covered by `list_local()`).
+- **`GET /api/backends` returns `weight` and `checked_at`** — `weight` comes from DB, falls back to `OLLAMA_BACKEND_WEIGHTS` env var, then 1.0. `checked_at` is derived from `_health_cache[url][0]` (monotonic timestamp) converted to wall time via `time.time() - (time.monotonic() - cached_ts)`. `BackendsTab.BackendCard` uses `checked_at` for `ShFrozen` freshness indicator and `weight` for the editable weight display.
+- **`PUT /api/backends/{url}/heartbeat` — remote push API** — a remote ollama-queue instance calls this periodically (recommended 30s) to push its own health state (`healthy`, `gpu_name`, `vram_pct`, `vram_total_gb`, `loaded_models`, `available_models`) directly into the primary's routing caches (`_health_cache`, `_hw_cache`, `_gpu_name_cache`, `_loaded_cache`, `_models_cache`). The primary no longer needs to poll the remote on each routing decision. Auto-registers the backend if absent — the act of pushing proves reachability. Uses `exclude_unset=True` on the Pydantic model so partial pushes (e.g. only `healthy`) don't overwrite other caches with default 0 values. Implemented in `backend_router.receive_heartbeat()`.
+- **Remote host push implementation** — on the remote Docker container, add `curl -X PUT http://<primary-ip>:7683/api/backends/http://<remote-ip>:11434/heartbeat -H "Content-Type: application/json" -d '{"healthy":true,"gpu_name":"RTX 2070","vram_pct":45}' &` to a cron every 30s, or call it from the remote ollama-queue's own health loop. `scripts/backend-onboard.sh` should be extended to set up this cron.
 
 ## Design Doc
 

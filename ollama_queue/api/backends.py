@@ -28,6 +28,34 @@ from pydantic import BaseModel
 import ollama_queue.api as _api
 import ollama_queue.api.backend_router as _router
 
+_WEIGHT_MIN = 0.1
+_WEIGHT_MAX = 10.0
+
+
+def _is_env_backend(url: str) -> bool:
+    """Return True if url matches a backend in the env-var BACKENDS list.
+
+    Plain English: Checks whether a URL is registered via the OLLAMA_BACKENDS
+    env var (read-only — cannot be removed via the API). Used to distinguish
+    "env-var backend, DB row not yet created" from "unknown backend, reject 404".
+    Normalises trailing slashes before comparing.
+    """
+    normalized = url.rstrip("/")
+    return any(b.rstrip("/") == normalized for b in _router.BACKENDS)
+
+
+def _auto_register_if_env_backend(url: str, db, reason: str) -> None:
+    """Insert an env-var backend into the DB if it isn't there yet.
+
+    Plain English: Env-var backends are always included in routing but start
+    with no DB row (nothing to persist until the user sets weight or mode).
+    Calling this before a write ensures the row exists so UPDATE succeeds.
+    """
+    if not db.get_backend(url) and _is_env_backend(url):
+        _log.info("auto-registering env-var backend %s for %s", url, reason)
+        db.add_backend(url)
+
+
 _log = logging.getLogger(__name__)
 router = APIRouter()
 
@@ -69,13 +97,25 @@ class AddBackendRequest(BaseModel):
 
 @router.get("/api/backends")
 async def get_backends():
-    """Return health and resource status for all configured Ollama backends."""
+    """Return health and resource status for all configured Ollama backends.
+
+    Each entry includes:
+      weight      — routing weight (DB value, then env-var, then 1.0)
+      checked_at  — unix timestamp of last health-check or heartbeat (null if never checked)
+    """
     db = _api.db
-    # Build a url→inference_mode map from DB (env-var-only backends default to 'cpu_shared')
+    # Build url→inference_mode and url→weight maps from DB
     db_modes: dict[str, str] = {}
+    db_weights: dict[str, float] = {}
     if db:
         for row in db.list_backends():
-            db_modes[row["url"].rstrip("/")] = row.get("inference_mode", "cpu_shared")
+            key = row["url"].rstrip("/")
+            db_modes[key] = row.get("inference_mode", "cpu_shared")
+            db_weights[key] = float(row.get("weight", 1.0))
+
+    # Monotonic→wall-time conversion anchor (computed once per request)
+    _mono_now = time.monotonic()
+    _wall_now = time.time()
 
     results = []
     for url in _router.BACKENDS:
@@ -86,6 +126,13 @@ async def get_backends():
             _router._backend_vram_pct(url),
             _router._backend_gpu_name(url),
         )
+        # Derive checked_at from the health-cache entry (monotonic → wall time)
+        cached_health = _router._health_cache.get(url)
+        checked_at = round(_wall_now - (_mono_now - cached_health[0]), 1) if cached_health else None
+
+        # Weight: DB > env-var > 1.0
+        weight = db_weights.get(url.rstrip("/"), _router._BACKEND_WEIGHTS.get(url.rstrip("/"), 1.0))
+
         results.append(
             {
                 "url": url,
@@ -95,6 +142,8 @@ async def get_backends():
                 "vram_pct": round(vram_pct, 1),
                 "gpu_name": gpu_name,
                 "inference_mode": db_modes.get(url.rstrip("/"), "cpu_shared"),
+                "weight": weight,
+                "checked_at": checked_at,
             }
         )
     return results
@@ -113,8 +162,8 @@ async def add_backend(req: AddBackendRequest):
     """
     if not (req.url.startswith("http://") or req.url.startswith("https://")):
         raise HTTPException(status_code=400, detail="url must start with http:// or https://")
-    if not (0.1 <= req.weight <= 10.0):
-        raise HTTPException(status_code=400, detail="weight must be between 0.1 and 10.0")
+    if not (_WEIGHT_MIN <= req.weight <= _WEIGHT_MAX):
+        raise HTTPException(status_code=400, detail=f"weight must be between {_WEIGHT_MIN} and {_WEIGHT_MAX}")
     if not _is_safe_backend_url(req.url):
         raise HTTPException(status_code=400, detail="url targets a disallowed host")
 
@@ -171,6 +220,14 @@ async def remove_backend(url: str = Path(...)):
 
     removed = db.remove_backend(url)
     if not removed:
+        if _is_env_backend(url):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"backend {url} is configured via OLLAMA_BACKENDS and cannot be removed via "
+                    "the API — update the env var and restart the service"
+                ),
+            )
         raise HTTPException(status_code=404, detail=f"backend {url} not found")
 
     _router.invalidate_backend_caches(url)
@@ -190,13 +247,15 @@ async def update_backend_weight(url: str = Path(...), weight: float = Query(...)
     Range 0.1-10.0. Takes effect on the next routing decision.
     """
     url = unquote(url)
-    if not (0.1 <= weight <= 10.0):
-        raise HTTPException(status_code=400, detail="weight must be between 0.1 and 10.0")
+    if not (_WEIGHT_MIN <= weight <= _WEIGHT_MAX):
+        raise HTTPException(status_code=400, detail=f"weight must be between {_WEIGHT_MIN} and {_WEIGHT_MAX}")
 
     db = _api.db
     if not db:
         _log.error("update_backend_weight: database not available for %s", url)
         raise HTTPException(status_code=503, detail="database not available")
+
+    _auto_register_if_env_backend(url, db, "weight")
 
     updated = db.update_backend_weight(url, weight)
     if not updated:
@@ -226,10 +285,7 @@ async def update_backend_inference_mode(url: str = Path(...), mode: str = Query(
     if not db:
         raise HTTPException(status_code=503, detail="database not available")
 
-    # Auto-register env-var backends that aren't in the DB yet so the setting can be stored
-    if not db.get_backend(url) and any(b.rstrip("/") == url.rstrip("/") for b in _router.BACKENDS):
-        _log.info("auto-registering env-var backend %s for inference_mode configuration", url)
-        db.add_backend(url)
+    _auto_register_if_env_backend(url, db, "inference_mode")
 
     updated = db.update_backend_inference_mode(url, mode)
     if not updated:
@@ -273,3 +329,68 @@ async def test_backend(url: str = Path(...)):
             "latency_ms": round(latency_ms, 1),
             "error": str(e),
         }
+
+
+# ── PUT /api/backends/{url}/heartbeat ─────────────────────────────────────────
+
+
+class HeartbeatRequest(BaseModel):
+    """Health state pushed by a remote ollama-queue instance.
+
+    Plain English: A remote ollama-queue daemon calls this endpoint periodically
+    (recommended every 30s) to push its own health metrics directly into the primary
+    instance's routing caches. This replaces the primary having to poll the remote on
+    every routing decision — the remote proves reachability by contacting us.
+
+    Fields mirror what the primary's own /api/health returns plus Ollama model state.
+    All fields are optional so partial pushes work (e.g. no GPU → omit vram fields).
+    """
+
+    healthy: bool = True
+    gpu_name: str | None = None
+    vram_pct: float = 0.0
+    vram_total_gb: float = 0.0
+    loaded_models: list[str] = []
+    available_models: list[str] = []
+
+
+@router.put("/api/backends/{url:path}/heartbeat")
+async def backend_heartbeat(url: str = Path(...), req: HeartbeatRequest = None):
+    """Receive a health push from a remote ollama-queue instance.
+
+    Plain English: The remote host calls this instead of waiting to be polled.
+    Writes directly into the primary's in-process routing caches (health, VRAM,
+    GPU name, loaded models, available models) so the next routing decision
+    uses fresh data without any outbound HTTP call to the remote.
+
+    Auto-registers the backend if it is not yet in BACKENDS or the DB — the act
+    of pushing a heartbeat proves the host is reachable (no separate test needed).
+
+    Idempotent — safe to call repeatedly. Rate limiting is the caller's responsibility.
+    """
+    if req is None:
+        req = HeartbeatRequest()
+
+    url = unquote(url)
+
+    if not (url.startswith("http://") or url.startswith("https://")):
+        raise HTTPException(status_code=400, detail="url must start with http:// or https://")
+    if not _is_safe_backend_url(url):
+        raise HTTPException(status_code=400, detail="url targets a disallowed host")
+
+    now = time.monotonic()
+
+    # Auto-register: add to BACKENDS list and DB so routing can use it immediately.
+    # No connectivity test needed — the remote proved reachability by calling us.
+    if not _is_env_backend(url):
+        _log.info("heartbeat auto-registering new backend %s", url)
+        db = _api.db
+        if db and not db.get_backend(url):
+            db.add_backend(url)
+        _router.refresh_backends_from_db()
+
+    # exclude_unset=True ensures only explicitly-provided fields update their caches;
+    # default-valued fields (e.g. vram_pct=0.0) don't overwrite cached data on partial pushes
+    _router.receive_heartbeat(url, req.model_dump(exclude_unset=True), now)
+
+    return {"url": url, "ok": True}
