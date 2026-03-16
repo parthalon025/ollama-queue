@@ -23,7 +23,11 @@ def backend(ctx, queue_url):
 def backend_status(ctx, url):
     """Show backend agent status (all or specific)."""
     queue_url = ctx.obj["queue_url"]
-    resp = httpx.get(f"{queue_url}/api/backends", timeout=10.0)
+    try:
+        resp = httpx.get(f"{queue_url}/api/backends", timeout=10.0)
+    except httpx.HTTPError as e:
+        click.echo(f"Error connecting to queue: {e}")
+        return
     backends = resp.json()
     if url:
         backends = [b for b in backends if b["url"].rstrip("/") == url.rstrip("/")]
@@ -41,11 +45,15 @@ def backend_status(ctx, url):
 def _dispatch_command(queue_url: str, backend_url: str, action: str):
     """Send a command to a specific backend via the queue."""
     encoded = urllib.parse.quote(backend_url, safe="")
-    resp = httpx.post(
-        f"{queue_url}/api/backends/{encoded}/command",
-        json={"action": action},
-        timeout=60.0,
-    )
+    try:
+        resp = httpx.post(
+            f"{queue_url}/api/backends/{encoded}/command",
+            json={"action": action},
+            timeout=60.0,
+        )
+    except httpx.HTTPError as e:
+        click.echo(f"  {backend_url}: Error connecting to queue: {e}")
+        return
     if resp.status_code != 200:
         click.echo(f"Error: {resp.json().get('detail', resp.text)}")
         return
@@ -58,7 +66,11 @@ def _dispatch_to_all_or_one(ctx, action, url):
     if url:
         _dispatch_command(queue_url, url, action)
     else:
-        resp = httpx.get(f"{queue_url}/api/backends", timeout=10.0)
+        try:
+            resp = httpx.get(f"{queue_url}/api/backends", timeout=10.0)
+        except httpx.HTTPError as e:
+            click.echo(f"Error connecting to queue: {e}")
+            return
         for b in resp.json():
             _dispatch_command(queue_url, b["url"], action)
 

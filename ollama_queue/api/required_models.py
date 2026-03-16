@@ -8,6 +8,7 @@ they can't run efficiently.
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 
@@ -32,7 +33,8 @@ def get_required_models(backend_url: str | None = Query(None)):
     """
     db = _api.db
     settings = db.get_all_settings() if db else {}
-    all_models = settings.get("required_models", [])
+    raw = settings.get("required_models", [])
+    all_models = json.loads(raw) if isinstance(raw, str) else raw
 
     if not backend_url:
         return {"models": all_models}

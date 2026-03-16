@@ -439,6 +439,8 @@ async def backend_command(url: str = Path(...), req: CommandRequest = None):
     Supported actions: sync-models, update-ollama, restart-ollama, status
     """
     url = unquote(url)
+    if not _is_safe_backend_url(url):
+        raise HTTPException(status_code=400, detail="url targets a disallowed host")
     if req is None or req.action not in _ALLOWED_ACTIONS:
         raise HTTPException(
             status_code=400,

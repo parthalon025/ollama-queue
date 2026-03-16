@@ -165,6 +165,7 @@ async def _ollama_healthy() -> bool:
             resp = await c.get(f"{OLLAMA_URL}/api/tags")
             return resp.status_code == 200
     except Exception:
+        _log.debug("Ollama health check failed")
         return False
 
 
@@ -331,8 +332,11 @@ async def status():
     required = await _fetch_required_models()
     required_names = [m["name"] for m in required]
     missing = [n for n in required_names if n not in installed]
-    ram_pct, ram_total_gb = _read_ram()
-    disk_pct, disk_total_gb, disk_used_gb = _read_disk()
+    # Wrap blocking I/O in to_thread to avoid stalling the event loop
+    cpu_pct = await asyncio.to_thread(_read_cpu_pct)
+    ram_pct, ram_total_gb = await asyncio.to_thread(_read_ram)
+    disk_pct, disk_total_gb, disk_used_gb = await asyncio.to_thread(_read_disk)
+    storage_gb = await asyncio.to_thread(_read_ollama_storage_gb)
     return {
         "backend_url": BACKEND_URL,
         "version": VERSION,
@@ -344,13 +348,13 @@ async def status():
             "missing": sorted(missing),
         },
         "system": {
-            "cpu_pct": _read_cpu_pct(),
+            "cpu_pct": cpu_pct,
             "ram_pct": ram_pct,
             "ram_total_gb": ram_total_gb,
             "disk_pct": disk_pct,
             "disk_total_gb": disk_total_gb,
             "disk_used_gb": disk_used_gb,
-            "ollama_storage_gb": _read_ollama_storage_gb(),
+            "ollama_storage_gb": storage_gb,
         },
         "last_reconcile": _last_reconcile,
         "last_reconcile_result": _last_reconcile_result,
@@ -382,6 +386,18 @@ async def update_ollama():
         return {"ok": False, "error": f"Pull failed: {e}", "log": log}
     try:
         old = client.containers.get(container_name)
+    except Exception:
+        _log.info("Container '%s' not found, using defaults", container_name)
+        log.append(f"'{container_name}' not found, using defaults.")
+        run_config = {
+            "image": "ollama/ollama:latest",
+            "name": container_name,
+            "detach": True,
+            "restart_policy": {"Name": "always"},
+            "ports": {"11434/tcp": "11434"},
+            "volumes": ["ollama:/root/.ollama"],
+        }
+    else:
         hc = old.attrs["HostConfig"]
         cfg = old.attrs["Config"]
         port_bindings = hc.get("PortBindings") or {}
@@ -404,16 +420,6 @@ async def update_ollama():
         old.stop(timeout=10)
         old.remove()
         log.append("Removed.")
-    except Exception:
-        log.append(f"'{container_name}' not found, using defaults.")
-        run_config = {
-            "image": "ollama/ollama:latest",
-            "name": container_name,
-            "detach": True,
-            "restart_policy": {"Name": "always"},
-            "ports": {"11434/tcp": "11434"},
-            "volumes": ["ollama:/root/.ollama"],
-        }
     try:
         container = client.containers.run(**run_config)
         time.sleep(2)
