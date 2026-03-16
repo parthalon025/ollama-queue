@@ -9,7 +9,7 @@ import { useActionFeedback } from '../hooks/useActionFeedback.js';
 import CurrentJob from '../components/CurrentJob.jsx';
 import QueueList from '../components/QueueList.jsx';
 import HeroCard from '../components/HeroCard.jsx';
-import { ShPageBanner, ShStatCard, ShStatsGrid } from 'superhot-ui/preact';
+import { ShPageBanner, ShStatCard, ShStatsGrid, ShFrozen } from 'superhot-ui/preact';
 import { TAB_CONFIG } from '../config/tabs.js';
 import InfrastructurePanel from '../components/InfrastructurePanel.jsx';
 
@@ -132,7 +132,11 @@ export default function Now({ onSubmitRequest }) {
              data-mood={showAlerts ? 'dread' : 'dawn'}>
             <ShPageBanner namespace={_tab.namespace} page={_tab.page} subtitle={_tab.subtitle} />
             {/* KPI stat cards — live queue health at a glance */}
-            <ShStatsGrid stats={kpiStats} />
+            {/* ShFrozen: dims the stats block when daemon data goes stale (>30s cooling, >2m frozen, >5m stale) */}
+            <ShFrozen timestamp={st?.daemon?.timestamp ? st.daemon.timestamp * 1000 : null}
+                      thresholds={{ cooling: 30, frozen: 120, stale: 300 }}>
+                <ShStatsGrid stats={kpiStats} />
+            </ShFrozen>
             {/* Disconnected banner */}
             {connectionStatus.value === 'disconnected' && (
                 <div style={{
@@ -263,47 +267,60 @@ export default function Now({ onSubmitRequest }) {
                     />
 
                     {/* KPI cards — 2×2 grid */}
+                    {/* ShFrozen: each card dims when health data goes stale — health polls every 5s so thresholds are tight */}
                     <div class="grid grid-cols-2 gap-3 sh-delay-200">
-                        <HeroCard
-                            label="Jobs Completed Today"
-                            value={kpis ? kpis.jobs_24h : '--'}
-                            sparkData={buildHealthSparkline(health, 'ram_pct')}
-                            sparkColor="var(--accent)"
-                            delta={kpis ? buildJobsDelta(kpis, hist) : null}
-                            tooltip="Total jobs completed in the last 24 hours. Rising = queue is healthy. Falling = daemon may be stalled."
-                            chroma="lune"
-                        />
-                        <HeroCard
-                            label="Average Wait Before Starting"
-                            value={kpis ? formatWaitReadable(kpis.avg_wait_seconds) : '--'}
-                            sparkData={buildDurationSparkline(durations)}
-                            sparkColor="var(--accent)"
-                            delta={kpis ? buildWaitDelta(kpis.avg_wait_seconds) : null}
-                            tooltip="Average time a job spends in queue before the daemon starts it. Spikes mean the daemon was busy or paused."
-                            chroma="lune"
-                        />
-                        <HeroCard
-                            label="Auto-Paused Time Today"
-                            value={kpis ? `${kpis.pause_minutes_24h}` : '--'}
-                            unit="min"
-                            warning={kpis && kpis.pause_minutes_24h > 30}
-                            sparkData={buildPauseSparkline(health)}
-                            sparkColor="var(--status-warning)"
-                            delta={kpis ? buildPauseDelta(kpis.pause_minutes_24h) : null}
-                            tooltip="Total minutes the daemon spent paused in the last 24 hours. High values mean frequent health-triggered pauses."
-                            chroma="sciel"
-                        />
-                        <HeroCard
-                            label="7-Day Success Rate"
-                            value={kpis ? `${Math.round(kpis.success_rate_7d * 100)}` : '--'}
-                            unit="%"
-                            warning={kpis && kpis.success_rate_7d < 0.9}
-                            sparkData={buildSuccessRateSparkline(durations)}
-                            sparkColor="var(--accent)"
-                            delta={kpis ? buildSuccessRateDelta(kpis, hist) : null}
-                            tooltip="Percentage of completed jobs that succeeded. Below 90% warrants investigation in History."
-                            chroma="gustave"
-                        />
+                        <ShFrozen timestamp={latestHealth?.timestamp ? latestHealth.timestamp * 1000 : null}
+                                  thresholds={{ cooling: 30, frozen: 120, stale: 300 }}>
+                            <HeroCard
+                                label="Jobs Completed Today"
+                                value={kpis ? kpis.jobs_24h : '--'}
+                                sparkData={buildHealthSparkline(health, 'ram_pct')}
+                                sparkColor="var(--accent)"
+                                delta={kpis ? buildJobsDelta(kpis, hist) : null}
+                                tooltip="Total jobs completed in the last 24 hours. Rising = queue is healthy. Falling = daemon may be stalled."
+                                chroma="lune"
+                            />
+                        </ShFrozen>
+                        <ShFrozen timestamp={latestHealth?.timestamp ? latestHealth.timestamp * 1000 : null}
+                                  thresholds={{ cooling: 30, frozen: 120, stale: 300 }}>
+                            <HeroCard
+                                label="Average Wait Before Starting"
+                                value={kpis ? formatWaitReadable(kpis.avg_wait_seconds) : '--'}
+                                sparkData={buildDurationSparkline(durations)}
+                                sparkColor="var(--accent)"
+                                delta={kpis ? buildWaitDelta(kpis.avg_wait_seconds) : null}
+                                tooltip="Average time a job spends in queue before the daemon starts it. Spikes mean the daemon was busy or paused."
+                                chroma="lune"
+                            />
+                        </ShFrozen>
+                        <ShFrozen timestamp={latestHealth?.timestamp ? latestHealth.timestamp * 1000 : null}
+                                  thresholds={{ cooling: 30, frozen: 120, stale: 300 }}>
+                            <HeroCard
+                                label="Auto-Paused Time Today"
+                                value={kpis ? `${kpis.pause_minutes_24h}` : '--'}
+                                unit="min"
+                                warning={kpis && kpis.pause_minutes_24h > 30}
+                                sparkData={buildPauseSparkline(health)}
+                                sparkColor="var(--status-warning)"
+                                delta={kpis ? buildPauseDelta(kpis.pause_minutes_24h) : null}
+                                tooltip="Total minutes the daemon spent paused in the last 24 hours. High values mean frequent health-triggered pauses."
+                                chroma="sciel"
+                            />
+                        </ShFrozen>
+                        <ShFrozen timestamp={latestHealth?.timestamp ? latestHealth.timestamp * 1000 : null}
+                                  thresholds={{ cooling: 30, frozen: 120, stale: 300 }}>
+                            <HeroCard
+                                label="7-Day Success Rate"
+                                value={kpis ? `${Math.round(kpis.success_rate_7d * 100)}` : '--'}
+                                unit="%"
+                                warning={kpis && kpis.success_rate_7d < 0.9}
+                                sparkData={buildSuccessRateSparkline(durations)}
+                                sparkColor="var(--accent)"
+                                delta={kpis ? buildSuccessRateDelta(kpis, hist) : null}
+                                tooltip="Percentage of completed jobs that succeeded. Below 90% warrants investigation in History."
+                                chroma="gustave"
+                            />
+                        </ShFrozen>
                     </div>
 
                     {/* Proxy mini-stat — shown only when proxy calls exist in history */}

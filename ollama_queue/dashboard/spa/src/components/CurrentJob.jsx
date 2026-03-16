@@ -3,7 +3,7 @@ import { useSignal } from '@preact/signals';
 import { applyMantra, removeMantra } from 'superhot-ui';
 import StatusBadge from './StatusBadge.jsx';
 import ResourceGauges from './ResourceGauges.jsx';
-import { ShEmptyState } from 'superhot-ui/preact';
+import { ShEmptyState, ShFrozen } from 'superhot-ui/preact';
 import ModelChip from './ModelChip.jsx';
 import { formatDuration } from '../utils/time.js';
 import { API, cpuCount, backendsData } from '../stores';
@@ -200,14 +200,17 @@ export default function CurrentJob({ daemon, currentJob, latestHealth, settings,
               ...(isOverrun ? {} : { width: `${progressPct}%`, transition: 'width 1s linear' }),
             }} />
           </div>
-          {/* Compact resource gauges */}
-          <ResourceGauges
-            ram={hp.ram_pct}
-            vram={hp.vram_pct}
-            load={(hp.load_avg / (cpuCount.value || 1)) * 100}
-            swap={hp.swap_pct}
-            settings={settings}
-          />
+          {/* Compact resource gauges — ShFrozen dims when health data goes stale (health polls every 5s) */}
+          <ShFrozen timestamp={latestHealth?.timestamp ? latestHealth.timestamp * 1000 : null}
+                    thresholds={{ cooling: 30, frozen: 120, stale: 300 }}>
+            <ResourceGauges
+              ram={hp.ram_pct}
+              vram={hp.vram_pct}
+              load={(hp.load_avg / (cpuCount.value || 1)) * 100}
+              swap={hp.swap_pct}
+              settings={settings}
+            />
+          </ShFrozen>
           {/* Collapsible live log tail — last 5 lines of job stdout, polled every 5s */}
           <details
             style="margin-top:4px;"
