@@ -10,23 +10,23 @@ const STORAGE_KEY = 'oq_onboarding_done';
 
 const STEPS = [
     {
-        title: 'Welcome to ollama-queue',
+        title: 'OLLAMA-QUEUE ONLINE',
         body: "This dashboard shows your AI job queue — what's running, what's waiting, and how your system is holding up.",
     },
     {
-        title: 'The Now tab',
-        body: 'Your command center. See the running job, what\'s queued next, system resources, and key stats — all at a glance.',
+        title: 'NOW TAB',
+        body: 'Command center. See the running job, what\'s queued next, system resources, and key stats — all at a glance.',
     },
     {
-        title: 'Submit a job',
-        body: 'Use the [+ Submit] button (sidebar or bottom-right) to queue an Ollama model request. Set model, prompt, priority, and timeout.',
+        title: 'SUBMIT A JOB',
+        body: 'Use the [+ SUBMIT] button (sidebar or bottom-right) to queue an Ollama model request. Set model, prompt, priority, and timeout.',
     },
     {
-        title: 'Queue management',
+        title: 'QUEUE MANAGEMENT',
         body: 'Jobs process in priority order. Critical (1) runs first, Background (9) runs last. Drag to reorder. Click a job to cancel it.',
     },
     {
-        title: "You're ready",
+        title: 'READY',
         body: 'Explore the Plan tab for scheduling, History for past runs, and Settings to tune thresholds. Press 1-5 to switch tabs fast.',
     },
 ];
@@ -108,7 +108,7 @@ export default function OnboardingOverlay() {
                     fontSize: 'var(--type-micro)',
                     color: 'var(--text-tertiary)',
                 }}>
-                    {`Step ${stepNumber} of ${STEPS.length}`}
+                    {`STEP ${stepNumber} OF ${STEPS.length}`}
                 </div>
 
                 {/* Headline */}
@@ -151,7 +151,7 @@ export default function OnboardingOverlay() {
                             textDecoration: 'underline',
                         }}
                     >
-                        Skip
+                        SKIP
                     </button>
 
                     {/* Next / Got it */}
@@ -169,7 +169,7 @@ export default function OnboardingOverlay() {
                                 padding: '0.5rem 1.25rem',
                             }}
                         >
-                            Got it
+                            GOT IT
                         </button>
                     ) : (
                         <button
@@ -185,7 +185,7 @@ export default function OnboardingOverlay() {
                                 padding: '0.5rem 1.25rem',
                             }}
                         >
-                            Next
+                            NEXT
                         </button>
                     )}
                 </div>

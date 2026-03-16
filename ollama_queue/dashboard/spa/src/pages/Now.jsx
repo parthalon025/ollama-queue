@@ -140,7 +140,7 @@ export default function Now({ onSubmitRequest }) {
                     padding: '0.5rem 1rem', borderRadius: 4,
                     border: '1px solid var(--status-warning-subtle)',
                 }}>
-                    ⚠ Lost connection to the queue server — trying to reconnect...
+                    SIGNAL LOST — RECONNECTING
                 </div>
             )}
 
@@ -183,7 +183,7 @@ export default function Now({ onSubmitRequest }) {
                                 fontFamily: 'var(--font-mono)',
                                 flexShrink: 0,
                             }}>
-                                ⚠ Needs Attention
+                                ATTENTION REQUIRED
                             </span>
                             {dlqCnt > 0 && (
                                 // What it shows: DLQ count + two quick-action buttons to navigate
@@ -199,20 +199,20 @@ export default function Now({ onSubmitRequest }) {
                                             fontFamily: 'var(--font-mono)',
                                         }}
                                     >
-                                        {dlqCnt} failed {dlqCnt === 1 ? 'job' : 'jobs'} need attention
+                                        {dlqCnt} FAILED — REVIEW REQUIRED
                                     </span>
                                     <button
                                         class="t-btn"
                                         style={{ fontSize: 'var(--type-micro)', padding: '2px 8px' }}
                                         onClick={() => { currentTab.value = 'history'; }}
-                                    >View failed</button>
+                                    >VIEW</button>
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                                         <button
                                             class="t-btn"
                                             style={{ fontSize: 'var(--type-micro)', padding: '2px 8px', color: 'var(--text-tertiary)' }}
                                             disabled={dismissFb.phase === 'loading'}
                                             onClick={() => dismissAct('CLEARING', clearDLQ, () => 'CLEARED')}
-                                        >Dismiss all</button>
+                                        >DISMISS ALL</button>
                                         {dismissFb.msg && <span class={`action-fb action-fb--${dismissFb.phase}`}>{dismissFb.msg}</span>}
                                     </div>
                                 </div>
@@ -231,7 +231,7 @@ export default function Now({ onSubmitRequest }) {
                                         padding: 0,
                                     }}
                                 >
-                                    {recentFailures} job{recentFailures > 1 ? 's' : ''} failed in the last 24h
+                                    {recentFailures} FAILURES (24H)
                                 </button>
                             )}
                             {disabledRecurring > 0 && (
@@ -249,7 +249,7 @@ export default function Now({ onSubmitRequest }) {
                                         padding: 0,
                                     }}
                                 >
-                                    {disabledRecurring} scheduled job{disabledRecurring > 1 ? 's' : ''} auto-disabled
+                                    {disabledRecurring} JOBS AUTO-DISABLED
                                 </button>
                             )}
                         </div>
@@ -317,11 +317,11 @@ export default function Now({ onSubmitRequest }) {
                                 paddingTop: '0.25rem',
                             }}
                         >
-                            API proxy calls{' '}
-                            {proxyGenerate > 0 && `${proxyGenerate} generate`}
+                            PROXY{' '}
+                            {proxyGenerate > 0 && `${proxyGenerate} GENERATE`}
                             {proxyGenerate > 0 && proxyEmbed > 0 && ' · '}
-                            {proxyEmbed > 0 && `${proxyEmbed} embed`}
-                            {' '}(last 24h)
+                            {proxyEmbed > 0 && `${proxyEmbed} EMBED`}
+                            {' '}(24H)
                         </div>
                     )}
                 </div>
@@ -383,36 +383,35 @@ function formatWaitReadable(seconds) {
 }
 
 function buildJobsDelta(kpis, hist) {
-    if (!kpis || kpis.jobs_24h === 0) return 'no jobs in the last 24h';
+    if (!kpis || kpis.jobs_24h === 0) return 'NO JOBS (24H)';
     const oneDayAgo = Date.now() / 1000 - 86400;
     const todayFailed = (hist || []).filter(
         (j) => (j.status === 'failed' || j.status === 'killed') && (j.completed_at ?? 0) >= oneDayAgo
     ).length;
-    if (todayFailed === 0) return 'all completed successfully';
-    const s = todayFailed === 1 ? '' : 's';
-    return `${todayFailed} job${s} failed today`;
+    if (todayFailed === 0) return 'ALL SUCCEEDED';
+    return `${todayFailed} FAILED TODAY`;
 }
 
 function buildWaitDelta(seconds) {
-    if (seconds === null || seconds <= 0) return 'no wait data yet';
-    if (seconds <= 30) return 'queue flowing smoothly';
-    if (seconds <= 120) return 'light wait — normal range';
-    if (seconds <= 300) return 'moderate backlog — check queue';
-    return 'heavy wait — jobs are stacking up';
+    if (seconds === null || seconds <= 0) return 'NO WAIT DATA';
+    if (seconds <= 30) return 'QUEUE FLOWING';
+    if (seconds <= 120) return 'LIGHT WAIT';
+    if (seconds <= 300) return 'BACKLOG — CHECK QUEUE';
+    return 'HEAVY WAIT — JOBS STACKING';
 }
 
 function buildPauseDelta(minutes) {
-    if (!minutes || minutes <= 0) return 'no pauses — running clean';
-    if (minutes <= 30) return 'some pauses — health thresholds triggered';
-    return 'frequent pauses — lower thresholds in Settings';
+    if (!minutes || minutes <= 0) return 'NO PAUSES';
+    if (minutes <= 30) return 'PAUSES — HEALTH THRESHOLDS HIT';
+    return 'FREQUENT PAUSES — LOWER THRESHOLDS';
 }
 
 function buildSuccessRateDelta(kpis, hist) {
     const ok = kpis.jobs_7d_ok ?? 0;
     const bad = kpis.jobs_7d_bad ?? 0;
     const total = ok + bad;
-    if (total === 0) return 'no jobs run in the last 7 days';
-    if (bad === 0) return 'everything is running clean';
+    if (total === 0) return 'NO JOBS (7D)';
+    if (bad === 0) return 'ALL CLEAN';
 
     const sevenDaysAgo = Date.now() / 1000 - 7 * 86400;
     const recentFails = (hist || []).filter(
@@ -424,14 +423,13 @@ function buildSuccessRateDelta(kpis, hist) {
     const crashes = recentFails.filter((j) => j.outcome_reason && /exit code [^0]|non.zero|crash|error/i.test(j.outcome_reason));
 
     const n = bad;
-    const s = n === 1 ? '' : 's';
 
     if (timeouts.length > 0 && timeouts.length >= recentFails.length / 2)
-        return `${n} job${s} ran past their time limit — raise Default Timeout in Settings`;
+        return `${n} TIMED OUT — RAISE DEFAULT TIMEOUT`;
     if (stalls.length > 0 && stalls.length >= recentFails.length / 2)
-        return `${n} job${s} appeared stuck and were killed — review Stall Detection in Settings`;
+        return `${n} STALLED — REVIEW STALL DETECTION`;
     if (crashes.length > 0 && crashes.length >= recentFails.length / 2)
-        return `${n} job${s} crashed with an error — check History for the command output`;
-    if (bad === 1) return '1 job failed — tap History to see what went wrong';
-    return `${n} jobs failed this week — check History or DLQ for patterns`;
+        return `${n} CRASHED — CHECK HISTORY`;
+    if (bad === 1) return '1 FAILED — CHECK HISTORY';
+    return `${n} FAILED THIS WEEK — CHECK DLQ`;
 }

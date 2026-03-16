@@ -131,7 +131,7 @@ export default function Settings() {
       {restartRequired.value && (
         <div role="alert" style="background:color-mix(in srgb,var(--status-warning) 12%,transparent);border:1px solid var(--status-warning);border-radius:var(--radius);padding:10px 14px;display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;">
           <span style="font-size:var(--type-label);color:var(--status-warning);">
-            ⚠ Daemon restart required for these changes to take effect.
+            RESTART REQUIRED — CHANGES PENDING
           </span>
           <button
             class="t-btn"
@@ -139,7 +139,7 @@ export default function Settings() {
             disabled={restartFb.phase === 'loading'}
             onClick={() => restartAct('RESTARTING', restartDaemon, () => 'RESTARTED')}
           >
-            {restartFb.phase === 'loading' ? 'Restarting…' : 'Restart daemon'}
+            {restartFb.phase === 'loading' ? 'RESTARTING…' : 'RESTART DAEMON'}
           </button>
           {restartFb.msg && <div class={`action-fb action-fb--${restartFb.phase}`}>{restartFb.msg}</div>}
         </div>
@@ -165,13 +165,13 @@ export default function Settings() {
       </div>
       <div aria-label="Keyboard shortcuts" style="margin-top:24px;padding-top:16px;border-top:1px solid var(--border-subtle);">
         <p style="font-family:var(--font-mono);font-size:var(--type-micro);color:var(--text-tertiary);">
-          Keyboard shortcuts:{'  '}
-          <kbd>1</kbd> Now{'  ·  '}
-          <kbd>2</kbd> Plan{'  ·  '}
-          <kbd>3</kbd> History{'  ·  '}
-          <kbd>4</kbd> Models{'  ·  '}
-          <kbd>5</kbd> Settings{'  ·  '}
-          <kbd>Cmd+K</kbd> Command palette
+          SHORTCUTS{'  '}
+          <kbd>1</kbd> NOW{'  ·  '}
+          <kbd>2</kbd> PLAN{'  ·  '}
+          <kbd>3</kbd> HISTORY{'  ·  '}
+          <kbd>4</kbd> MODELS{'  ·  '}
+          <kbd>5</kbd> SETTINGS{'  ·  '}
+          <kbd>Cmd+K</kbd> COMMAND PALETTE
         </p>
       </div>
     </div>

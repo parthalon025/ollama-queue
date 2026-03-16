@@ -106,9 +106,9 @@ export default function CurrentJob({ daemon, currentJob, latestHealth, settings,
   const burstRegime = daemon.burst_regime || 'unknown';
 
   const pausedReasonLabel = {
-    paused_health:      'Paused — system resources are too high to start new jobs',
-    paused_manual:      'Paused manually — resume in Settings when ready',
-    paused_interactive: 'Paused — waiting for active computer use to stop',
+    paused_health:      'PAUSED — RESOURCES OVER THRESHOLD',
+    paused_manual:      'PAUSED MANUALLY — RESUME IN SETTINGS',
+    paused_interactive: 'PAUSED — WAITING FOR COMPUTER USE TO STOP',
   }[state] || (daemon.paused_reason || state.replace('paused_', ''));
 
   return (
@@ -156,10 +156,10 @@ export default function CurrentJob({ daemon, currentJob, latestHealth, settings,
               {isStalled && (
                 <details style="display:inline-block;position:relative;">
                   <summary style="cursor:pointer;font-size:var(--type-label);color:var(--status-warning);background:var(--status-warning-subtle);padding:2px 8px;border-radius:3px;border:1px solid var(--status-warning);list-style:none;display:inline-flex;align-items:center;gap:4px;">
-                    ⚠ frozen — what should I do? ▾
+                    STALLED — RESOLUTION ▾
                   </summary>
                   <div style="position:absolute;z-index:10;background:var(--bg-surface);border:1px solid var(--border-primary);border-radius:var(--radius);padding:12px;max-width:300px;font-size:var(--type-label);color:var(--text-secondary);box-shadow:var(--card-shadow-hover);margin-top:4px;left:0;">
-                    <p style="margin:0 0 8px;font-weight:600;color:var(--status-warning);">Job is not producing output.</p>
+                    <p style="margin:0 0 8px;font-weight:600;color:var(--status-warning);">NO OUTPUT DETECTED</p>
                     <ol style="margin:0;padding-left:16px;display:flex;flex-direction:column;gap:4px;">
                       <li>Wait 2 more minutes — some models are slow to start</li>
                       <li>Cancel and retry — click × in the queue below</li>
@@ -215,7 +215,7 @@ export default function CurrentJob({ daemon, currentJob, latestHealth, settings,
             onToggle={e => { logExpanded.value = e.currentTarget.open; }}
           >
             <summary style="font-family:var(--font-mono);font-size:var(--type-micro);color:var(--text-tertiary);cursor:pointer;user-select:none;list-style:none;">
-              Output {logLines.value.length > 0 ? `(${logLines.value.length} lines)` : ''}
+              OUTPUT {logLines.value.length > 0 ? `(${logLines.value.length} lines)` : ''}
             </summary>
             <div style="margin-top:6px;padding:8px;background:var(--bg-terminal,var(--bg-inset));border-radius:var(--radius);font-family:var(--font-mono);font-size:var(--type-micro);color:var(--text-secondary);white-space:pre-wrap;word-break:break-all;max-height:120px;overflow-y:auto;">
               {logLines.value.length > 0
@@ -312,10 +312,10 @@ const REGIME_STYLE = {
 };
 
 const REGIME_LABELS = {
-  burst:   'burst — high traffic',
-  trough:  'quiet — good time for batch work',
-  steady:  'steady',
-  unknown: 'unknown',
+  burst:   'BURST — HIGH TRAFFIC',
+  trough:  'QUIET — BATCH WINDOW',
+  steady:  'STEADY',
+  unknown: 'UNKNOWN',
 };
 
 function BurstBadge({ regime }) {
