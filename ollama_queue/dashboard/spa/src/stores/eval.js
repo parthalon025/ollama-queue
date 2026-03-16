@@ -92,11 +92,26 @@ export async function fetchEvalTemplates() {
 }
 
 // What it shows: nothing — fetches and updates eval runs signal
-// Decision it drives: keeps run history table and active run tracking in sync
+// Decision it drives: keeps run history table and active run tracking in sync.
+//   Also auto-detects active runs (generating/judging) started outside the SPA
+//   (e.g. via curl) and starts live polling so progress appears on the UI.
 export async function fetchEvalRuns() {
   try {
     const res = await fetch(`${API}/eval/runs`);
-    if (res.ok) evalRuns.value = await res.json();
+    if (!res.ok) return;
+    const runs = await res.json();
+    evalRuns.value = runs;
+
+    // Auto-detect active runs not already tracked by the SPA.
+    // Without this, runs started via API (curl, cron, etc.) never appear in
+    // the live progress panel because startEvalPoll() is only called by triggerEvalRun().
+    if (!_evalPollId && !evalActiveRun.value) {
+      const activeRun = runs.find(r => r.status === 'generating' || r.status === 'judging');
+      if (activeRun) {
+        startEvalPoll(activeRun.id);
+      }
+    }
+
     // Fire-and-forget: update scheduled eval count for the next 4 hours
     fetch(`${API}/eval/runs?status=scheduled&within_hours=4`)
       .then(r => r.ok ? r.json() : [])
@@ -319,6 +334,7 @@ export async function fetchScheduledEvalRuns() {
 
 // On startup: verify stored active run is still live — clear it if the API says it's terminal.
 // This prevents a stale "Run #N generating" panel persisting after a service restart.
+// If the stored run IS still active, resume polling so progress updates continue.
 if (evalActiveRun.value) {
   const _storedId = evalActiveRun.value.run_id;
   fetch(`${API}/eval/runs/${_storedId}/progress`)
@@ -328,6 +344,9 @@ if (evalActiveRun.value) {
       if (!data || ['complete', 'failed', 'cancelled'].includes(data.status)) {
         evalActiveRun.value = null;
         sessionStorage.removeItem('evalActiveRun');
+      } else {
+        // Run is still live — resume polling (poll was lost on page refresh)
+        startEvalPoll(_storedId);
       }
     })
     .catch(() => {
