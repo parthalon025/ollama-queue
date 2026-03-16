@@ -12,6 +12,7 @@ module.exports = {
     // Also mock uplot to avoid canvas/DOM requirements in tests.
     moduleNameMapper: {
         '^superhot-ui$': '<rootDir>/src/__mocks__/superhot-ui.cjs',
+        '^superhot-ui/preact$': '<rootDir>/src/__mocks__/superhot-ui-preact.cjs',
         '^preact$': '<rootDir>/src/__mocks__/preact.cjs',
         '^preact/hooks$': '<rootDir>/src/__mocks__/preact-hooks.cjs',
         '^@preact/signals$': '<rootDir>/src/__mocks__/preact-signals.cjs',
