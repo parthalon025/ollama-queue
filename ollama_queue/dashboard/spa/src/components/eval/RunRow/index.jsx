@@ -8,6 +8,8 @@ import StatusDot from './StatusDot.jsx';
 import ModelChip from '../../ModelChip.jsx';
 import { formatDate, fmtPct, simpleRenderMd, resolveGenModel } from './helpers.js';
 import { ShFrozen } from 'superhot-ui/preact';
+import { glitchText } from 'superhot-ui';
+import { canFireEffect } from '../../../stores/atmosphere.js';
 
 // What it shows: A single eval run row with 3-level progressive disclosure.
 //   L1: status dot, winner config, quality score, date, item count.
@@ -29,6 +31,16 @@ export default function RunRow({ run }) {
   const [showAllItems, setShowAllItems] = useState(false);
   const refreshTimer = useRef(null);
   useEffect(() => () => { if (refreshTimer.current) clearTimeout(refreshTimer.current); }, []);
+
+  const rowRef = useRef(null);
+
+  // Glitch the row when an eval run transitions to failed status.
+  useEffect(() => {
+    if (run.status === 'failed' && rowRef.current) {
+      const cleanup = canFireEffect('glitch-eval-' + run.id);
+      if (cleanup) glitchText(rowRef.current, { intensity: 'high' });
+    }
+  }, [run.status]);
 
   const {
     id,
@@ -164,7 +176,7 @@ export default function RunRow({ run }) {
 
   return (
     <ShFrozen timestamp={runTimestamp} thresholds={{ cooling: 3600, frozen: 43200, stale: 172800 }}>
-    <div class="eval-run-row-container" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+    <div ref={rowRef} class="eval-run-row-container" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
       {/* L1 */}
       <div
         class="eval-run-row"

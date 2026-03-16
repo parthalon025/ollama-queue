@@ -4,14 +4,17 @@
 // D19: applyFreshness on the "last updated" timestamp — header greys out before data stops updating.
 
 import { useEffect, useRef } from 'preact/hooks';
-import { applyFreshness } from 'superhot-ui';
+import { applyFreshness, glitchText } from 'superhot-ui';
 import { dlqCount } from '../stores/health.js';
-import { status } from '../stores';
+import { status, connectionStatus } from '../stores';
+import { canFireEffect } from '../stores/atmosphere.js';
 import SystemSummaryLine from './SystemSummaryLine.jsx';
 
 export default function CohesionHeader() {
   const hasDlq = dlqCount?.value > 0;
   const timestampRef = useRef(null);
+  const headerRef = useRef(null);
+  const prevConn = useRef(connectionStatus.value);
 
   // D19: Freshness heartbeat — applies applyFreshness to the last-poll timestamp el.
   // The header greys out gradually as time passes without a new poll — warns before data goes stale.
@@ -22,8 +25,21 @@ export default function CohesionHeader() {
     }
   }, [lastPollTs]);
 
+  // Glitch header on connection state transitions — high intensity on disconnect, medium on reconnect.
+  useEffect(() => {
+    const curr = connectionStatus.value;
+    if (curr !== prevConn.current && headerRef.current) {
+      const intensity = curr === 'disconnected' ? 'high' : 'medium';
+      const cleanup = canFireEffect('glitch-connection');
+      if (cleanup) {
+        glitchText(headerRef.current, { intensity });
+      }
+    }
+    prevConn.current = curr;
+  }, [connectionStatus.value]);
+
   return (
-    <header class="cohesion-header">
+    <header ref={headerRef} class="cohesion-header">
       <SystemSummaryLine />
       <span
         ref={timestampRef}

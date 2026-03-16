@@ -4,8 +4,10 @@
 // Decision it drives: Which backend is healthy? Is any GPU overloaded? Should I
 //   add a node, rebalance weights, or remove a failing backend?
 
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { ShFrozen, ShGlitch, ShPageBanner, ShShatter, ShThreatPulse } from 'superhot-ui/preact';
+import { glitchText } from 'superhot-ui';
+import { canFireEffect } from '../stores/atmosphere.js';
 import TopologyDiagram from '../components/TopologyDiagram.jsx';
 import {
   backendsData, backendsError, fetchBackends,
@@ -29,6 +31,7 @@ function BackendCard({ backend, onRemove, onUpdateWeight }) {
   const [testResult, setTestResult] = useState(null);
   const [testing, setTesting] = useState(false);
   const [weightFb, setWeightFb] = useState('');
+  const cardRef = useRef(null);
 
   const isUnhealthy = !backend.healthy;
   const vramPct = backend.vram_pct ?? 0;
@@ -52,6 +55,10 @@ function BackendCard({ backend, onRemove, onUpdateWeight }) {
       setTestResult({ ok: true, latency_ms: result.latency_ms });
     } catch (e) {
       setTestResult({ ok: false, error: e.message });
+      if (cardRef.current) {
+        const cleanup = canFireEffect('glitch-backend-test');
+        if (cleanup) glitchText(cardRef.current, { intensity: 'medium' });
+      }
     } finally {
       setTesting(false);
     }
@@ -72,6 +79,7 @@ function BackendCard({ backend, onRemove, onUpdateWeight }) {
   return (
     <ShFrozen timestamp={backend.last_checked ? backend.last_checked * 1000 : null}>
       <div
+        ref={cardRef}
         class={`backend-card${isUnhealthy ? ' backend-card--unhealthy' : ''}`}
         style={{ outline: isServing ? '2px solid var(--sh-phosphor, var(--accent))' : 'none' }}
       >
