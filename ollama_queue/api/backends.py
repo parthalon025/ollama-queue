@@ -416,3 +416,46 @@ async def backend_heartbeat(url: str = Path(...), req: HeartbeatRequest = None):
     _router.receive_heartbeat(url, req.model_dump(exclude_unset=True), now)
 
     return {"url": url, "ok": True}
+
+
+# ── POST /api/backends/{url}/command ─────────────────────────────────────────
+
+_ALLOWED_ACTIONS = frozenset({"sync-models", "update-ollama", "restart-ollama", "status"})
+_AGENT_PORT = 11435
+
+
+class CommandRequest(BaseModel):
+    action: str
+
+
+@router.post("/api/backends/{url:path}/command")
+async def backend_command(url: str = Path(...), req: CommandRequest = None):
+    """Dispatch a command to a remote backend agent.
+
+    Plain English: The dashboard or CLI calls this endpoint, and the queue
+    forwards the request to the backend agent running on port 11435 of the
+    same host.
+
+    Supported actions: sync-models, update-ollama, restart-ollama, status
+    """
+    url = unquote(url)
+    if req is None or req.action not in _ALLOWED_ACTIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"action must be one of: {', '.join(sorted(_ALLOWED_ACTIONS))}",
+        )
+
+    parsed = urlparse(url)
+    agent_base = f"{parsed.scheme}://{parsed.hostname}:{_AGENT_PORT}"
+    agent_endpoint = f"{agent_base}/{req.action}"
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0, verify=False) as client:  # noqa: S501
+            resp = await client.post(agent_endpoint)
+            return resp.json()
+    except (httpx.ConnectError, httpx.TimeoutException) as e:
+        _log.warning("command %s to agent %s failed: %s", req.action, agent_base, e)
+        raise HTTPException(status_code=502, detail=f"agent unreachable: {e}") from e
+    except Exception as e:
+        _log.error("unexpected error dispatching %s to %s: %s", req.action, agent_base, e)
+        raise HTTPException(status_code=500, detail="internal error") from e
