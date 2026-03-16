@@ -4,6 +4,7 @@
 //   whether to investigate further or act immediately on a regression.
 
 import { evalTrends } from '../../stores';
+import { ShEmptyState } from 'superhot-ui/preact';
 
 // Map API trend_direction values to plain-language labels and colours
 const TREND_META = {
@@ -19,7 +20,7 @@ export default function TrendSummaryBar() {
   if (!trends) {
     return (
       <div class="eval-trend-summary-bar eval-trend-summary-bar--empty">
-        No runs yet — run an eval to see trends.
+        <ShEmptyState mantra="INSUFFICIENT DATA" />
       </div>
     );
   }

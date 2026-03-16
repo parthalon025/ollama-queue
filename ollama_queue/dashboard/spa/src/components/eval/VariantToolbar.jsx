@@ -2,6 +2,7 @@ import { useState } from 'preact/hooks';
 import { API, evalTemplates, fetchEvalVariants } from '../../stores';
 import { EVAL_TRANSLATIONS } from './translations.js';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
+import { useShatter } from '../../hooks/useShatter.js';
 import ModelSelect from '../ModelSelect.jsx';
 // What it shows: Action toolbar for managing variant configs — create new,
 //   bulk-generate from installed models, export, and import.
@@ -14,6 +15,8 @@ export default function VariantToolbar() {
   const templates = evalTemplates.value;
 
   const [genFb, genAct] = useActionFeedback();
+  const [saveRef, saveShatter] = useShatter('complete');
+  const [genConfirmRef, genConfirmShatter] = useShatter('complete');
 
   const [showNewForm, setShowNewForm] = useState(false);
   const [genPreview, setGenPreview] = useState(null);
@@ -40,6 +43,7 @@ export default function VariantToolbar() {
       setError('Label and model are required.');
       return;
     }
+    saveShatter();
     setSaving(true);
     setError(null);
     try {
@@ -76,7 +80,7 @@ export default function VariantToolbar() {
 
   async function handleGenerateConfirm() {
     await genAct(
-      'Generating variants…',
+      'GENERATING',
       async () => {
         const res = await fetch(`${API}/eval/variants/generate`, { method: 'POST' });
         if (!res.ok) {
@@ -89,7 +93,7 @@ export default function VariantToolbar() {
         setGenPreview(null);
         return data;
       },
-      data => `${data.created ?? data.count ?? 'Variants'} generated`
+      data => `${data.created ?? data.count ?? 'VARIANTS'} GENERATED`
     );
   }
 
@@ -177,10 +181,11 @@ export default function VariantToolbar() {
           </div>
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
             <button
+              ref={genConfirmRef}
               class="t-btn t-btn-primary"
               style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }}
               disabled={genFb.phase === 'loading'}
-              onClick={handleGenerateConfirm}
+              onClick={() => { genConfirmShatter(); handleGenerateConfirm(); }}
             >
               {genFb.phase === 'loading' ? 'Generating…' : 'Confirm'}
             </button>
@@ -282,7 +287,7 @@ export default function VariantToolbar() {
           )}
 
           <div style={{ display: 'flex', gap: '0.5rem' }}>
-            <button type="submit" class="t-btn t-btn-primary" style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }} disabled={saving}>
+            <button ref={saveRef} type="submit" class="t-btn t-btn-primary" style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }} disabled={saving}>
               {saving ? 'Saving…' : 'Save'}
             </button>
             <button type="button" class="t-btn t-btn-secondary" style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }} onClick={() => setShowNewForm(false)}>

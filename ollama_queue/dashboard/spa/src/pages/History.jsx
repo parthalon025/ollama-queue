@@ -9,11 +9,11 @@ import { currentTab } from '../stores/health.js';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { signal } from '@preact/signals';
 import { useActionFeedback } from '../hooks/useActionFeedback.js';
+import { useShatter } from '../hooks/useShatter.js';
 import ActivityHeatmap from '../components/ActivityHeatmap.jsx';
 import HistoryList from '../components/HistoryList.jsx';
 import TimeChart from '../components/TimeChart.jsx';
-import { ShPageBanner } from 'superhot-ui/preact';
-import { ShDataTable } from 'superhot-ui/preact';
+import { ShPageBanner, ShDataTable, ShEmptyState } from 'superhot-ui/preact';
 import { HISTORY_COLUMNS } from '../config/historyColumns.js';
 import { TAB_CONFIG } from '../config/tabs.js';
 
@@ -48,6 +48,8 @@ export default function History() {
     // Hooks must be called before any conditional early returns
     const [retryAllFb, retryAllAct] = useActionFeedback();
     const [clearFb, clearAct] = useActionFeedback();
+    const [retryAllRef, retryAllShatter] = useShatter('routine');
+    const [clearRef, clearShatter] = useShatter('earned');
     const dlqListRef = useRef(null);
 
     useEffect(() => { fetchDLQ(); }, []);
@@ -72,7 +74,7 @@ export default function History() {
     async function handleRetryAll() {
         if (!window.confirm(`Re-queue all ${dlq.length} failed jobs so they try again?`)) return;
         await retryAllAct(
-            'Retrying all…',
+            'RETRYING ALL',
             async () => {
                 const res = await fetch(`${API}/dlq/retry-all`, { method: 'POST' });
                 if (!res.ok) throw new Error(`Retry all failed: ${res.status}`);
@@ -80,14 +82,14 @@ export default function History() {
                 await fetchDLQ();
                 return data;
             },
-            data => `${data.retried ?? data.count ?? 'All'} jobs re-queued`,
+            data => `${data.retried ?? data.count ?? 'ALL'} JOBS RE-QUEUED`,
         );
     }
 
     async function handleClearDLQ() {
         if (!window.confirm('Permanently delete all failed jobs? This cannot be undone.')) return;
         await clearAct(
-            'Clearing DLQ…',
+            'CLEARING DLQ',
             async () => {
                 // Stagger-shatter all visible DLQ row elements before clearing
                 if (dlqListRef.current) {
@@ -111,7 +113,7 @@ export default function History() {
                 if (!res.ok) throw new Error(`Clear failed: ${res.status}`);
                 await fetchDLQ();
             },
-            'All failed jobs deleted',
+            'DLQ CLEARED',
         );
     }
 
@@ -128,7 +130,7 @@ export default function History() {
     }
 
     return (
-        <div class="flex flex-col gap-6 animate-page-enter" data-mood="dread">
+        <div class="flex flex-col gap-6 sh-stagger-children animate-page-enter" data-mood="dread">
             <ShPageBanner namespace={_tab.namespace} page={_tab.page} subtitle={_tab.subtitle} />
 
             {/* DLQ section — only shown when entries exist */}
@@ -153,9 +155,10 @@ export default function History() {
                         <div class="flex gap-2" style="align-items: flex-start;">
                             <div>
                                 <button
+                                    ref={retryAllRef}
                                     class="t-btn t-btn-secondary"
                                     style="font-size: var(--type-label); padding: 3px 10px;"
-                                    onClick={handleRetryAll}
+                                    onClick={() => { retryAllShatter(); handleRetryAll(); }}
                                     disabled={retryAllFb.phase === 'loading'}
                                 >
                                     {retryAllFb.phase === 'loading' ? 'Retrying all…' : 'Re-queue all failed jobs'}
@@ -166,9 +169,10 @@ export default function History() {
                             </div>
                             <div>
                                 <button
+                                    ref={clearRef}
                                     class="t-btn t-btn-secondary"
                                     style="font-size: var(--type-label); padding: 3px 10px;"
-                                    onClick={handleClearDLQ}
+                                    onClick={() => { clearShatter(); handleClearDLQ(); }}
                                     disabled={clearFb.phase === 'loading'}
                                 >
                                     {clearFb.phase === 'loading' ? 'Clearing…' : 'Delete all'}
@@ -216,9 +220,7 @@ export default function History() {
                             </div>
                         ))
                     ) : (
-                        <p style="color: var(--text-tertiary); font-size: var(--type-body); text-align: center;">
-                            No timing data yet — run some jobs first
-                        </p>
+                        <ShEmptyState mantra="NO DATA" />
                     )}
                 </div>
 
@@ -308,6 +310,9 @@ function DLQRow({ entry, onAction }) {
     const [retryFb, retryAct] = useActionFeedback();
     const [dismissFb, dismissAct] = useActionFeedback();
     const [rescheduleFb, rescheduleAct] = useActionFeedback();
+    const [retryBtnRef, retryShatter] = useShatter('routine');
+    const [dismissBtnRef, dismissShatter] = useShatter('earned');
+    const [rescheduleBtnRef, rescheduleShatter] = useShatter('routine');
     const [expanded, setExpanded] = useState(false);
     const rowRef = useRef(null);
 
@@ -359,14 +364,15 @@ function DLQRow({ entry, onAction }) {
                     {!alreadyRescheduled && (
                         <div>
                             <button
+                                ref={rescheduleBtnRef}
                                 class="t-btn t-btn-secondary"
                                 style="font-size: var(--type-label); padding: 2px 8px;"
                                 disabled={rescheduleFb.phase === 'loading'}
-                                onClick={() => rescheduleAct(
-                                    'Scheduling…',
+                                onClick={() => { rescheduleShatter(); rescheduleAct(
+                                    'SCHEDULING',
                                     () => rescheduleDLQEntry(entry.id),
-                                    `DLQ #${entry.id} rescheduled`,
-                                )}
+                                    `DLQ #${entry.id} RESCHEDULED`,
+                                ); }}
                             >
                                 {rescheduleFb.phase === 'loading' ? 'Scheduling…' : 'Reschedule'}
                             </button>
@@ -377,14 +383,15 @@ function DLQRow({ entry, onAction }) {
                     )}
                     <div>
                         <button
+                            ref={retryBtnRef}
                             class="t-btn t-btn-secondary"
                             style="font-size: var(--type-label); padding: 2px 8px;"
                             disabled={retryFb.phase === 'loading'}
-                            onClick={() => retryAct(
-                                'Retrying…',
+                            onClick={() => { retryShatter(); retryAct(
+                                'RETRYING',
                                 () => onAction('retry', entry.id),
-                                'Job re-queued for retry',
-                            )}
+                                'RE-QUEUED',
+                            ); }}
                         >
                             {retryFb.phase === 'loading' ? 'Retrying…' : 'Re-queue'}
                         </button>
@@ -394,23 +401,25 @@ function DLQRow({ entry, onAction }) {
                     </div>
                     <div>
                         <button
+                            ref={dismissBtnRef}
                             class="t-btn t-btn-secondary"
                             style="font-size: var(--type-label); padding: 2px 8px;"
                             disabled={dismissFb.phase === 'loading'}
                             onClick={() => {
+                                dismissShatter();
                                 if (rowRef.current) {
                                     shatterElement(rowRef.current, {
                                         onComplete: () => dismissAct(
-                                            'Dismissing…',
+                                            'DISMISSING',
                                             () => onAction('dismiss', entry.id),
-                                            `DLQ #${entry.id} dismissed`,
+                                            `DLQ #${entry.id} DISMISSED`,
                                         ),
                                     });
                                 } else {
                                     dismissAct(
-                                        'Dismissing…',
+                                        'DISMISSING',
                                         () => onAction('dismiss', entry.id),
-                                        `DLQ #${entry.id} dismissed`,
+                                        `DLQ #${entry.id} DISMISSED`,
                                     );
                                 }
                             }}

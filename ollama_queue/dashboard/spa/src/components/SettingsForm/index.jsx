@@ -23,7 +23,7 @@ import { ThresholdPair, NumberRow, SelectRow, ToggleRow } from './SettingControl
  *
  * @param {{ settings: object, daemonState: string, onSave: (key: string, value: any) => Promise<boolean>, onPause: () => void, onResume: () => void, pauseFb: object, resumeFb: object }} props
  */
-export default function SettingsForm({ settings, daemonState, onSave, onPause, onResume, pauseFb, resumeFb }) {
+export default function SettingsForm({ settings, daemonState, onSave, onPause, onResume, pauseFb, resumeFb, pauseRef, resumeRef }) {
   const [flashKey, setFlashKey] = useState(null);
   const flashTimer = useRef(null);
   useEffect(() => () => { if (flashTimer.current) clearTimeout(flashTimer.current); }, []);
@@ -267,6 +267,7 @@ export default function SettingsForm({ settings, daemonState, onSave, onPause, o
           <div class="flex items-center gap-3">
             {isPaused ? (
               <button
+                ref={resumeRef}
                 class="t-btn t-btn-primary px-4 py-2 text-sm"
                 disabled={resumeFb?.phase === 'loading'}
                 onClick={onResume}
@@ -275,6 +276,7 @@ export default function SettingsForm({ settings, daemonState, onSave, onPause, o
               </button>
             ) : (
               <button
+                ref={pauseRef}
                 class="t-btn t-btn-secondary px-4 py-2 text-sm"
                 disabled={pauseFb?.phase === 'loading'}
                 onClick={onPause}

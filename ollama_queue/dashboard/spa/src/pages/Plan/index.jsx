@@ -8,6 +8,7 @@ import {
     generateJobDescription,
 } from '../../stores';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
+import { useShatter } from '../../hooks/useShatter.js';
 import { GanttChart, runStatus } from '../../components/GanttChart';
 import { scheduledEvalRuns, fetchScheduledEvalRuns } from '../../stores/eval.js';
 import { currentTab } from '../../stores/health.js';
@@ -56,6 +57,19 @@ export default function Plan() {
     const [saveFb, saveAct] = useActionFeedback();
     const [generateFb, generateAct] = useActionFeedback();
     const [batchToggleFb, batchToggleAct] = useActionFeedback();
+
+    // Shatter hooks — one per distinct action type.
+    // Loop-rendered buttons pass the click event to fire(ev) so the correct
+    // element shatters (a single ref would always point to the last-rendered row).
+    const [deleteShRef, deleteShatter] = useShatter('earned');
+    const [, runNowShatter] = useShatter('complete');
+    const [, pinShatter] = useShatter('routine');
+    const [, batchRunShatter] = useShatter('complete');
+    const [rebalanceShRef, rebalanceShatter] = useShatter('routine');
+    const [, reenableShatter] = useShatter('routine');
+    const [saveShRef, saveShatter] = useShatter('complete');
+    const [generateShRef, generateShatter] = useShatter('routine');
+    const [, batchToggleShatter] = useShatter('routine');
 
     // Detail panel
     const [expandedJobId, setExpandedJobId] = useState(null);
@@ -142,6 +156,7 @@ export default function Plan() {
 
     async function handleDetailSave() {
         if (!editForm || saveFb.phase === 'loading') return;
+        saveShatter();
         const rj = jobs.find(j => j.id === editForm.id);
         if (!rj) return;
         const updates = {};
@@ -167,13 +182,13 @@ export default function Plan() {
             return;
         }
         await saveAct(
-            'Saving\u2026',
+            'SAVING',
             async () => {
                 await updateScheduleJob(editForm.id, updates);
                 setExpandedJobId(null);
                 setEditForm(null);
             },
-            'Saved'
+            'SAVED'
         );
     }
 
@@ -181,14 +196,15 @@ export default function Plan() {
     // The backend starts a background thread and returns immediately; description arrives via
     // the next 10s schedule refresh (or sooner if the model responds quickly).
     async function handleGenerateDescription(rjId) {
+        generateShatter();
         setGeneratingDescId(rjId);
         await generateAct(
-            'Generating description\u2026',
+            'GENERATING',
             async () => {
                 await generateJobDescription(rjId);
                 await fetchSchedule(); // refresh now; background thread may already be done
             },
-            'Queued \u2014 description arriving shortly'
+            'QUEUED \u2014 DESCRIPTION ARRIVING SHORTLY'
         );
         setGeneratingDescId(null);
     }
@@ -200,15 +216,16 @@ export default function Plan() {
     }
 
     async function handleDeleteConfirm(rjId) {
+        deleteShatter();
         setPendingDeleteId(null);
         await deleteAct(
-            'Deleting\u2026',
+            'DELETING',
             async () => {
                 await deleteScheduleJob(rjId);
                 setExpandedJobId(null);
                 setEditForm(null);
             },
-            'Deleted'
+            'DELETED'
         );
     }
 
@@ -216,38 +233,41 @@ export default function Plan() {
         setPendingDeleteId(null);
     }
 
-    async function handleRunNow(rj) {
+    async function handleRunNow(ev, rj) {
         if (rj.estimated_duration > 300) {
             const ok = window.confirm(`Run "${rj.name}" now? Estimated duration: ~${Math.round(rj.estimated_duration / 60)}m`);
             if (!ok) return;
         }
+        runNowShatter(ev);
         await runNowAct(
-            `Triggering ${rj.name}\u2026`,
+            'TRIGGERING',
             async () => {
                 await runScheduleJobNow(rj.id);
             },
-            `${rj.name} triggered`
+            `${rj.name.toUpperCase()} TRIGGERED`
         );
     }
 
-    async function handlePinToggle(rj) {
+    async function handlePinToggle(ev, rj) {
+        pinShatter(ev);
         await pinAct(
-            rj.pinned ? 'Unpinning\u2026' : 'Pinning\u2026',
+            rj.pinned ? 'UNPINNING' : 'PINNING',
             async () => {
                 await updateScheduleJob(rj.id, { pinned: !rj.pinned });
             },
-            rj.pinned ? 'Unpinned' : 'Pinned'
+            rj.pinned ? 'UNPINNED' : 'PINNED'
         );
     }
 
-    async function handleBatchRun(tag) {
+    async function handleBatchRun(ev, tag) {
+        batchRunShatter(ev);
         setBatchRunningTags(prev => new Set([...prev, tag]));
         await batchRunAct(
-            `Running all ${tag} jobs\u2026`,
+            'TRIGGERING',
             async () => {
                 await batchRunJobs(tag);
             },
-            `All ${tag} jobs triggered`
+            `ALL ${tag.toUpperCase()} TRIGGERED`
         );
         setBatchRunningTags(prev => {
             const next = new Set(prev);
@@ -256,36 +276,39 @@ export default function Plan() {
         });
     }
 
-    async function handleBatchToggle(tag, enabled) {
+    async function handleBatchToggle(ev, tag, enabled) {
+        batchToggleShatter(ev);
         await batchToggleAct(
-            enabled ? `Enabling ${tag}\u2026` : `Disabling ${tag}\u2026`,
+            enabled ? 'ENABLING' : 'DISABLING',
             async () => {
                 await batchToggleJobs(tag, enabled);
                 await fetchSchedule();
             },
-            enabled ? `${tag} jobs enabled` : `${tag} jobs disabled`
+            enabled ? `${tag.toUpperCase()} ENABLED` : `${tag.toUpperCase()} DISABLED`
         );
     }
 
     async function handleRebalance() {
+        rebalanceShatter();
         await rebalanceAct(
-            'Rebalancing\u2026',
+            'REBALANCING',
             async () => {
                 await triggerRebalance();
                 await fetchSchedule();
             },
-            'Schedule rebalanced'
+            'REBALANCED'
         );
     }
 
-    async function handleReenableJob(name) {
+    async function handleReenableJob(ev, name) {
+        reenableShatter(ev);
         await reenableAct(
-            `Re-enabling ${name}\u2026`,
+            'RE-ENABLING',
             async () => {
                 await enableJobByName(name);
                 await fetchSchedule();
             },
-            `${name} re-enabled`
+            `${name.toUpperCase()} RE-ENABLED`
         );
     }
 
@@ -371,7 +394,7 @@ export default function Plan() {
                             style={{ fontSize: 'var(--type-label)', padding: '0.15rem 0.5rem',
                                      opacity: (isBatchRunning || batchRunFb.phase === 'loading') ? 0.5 : 1 }}
                             disabled={isBatchRunning || batchRunFb.phase === 'loading'}
-                            onClick={() => handleBatchRun(tag)}>
+                            onClick={(ev) => handleBatchRun(ev, tag)}>
                             {(isBatchRunning || batchRunFb.phase === 'loading') ? '\u2026' : '\u25B6 Run All'}
                         </button>
                         {batchRunFb.msg && <div class={`action-fb action-fb--${batchRunFb.phase}`}>{batchRunFb.msg}</div>}
@@ -381,7 +404,7 @@ export default function Plan() {
                                     color: 'var(--text-secondary)', cursor: 'pointer' }}>
                         <input type="checkbox" checked={allEnabled}
                                style={{ accentColor: 'var(--accent)', width: 14, height: 14 }}
-                               onChange={() => handleBatchToggle(tag, !allEnabled)} />
+                               onChange={(ev) => handleBatchToggle(ev, tag, !allEnabled)} />
                         All
                     </label>
                     {batchToggleFb.msg && <div class={`action-fb action-fb--${batchToggleFb.phase}`}>{batchToggleFb.msg}</div>}
@@ -495,7 +518,7 @@ export default function Plan() {
                         <button
                             title={rj.pinned ? 'Locked \u2014 click to unlock this time slot' : 'Lock this time slot so the scheduler won\'t move it when you rebalance'}
                             disabled={pinFb.phase === 'loading'}
-                            onClick={() => handlePinToggle(rj)}
+                            onClick={(ev) => handlePinToggle(ev, rj)}
                             style={{
                                 background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.1rem',
                                 color: rj.pinned ? 'var(--status-warning)' : 'var(--text-tertiary)',
@@ -514,7 +537,7 @@ export default function Plan() {
                             </span>
                             <button
                                 disabled={reenableFb.phase === 'loading'}
-                                onClick={() => handleReenableJob(rj.name)}
+                                onClick={(ev) => handleReenableJob(ev, rj.name)}
                                 style={{
                                     fontFamily: 'var(--font-mono)', fontSize: '9px',
                                     background: 'transparent', border: '1px solid var(--status-warning)',
@@ -540,7 +563,7 @@ export default function Plan() {
                             style={{ fontSize: 'var(--type-label)', padding: '0.2rem 0.6rem',
                                      opacity: runNowFb.phase === 'loading' ? 0.5 : 1 }}
                             disabled={runNowFb.phase === 'loading'}
-                            onClick={() => handleRunNow(rj)}>
+                            onClick={(ev) => handleRunNow(ev, rj)}>
                             {runNowFb.phase === 'loading' ? '\u2026' : '\u25B6'}
                         </button>
                         {runNowFb.msg && <div class={`action-fb action-fb--${runNowFb.phase}`}>{runNowFb.msg}</div>}
@@ -568,6 +591,7 @@ export default function Plan() {
                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem' }}>
                                 <label style={labelStyle}>What it does</label>
                                 <button
+                                    ref={generateShRef}
                                     class="t-btn"
                                     style={{
                                         fontSize: 'var(--type-micro)', padding: '0.1rem 0.5rem',
@@ -756,7 +780,7 @@ export default function Plan() {
                         {/* Actions */}
                         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
                             <div>
-                                <button class="t-btn t-btn-primary"
+                                <button ref={saveShRef} class="t-btn t-btn-primary"
                                         style={{ padding: '0.3rem 1rem', fontSize: 'var(--type-body)',
                                                  opacity: saveFb.phase === 'loading' ? 0.6 : 1 }}
                                         disabled={saveFb.phase === 'loading'}
@@ -776,7 +800,7 @@ export default function Plan() {
                                         style={{ padding: '0.3rem 0.75rem', fontSize: 'var(--type-body)',
                                                  opacity: runNowFb.phase === 'loading' ? 0.5 : 1 }}
                                         disabled={runNowFb.phase === 'loading'}
-                                        onClick={() => handleRunNow(rj)}>
+                                        onClick={(ev) => handleRunNow(ev, rj)}>
                                     {runNowFb.phase === 'loading' ? '\u2026' : '\u25B6 Run Now'}
                                 </button>
                                 {runNowFb.msg && <div class={`action-fb action-fb--${runNowFb.phase}`}>{runNowFb.msg}</div>}
@@ -798,7 +822,7 @@ export default function Plan() {
                                         <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--status-error)' }}>
                                             Delete "{jobs.find(j => j.id === rjId)?.name}"?
                                         </span>
-                                        <button class="t-btn"
+                                        <button ref={deleteShRef} class="t-btn"
                                                 style={{
                                                     padding: '0.2rem 0.6rem', fontSize: 'var(--type-label)',
                                                     color: 'var(--status-error)', borderColor: 'var(--status-error)',
@@ -826,13 +850,14 @@ export default function Plan() {
     // --- Main render ---
 
     return (
-        <div class="flex flex-col gap-4 animate-page-enter" data-mood="wonder">
+        <div class="flex flex-col gap-4 sh-stagger-children animate-page-enter" data-mood="wonder">
             <ShPageBanner namespace={_tab.namespace} page={_tab.page} subtitle={_tab.subtitle} />
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                     <AddRecurringJobModal onAdded={() => { fetchSchedule(); fetchLoadMap(); }} />
                     <div>
                         <button
+                            ref={rebalanceShRef}
                             class="t-btn t-btn-primary px-4 py-2 text-sm"
                             onClick={handleRebalance}
                             disabled={rebalanceFb.phase === 'loading'}

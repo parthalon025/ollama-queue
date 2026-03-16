@@ -1,8 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'preact/hooks';
 import { useSignal } from '@preact/signals';
-import { ShFrozen } from 'superhot-ui/preact';
+import { ShFrozen, ShEmptyState } from 'superhot-ui/preact';
 import { queue, queueEtas, API, refreshQueue, highlightJobId } from '../stores';
-import EmptyState from './EmptyState.jsx';
 import { formatDuration } from '../utils/time.js';
 import { priorityBorderWidth, priorityBorderOpacity } from '../utils/priority.js';
 
@@ -101,7 +100,7 @@ export default function QueueList({ jobs, currentJob }) {
   if (allItems.length === 0 && !currentJob) {
     return (
       <div class="t-frame" data-label="Waiting to Run" data-chroma="gustave">
-        <EmptyState headline="Queue is empty" body="Jobs you submit will appear here." />
+        <ShEmptyState mantra="CLEAR" hint="all jobs processed" />
       </div>
     );
   }

@@ -1,4 +1,5 @@
 import { relativeTimeLog } from './helpers.js';
+import { ShEmptyState } from 'superhot-ui/preact';
 
 // What it shows: A reverse-chronological table of schedule mutations — rebalances,
 //   job additions, toggles, and other schedule events with timestamps.
@@ -15,9 +16,7 @@ export default function ScheduleHistory({ events }) {
                 Schedule Change History
             </h3>
             {events.length === 0 ? (
-                <p style={{ color: 'var(--text-tertiary)', fontSize: 'var(--type-body)' }}>
-                    No schedule changes yet. Changes appear here after you rebalance or add jobs.
-                </p>
+                <ShEmptyState mantra="NO ACTIVITY" />
             ) : (
                 <div class="t-frame" style={{ padding: 0, overflow: 'hidden' }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse',

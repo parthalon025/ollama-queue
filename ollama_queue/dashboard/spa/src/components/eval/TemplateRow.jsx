@@ -2,6 +2,7 @@ import { useState } from 'preact/hooks';
 import { API, fetchEvalTemplates, fetchEvalVariants } from '../../stores';
 import { EVAL_TRANSLATIONS } from './translations.js';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
+import { useShatter } from '../../hooks/useShatter.js';
 // What it shows: A single prompt template with 3-level progressive disclosure.
 //   L1: template ID, plain-language label.
 //   L2: first 200 chars of instruction, edit/clone buttons.
@@ -13,6 +14,7 @@ import { useActionFeedback } from '../../hooks/useActionFeedback.js';
 
 export default function TemplateRow({ template }) {
   const [deleteFb, deleteAct] = useActionFeedback();
+  const [deleteRef, deleteShatter] = useShatter('earned');
 
   const [level, setLevel] = useState(1); // 1 | 2 | 3
   const [cloning, setCloning] = useState(false);
@@ -45,7 +47,7 @@ export default function TemplateRow({ template }) {
   async function handleDelete(evt) {
     evt.stopPropagation();
     await deleteAct(
-      'Deleting…',
+      'DELETING',
       async () => {
         const res = await fetch(`${API}/eval/templates/${id}`, { method: 'DELETE' });
         if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
@@ -53,7 +55,7 @@ export default function TemplateRow({ template }) {
         await fetchEvalVariants(); // variants may reference this template
         setPendingDelete(false);
       },
-      `Template deleted`
+      'DELETED'
     );
   }
 
@@ -150,10 +152,11 @@ export default function TemplateRow({ template }) {
                       Delete "{label}"?
                     </span>
                     <button
+                      ref={deleteRef}
                       class="t-btn t-btn-secondary"
                       style={{ fontSize: 'var(--type-label)', padding: '3px 8px', color: 'var(--status-error)', borderColor: 'var(--status-error)' }}
                       disabled={deleteFb.phase === 'loading'}
-                      onClick={handleDelete}
+                      onClick={evt => { deleteShatter(); handleDelete(evt); }}
                     >
                       {deleteFb.phase === 'loading' ? 'Deleting…' : 'Yes, delete'}
                     </button>

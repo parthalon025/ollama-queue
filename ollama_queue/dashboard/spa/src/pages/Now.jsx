@@ -8,10 +8,11 @@ import {
 } from '../stores';
 import { evalActiveRun } from '../stores/eval.js';
 import { useActionFeedback } from '../hooks/useActionFeedback.js';
+import { useShatter } from '../hooks/useShatter.js';
 import HostCard from '../components/HostCard.jsx';
 import QueueList from '../components/QueueList.jsx';
 import HeroCard from '../components/HeroCard.jsx';
-import { ShPageBanner, ShStatCard, ShStatsGrid } from 'superhot-ui/preact';
+import { ShPageBanner, ShStatCard, ShStatsGrid, ShFrozen, ShThreatPulse } from 'superhot-ui/preact';
 import { TAB_CONFIG } from '../config/tabs.js';
 
 // NOTE: all .map() callbacks use descriptive names — never 'h' (shadows JSX factory)
@@ -34,6 +35,7 @@ export default function Now() {
 
     // Action feedback hook for "Dismiss all" — must precede any conditional return
     const [dismissFb, dismissAct] = useActionFeedback();
+    const [dismissRef, dismissShatter] = useShatter('earned');
 
     // Ref for the page container — target for the OFFLINE mantra overlay.
     const pageRef = useRef(null);
@@ -110,11 +112,15 @@ export default function Now() {
     ];
 
     return (
-        <div ref={pageRef} class="flex flex-col gap-4 animate-page-enter"
+        <div ref={pageRef} class="flex flex-col gap-4 sh-stagger-children animate-page-enter"
              data-mood={showAlerts ? 'dread' : 'dawn'}>
             <ShPageBanner namespace={_tab.namespace} page={_tab.page} subtitle={_tab.subtitle} />
             {/* KPI stat cards — live queue health at a glance */}
-            <ShStatsGrid stats={kpiStats} />
+            {/* ShFrozen: dims the stats block when daemon data goes stale (>30s cooling, >2m frozen, >5m stale) */}
+            <ShFrozen timestamp={st?.daemon?.timestamp ? st.daemon.timestamp * 1000 : null}
+                      thresholds={{ cooling: 30, frozen: 120, stale: 300 }}>
+                <ShStatsGrid stats={kpiStats} />
+            </ShFrozen>
             {/* Disconnected banner */}
             {connectionStatus.value === 'disconnected' && (
                 <div style={{
@@ -122,7 +128,7 @@ export default function Now() {
                     padding: '0.5rem 1rem', borderRadius: 4,
                     border: '1px solid var(--status-warning-subtle)',
                 }}>
-                    ⚠ Lost connection to the queue server — trying to reconnect...
+                    SIGNAL LOST — RECONNECTING
                 </div>
             )}
 
@@ -161,7 +167,7 @@ export default function Now() {
                         fontFamily: 'var(--font-mono)',
                         flexShrink: 0,
                     }}>
-                        ⚠ Needs Attention
+                        ATTENTION REQUIRED
                     </span>
                     {dlqCnt > 0 && (
                         // What it shows: DLQ count + two quick-action buttons to navigate
@@ -177,20 +183,21 @@ export default function Now() {
                                     fontFamily: 'var(--font-mono)',
                                 }}
                             >
-                                {dlqCnt} failed {dlqCnt === 1 ? 'job' : 'jobs'} need attention
+                                {dlqCnt} FAILED — REVIEW REQUIRED
                             </span>
                             <button
                                 class="t-btn"
                                 style={{ fontSize: 'var(--type-micro)', padding: '2px 8px' }}
                                 onClick={() => { currentTab.value = 'history'; }}
-                            >View failed</button>
+                            >VIEW</button>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                                 <button
+                                    ref={dismissRef}
                                     class="t-btn"
                                     style={{ fontSize: 'var(--type-micro)', padding: '2px 8px', color: 'var(--text-tertiary)' }}
                                     disabled={dismissFb.phase === 'loading'}
-                                    onClick={() => dismissAct('Clearing…', clearDLQ, () => 'Cleared')}
-                                >Dismiss all</button>
+                                    onClick={() => { dismissShatter(); dismissAct('CLEARING', clearDLQ, () => 'CLEARED'); }}
+                                >DISMISS ALL</button>
                                 {dismissFb.msg && <span class={`action-fb action-fb--${dismissFb.phase}`}>{dismissFb.msg}</span>}
                             </div>
                         </div>
@@ -209,7 +216,7 @@ export default function Now() {
                                 padding: 0,
                             }}
                         >
-                            {recentFailures} job{recentFailures > 1 ? 's' : ''} failed in the last 24h
+                            {recentFailures} FAILURES (24H)
                         </button>
                     )}
                     {disabledRecurring > 0 && (
@@ -227,7 +234,7 @@ export default function Now() {
                                 padding: 0,
                             }}
                         >
-                            {disabledRecurring} scheduled job{disabledRecurring > 1 ? 's' : ''} auto-disabled
+                            {disabledRecurring} JOBS AUTO-DISABLED
                         </button>
                     )}
                 </div>
@@ -241,47 +248,60 @@ export default function Now() {
                 {/* RIGHT: hero cards + proxy stat */}
                 <div class="flex flex-col gap-4">
                     {/* KPI cards — 2×2 grid */}
-                    <div class="grid grid-cols-2 gap-3">
-                        <HeroCard
-                            label="Jobs Completed Today"
-                            value={kpis ? kpis.jobs_24h : '--'}
-                            sparkData={buildHealthSparkline(health, 'ram_pct')}
-                            sparkColor="var(--accent)"
-                            delta={kpis ? buildJobsDelta(kpis, hist) : null}
-                            tooltip="Total jobs completed in the last 24 hours. Rising = queue is healthy. Falling = daemon may be stalled."
-                            chroma="lune"
-                        />
-                        <HeroCard
-                            label="Average Wait Before Starting"
-                            value={kpis ? formatWaitReadable(kpis.avg_wait_seconds) : '--'}
-                            sparkData={buildDurationSparkline(durations)}
-                            sparkColor="var(--accent)"
-                            delta={kpis ? buildWaitDelta(kpis.avg_wait_seconds) : null}
-                            tooltip="Average time a job spends in queue before the daemon starts it. Spikes mean the daemon was busy or paused."
-                            chroma="lune"
-                        />
-                        <HeroCard
-                            label="Auto-Paused Time Today"
-                            value={kpis ? `${kpis.pause_minutes_24h}` : '--'}
-                            unit="min"
-                            warning={kpis && kpis.pause_minutes_24h > 30}
-                            sparkData={buildPauseSparkline(health)}
-                            sparkColor="var(--status-warning)"
-                            delta={kpis ? buildPauseDelta(kpis.pause_minutes_24h) : null}
-                            tooltip="Total minutes the daemon spent paused in the last 24 hours. High values mean frequent health-triggered pauses."
-                            chroma="sciel"
-                        />
-                        <HeroCard
-                            label="7-Day Success Rate"
-                            value={kpis ? `${Math.round(kpis.success_rate_7d * 100)}` : '--'}
-                            unit="%"
-                            warning={kpis && kpis.success_rate_7d < 0.9}
-                            sparkData={buildSuccessRateSparkline(durations)}
-                            sparkColor="var(--accent)"
-                            delta={kpis ? buildSuccessRateDelta(kpis, hist) : null}
-                            tooltip="Percentage of completed jobs that succeeded. Below 90% warrants investigation in History."
-                            chroma="gustave"
-                        />
+                    {/* ShFrozen: each card dims when health data goes stale — health polls every 5s so thresholds are tight */}
+                    <div class="grid grid-cols-2 gap-3 sh-delay-200">
+                        <ShFrozen timestamp={latestHealth?.timestamp ? latestHealth.timestamp * 1000 : null}
+                                  thresholds={{ cooling: 30, frozen: 120, stale: 300 }}>
+                            <HeroCard
+                                label="Jobs Completed Today"
+                                value={kpis ? kpis.jobs_24h : '--'}
+                                sparkData={buildHealthSparkline(health, 'ram_pct')}
+                                sparkColor="var(--accent)"
+                                delta={kpis ? buildJobsDelta(kpis, hist) : null}
+                                tooltip="Total jobs completed in the last 24 hours. Rising = queue is healthy. Falling = daemon may be stalled."
+                                chroma="lune"
+                            />
+                        </ShFrozen>
+                        <ShFrozen timestamp={latestHealth?.timestamp ? latestHealth.timestamp * 1000 : null}
+                                  thresholds={{ cooling: 30, frozen: 120, stale: 300 }}>
+                            <HeroCard
+                                label="Average Wait Before Starting"
+                                value={kpis ? formatWaitReadable(kpis.avg_wait_seconds) : '--'}
+                                sparkData={buildDurationSparkline(durations)}
+                                sparkColor="var(--accent)"
+                                delta={kpis ? buildWaitDelta(kpis.avg_wait_seconds) : null}
+                                tooltip="Average time a job spends in queue before the daemon starts it. Spikes mean the daemon was busy or paused."
+                                chroma="lune"
+                            />
+                        </ShFrozen>
+                        <ShFrozen timestamp={latestHealth?.timestamp ? latestHealth.timestamp * 1000 : null}
+                                  thresholds={{ cooling: 30, frozen: 120, stale: 300 }}>
+                            <HeroCard
+                                label="Auto-Paused Time Today"
+                                value={kpis ? `${kpis.pause_minutes_24h}` : '--'}
+                                unit="min"
+                                warning={kpis && kpis.pause_minutes_24h > 30}
+                                sparkData={buildPauseSparkline(health)}
+                                sparkColor="var(--status-warning)"
+                                delta={kpis ? buildPauseDelta(kpis.pause_minutes_24h) : null}
+                                tooltip="Total minutes the daemon spent paused in the last 24 hours. High values mean frequent health-triggered pauses."
+                                chroma="sciel"
+                            />
+                        </ShFrozen>
+                        <ShFrozen timestamp={latestHealth?.timestamp ? latestHealth.timestamp * 1000 : null}
+                                  thresholds={{ cooling: 30, frozen: 120, stale: 300 }}>
+                            <HeroCard
+                                label="7-Day Success Rate"
+                                value={kpis ? `${Math.round(kpis.success_rate_7d * 100)}` : '--'}
+                                unit="%"
+                                warning={kpis && kpis.success_rate_7d < 0.9}
+                                sparkData={buildSuccessRateSparkline(durations)}
+                                sparkColor="var(--accent)"
+                                delta={kpis ? buildSuccessRateDelta(kpis, hist) : null}
+                                tooltip="Percentage of completed jobs that succeeded. Below 90% warrants investigation in History."
+                                chroma="gustave"
+                            />
+                        </ShFrozen>
                     </div>
 
                     {/* Proxy mini-stat — shown only when proxy calls exist in history */}
@@ -295,11 +315,11 @@ export default function Now() {
                                 paddingTop: '0.25rem',
                             }}
                         >
-                            API proxy calls{' '}
-                            {proxyGenerate > 0 && `${proxyGenerate} generate`}
+                            PROXY{' '}
+                            {proxyGenerate > 0 && `${proxyGenerate} GENERATE`}
                             {proxyGenerate > 0 && proxyEmbed > 0 && ' · '}
-                            {proxyEmbed > 0 && `${proxyEmbed} embed`}
-                            {' '}(last 24h)
+                            {proxyEmbed > 0 && `${proxyEmbed} EMBED`}
+                            {' '}(24H)
                         </div>
                     )}
                 </div>
@@ -361,36 +381,35 @@ function formatWaitReadable(seconds) {
 }
 
 function buildJobsDelta(kpis, hist) {
-    if (!kpis || kpis.jobs_24h === 0) return 'no jobs in the last 24h';
+    if (!kpis || kpis.jobs_24h === 0) return 'NO JOBS (24H)';
     const oneDayAgo = Date.now() / 1000 - 86400;
     const todayFailed = (hist || []).filter(
         (j) => (j.status === 'failed' || j.status === 'killed') && (j.completed_at ?? 0) >= oneDayAgo
     ).length;
-    if (todayFailed === 0) return 'all completed successfully';
-    const s = todayFailed === 1 ? '' : 's';
-    return `${todayFailed} job${s} failed today`;
+    if (todayFailed === 0) return 'ALL SUCCEEDED';
+    return `${todayFailed} FAILED TODAY`;
 }
 
 function buildWaitDelta(seconds) {
-    if (seconds === null || seconds <= 0) return 'no wait data yet';
-    if (seconds <= 30) return 'queue flowing smoothly';
-    if (seconds <= 120) return 'light wait — normal range';
-    if (seconds <= 300) return 'moderate backlog — check queue';
-    return 'heavy wait — jobs are stacking up';
+    if (seconds === null || seconds <= 0) return 'NO WAIT DATA';
+    if (seconds <= 30) return 'QUEUE FLOWING';
+    if (seconds <= 120) return 'LIGHT WAIT';
+    if (seconds <= 300) return 'BACKLOG — CHECK QUEUE';
+    return 'HEAVY WAIT — JOBS STACKING';
 }
 
 function buildPauseDelta(minutes) {
-    if (!minutes || minutes <= 0) return 'no pauses — running clean';
-    if (minutes <= 30) return 'some pauses — health thresholds triggered';
-    return 'frequent pauses — lower thresholds in Settings';
+    if (!minutes || minutes <= 0) return 'NO PAUSES';
+    if (minutes <= 30) return 'PAUSES — HEALTH THRESHOLDS HIT';
+    return 'FREQUENT PAUSES — LOWER THRESHOLDS';
 }
 
 function buildSuccessRateDelta(kpis, hist) {
     const ok = kpis.jobs_7d_ok ?? 0;
     const bad = kpis.jobs_7d_bad ?? 0;
     const total = ok + bad;
-    if (total === 0) return 'no jobs run in the last 7 days';
-    if (bad === 0) return 'everything is running clean';
+    if (total === 0) return 'NO JOBS (7D)';
+    if (bad === 0) return 'ALL CLEAN';
 
     const sevenDaysAgo = Date.now() / 1000 - 7 * 86400;
     const recentFails = (hist || []).filter(
@@ -402,14 +421,13 @@ function buildSuccessRateDelta(kpis, hist) {
     const crashes = recentFails.filter((j) => j.outcome_reason && /exit code [^0]|non.zero|crash|error/i.test(j.outcome_reason));
 
     const n = bad;
-    const s = n === 1 ? '' : 's';
 
     if (timeouts.length > 0 && timeouts.length >= recentFails.length / 2)
-        return `${n} job${s} ran past their time limit — raise Default Timeout in Settings`;
+        return `${n} TIMED OUT — RAISE DEFAULT TIMEOUT`;
     if (stalls.length > 0 && stalls.length >= recentFails.length / 2)
-        return `${n} job${s} appeared stuck and were killed — review Stall Detection in Settings`;
+        return `${n} STALLED — REVIEW STALL DETECTION`;
     if (crashes.length > 0 && crashes.length >= recentFails.length / 2)
-        return `${n} job${s} crashed with an error — check History for the command output`;
-    if (bad === 1) return '1 job failed — tap History to see what went wrong';
-    return `${n} jobs failed this week — check History or DLQ for patterns`;
+        return `${n} CRASHED — CHECK HISTORY`;
+    if (bad === 1) return '1 FAILED — CHECK HISTORY';
+    return `${n} FAILED THIS WEEK — CHECK DLQ`;
 }

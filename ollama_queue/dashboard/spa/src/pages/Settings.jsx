@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 import { useSignal } from '@preact/signals';
 import { settings, status, API, restartDaemon } from '../stores';
+import { setAudioEnabled } from '../stores/atmosphere.js';
 import SettingsForm from '../components/SettingsForm';
 import { useActionFeedback } from '../hooks/useActionFeedback.js';
+import { useShatter } from '../hooks/useShatter.js';
 import { ShCrtToggle, ShPageBanner } from 'superhot-ui/preact';
 import { TAB_CONFIG } from '../config/tabs.js';
 
@@ -47,6 +49,9 @@ export default function Settings() {
   const daemonState = st && st.daemon ? st.daemon.state : null;
 
   const [intensity, setIntensity] = useState(() => readCrtIntensity());
+  const [audioOn, setAudioOn] = useState(() => {
+    try { return localStorage.getItem('queue-audio') === 'true'; } catch (_) { return false; }
+  });
 
   // Apply CSS var on mount to match persisted preference
   useEffect(() => {
@@ -69,6 +74,9 @@ export default function Settings() {
   const [pauseFb, pauseAct] = useActionFeedback();
   const [resumeFb, resumeAct] = useActionFeedback();
   const [restartFb, restartAct] = useActionFeedback();
+  const [restartRef, restartShatter] = useShatter('complete');
+  const [pauseRef, pauseShatter] = useShatter('routine');
+  const [resumeRef, resumeShatter] = useShatter('routine');
 
   /** Save a single setting key via PUT /api/settings. Returns true on success. */
   const handleSave = useCallback(async (key, value) => {
@@ -96,8 +104,9 @@ export default function Settings() {
   }, []);
 
   const handlePause = useCallback(async () => {
+    pauseShatter();
     await pauseAct(
-      'Pausing daemon…',
+      'PAUSING',
       async () => {
         const res = await fetch(`${API}/daemon/pause`, { method: 'POST' });
         if (!res.ok) throw new Error(`Pause failed: ${res.status}`);
@@ -106,13 +115,14 @@ export default function Settings() {
           status.value = { ...status.value, daemon: { ...status.value.daemon, state: 'paused' } };
         }
       },
-      'Daemon paused'
+      'PAUSED'
     );
   }, [pauseAct]);
 
   const handleResume = useCallback(async () => {
+    resumeShatter();
     await resumeAct(
-      'Resuming daemon…',
+      'RESUMING',
       async () => {
         const res = await fetch(`${API}/daemon/resume`, { method: 'POST' });
         if (!res.ok) throw new Error(`Resume failed: ${res.status}`);
@@ -121,25 +131,26 @@ export default function Settings() {
           status.value = { ...status.value, daemon: { ...status.value.daemon, state: 'running' } };
         }
       },
-      'Daemon resumed'
+      'RESUMED'
     );
   }, [resumeAct]);
 
   return (
-    <div class="flex flex-col gap-4 animate-page-enter" data-mood="nostalgic">
+    <div class="flex flex-col gap-4 sh-stagger-children animate-page-enter" data-mood="nostalgic">
       <ShPageBanner namespace={_tab.namespace} page={_tab.page} subtitle={_tab.subtitle} />
       {restartRequired.value && (
         <div role="alert" style="background:color-mix(in srgb,var(--status-warning) 12%,transparent);border:1px solid var(--status-warning);border-radius:var(--radius);padding:10px 14px;display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;">
           <span style="font-size:var(--type-label);color:var(--status-warning);">
-            ⚠ Daemon restart required for these changes to take effect.
+            RESTART REQUIRED — CHANGES PENDING
           </span>
           <button
+            ref={restartRef}
             class="t-btn"
             style="font-size:var(--type-micro);padding:2px 10px;"
             disabled={restartFb.phase === 'loading'}
-            onClick={() => restartAct('Restarting…', restartDaemon, () => 'Restart signalled')}
+            onClick={() => { restartShatter(); restartAct('RESTARTING', restartDaemon, () => 'RESTARTED'); }}
           >
-            {restartFb.phase === 'loading' ? 'Restarting…' : 'Restart daemon'}
+            {restartFb.phase === 'loading' ? 'RESTARTING…' : 'RESTART DAEMON'}
           </button>
           {restartFb.msg && <div class={`action-fb action-fb--${restartFb.phase}`}>{restartFb.msg}</div>}
         </div>
@@ -152,6 +163,8 @@ export default function Settings() {
         onResume={handleResume}
         pauseFb={pauseFb}
         resumeFb={resumeFb}
+        pauseRef={pauseRef}
+        resumeRef={resumeRef}
       />
       {/* D20: CRT scanline intensity preference */}
       <div class="t-frame" data-label="Display" style="margin-top:1rem;">
@@ -163,15 +176,35 @@ export default function Settings() {
           }}
         />
       </div>
+      {/* Audio toggle — opt-in procedural SFX for state transitions */}
+      {/* What it shows: A checkbox to enable/disable procedural audio cues. */}
+      {/* Decision it drives: User can opt in to audio feedback on error, recovery, and DLQ events. Off by default. */}
+      <div class="t-frame" data-label="AUDIO" style="margin-top:1rem;">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-family:var(--font-mono);font-size:var(--type-label);color:var(--text-secondary);">
+          <input
+            type="checkbox"
+            checked={audioOn}
+            onChange={ev => {
+              const val = ev.target.checked;
+              setAudioOn(val);
+              setAudioEnabled(val);
+            }}
+          />
+          PROCEDURAL SFX
+        </label>
+        <span style="font-size:var(--type-micro);color:var(--text-tertiary);margin-top:4px;display:block;">
+          AUDIO CUES ON STATE TRANSITIONS — ERROR, RECOVERY, DLQ
+        </span>
+      </div>
       <div aria-label="Keyboard shortcuts" style="margin-top:24px;padding-top:16px;border-top:1px solid var(--border-subtle);">
         <p style="font-family:var(--font-mono);font-size:var(--type-micro);color:var(--text-tertiary);">
-          Keyboard shortcuts:{'  '}
-          <kbd>1</kbd> Now{'  ·  '}
-          <kbd>2</kbd> Plan{'  ·  '}
-          <kbd>3</kbd> History{'  ·  '}
-          <kbd>4</kbd> Models{'  ·  '}
-          <kbd>5</kbd> Settings{'  ·  '}
-          <kbd>Cmd+K</kbd> Command palette
+          SHORTCUTS{'  '}
+          <kbd>1</kbd> NOW{'  ·  '}
+          <kbd>2</kbd> PLAN{'  ·  '}
+          <kbd>3</kbd> HISTORY{'  ·  '}
+          <kbd>4</kbd> MODELS{'  ·  '}
+          <kbd>5</kbd> SETTINGS{'  ·  '}
+          <kbd>Cmd+K</kbd> COMMAND PALETTE
         </p>
       </div>
     </div>

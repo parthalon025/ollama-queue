@@ -5,6 +5,7 @@
 //   applies patches, and optionally enables system-wide iptables interception.
 import { useEffect } from 'preact/hooks';
 import { useActionFeedback } from '../hooks/useActionFeedback.js';
+import { useShatter } from '../hooks/useShatter.js';
 import {
   consumers, consumersScanning,
   fetchConsumers, scanConsumers,
@@ -12,7 +13,7 @@ import {
   enableIntercept, disableIntercept,
 } from '../stores';
 import { ConsumerRow } from '../components/consumers/ConsumerRow.jsx';
-import { ShPageBanner } from 'superhot-ui/preact';
+import { ShPageBanner, ShEmptyState } from 'superhot-ui/preact';
 import { TAB_CONFIG } from '../config/tabs.js';
 
 // What it shows: System-wide iptables intercept mode status + enable/disable toggle.
@@ -20,6 +21,7 @@ import { TAB_CONFIG } from '../config/tabs.js';
 //   hardcoded URLs env-var patching can't reach.
 function InterceptBanner() {
   const [fb, run] = useActionFeedback();
+  const [interceptRef, interceptShatter] = useShatter('routine');
   const status = interceptStatus.value;
 
   useEffect(() => { fetchInterceptStatus(); }, []);
@@ -38,16 +40,18 @@ function InterceptBanner() {
       <div class="intercept-banner__action">
         {status.enabled ? (
           <button
+            ref={interceptRef}
             class={`action-fb--${fb.phase}`}
-            onClick={() => run('Disabling…', disableIntercept, () => 'Intercept disabled')}
+            onClick={() => { interceptShatter(); run('DISABLING', disableIntercept, () => 'INTERCEPT DISABLED'); }}
             disabled={fb.phase === 'loading'}
           >
             {fb.phase === 'loading' ? fb.msg : 'Disable intercept'}
           </button>
         ) : (
           <button
+            ref={interceptRef}
             class={`action-fb--${fb.phase}`}
-            onClick={() => run('Enabling…', enableIntercept, () => 'Intercept active')}
+            onClick={() => { interceptShatter(); run('ENABLING', enableIntercept, () => 'INTERCEPT ACTIVE'); }}
             disabled={fb.phase === 'loading'}
           >
             {fb.phase === 'loading' ? fb.msg : 'Enable intercept mode'}
@@ -63,6 +67,7 @@ function InterceptBanner() {
 export default function Consumers() {
   const _tab = TAB_CONFIG.find(t => t.id === 'consumers');
   const [scanFb, runScan] = useActionFeedback();
+  const [scanRef, scanShatter] = useShatter('routine');
 
   useEffect(() => { fetchConsumers(); }, []);
 
@@ -71,7 +76,7 @@ export default function Consumers() {
   const showWizard = newlyDiscovered.length > 0 && list.every(consumer => consumer.status === 'discovered');
 
   return (
-    <div class="consumers-page">
+    <div class="consumers-page sh-stagger-children">
       <ShPageBanner namespace={_tab.namespace} page={_tab.page} subtitle={_tab.subtitle} />
 
       {/* What it shows: A plain-language explanation of what consumers are and how the
@@ -93,8 +98,9 @@ export default function Consumers() {
       <div class="consumers-header">
         <h2 style="margin:0">Consumers</h2>
         <button
+          ref={scanRef}
           class={`action-fb--${scanFb.phase}`}
-          onClick={() => runScan('Scanning…', scanConsumers, () => `Found ${consumers.value.length} consumer(s)`)}
+          onClick={() => { scanShatter(); runScan('SCANNING', scanConsumers, () => `FOUND ${consumers.value.length} CONSUMER(S)`); }}
           disabled={consumersScanning.value || scanFb.phase === 'loading'}
         >
           {scanFb.phase === 'loading' ? 'Scanning…' : 'Scan Now'}
@@ -111,9 +117,7 @@ export default function Consumers() {
       )}
 
       {list.length === 0 ? (
-        <div class="consumers-empty">
-          <p>No Ollama consumers detected. Click <strong>Scan Now</strong> to search.</p>
-        </div>
+        <ShEmptyState mantra="DARK" hint="scan to detect services" />
       ) : (
         <table class="consumers-table">
           <thead>

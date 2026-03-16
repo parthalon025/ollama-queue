@@ -23,7 +23,7 @@ export default function Eval() {
   // Without this, clicking sub-tabs would update the signal but Eval would not re-render.
   const subTab = evalSubTab.value;
   return (
-    <div class="eval-page">
+    <div class="eval-page sh-stagger-children">
       <ShPageBanner namespace={_tab.namespace} page={_tab.page} subtitle={_tab.subtitle} />
       <nav class="eval-subnav">
         {TABS.map(tab => (

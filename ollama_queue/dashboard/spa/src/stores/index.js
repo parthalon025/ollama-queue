@@ -39,6 +39,7 @@ export * from './schedule.js';
 export * from './models.js';
 export * from './settings.js';
 export * from './health.js';
+export * from './atmosphere.js';
 
 // ── Cross-component derived signals ───────────────────────────────────────────
 

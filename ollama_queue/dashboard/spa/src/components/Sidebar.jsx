@@ -1,5 +1,6 @@
 import { useRef } from 'preact/hooks';
-import { healthData, settings, connectionStatus } from '../stores';
+import { healthData, settings, connectionStatus, escalationLevel, healthMode } from '../stores';
+import { ShThreatPulse } from 'superhot-ui/preact';
 import { scheduledEvalCount } from '../stores/eval.js';
 import SystemHealthChip from './SystemHealthChip.jsx';
 import SystemSummaryLine from './SystemSummaryLine.jsx';
@@ -7,15 +8,15 @@ import EvalWinnerChip from './EvalWinnerChip.jsx';
 
 // NOTE: callback params use descriptive names (item, etc.) — never 'h' (shadows JSX factory)
 const NAV_ITEMS = [
-    { id: 'now',      icon: '●', label: 'Now',      tooltip: "Live view — what's running right now" },
-    { id: 'plan',     icon: '◫', label: 'Schedule', tooltip: 'Recurring jobs and upcoming run times' },
-    { id: 'history',  icon: '◷', label: 'History',  tooltip: 'Completed and failed jobs' },
-    { id: 'models',   icon: '⊞', label: 'Models',   tooltip: 'Installed AI models and downloads' },
-    { id: 'settings', icon: '⚙', label: 'Settings', tooltip: 'Configure queue thresholds and defaults' },
-    { id: 'eval',      icon: '⊡', label: 'Eval',      tooltip: 'Test and compare AI model configurations' },
-    { id: 'consumers', icon: '⇄', label: 'Consumers', tooltip: 'Detected Ollama consumers and routing' },
-    { id: 'performance', icon: '⊘', label: 'Perf', tooltip: 'Model performance stats and system health' },
-    { id: 'backends', icon: '⊟', label: 'Backends', tooltip: 'Multi-backend fleet management and routing intelligence' },
+    { id: 'now',         icon: '●', label: 'Now',       tooltip: 'LIVE — CURRENT OPERATIONS' },
+    { id: 'plan',        icon: '◫', label: 'Schedule',  tooltip: 'SCHEDULE — RECURRING JOBS' },
+    { id: 'history',     icon: '◷', label: 'History',   tooltip: 'HISTORY — COMPLETED AND FAILED' },
+    { id: 'models',      icon: '⊞', label: 'Models',    tooltip: 'MODELS — INSTALLED AI MODELS' },
+    { id: 'settings',    icon: '⚙', label: 'Settings',  tooltip: 'CONFIG — THRESHOLDS AND DEFAULTS' },
+    { id: 'eval',        icon: '⊡', label: 'Eval',      tooltip: 'EVAL — MODEL COMPARISON' },
+    { id: 'consumers',   icon: '⇄', label: 'Consumers', tooltip: 'CONSUMERS — OLLAMA SERVICE DETECTION' },
+    { id: 'performance', icon: '⊘', label: 'Perf',      tooltip: 'PERF — THROUGHPUT AND HEALTH' },
+    { id: 'backends',    icon: '⊟', label: 'Backends',  tooltip: 'BACKENDS — GPU FLEET MANAGEMENT' },
 ];
 
 // What it shows: Sidebar navigation + aggregate system health chip at the top.
@@ -56,16 +57,18 @@ export default function Sidebar({ active, onNavigate, daemonState, dlqCount, the
         <aside class="layout-sidebar">
             {/* Aggregate health chip — replaces old daemon-only status display */}
             <div style={{ borderBottom: '1px solid var(--border-subtle)', flexShrink: 0 }}>
-                <SystemHealthChip
-                    daemonState={daemonState?.state || 'idle'}
-                    dlqCount={dlqCount}
-                    ram={latestHealth?.ram_pct}
-                    vram={latestHealth?.vram_pct}
-                    load={latestHealth?.load_avg}
-                    swap={latestHealth?.swap_pct}
-                    settings={sett}
-                    connectionStatus={connStatus}
-                />
+                <ShThreatPulse active={escalationLevel.value >= 1} persistent>
+                    <SystemHealthChip
+                        daemonState={daemonState?.state || 'idle'}
+                        dlqCount={dlqCount}
+                        ram={latestHealth?.ram_pct}
+                        vram={latestHealth?.vram_pct}
+                        load={latestHealth?.load_avg}
+                        swap={latestHealth?.swap_pct}
+                        settings={sett}
+                        connectionStatus={connStatus}
+                    />
+                </ShThreatPulse>
             </div>
 
             <div class="sidebar-summary">
@@ -108,22 +111,24 @@ export default function Sidebar({ active, onNavigate, daemonState, dlqCount, the
                                 <span class="nav-badge nav-badge--eval" title={`${scheduledEvalCount.value} eval run(s) in next 4h`}>EVAL</span>
                             )}
                             {badge && (
-                                <span
-                                    key={badgeAnimKey.current}
-                                    class={badgeAnimClass.current}
-                                    style={{
-                                        marginLeft: 'auto',
-                                        background: 'var(--status-error)',
-                                        color: '#fff',
-                                        fontSize: 'var(--type-micro)',
-                                        fontFamily: 'var(--font-mono)',
-                                        padding: '1px 5px',
-                                        borderRadius: 10,
-                                        fontWeight: 700,
-                                        flexShrink: 0,
-                                    }}>
-                                    {badge}
-                                </span>
+                                <ShThreatPulse active={badge > 0} persistent>
+                                    <span
+                                        key={badgeAnimKey.current}
+                                        class={badgeAnimClass.current}
+                                        style={{
+                                            marginLeft: 'auto',
+                                            background: 'var(--status-error)',
+                                            color: '#fff',
+                                            fontSize: 'var(--type-micro)',
+                                            fontFamily: 'var(--font-mono)',
+                                            padding: '1px 5px',
+                                            borderRadius: 10,
+                                            fontWeight: 700,
+                                            flexShrink: 0,
+                                        }}>
+                                        {badge}
+                                    </span>
+                                </ShThreatPulse>
                             )}
                         </button>
                     );

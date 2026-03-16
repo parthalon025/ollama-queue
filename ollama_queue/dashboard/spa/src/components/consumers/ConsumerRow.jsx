@@ -3,9 +3,11 @@
 //   last seen time, patch status, and health status.
 // Decision it drives: User decides whether to include or ignore the service and whether to
 //   apply patch immediately or defer until next restart.
-import { useState } from 'preact/hooks';
+import { useState, useEffect, useRef } from 'preact/hooks';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
+import { useShatter } from '../../hooks/useShatter.js';
 import { includeConsumer, ignoreConsumer, revertConsumer } from '../../stores';
+import { applyFreshness } from 'superhot-ui';
 
 const STATUS_BADGE = {
   discovered:      { cls: 'badge--neutral',  label: 'Discovered' },
@@ -26,17 +28,31 @@ const HEALTH_BADGE = {
 
 export function ConsumerRow({ consumer }) {
   const [fb, run] = useActionFeedback();
+  const [includeRef, includeShatter] = useShatter('complete');
+  const [ignoreRef, ignoreShatter] = useShatter('earned');
+  const [revertRef, revertShatter] = useShatter('earned');
   const [showStreamingConfirm, setShowStreamingConfirm] = useState(false);
   const [restartPolicy, setRestartPolicy] = useState('deferred');
+  // Freshness ref: applied directly to <tr> (can't wrap a table row in a <div>).
+  // Default thresholds (5m/30m/60m) — consumers are expected to check in frequently.
+  const rowRef = useRef(null);
+  useEffect(() => {
+    if (!rowRef.current || !consumer.last_seen) return;
+    applyFreshness(rowRef.current, consumer.last_seen * 1000);
+    const interval = setInterval(() => {
+      if (rowRef.current) applyFreshness(rowRef.current, consumer.last_seen * 1000);
+    }, 30_000);
+    return () => clearInterval(interval);
+  }, [consumer.last_seen]);
 
   const statusInfo = STATUS_BADGE[consumer.status] || STATUS_BADGE.discovered;
   const healthInfo = HEALTH_BADGE[consumer.health_status] || HEALTH_BADGE.unknown;
 
   async function doInclude(opts = {}) {
     await run(
-      'Including…',
+      'INCLUDING',
       () => includeConsumer(consumer.id, { restart_policy: restartPolicy, ...opts }),
-      result => `Included — ${result.patch_type || 'snippet generated'}`,
+      result => `INCLUDED — ${result.patch_type || 'snippet generated'}`,
     );
   }
 
@@ -57,7 +73,7 @@ export function ConsumerRow({ consumer }) {
     : null;
 
   return (
-    <tr class={`consumer-row consumer-row--${consumer.status}`}>
+    <tr ref={rowRef} class={`consumer-row consumer-row--${consumer.status}`}>
       <td>
         <span class="consumer-name">{consumer.name}</span>
         {consumer.is_managed_job && (
@@ -98,7 +114,8 @@ export function ConsumerRow({ consumer }) {
               <option value="immediate">Apply now (restarts service)</option>
             </select>
             <button
-              onClick={handleInclude}
+              ref={includeRef}
+              onClick={() => { includeShatter(); handleInclude(); }}
               disabled={isDisabled}
               title={consumer.is_managed_job ? 'Cannot include managed queue jobs' : undefined}
             >
@@ -108,14 +125,14 @@ export function ConsumerRow({ consumer }) {
               <div class={`action-fb action-fb--${fb.phase}`}>{fb.msg}</div>
             )}
             {consumer.status !== 'ignored' && (
-              <button onClick={() => run('Ignoring…', () => ignoreConsumer(consumer.id), () => 'Ignored')}>
+              <button ref={ignoreRef} onClick={() => { ignoreShatter(); run('IGNORING', () => ignoreConsumer(consumer.id), () => 'IGNORED'); }}>
                 Ignore
               </button>
             )}
           </span>
         )}
         {(consumer.status === 'pending_restart' || consumer.status === 'patched') && (
-          <button onClick={() => run('Reverting…', () => revertConsumer(consumer.id), () => 'Reverted')}>
+          <button ref={revertRef} onClick={() => { revertShatter(); run('REVERTING', () => revertConsumer(consumer.id), () => 'REVERTED'); }}>
             Revert
           </button>
         )}

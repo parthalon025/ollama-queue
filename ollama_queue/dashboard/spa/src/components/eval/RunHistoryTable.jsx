@@ -1,6 +1,7 @@
 import { useState } from 'preact/hooks';
 import { evalRuns } from '../../stores';
 import RunRow from './RunRow';
+import { ShEmptyState } from 'superhot-ui/preact';
 // What it shows: The full list of past and current eval runs, newest first,
 //   with a status filter bar. Defaults to hiding failed runs to reduce clutter.
 //   Each row shows status, winner config, quality score, date, and item count.
@@ -28,9 +29,7 @@ export default function RunHistoryTable() {
   if (!runs || runs.length === 0) {
     return (
       <div class="t-frame" data-label="Run History">
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-label)', color: 'var(--text-tertiary)' }}>
-          No eval runs yet. Start a run above to begin.
-        </div>
+        <ShEmptyState mantra="AWAITING ORDERS" hint="create a variant and run" />
       </div>
     );
   }

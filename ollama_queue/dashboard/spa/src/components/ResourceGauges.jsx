@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'preact/hooks';
+import { ShThreatPulse } from 'superhot-ui/preact';
 
 /**
  * What it shows: RAM, VRAM, CPU load, and swap — the four metrics the health monitor watches
@@ -80,37 +81,48 @@ export default function ResourceGauges({ ram, vram, load, swap, settings }) {
         // edge of the visible bar always shows the color for the current load level.
         const gradientBg = `linear-gradient(to right, var(--accent) 0%, var(--status-warning) ${resumeNorm.toFixed(1)}%, var(--status-error) ${pauseNorm.toFixed(1)}%)`;
 
+        const gaugeBar = (
+          <div style="flex: 1; height: 6px; background: var(--bg-inset); border-radius: 3px; position: relative; overflow: hidden;">
+            {/* Gradient track — always full width, encodes the full threshold range as a color ramp */}
+            <div style={{ position: 'absolute', inset: '0', background: gradientBg }} />
+            {/* Unfilled mask — covers from pct% to 100% with the track background color */}
+            <div style={{
+              position: 'absolute',
+              left: `${pct}%`,
+              top: 0, bottom: 0, right: 0,
+              background: 'var(--bg-inset)',
+              transition: 'left 0.3s ease',
+            }} />
+            {/* Pause threshold marker — on top of gradient */}
+            <div
+              title="Pause threshold — the queue stops starting new jobs above this level"
+              style={{
+                position: 'absolute',
+                left: `${pauseNorm}%`,
+                top: 0,
+                bottom: 0,
+                width: '1px',
+                borderLeft: '1px dashed var(--text-tertiary)',
+                opacity: 0.5,
+                zIndex: 1,
+              }}
+            />
+          </div>
+        );
+
+        // Wrap VRAM (GPU) and RAM gauge bars with ThreatPulse when past pause threshold
+        const wrappedBar = g.label === 'GPU'
+          ? <ShThreatPulse active={vram > (s.vram_pause_pct || 90)} persistent>{gaugeBar}</ShThreatPulse>
+          : g.label === 'RAM'
+          ? <ShThreatPulse active={ram > (s.ram_pause_pct || 85)} persistent>{gaugeBar}</ShThreatPulse>
+          : gaugeBar;
+
         return (
           <div key={g.label} title={g.title} class="flex items-center gap-1" style="min-width: 80px; flex: 1;">
             <span class="data-mono" style="font-size: var(--type-micro); color: var(--text-tertiary); width: 32px; text-align: right;">
               {g.label}
             </span>
-            <div style="flex: 1; height: 6px; background: var(--bg-inset); border-radius: 3px; position: relative; overflow: hidden;">
-              {/* Gradient track — always full width, encodes the full threshold range as a color ramp */}
-              <div style={{ position: 'absolute', inset: '0', background: gradientBg }} />
-              {/* Unfilled mask — covers from pct% to 100% with the track background color */}
-              <div style={{
-                position: 'absolute',
-                left: `${pct}%`,
-                top: 0, bottom: 0, right: 0,
-                background: 'var(--bg-inset)',
-                transition: 'left 0.3s ease',
-              }} />
-              {/* Pause threshold marker — on top of gradient */}
-              <div
-                title="Pause threshold — the queue stops starting new jobs above this level"
-                style={{
-                  position: 'absolute',
-                  left: `${pauseNorm}%`,
-                  top: 0,
-                  bottom: 0,
-                  width: '1px',
-                  borderLeft: '1px dashed var(--text-tertiary)',
-                  opacity: 0.5,
-                  zIndex: 1,
-                }}
-              />
-            </div>
+            {wrappedBar}
             <span class="data-mono" style="font-size: var(--type-micro); color: var(--text-secondary); width: 28px;">
               {Math.round(pct)}%
             </span>

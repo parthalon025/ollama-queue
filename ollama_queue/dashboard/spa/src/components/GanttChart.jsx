@@ -2,6 +2,7 @@ import { Fragment } from 'preact';
 import { useState } from 'preact/hooks';
 import { useSignal } from '@preact/signals';
 import { fetchJobRuns } from '../stores';
+import { applyFreshness } from 'superhot-ui';
 
 // NOTE: all .map() callbacks use descriptive names (job, slot, laneIdx) — never 'h'
 // as that shadows the JSX factory esbuild injects.
@@ -678,9 +679,16 @@ export function GanttChart({
                     // against the full-height body — matching the classic candlestick silhouette.
                     const wickThickness = 3; // px, thin wick height
 
+                    // Freshness via ref callback — applied directly to the absolutely-positioned bar div.
+                    // Can't wrap with ShFrozen (would need to replicate all position/size styles on the wrapper).
+                    // Default thresholds (5m/30m/60m) — a job bar that hasn't run recently signals schedule drift.
+                    const _lastRunMs = job.last_run ? job.last_run * 1000 : null;
+                    const _applyFreshnessToBar = el => { if (el && _lastRunMs) applyFreshness(el, _lastRunMs); };
+
                     return (
                         <div
                             key={job.id}
+                            ref={_applyFreshnessToBar}
                             title={buildTooltip(job, isConcurrent)}
                             onClick={evt => { evt.stopPropagation(); handleBarClick(job); }}
                             onMouseEnter={e => { tooltip.value = { x: e.clientX + 16, y: e.clientY, job }; }}

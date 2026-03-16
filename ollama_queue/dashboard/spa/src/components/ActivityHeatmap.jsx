@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'preact/hooks';
+import { ShEmptyState } from 'superhot-ui/preact';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
@@ -35,9 +36,7 @@ export default function ActivityHeatmap({ data }) {
   if (items.length === 0) {
     return (
       <div class="t-frame" data-label="GPU Activity by Time of Day">
-        <p style="color: var(--text-tertiary); font-size: var(--type-body); text-align: center;">
-          No activity yet — run some jobs and this chart will fill in over time
-        </p>
+        <ShEmptyState mantra="NO SIGNAL" />
       </div>
     );
   }

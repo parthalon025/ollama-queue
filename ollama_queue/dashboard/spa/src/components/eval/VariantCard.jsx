@@ -9,11 +9,13 @@
 import { h } from 'preact';
 import F1Score from '../F1Score.jsx';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
+import { useShatter } from '../../hooks/useShatter.js';
 
 // NOTE: All .map() callbacks use descriptive parameter names — never 'h' (shadows JSX factory)
 
 export default function VariantCard({ variant, selected = false, onSelect, onClone, onEdit, onDelete }) {
   const [fb, act] = useActionFeedback();
+  const [deleteRef, deleteShatter] = useShatter('earned');
 
   // Top 3 non-default params as pills
   const paramPills = Object.entries(variant.params || {}).slice(0, 3);
@@ -60,9 +62,10 @@ export default function VariantCard({ variant, selected = false, onSelect, onClo
         <button onClick={() => onClone?.()}>Clone</button>
         <button onClick={() => onEdit?.()}>Edit</button>
         <button
+          ref={deleteRef}
           class="variant-card__delete"
           disabled={fb.phase === 'loading'}
-          onClick={() => act('Deleting\u2026', () => onDelete?.(), () => 'Deleted')}
+          onClick={() => { deleteShatter(); act('DELETING', () => onDelete?.(), () => 'DELETED'); }}
         >
           {fb.phase === 'loading' ? '\u2026' : 'Delete'}
         </button>

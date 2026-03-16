@@ -6,5 +6,9 @@ module.exports = {
     evalWinner: signal(null),
     evalSubTab: signal('runs'),
     focusVariantId: signal(null),
+    evalSettings: signal({}),
+    evalTemplates: signal([]),
     cancelEvalRun: jest.fn().mockResolvedValue({ ok: true }),
+    saveEvalSettings: jest.fn().mockResolvedValue({}),
+    fetchEvalVariants: jest.fn().mockResolvedValue([]),
 };

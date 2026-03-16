@@ -23,6 +23,8 @@ module.exports = {
         '^\\.\\./stores/health\\.js$': '<rootDir>/src/__mocks__/stores.cjs',
         '^\\.\\./stores/eval\\.js$': '<rootDir>/src/__mocks__/stores-eval.cjs',
         '^\\.\\./hooks/useActionFeedback\\.js$': '<rootDir>/src/__mocks__/useActionFeedback.cjs',
+        '^\\.\\./hooks/useShatter\\.js$': '<rootDir>/src/__mocks__/useShatter.cjs',
+        '^\\.\\./stores/atmosphere\\.js$': '<rootDir>/src/__mocks__/atmosphere.cjs',
         '^\\.\\./utils/time\\.js$': '<rootDir>/src/__mocks__/utils-time.cjs',
         // Depth-2 patterns for components in src/components/<subdirectory>/ (e.g. eval/)
         '^\\.\\./\\.\\./stores$': '<rootDir>/src/__mocks__/stores.cjs',
@@ -31,6 +33,8 @@ module.exports = {
         '^\\.\\./\\.\\./stores/health\\.js$': '<rootDir>/src/__mocks__/stores.cjs',
         '^\\.\\./\\.\\./stores/eval\\.js$': '<rootDir>/src/__mocks__/stores-eval.cjs',
         '^\\.\\./\\.\\./hooks/useActionFeedback\\.js$': '<rootDir>/src/__mocks__/useActionFeedback.cjs',
+        '^\\.\\./\\.\\./hooks/useShatter\\.js$': '<rootDir>/src/__mocks__/useShatter.cjs',
+        '^\\.\\./\\.\\./stores/atmosphere\\.js$': '<rootDir>/src/__mocks__/atmosphere.cjs',
         '^\\.\\./\\.\\./utils/time\\.js$': '<rootDir>/src/__mocks__/utils-time.cjs',
     },
     testMatch: ['**/*.test.js'],

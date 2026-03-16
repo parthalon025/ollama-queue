@@ -4,9 +4,13 @@ import ResultsTable from '../ResultsTable.jsx';
 import ConfusionMatrix from '../ConfusionMatrix.jsx';
 import { API, evalActiveRun, evalSubTab, evalVariants, fetchEvalRuns, fetchEvalVariants, fetchRunAnalysis, startEvalPoll } from '../../../stores';
 import { useActionFeedback } from '../../../hooks/useActionFeedback.js';
+import { useShatter } from '../../../hooks/useShatter.js';
 import StatusDot from './StatusDot.jsx';
 import ModelChip from '../../ModelChip.jsx';
 import { formatDate, fmtPct, simpleRenderMd, resolveGenModel } from './helpers.js';
+import { ShFrozen } from 'superhot-ui/preact';
+import { glitchText } from 'superhot-ui';
+import { canFireEffect } from '../../../stores/atmosphere.js';
 
 // What it shows: A single eval run row with 3-level progressive disclosure.
 //   L1: status dot, winner config, quality score, date, item count.
@@ -22,12 +26,26 @@ export default function RunRow({ run }) {
   const [analyzeFb, analyzeAct] = useActionFeedback();
   const [promoteFb, promoteAct] = useActionFeedback();
   const [reanalyzeFb, reanalyzeAct] = useActionFeedback();
+  const [promoteRef, promoteShatter] = useShatter('complete');
+  const [analyzeRef, analyzeShatter] = useShatter('routine');
+  const [repeatRef, repeatShatter] = useShatter('complete');
+  const [reanalyzeRef, reanalyzeShatter] = useShatter('routine');
   const [analysis, setAnalysis] = useState(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [showBreakdown, setShowBreakdown] = useState(false);
   const [showAllItems, setShowAllItems] = useState(false);
   const refreshTimer = useRef(null);
   useEffect(() => () => { if (refreshTimer.current) clearTimeout(refreshTimer.current); }, []);
+
+  const rowRef = useRef(null);
+
+  // Glitch the row when an eval run transitions to failed status.
+  useEffect(() => {
+    if (run.status === 'failed' && rowRef.current) {
+      const cleanup = canFireEffect('glitch-eval-' + run.id);
+      if (cleanup) glitchText(rowRef.current, { intensity: 'high' });
+    }
+  }, [run.status]);
 
   const {
     id,
@@ -59,7 +77,7 @@ export default function RunRow({ run }) {
   async function handleAnalyze(evt) {
     evt.stopPropagation();
     await analyzeAct(
-      'Generating analysis\u2026',
+      'ANALYZING',
       async () => {
         const res = await fetch(`${API}/eval/runs/${id}/analyze`, { method: 'POST' });
         let data = null;
@@ -70,14 +88,14 @@ export default function RunRow({ run }) {
         refreshTimer.current = setTimeout(() => fetchEvalRuns(), 8000);
         return data;
       },
-      () => `Analysis started for run #${id} \u2014 refresh in a moment`
+      () => `ANALYSIS STARTED FOR RUN #${id} \u2014 REFRESH IN A MOMENT`
     );
   }
 
   async function handleRepeat(evt) {
     evt.stopPropagation();
     await repeatAct(
-      'Repeating run\u2026',
+      'REPEATING',
       async () => {
         const res = await fetch(`${API}/eval/runs/${id}/repeat`, { method: 'POST' });
         let data = null;
@@ -91,7 +109,7 @@ export default function RunRow({ run }) {
         await fetchEvalRuns();
         return data;
       },
-      data => `Run #${data.run_id} started`
+      data => `RUN #${data.run_id} STARTED`
     );
   }
 
@@ -99,7 +117,7 @@ export default function RunRow({ run }) {
   async function handlePromote(evt) {
     evt.stopPropagation();
     await promoteAct(
-      'Promoting\u2026',
+      'PROMOTING',
       async () => {
         const res = await fetch(`${API}/eval/runs/${id}/promote`, {
           method: 'POST',
@@ -113,7 +131,7 @@ export default function RunRow({ run }) {
         await fetchEvalVariants();
         return data;
       },
-      data => `Config ${data?.variant_id ?? winner_variant} promoted to production`
+      data => `CONFIG ${data?.variant_id ?? winner_variant} PROMOTED TO PRODUCTION`
     );
   }
 
@@ -154,8 +172,16 @@ export default function RunRow({ run }) {
     setTooltip(tooltip === key ? null : key);
   }
 
+  // Freshness thresholds for eval run rows (in seconds):
+  //   cooling = 1h (run recently completed), frozen = 12h (mid-analysis window),
+  //   stale = 48h (old run, may be superseded). Drives visual cue to prompt re-running stale evals.
+  const runTimestamp = (run.completed_at || run.started_at)
+    ? (run.completed_at || run.started_at) * 1000
+    : null;
+
   return (
-    <div class="eval-run-row-container" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+    <ShFrozen timestamp={runTimestamp} thresholds={{ cooling: 3600, frozen: 43200, stale: 172800 }}>
+    <div ref={rowRef} class="eval-run-row-container" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
       {/* L1 */}
       <div
         class="eval-run-row"
@@ -421,10 +447,11 @@ export default function RunRow({ run }) {
             }}>
               Analysis not computed
               <button
+                ref={reanalyzeRef}
                 style={{ fontSize: 'var(--type-label)', color: 'var(--accent)', background: 'none', border: '1px solid var(--accent)', borderRadius: '3px', padding: '2px 8px', cursor: 'pointer' }}
                 disabled={reanalyzeFb.phase === 'loading'}
-                onClick={() => reanalyzeAct(
-                  'Computing\u2026',
+                onClick={() => { reanalyzeShatter(); reanalyzeAct(
+                  'COMPUTING',
                   async () => {
                     const res = await fetch(`${API}/eval/runs/${id}/reanalyze`, { method: 'POST' });
                     if (!res.ok) throw new Error('Reanalyze failed');
@@ -432,9 +459,9 @@ export default function RunRow({ run }) {
                   },
                   () => {
                     fetchRunAnalysis(id).then(data => setAnalysis(data));
-                    return 'Analysis computed';
+                    return 'ANALYSIS COMPUTED';
                   }
-                )}
+                ); }}
               >
                 {reanalyzeFb.phase === 'loading' ? 'Computing\u2026' : 'Compute'}
               </button>
@@ -476,10 +503,11 @@ export default function RunRow({ run }) {
             {status === 'complete' && winner_variant && (
               <div>
                 <button
+                  ref={promoteRef}
                   class="t-btn t-btn-primary"
                   style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }}
                   disabled={promoteFb.phase === 'loading'}
-                  onClick={handlePromote}
+                  onClick={ev => { promoteShatter(); handlePromote(ev); }}
                   title="Promote winning config to production"
                 >
                   {promoteFb.phase === 'loading' ? 'Promoting\u2026' : 'Use this config'}
@@ -490,10 +518,11 @@ export default function RunRow({ run }) {
             {status === 'complete' && (
               <div>
                 <button
+                  ref={analyzeRef}
                   class="t-btn t-btn-secondary"
                   style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }}
                   disabled={analyzeFb.phase === 'loading'}
-                  onClick={handleAnalyze}
+                  onClick={ev => { analyzeShatter(); handleAnalyze(ev); }}
                   title={analysis_md ? 'Regenerate analysis' : 'Analyze this run with Ollama'}
                 >
                   {analyzeFb.phase === 'loading' ? 'Analysing\u2026' : (analysis_md ? '\u21BA Re-analyze' : '\u2726 Analyze')}
@@ -504,10 +533,11 @@ export default function RunRow({ run }) {
             {canRepeat && (
               <div>
                 <button
+                  ref={repeatRef}
                   class="t-btn t-btn-secondary"
                   style={{ fontSize: 'var(--type-label)', padding: '3px 10px' }}
                   disabled={repeatFb.phase === 'loading'}
-                  onClick={handleRepeat}
+                  onClick={ev => { repeatShatter(); handleRepeat(ev); }}
                   title="Re-run this eval with the same items and seed"
                 >
                   {repeatFb.phase === 'loading' ? 'Repeating\u2026' : '\u21BA Repeat'}
@@ -529,5 +559,6 @@ export default function RunRow({ run }) {
       {/* L3 */}
       {level >= 3 && <ResultsTable runId={id} />}
     </div>
+    </ShFrozen>
   );
 }

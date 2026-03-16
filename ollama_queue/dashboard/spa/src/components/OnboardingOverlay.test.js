@@ -76,21 +76,21 @@ test('renders step 1 content when localStorage is empty', () => {
     const vnode = OnboardingOverlay({});
     expect(vnode).not.toBeNull();
     const texts = collectText(vnode);
-    expect(texts.some(t => t.includes('Welcome to ollama-queue'))).toBe(true);
+    expect(texts.some(t => t.includes('OLLAMA-QUEUE ONLINE'))).toBe(true);
 });
 
 test("renders step indicator text 'Step 1 of 5'", () => {
     global.localStorage.getItem.mockReturnValue(null);
     const vnode = OnboardingOverlay({});
     const texts = collectText(vnode);
-    expect(texts.some(t => t.includes('Step 1 of 5'))).toBe(true);
+    expect(texts.some(t => t.includes('STEP 1 OF 5'))).toBe(true);
 });
 
 test('renders Next button on step 1', () => {
     global.localStorage.getItem.mockReturnValue(null);
     const vnode = OnboardingOverlay({});
     const buttons = findAll(vnode, n => n?.type === 'button');
-    const nextBtn = buttons.find(b => collectText(b).some(t => t === 'Next'));
+    const nextBtn = buttons.find(b => collectText(b).some(t => t === 'NEXT'));
     expect(nextBtn).toBeTruthy();
 });
 
@@ -98,7 +98,7 @@ test('renders Skip link on step 1', () => {
     global.localStorage.getItem.mockReturnValue(null);
     const vnode = OnboardingOverlay({});
     const buttons = findAll(vnode, n => n?.type === 'button');
-    const skipBtn = buttons.find(b => collectText(b).some(t => t === 'Skip'));
+    const skipBtn = buttons.find(b => collectText(b).some(t => t === 'SKIP'));
     expect(skipBtn).toBeTruthy();
 });
 
@@ -106,7 +106,7 @@ test('Skip onClick calls localStorage.setItem with oq_onboarding_done=1', () => 
     global.localStorage.getItem.mockReturnValue(null);
     const vnode = OnboardingOverlay({});
     const buttons = findAll(vnode, n => n?.type === 'button');
-    const skipBtn = buttons.find(b => collectText(b).some(t => t === 'Skip'));
+    const skipBtn = buttons.find(b => collectText(b).some(t => t === 'SKIP'));
     expect(skipBtn).toBeTruthy();
     skipBtn.props.onClick();
     expect(global.localStorage.setItem).toHaveBeenCalledWith('oq_onboarding_done', '1');
@@ -120,8 +120,8 @@ test('renders Got it button on last step (step 5, index 4)', () => {
     const vnode = OnboardingOverlay({});
     expect(vnode).not.toBeNull();
     const texts = collectText(vnode);
-    expect(texts.some(t => t.includes('Got it'))).toBe(true);
-    expect(texts.some(t => t === 'Next')).toBe(false);
+    expect(texts.some(t => t.includes('GOT IT'))).toBe(true);
+    expect(texts.some(t => t === 'NEXT')).toBe(false);
 });
 
 test('handleNext onClick increments step value', () => {
@@ -132,7 +132,7 @@ test('handleNext onClick increments step value', () => {
     useSignal.mockReturnValueOnce(stepSig);
     const vnode = OnboardingOverlay({});
     const buttons = findAll(vnode, n => n?.type === 'button');
-    const nextBtn = buttons.find(b => collectText(b).some(t => t === 'Next'));
+    const nextBtn = buttons.find(b => collectText(b).some(t => t === 'NEXT'));
     expect(nextBtn).toBeTruthy();
     nextBtn.props.onClick();
     expect(stepSig.value).toBe(1);

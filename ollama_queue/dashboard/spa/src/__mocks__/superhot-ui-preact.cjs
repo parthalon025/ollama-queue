@@ -2,6 +2,7 @@
 // a data-sh-effect attribute that tests can assert on via tree traversal.
 // Uses the same h() from preact.cjs so returned values are traversable POJOs.
 const { h } = require('./preact.cjs');
+const passthrough = (props) => h('div', null, props.children);
 
 module.exports = {
     // Renders children with data-sh-status so tests can assert badge variant
@@ -49,4 +50,10 @@ module.exports = {
         h('button', { 'data-sh': 'crt-toggle', onClick: onChange }),
     ShPipeline: ({ stages, children }) =>
         h('div', { 'data-sh': 'pipeline' }, children),
+
+    // Simple pass-through stubs for components without test-specific assertions
+    ShMantra: passthrough,
+    ShCommandPalette: passthrough,
+    ShEmptyState: passthrough,
+    ShSkeleton: passthrough,
 };

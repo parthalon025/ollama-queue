@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { settings, submitJob } from '../stores';
 import { useActionFeedback } from '../hooks/useActionFeedback.js';
+import { useShatter } from '../hooks/useShatter.js';
 import PrioritySelector from './PrioritySelector.jsx';
 
 const inputStyle = {
@@ -41,6 +42,7 @@ export default function SubmitJobModal({ onJobSubmitted, open: controlledOpen, o
     const [timeout, setTimeout_] = useState(120);
     const [error, setError] = useState(null);
     const [fb, act] = useActionFeedback();
+    const [submitRef, submitShatter] = useShatter('complete');
     const dialogRef = useRef(null);
 
     // Sync form defaults when settings signal updates
@@ -90,12 +92,12 @@ export default function SubmitJobModal({ onJobSubmitted, open: controlledOpen, o
     }
 
     function validate() {
-        if (!command.trim()) return 'Command is required';
-        if (!source.trim()) return 'Source is required';
+        if (!command.trim()) return 'COMMAND REQUIRED';
+        if (!source.trim()) return 'SOURCE REQUIRED';
         const p = Number(priority);
-        if (!Number.isInteger(p) || p < 1 || p > 10) return 'Priority must be a valid level (1–10)';
+        if (!Number.isInteger(p) || p < 1 || p > 10) return 'PRIORITY INVALID — MUST BE 1–10';
         const t = Number(timeout);
-        if (!Number.isInteger(t) || t < 1) return 'Timeout must be a positive integer (seconds)';
+        if (!Number.isInteger(t) || t < 1) return 'TIMEOUT INVALID — POSITIVE INTEGER REQUIRED';
         return null;
     }
 
@@ -107,9 +109,10 @@ export default function SubmitJobModal({ onJobSubmitted, open: controlledOpen, o
             return;
         }
         setError(null);
+        submitShatter();
 
         await act(
-            'Submitting job\u2026',
+            'SUBMITTING',
             async () => {
                 const body = {
                     command: command.trim(),
@@ -128,7 +131,7 @@ export default function SubmitJobModal({ onJobSubmitted, open: controlledOpen, o
                 }, 1500);
                 return result;
             },
-            result => `Job #${result.job_id} queued`,
+            result => `JOB #${result.job_id} QUEUED`,
         );
     }
 
@@ -183,13 +186,13 @@ export default function SubmitJobModal({ onJobSubmitted, open: controlledOpen, o
                     overflow: 'auto',
                 }}
             >
-                <div class="t-frame" data-label="Add a New Job to the Queue" style={{ margin: 0, border: 'none' }}>
+                <div class="t-frame" data-label="SUBMIT JOB" style={{ margin: 0, border: 'none' }}>
                     <form onSubmit={handleSubmit}>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
 
                             {/* Command */}
                             <div>
-                                <label style={labelStyle}>Shell Command to Run</label>
+                                <label style={labelStyle}>COMMAND</label>
                                 <p style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-micro)', color: 'var(--text-tertiary)', margin: '0 0 0.25rem' }}>
                                     The exact command the queue will execute — same as typing it in a terminal
                                 </p>
@@ -205,7 +208,7 @@ export default function SubmitJobModal({ onJobSubmitted, open: controlledOpen, o
 
                             {/* Source */}
                             <div>
-                                <label style={labelStyle}>Source Name</label>
+                                <label style={labelStyle}>SOURCE</label>
                                 <p style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-micro)', color: 'var(--text-tertiary)', margin: '0 0 0.25rem' }}>
                                     A short name for who or what is submitting this job — used for filtering and reports
                                 </p>
@@ -220,7 +223,7 @@ export default function SubmitJobModal({ onJobSubmitted, open: controlledOpen, o
 
                             {/* Model */}
                             <div>
-                                <label style={labelStyle}>AI Model (optional)</label>
+                                <label style={labelStyle}>MODEL (OPTIONAL)</label>
                                 <p style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-micro)', color: 'var(--text-tertiary)', margin: '0 0 0.25rem' }}>
                                     Which AI model this job uses — leave blank for non-AI jobs
                                 </p>
@@ -235,7 +238,7 @@ export default function SubmitJobModal({ onJobSubmitted, open: controlledOpen, o
 
                             {/* Priority */}
                             <div>
-                                <label style={labelStyle}>Priority</label>
+                                <label style={labelStyle}>PRIORITY</label>
                                 <p style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-micro)', color: 'var(--text-tertiary)', margin: '0 0 0.25rem' }}>
                                     Choose how urgently this job should run relative to others in the queue
                                 </p>
@@ -244,7 +247,7 @@ export default function SubmitJobModal({ onJobSubmitted, open: controlledOpen, o
 
                             {/* Timeout */}
                             <div>
-                                <label style={labelStyle}>Time Limit (seconds)</label>
+                                <label style={labelStyle}>TIMEOUT (SEC)</label>
                                 <p style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--type-micro)', color: 'var(--text-tertiary)', margin: '0 0 0.25rem' }}>
                                     The job will be killed if it takes longer than this
                                 </p>
@@ -284,9 +287,10 @@ export default function SubmitJobModal({ onJobSubmitted, open: controlledOpen, o
                                         fontSize: 'var(--type-body)',
                                     }}
                                 >
-                                    Cancel
+                                    CANCEL
                                 </button>
                                 <button
+                                    ref={submitRef}
                                     type="submit"
                                     disabled={fb.phase === 'loading'}
                                     style={{
@@ -301,7 +305,7 @@ export default function SubmitJobModal({ onJobSubmitted, open: controlledOpen, o
                                         fontSize: 'var(--type-body)',
                                     }}
                                 >
-                                    {fb.phase === 'loading' ? 'Adding to queue\u2026' : 'Add to Queue'}
+                                    {fb.phase === 'loading' ? 'QUEUING\u2026' : 'QUEUE JOB'}
                                 </button>
                             </div>
                             {fb.msg && <div class={`action-fb action-fb--${fb.phase}`}>{fb.msg}</div>}
