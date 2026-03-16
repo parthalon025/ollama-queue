@@ -90,6 +90,8 @@ _loaded_cache: dict[str, tuple[float, frozenset[str]]] = {}
 _hw_cache: dict[str, tuple[float, float]] = {}
 _gpu_name_cache: dict[str, tuple[float, str | None]] = {}
 _vram_total_cache: dict[str, tuple[float, float]] = {}
+_cpu_cache: dict[str, tuple[float, float]] = {}
+_ram_cache: dict[str, tuple[float, float]] = {}
 
 
 async def _backend_healthy(url: str) -> bool:
@@ -455,7 +457,16 @@ def invalidate_backend_caches(url: str) -> None:
     entries for that URL must be evicted so the next routing decision reflects
     the current backend list rather than a cached state from before the change.
     """
-    for cache in (_health_cache, _models_cache, _loaded_cache, _hw_cache, _gpu_name_cache, _vram_total_cache):
+    for cache in (
+        _health_cache,
+        _models_cache,
+        _loaded_cache,
+        _hw_cache,
+        _gpu_name_cache,
+        _vram_total_cache,
+        _cpu_cache,
+        _ram_cache,
+    ):
         cache.pop(url, None)  # type: ignore[union-attr]  # all caches are dicts; mypy infers object from list
 
 
@@ -490,7 +501,9 @@ def receive_heartbeat(url: str, data: dict, now: float) -> None:
     Args:
         url:  The backend URL as registered (e.g. "http://100.x.x.x:11434").
         data: Heartbeat payload — keys: healthy, vram_pct, vram_total_gb, gpu_name,
-              loaded_models (list[str]), available_models (list[str]).
+              loaded_models (list[str]), available_models (list[str]),
+              cpu_pct, ram_pct, ram_total_gb, disk_pct, disk_total_gb, disk_used_gb,
+              ollama_storage_gb, agent_version, ollama_version.
         now:  Monotonic timestamp for cache entries.
     """
     url = url.rstrip("/")
@@ -517,5 +530,13 @@ def receive_heartbeat(url: str, data: dict, now: float) -> None:
     # Available models cache (used by routing tier 2 — prefer backend with model)
     if "available_models" in data:
         _models_cache[url] = (now, frozenset(data["available_models"]))
+
+    # CPU pressure cache (used by routing to skip overloaded hosts)
+    if "cpu_pct" in data:
+        _cpu_cache[url] = (now, float(data["cpu_pct"]))
+
+    # RAM pressure cache (used by routing to skip memory-pressured hosts)
+    if "ram_pct" in data:
+        _ram_cache[url] = (now, float(data["ram_pct"]))
 
     _log.debug("heartbeat received from %s: healthy=%s vram=%.1f%%", url, data.get("healthy"), data.get("vram_pct", 0))

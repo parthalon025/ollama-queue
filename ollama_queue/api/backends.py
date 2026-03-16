@@ -60,6 +60,18 @@ _log = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _is_env_backend(url: str) -> bool:
+    """Return True if url matches a backend in the env-var BACKENDS list.
+
+    Plain English: Checks whether a URL is registered via the OLLAMA_BACKENDS
+    env var (read-only — cannot be removed via the API). Used to distinguish
+    "env-var backend, DB row not yet created" from "unknown backend, reject 404".
+    Normalises trailing slashes before comparing.
+    """
+    normalized = url.rstrip("/")
+    return any(b.rstrip("/") == normalized for b in _router.BACKENDS)
+
+
 # ── SSRF protection ───────────────────────────────────────────────────────────
 
 # Deny cloud metadata endpoints to prevent SSRF via POST /api/backends.
@@ -352,6 +364,16 @@ class HeartbeatRequest(BaseModel):
     vram_total_gb: float = 0.0
     loaded_models: list[str] = []
     available_models: list[str] = []
+    cpu_pct: float = 0.0
+    ram_pct: float = 0.0
+    ram_total_gb: float = 0.0
+    disk_total_gb: float = 0.0
+    disk_used_gb: float = 0.0
+    disk_pct: float = 0.0
+    ollama_storage_gb: float = 0.0
+    agent_version: str | None = None
+    ollama_version: str | None = None
+    last_reconcile: float | None = None
 
 
 @router.put("/api/backends/{url:path}/heartbeat")
@@ -360,7 +382,7 @@ async def backend_heartbeat(url: str = Path(...), req: HeartbeatRequest = None):
 
     Plain English: The remote host calls this instead of waiting to be polled.
     Writes directly into the primary's in-process routing caches (health, VRAM,
-    GPU name, loaded models, available models) so the next routing decision
+    GPU name, loaded models, available models, CPU, RAM) so the next routing decision
     uses fresh data without any outbound HTTP call to the remote.
 
     Auto-registers the backend if it is not yet in BACKENDS or the DB — the act
