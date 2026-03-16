@@ -67,17 +67,22 @@ _CURATED_MODELS = [
 
 @router.get("/api/models")
 async def get_models():
+    import asyncio
+
     from ollama_queue.api.backend_router import BACKENDS, fetch_all_backend_models
 
     db = _api.db
     om = OllamaModels()
-    loaded_names = {m["name"] for m in om.get_loaded()}
+    # get_loaded() calls subprocess.run(timeout=5) — run in threadpool to avoid blocking event loop
+    loaded_names = {m["name"] for m in await asyncio.to_thread(om.get_loaded)}
 
     if len(BACKENDS) > 1:
         # Multi-backend: merge /api/tags from all backends via HTTP
         raw = await fetch_all_backend_models()
     else:
-        raw = [{"name": m["name"], "size_bytes": m["size_bytes"], "backends": [BACKENDS[0]]} for m in om.list_local()]
+        # list_local() calls subprocess.run(timeout=10) — run in threadpool
+        local = await asyncio.to_thread(om.list_local)
+        raw = [{"name": m["name"], "size_bytes": m["size_bytes"], "backends": [BACKENDS[0]]} for m in local]
 
     result = []
     for m in raw:
