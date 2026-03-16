@@ -123,7 +123,7 @@ Compact view stays visible. Adds below:
 | `state !== 'running'` | `removeMantra(cardRef.current)` |
 | `state === 'offline'` | `<ShThreatPulse active={state === 'offline'} persistent={true}>` wraps entire card — `active` prop required or no effect renders |
 | Job elapsed time display | `ShFrozen` with `timestamp={currentJob.started_at * 1000}` — `started_at` is Unix epoch **seconds** from DB; multiply by 1000 for the ms value ShFrozen expects |
-| `backend.healthy` transitions false | `ShGlitch` on `ShStatusBadge` — **edge-triggered, not level-triggered**: track previous healthy value in a `useRef`; set `glitchActive` to `true` for one render cycle when `backend.healthy` transitions `true → false`, then clear it (do NOT keep `active={!backend.healthy}` — that would glitch continuously while offline) |
+| `backend.healthy` transitions false | `ShGlitch` wraps `ShStatusBadge`: `<ShGlitch active={glitchActive} intensity="medium"><ShStatusBadge status={statusBadgeStatus} /></ShGlitch>`. **Edge-triggered, not level-triggered**: track previous healthy value in a `useRef`; set `glitchActive` to `true` for one render cycle when `backend.healthy` transitions `true → false`, then clear it on the next render (do NOT keep `active={!backend.healthy}` — that glitches continuously while offline) |
 | Cancel eval button | `ShShatter` wrapping the cancel button. `ShShatter`'s wrapper `<div>` intercepts the click — the inner `<button>` must NOT have its own `onClick` (double-fire). Use `onDismiss` for the API call: `<ShShatter onDismiss={() => act('Cancelling…', () => cancelEvalRun(activeEval.id), () => 'Cancelled')}><button class="t-btn">✕ cancel</button></ShShatter>` — use `useActionFeedback` per existing button patterns |
 
 ### CSS Classes
@@ -143,8 +143,9 @@ These are extracted as named exports so they can be unit-tested without a render
 ```js
 export function deriveHostState(backend, currentJob, activeEval)
 // Returns: { state, mood, statusBadgeStatus, gpuLabel, loadedLabel, modelsTooltip, isServing, vramPct, vramColor }
-// gpuLabel: strips "NVIDIA GeForce " / "NVIDIA " prefixes; falls back to URL hostname
-// vramColor: 'crit' (≥90%), 'warn' (≥75%), 'ok' (otherwise)
+// gpuLabel: strips "NVIDIA GeForce " / "NVIDIA " prefixes; falls back to URL hostname (try/catch on URL parse)
+// vramColor: 'var(--status-error)' (>90%), 'var(--status-warning)' (>80%), 'var(--sh-phosphor)' (otherwise)
+// isServing: true when state === 'running' — used for phosphor outline on the compact row
 // Calls matchesBackend() internally for the 'running' model-match check
 // Includes all logic previously in backendRowState() from InfrastructurePanel.jsx
 
