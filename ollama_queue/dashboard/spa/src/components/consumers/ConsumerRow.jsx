@@ -3,9 +3,10 @@
 //   last seen time, patch status, and health status.
 // Decision it drives: User decides whether to include or ignore the service and whether to
 //   apply patch immediately or defer until next restart.
-import { useState } from 'preact/hooks';
+import { useState, useEffect, useRef } from 'preact/hooks';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
 import { includeConsumer, ignoreConsumer, revertConsumer } from '../../stores';
+import { applyFreshness } from 'superhot-ui';
 
 const STATUS_BADGE = {
   discovered:      { cls: 'badge--neutral',  label: 'Discovered' },
@@ -28,6 +29,17 @@ export function ConsumerRow({ consumer }) {
   const [fb, run] = useActionFeedback();
   const [showStreamingConfirm, setShowStreamingConfirm] = useState(false);
   const [restartPolicy, setRestartPolicy] = useState('deferred');
+  // Freshness ref: applied directly to <tr> (can't wrap a table row in a <div>).
+  // Default thresholds (5m/30m/60m) — consumers are expected to check in frequently.
+  const rowRef = useRef(null);
+  useEffect(() => {
+    if (!rowRef.current || !consumer.last_seen) return;
+    applyFreshness(rowRef.current, consumer.last_seen * 1000);
+    const interval = setInterval(() => {
+      if (rowRef.current) applyFreshness(rowRef.current, consumer.last_seen * 1000);
+    }, 30_000);
+    return () => clearInterval(interval);
+  }, [consumer.last_seen]);
 
   const statusInfo = STATUS_BADGE[consumer.status] || STATUS_BADGE.discovered;
   const healthInfo = HEALTH_BADGE[consumer.health_status] || HEALTH_BADGE.unknown;
@@ -57,7 +69,7 @@ export function ConsumerRow({ consumer }) {
     : null;
 
   return (
-    <tr class={`consumer-row consumer-row--${consumer.status}`}>
+    <tr ref={rowRef} class={`consumer-row consumer-row--${consumer.status}`}>
       <td>
         <span class="consumer-name">{consumer.name}</span>
         {consumer.is_managed_job && (

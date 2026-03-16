@@ -7,6 +7,7 @@ import { useActionFeedback } from '../../../hooks/useActionFeedback.js';
 import StatusDot from './StatusDot.jsx';
 import ModelChip from '../../ModelChip.jsx';
 import { formatDate, fmtPct, simpleRenderMd, resolveGenModel } from './helpers.js';
+import { ShFrozen } from 'superhot-ui/preact';
 
 // What it shows: A single eval run row with 3-level progressive disclosure.
 //   L1: status dot, winner config, quality score, date, item count.
@@ -154,7 +155,15 @@ export default function RunRow({ run }) {
     setTooltip(tooltip === key ? null : key);
   }
 
+  // Freshness thresholds for eval run rows (in seconds):
+  //   cooling = 1h (run recently completed), frozen = 12h (mid-analysis window),
+  //   stale = 48h (old run, may be superseded). Drives visual cue to prompt re-running stale evals.
+  const runTimestamp = (run.completed_at || run.started_at)
+    ? (run.completed_at || run.started_at) * 1000
+    : null;
+
   return (
+    <ShFrozen timestamp={runTimestamp} thresholds={{ cooling: 3600, frozen: 43200, stale: 172800 }}>
     <div class="eval-run-row-container" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
       {/* L1 */}
       <div
@@ -529,5 +538,6 @@ export default function RunRow({ run }) {
       {/* L3 */}
       {level >= 3 && <ResultsTable runId={id} />}
     </div>
+    </ShFrozen>
   );
 }
