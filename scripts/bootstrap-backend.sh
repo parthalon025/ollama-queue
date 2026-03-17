@@ -47,7 +47,18 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -z "$QUEUE_URL" ]] && { red "ERROR: --queue is required"; usage; }
-[[ -z "$BACKEND_URL" ]] && { red "ERROR: --backend-url is required"; usage; }
+
+# Auto-detect Tailscale IP if --backend-url not provided
+if [[ -z "$BACKEND_URL" ]]; then
+    if command -v tailscale &> /dev/null; then
+        TS_IP=$(tailscale ip -4 2>/dev/null | head -1)
+        if [[ -n "$TS_IP" ]]; then
+            BACKEND_URL="http://${TS_IP}:11434"
+            yellow "Auto-detected Tailscale IP: ${TS_IP}"
+        fi
+    fi
+    [[ -z "$BACKEND_URL" ]] && { red "ERROR: --backend-url is required (Tailscale auto-detect failed)"; usage; }
+fi
 
 # ── Checks ───────────────────────────────────────────────────────────────────
 
@@ -123,12 +134,12 @@ docker run -d --name "$AGENT_CONTAINER" \
 # ── Wait for health ──────────────────────────────────────────────────────────
 
 bold "Waiting for agent health check..."
+AGENT_HEALTHY=false
 for i in $(seq 1 15); do
     if curl -sf --connect-timeout 2 "http://localhost:${AGENT_PORT}/health" > /dev/null 2>&1; then
+        AGENT_HEALTHY=true
         green "Agent is healthy!"
         echo ""
-
-        # Print status
         bold "Agent Status:"
         curl -sf "http://localhost:${AGENT_PORT}/health" | python3 -c "
 import json, sys
@@ -136,17 +147,56 @@ d = json.load(sys.stdin)
 for k, v in d.items():
     print(f'  {k}: {v}')
 " 2>/dev/null || true
-
         echo ""
-        green "Bootstrap complete!"
-        echo "  Agent: http://localhost:${AGENT_PORT}"
-        echo "  Reconciliation will start automatically (models sync in ~10s)"
-        echo "  Monitor: curl http://localhost:${AGENT_PORT}/status"
-        exit 0
+        break
     fi
     sleep 2
 done
 
-yellow "Agent health check timed out after 30s."
-echo "  Check logs: docker logs ${AGENT_CONTAINER}"
-exit 1
+if ! $AGENT_HEALTHY; then
+    yellow "Agent health check timed out after 30s."
+    echo "  Check logs: docker logs ${AGENT_CONTAINER}"
+    exit 1
+fi
+
+# ── Verify queue registration ───────────────────────────────────────────────
+
+bold "Verifying queue registration..."
+BACKEND_NORM="${BACKEND_URL%/}"
+REGISTERED=false
+for i in $(seq 1 12); do
+    BACKENDS_JSON=$(curl -sf --connect-timeout 5 "${QUEUE_URL}/api/backends" 2>/dev/null || true)
+    if [[ -n "$BACKENDS_JSON" ]] && echo "$BACKENDS_JSON" | python3 -c "
+import json, sys
+backends = json.load(sys.stdin)
+target = '${BACKEND_NORM}'
+for b in backends:
+    if b['url'].rstrip('/') == target:
+        print(f\"  URL:     {b['url']}\")
+        print(f\"  Healthy: {b.get('healthy', '?')}\")
+        print(f\"  GPU:     {b.get('gpu_name', 'unknown')}\")
+        print(f\"  VRAM:    {b.get('vram_pct', '?')}%\")
+        print(f\"  Models:  {b.get('model_count', '?')}\")
+        sys.exit(0)
+sys.exit(1)
+" 2>/dev/null; then
+        REGISTERED=true
+        break
+    fi
+    sleep 5
+done
+
+if $REGISTERED; then
+    echo ""
+    green "Registered with queue!"
+else
+    echo ""
+    yellow "Queue registration not confirmed after 60s."
+    echo "  Agent is running — heartbeat may still be in progress."
+    echo "  Check: curl ${QUEUE_URL}/api/backends"
+fi
+
+green "Bootstrap complete!"
+echo "  Agent:         http://localhost:${AGENT_PORT}"
+echo "  Reconciliation will start automatically (models sync in ~10s)"
+echo "  Monitor:       curl http://localhost:${AGENT_PORT}/status"
