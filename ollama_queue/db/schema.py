@@ -64,6 +64,21 @@ DEFAULTS = {
     "defer.thermal_threshold_c": 85,
     "defer.resource_wait_timeout_s": 120,
     "max_pause_duration_seconds": 600,
+    "required_models": [
+        {"name": "qwen3.5:9b", "vram_mb": 6200, "tier": "core"},
+        {"name": "qwen2.5-coder:14b", "vram_mb": 9500, "tier": "core"},
+        {"name": "qwen3:14b", "vram_mb": 9500, "tier": "standard"},
+        {"name": "nomic-embed-text", "vram_mb": 300, "tier": "core"},
+        {"name": "qwen3.5:4b", "vram_mb": 2800, "tier": "core"},
+        {"name": "qwen3.5:2b", "vram_mb": 1800, "tier": "core"},
+        {"name": "qwen2.5:7b", "vram_mb": 4800, "tier": "standard"},
+        {"name": "deepseek-r1:8b", "vram_mb": 5200, "tier": "standard"},
+        {"name": "deepseek-r1:8b-0528-qwen3-q4_K_M", "vram_mb": 5200, "tier": "standard"},
+        {"name": "gemma3:12b", "vram_mb": 8200, "tier": "standard"},
+        {"name": "functiongemma:latest", "vram_mb": 2100, "tier": "standard"},
+        {"name": "fixt/home-3b-v3", "vram_mb": 2100, "tier": "optional"},
+        {"name": "qwen3-vl:4b", "vram_mb": 3200, "tier": "standard"},
+    ],
 }
 
 EVAL_SETTINGS_DEFAULTS = {

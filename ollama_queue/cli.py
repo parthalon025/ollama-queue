@@ -713,3 +713,9 @@ def metrics_curve(ctx):
     if data.get("warmup_slope") is not None:
         click.echo(f"  warmup slope:      {data['warmup_slope']:.4f}")
         click.echo(f"  warmup intercept:  {data['warmup_intercept']:.4f}")
+
+
+# Register backend subcommand group
+from ollama_queue.cli_backend import backend
+
+main.add_command(backend)

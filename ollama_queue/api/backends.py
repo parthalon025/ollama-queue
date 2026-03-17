@@ -60,6 +60,18 @@ _log = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _is_env_backend(url: str) -> bool:
+    """Return True if url matches a backend in the env-var BACKENDS list.
+
+    Plain English: Checks whether a URL is registered via the OLLAMA_BACKENDS
+    env var (read-only — cannot be removed via the API). Used to distinguish
+    "env-var backend, DB row not yet created" from "unknown backend, reject 404".
+    Normalises trailing slashes before comparing.
+    """
+    normalized = url.rstrip("/")
+    return any(b.rstrip("/") == normalized for b in _router.BACKENDS)
+
+
 # ── SSRF protection ───────────────────────────────────────────────────────────
 
 # Deny cloud metadata endpoints to prevent SSRF via POST /api/backends.
@@ -144,6 +156,8 @@ async def get_backends():
                 "inference_mode": db_modes.get(url.rstrip("/"), "cpu_shared"),
                 "weight": weight,
                 "checked_at": checked_at,
+                "agent_reachable": _router.agent_reachable(url),
+                "agent_version": _router.agent_version(url),
             }
         )
     return results
@@ -352,6 +366,16 @@ class HeartbeatRequest(BaseModel):
     vram_total_gb: float = 0.0
     loaded_models: list[str] = []
     available_models: list[str] = []
+    cpu_pct: float = 0.0
+    ram_pct: float = 0.0
+    ram_total_gb: float = 0.0
+    disk_total_gb: float = 0.0
+    disk_used_gb: float = 0.0
+    disk_pct: float = 0.0
+    ollama_storage_gb: float = 0.0
+    agent_version: str | None = None
+    ollama_version: str | None = None
+    last_reconcile: float | None = None
 
 
 @router.put("/api/backends/{url:path}/heartbeat")
@@ -360,7 +384,7 @@ async def backend_heartbeat(url: str = Path(...), req: HeartbeatRequest = None):
 
     Plain English: The remote host calls this instead of waiting to be polled.
     Writes directly into the primary's in-process routing caches (health, VRAM,
-    GPU name, loaded models, available models) so the next routing decision
+    GPU name, loaded models, available models, CPU, RAM) so the next routing decision
     uses fresh data without any outbound HTTP call to the remote.
 
     Auto-registers the backend if it is not yet in BACKENDS or the DB — the act
@@ -394,3 +418,52 @@ async def backend_heartbeat(url: str = Path(...), req: HeartbeatRequest = None):
     _router.receive_heartbeat(url, req.model_dump(exclude_unset=True), now)
 
     return {"url": url, "ok": True}
+
+
+# ── POST /api/backends/{url}/command ─────────────────────────────────────────
+
+_ALLOWED_ACTIONS = frozenset({"sync-models", "update-ollama", "restart-ollama", "status"})
+_GET_ACTIONS = frozenset({"status"})
+_AGENT_PORT = 11435
+
+
+class CommandRequest(BaseModel):
+    action: str
+
+
+@router.post("/api/backends/{url:path}/command")
+async def backend_command(url: str = Path(...), req: CommandRequest = None):
+    """Dispatch a command to a remote backend agent.
+
+    Plain English: The dashboard or CLI calls this endpoint, and the queue
+    forwards the request to the backend agent running on port 11435 of the
+    same host.
+
+    Supported actions: sync-models, update-ollama, restart-ollama, status
+    """
+    url = unquote(url)
+    if not _is_safe_backend_url(url):
+        raise HTTPException(status_code=400, detail="url targets a disallowed host")
+    if req is None or req.action not in _ALLOWED_ACTIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"action must be one of: {', '.join(sorted(_ALLOWED_ACTIONS))}",
+        )
+
+    parsed = urlparse(url)
+    agent_base = f"{parsed.scheme}://{parsed.hostname}:{_AGENT_PORT}"
+    agent_endpoint = f"{agent_base}/{req.action}"
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0, verify=False) as client:  # noqa: S501
+            if req.action in _GET_ACTIONS:
+                resp = await client.get(agent_endpoint)
+            else:
+                resp = await client.post(agent_endpoint)
+            return resp.json()
+    except (httpx.ConnectError, httpx.TimeoutException) as e:
+        _log.warning("command %s to agent %s failed: %s", req.action, agent_base, e)
+        raise HTTPException(status_code=502, detail=f"agent unreachable: {e}") from e
+    except Exception as e:
+        _log.error("unexpected error dispatching %s to %s: %s", req.action, agent_base, e)
+        raise HTTPException(status_code=500, detail="internal error") from e

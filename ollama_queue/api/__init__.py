@@ -42,6 +42,7 @@ def register_routes(app, db_instance: Database) -> None:
         jobs,
         models,
         proxy,
+        required_models,
         schedule,
         settings,
     )
@@ -54,6 +55,7 @@ def register_routes(app, db_instance: Database) -> None:
     app.include_router(schedule.router)
     app.include_router(dlq.router)
     app.include_router(models.router)
+    app.include_router(required_models.router)
     app.include_router(consumers.router)
     # Eval: order matters — fixed paths before parameterized
     app.include_router(eval_variants.router)

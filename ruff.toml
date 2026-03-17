@@ -30,6 +30,9 @@ ignore = [
 
 [lint.per-file-ignores]
 "tests/**/*.py" = ["S101", "S105", "S106", "PLR2004", "E501", "SIM115", "B017", "F841", "S603", "S607"]
+"sidecar/tests/**/*.py" = ["S101", "S105", "S106", "S108", "PLR2004", "E501"]
+# Backend agent runs nvidia-smi — known system binary, not user input
+"sidecar/backend_agent.py" = ["S603", "S607"]
 # FastAPI route registration is inherently large/complex; Body() default is the FastAPI idiom
 "ollama_queue/api/*.py" = ["B008", "B904", "C901", "PLR0912", "PLR0915"]
 # Eval engine orchestrator is a multi-phase state machine with mode dispatch — complexity by design
