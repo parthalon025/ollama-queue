@@ -32,7 +32,7 @@ def test_generate_proxy_returns_ollama_response(client):
     mock_response.raise_for_status = MagicMock()
 
     with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_client_cls:
-        mock_client = AsyncMock()
+        mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.post = AsyncMock(return_value=mock_response)
@@ -72,7 +72,7 @@ def test_generate_proxy_non_stream_unchanged(client):
     mock_response.raise_for_status = MagicMock()
 
     with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
-        mock_client = AsyncMock()
+        mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.post = AsyncMock(return_value=mock_response)
@@ -101,7 +101,7 @@ def test_generate_proxy_streams_ndjson_when_stream_true(client):
     mock_resp.aclose = AsyncMock()
 
     with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
-        mock_client = AsyncMock()
+        mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.send = AsyncMock(return_value=mock_resp)
@@ -134,7 +134,7 @@ def test_generate_proxy_buffers_misaligned_chunks(client):
     mock_resp.aclose = AsyncMock()
 
     with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
-        mock_client = AsyncMock()
+        mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.send = AsyncMock(return_value=mock_resp)
@@ -153,7 +153,7 @@ def test_generate_proxy_buffers_misaligned_chunks(client):
 def test_generate_proxy_releases_on_error(client, db):
     """State released back to idle even if Ollama errors."""
     with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_client_cls:
-        mock_client = AsyncMock()
+        mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.post = AsyncMock(side_effect=Exception("connection refused"))
@@ -181,7 +181,7 @@ def test_generate_proxy_logs_job(client, db):
     mock_response.raise_for_status = MagicMock()
 
     with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_client_cls:
-        mock_client = AsyncMock()
+        mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.post = AsyncMock(return_value=mock_response)
@@ -272,7 +272,7 @@ def test_proxy_read_timeout_returns_504(client, db):
     import httpx as _httpx
 
     with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
-        mock_client = AsyncMock()
+        mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.post = AsyncMock(side_effect=_httpx.ReadTimeout("timed out"))
@@ -303,7 +303,7 @@ def test_proxy_release_claim_exception_still_completes(client, db):
         patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls,
         patch.object(db, "release_proxy_claim", side_effect=RuntimeError("release failed")),
     ):
-        mock_client = AsyncMock()
+        mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.post = AsyncMock(return_value=mock_response)
@@ -354,7 +354,7 @@ def test_streaming_proxy_timeout_returns_504(client, db):
 def test_streaming_proxy_setup_exception_returns_502(client, db):
     """Streaming setup exception returns 502 and cleans up. Covers lines 615-622."""
     with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
-        mock_client = AsyncMock()
+        mock_client = MagicMock()
         mock_client.build_request = MagicMock(side_effect=Exception("connection refused"))
         mock_client.aclose = AsyncMock()
         mock_cls.return_value = mock_client
@@ -391,7 +391,7 @@ def test_streaming_release_fn_complete_job_exception(client, db):
         raise RuntimeError("DB error")
 
     with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
-        mock_client = AsyncMock()
+        mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.send = AsyncMock(return_value=mock_resp)
@@ -426,7 +426,7 @@ def test_streaming_release_fn_release_claim_exception(client, db):
     mock_resp.headers = {"content-type": "application/x-ndjson"}
 
     with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
-        mock_client = AsyncMock()
+        mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.send = AsyncMock(return_value=mock_resp)
@@ -467,7 +467,7 @@ def test_proxy_consumer_request_count_tracking(client, db):
     mock_response.raise_for_status = MagicMock()
 
     with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
-        mock_client = AsyncMock()
+        mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.post = AsyncMock(return_value=mock_response)
@@ -494,7 +494,7 @@ def test_proxy_consumer_request_count_tracking_exception(client, db):
         patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls,
         patch.object(db, "list_consumers", side_effect=RuntimeError("db error")),
     ):
-        mock_client = AsyncMock()
+        mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.post = AsyncMock(return_value=mock_response)
@@ -540,7 +540,7 @@ def test_streaming_consumer_request_count_tracking(client, db):
     mock_resp.headers = {"content-type": "application/x-ndjson"}
 
     with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
-        mock_client = AsyncMock()
+        mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.send = AsyncMock(return_value=mock_resp)
@@ -576,7 +576,7 @@ def test_iter_ndjson_empty_line_skipped(client):
     mock_resp.headers = {"content-type": "application/x-ndjson"}
 
     with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
-        mock_client = AsyncMock()
+        mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.send = AsyncMock(return_value=mock_resp)
@@ -612,7 +612,7 @@ def test_iter_ndjson_invalid_json_in_done_check(client):
     mock_resp.headers = {"content-type": "application/x-ndjson"}
 
     with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
-        mock_client = AsyncMock()
+        mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.send = AsyncMock(return_value=mock_resp)
@@ -644,7 +644,7 @@ def test_iter_ndjson_trailing_buffer_emitted(client):
     mock_resp.headers = {"content-type": "application/x-ndjson"}
 
     with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
-        mock_client = AsyncMock()
+        mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.send = AsyncMock(return_value=mock_resp)
@@ -680,7 +680,7 @@ def test_chat_completions_returns_openai_format(client):
     }
 
     with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
-        mock_client = AsyncMock()
+        mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.post = AsyncMock(return_value=mock_response)
@@ -722,7 +722,7 @@ def test_chat_completions_translates_temperature_and_max_tokens(client):
         return mock_response
 
     with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
-        mock_client = AsyncMock()
+        mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.post = capture_post
@@ -762,7 +762,7 @@ def test_chat_completions_queue_metadata_not_forwarded(client):
         return mock_response
 
     with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
-        mock_client = AsyncMock()
+        mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.post = capture_post
@@ -798,7 +798,7 @@ def test_chat_completions_paused_returns_503(client):
 def test_chat_completions_ollama_error_returns_502(client):
     """Ollama connection error returns 502."""
     with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
-        mock_client = AsyncMock()
+        mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.post = AsyncMock(side_effect=Exception("connection refused"))
@@ -823,7 +823,7 @@ def test_chat_completions_logged_in_jobs_table(client, db):
     }
 
     with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
-        mock_client = AsyncMock()
+        mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.post = AsyncMock(return_value=mock_response)
@@ -859,7 +859,7 @@ def test_embeddings_returns_openai_format(client):
     }
 
     with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
-        mock_client = AsyncMock()
+        mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.post = AsyncMock(return_value=mock_response)
@@ -895,7 +895,7 @@ def test_embeddings_queue_metadata_not_forwarded(client):
         return mock_response
 
     with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
-        mock_client = AsyncMock()
+        mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.post = capture_post
@@ -940,7 +940,7 @@ def test_iter_ndjson_release_on_error(client, db):
     mock_resp.headers = {"content-type": "application/x-ndjson"}
 
     with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
-        mock_client = AsyncMock()
+        mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.send = AsyncMock(return_value=mock_resp)
@@ -984,7 +984,7 @@ def test_bitnet_chat_completions_routes_to_bitnet_url(client):
         return mock_response
 
     with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
-        mock_client = AsyncMock()
+        mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.post = capture_post
@@ -1023,7 +1023,7 @@ def test_bitnet_chat_completions_returns_raw_openai_format(client):
     mock_response.json.return_value = openai_response
 
     with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
-        mock_client = AsyncMock()
+        mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.post = AsyncMock(return_value=mock_response)
@@ -1054,7 +1054,7 @@ def test_bitnet_chat_completions_logged_in_jobs_table(client, db):
     }
 
     with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
-        mock_client = AsyncMock()
+        mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.post = AsyncMock(return_value=mock_response)
@@ -1095,7 +1095,7 @@ def test_bitnet_chat_completions_queue_metadata_not_forwarded(client):
         return mock_response
 
     with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
-        mock_client = AsyncMock()
+        mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.post = capture_post
@@ -1131,7 +1131,7 @@ def test_bitnet_chat_completions_paused_returns_503(client):
 def test_bitnet_chat_completions_server_error_returns_502(client):
     """Returns 502 when BitNet llama-server is unreachable."""
     with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
-        mock_client = AsyncMock()
+        mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.post = AsyncMock(side_effect=Exception("connection refused"))
@@ -1162,7 +1162,7 @@ def test_non_bitnet_model_still_routes_to_ollama(client):
         return mock_response
 
     with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
-        mock_client = AsyncMock()
+        mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.post = capture_post
@@ -1264,7 +1264,7 @@ def test_streaming_background_task_forces_release_on_generator_release_failure(c
         original_release()
 
     with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
-        mock_client = AsyncMock()
+        mock_client = MagicMock()
         mock_client.send = AsyncMock(return_value=mock_resp)
         mock_client.build_request = MagicMock(return_value=MagicMock())
         mock_client.aclose = AsyncMock()
@@ -1330,7 +1330,7 @@ def test_streaming_release_flag_set_when_release_proxy_claim_raises(tmp_path):
     client = TestClient(app)
 
     with patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_cls:
-        mock_client = AsyncMock()
+        mock_client = MagicMock()
         mock_client.send = AsyncMock(return_value=mock_resp)
         mock_client.build_request = MagicMock(return_value=MagicMock())
         mock_client.aclose = AsyncMock()
@@ -1393,7 +1393,7 @@ def test_proxy_ollama_request_no_double_complete_job_when_first_raises(tmp_path)
         patch("ollama_queue.api.proxy.select_backend", new=AsyncMock(return_value="http://localhost:11434")),
         patch("ollama_queue.api.proxy.httpx.AsyncClient") as mock_client_cls,
     ):
-        mock_client = AsyncMock()
+        mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(return_value=mock_response)
