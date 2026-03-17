@@ -52,3 +52,53 @@ def test_receive_heartbeat_partial_no_cpu():
 
     # Cleanup
     _router._health_cache.pop(url, None)
+
+
+def test_agent_reachable_after_heartbeat():
+    """agent_reachable returns True after a recent heartbeat."""
+    url = "http://agent-test:11434"
+    now = time.monotonic()
+
+    _router.receive_heartbeat(url, {"healthy": True, "agent_version": "0.1.0"}, now)
+
+    assert _router.agent_reachable(url) is True
+    assert _router.agent_version(url) == "0.1.0"
+
+    # Cleanup
+    for c in (_router._health_cache, _router._heartbeat_ts_cache, _router._agent_version_cache):
+        c.pop(url, None)
+
+
+def test_agent_not_reachable_without_heartbeat():
+    """agent_reachable returns False for unknown backends."""
+    assert _router.agent_reachable("http://never-seen:11434") is False
+    assert _router.agent_version("http://never-seen:11434") is None
+
+
+def test_agent_stale_heartbeat():
+    """agent_reachable returns False when heartbeat is older than TTL."""
+    url = "http://stale-agent:11434"
+    stale_ts = time.monotonic() - _router._AGENT_HEARTBEAT_TTL - 10
+
+    _router._heartbeat_ts_cache[url] = stale_ts
+
+    assert _router.agent_reachable(url) is False
+
+    # Cleanup
+    _router._heartbeat_ts_cache.pop(url, None)
+
+
+def test_invalidate_clears_agent_caches():
+    """invalidate_backend_caches removes heartbeat and agent version entries."""
+    url = "http://clear-test:11434"
+    now = time.monotonic()
+
+    _router.receive_heartbeat(url, {"healthy": True, "agent_version": "0.1.0"}, now)
+    assert url in _router._heartbeat_ts_cache
+    assert url in _router._agent_version_cache
+
+    _router.invalidate_backend_caches(url)
+
+    assert url not in _router._heartbeat_ts_cache
+    assert url not in _router._agent_version_cache
+    assert url not in _router._health_cache

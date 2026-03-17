@@ -156,6 +156,8 @@ async def get_backends():
                 "inference_mode": db_modes.get(url.rstrip("/"), "cpu_shared"),
                 "weight": weight,
                 "checked_at": checked_at,
+                "agent_reachable": _router.agent_reachable(url),
+                "agent_version": _router.agent_version(url),
             }
         )
     return results

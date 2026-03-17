@@ -97,6 +97,8 @@ _gpu_name_cache: dict[str, tuple[float, str | None]] = {}
 _vram_total_cache: dict[str, tuple[float, float]] = {}
 _cpu_cache: dict[str, tuple[float, float]] = {}
 _ram_cache: dict[str, tuple[float, float]] = {}
+_heartbeat_ts_cache: dict[str, float] = {}  # url -> monotonic timestamp of last heartbeat
+_agent_version_cache: dict[str, str] = {}  # url -> agent version string
 
 
 async def _backend_healthy(url: str) -> bool:
@@ -488,6 +490,8 @@ def invalidate_backend_caches(url: str) -> None:
         _vram_total_cache,
         _cpu_cache,
         _ram_cache,
+        _heartbeat_ts_cache,
+        _agent_version_cache,
     ):
         cache.pop(url, None)  # type: ignore[union-attr]  # all caches are dicts; mypy infers object from list
 
@@ -561,4 +565,29 @@ def receive_heartbeat(url: str, data: dict, now: float) -> None:
     if "ram_pct" in data:
         _ram_cache[url] = (now, float(data["ram_pct"]))
 
+    # Agent liveness — track when the last heartbeat arrived and agent version
+    _heartbeat_ts_cache[url] = now
+    av = data.get("agent_version")
+    if av:
+        _agent_version_cache[url] = str(av)
+
     _log.debug("heartbeat received from %s: healthy=%s vram=%.1f%%", url, data.get("healthy"), data.get("vram_pct", 0))
+
+
+# ── Agent liveness queries ──────────────────────────────────────────────────
+
+_AGENT_HEARTBEAT_TTL = 90.0  # Agent pushes every 30s; stale after 3 missed beats
+
+
+def agent_reachable(url: str) -> bool:
+    """Return True if the backend agent has pushed a heartbeat within the TTL window."""
+    url = url.rstrip("/")
+    ts = _heartbeat_ts_cache.get(url)
+    if ts is None:
+        return False
+    return (time.monotonic() - ts) < _AGENT_HEARTBEAT_TTL
+
+
+def agent_version(url: str) -> str | None:
+    """Return the last-reported agent version for this backend, or None."""
+    return _agent_version_cache.get(url.rstrip("/"))
