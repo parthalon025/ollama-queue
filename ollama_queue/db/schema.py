@@ -576,6 +576,52 @@ class SchemaMixin:
                 label          TEXT,
                 inference_mode TEXT NOT NULL DEFAULT 'cpu_shared'
             );
+
+            -- Forge v2 tables
+            CREATE TABLE IF NOT EXISTS forge_runs (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                data_source_url     TEXT NOT NULL,
+                variant_id          TEXT NOT NULL,
+                judge_model         TEXT NOT NULL,
+                oracle_model        TEXT NOT NULL,
+                pairs_per_quartile  INTEGER DEFAULT 20,
+                label               TEXT,
+                seed                INTEGER,
+                status              TEXT NOT NULL DEFAULT 'queued',
+                metrics_json        TEXT,
+                calibration_json    TEXT,
+                oracle_json         TEXT,
+                report_md           TEXT,
+                error               TEXT,
+                created_at          REAL NOT NULL,
+                started_at          REAL,
+                completed_at        REAL
+            );
+
+            CREATE TABLE IF NOT EXISTS forge_results (
+                id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id                INTEGER NOT NULL REFERENCES forge_runs(id) ON DELETE CASCADE,
+                source_item_id        TEXT NOT NULL,
+                target_item_id        TEXT NOT NULL,
+                embedding_similarity  REAL NOT NULL,
+                quartile              TEXT NOT NULL,
+                judge_score           INTEGER,
+                judge_reasoning       TEXT,
+                oracle_score          INTEGER,
+                oracle_reasoning      TEXT,
+                calibrated_score      REAL,
+                created_at            REAL NOT NULL,
+                UNIQUE (run_id, source_item_id, target_item_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_forge_results_run ON forge_results(run_id);
+
+            CREATE TABLE IF NOT EXISTS forge_embeddings (
+                item_id       TEXT NOT NULL,
+                content_hash  TEXT NOT NULL,
+                vector_json   TEXT NOT NULL,
+                created_at    REAL NOT NULL,
+                PRIMARY KEY (item_id, content_hash)
+            );
         """)
 
             self._run_migrations(conn)
@@ -593,6 +639,29 @@ class SchemaMixin:
                 conn.execute(
                     "INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES (?, ?, ?)",
                     (key, json.dumps(value), now),
+                )
+
+            # Seed Forge v2 defaults (JSON-encoded to match existing convention)
+            _forge_defaults = {
+                "forge.oracle_provider": "claude",
+                "forge.oracle_model": "claude-sonnet-4-20250514",
+                "forge.oracle_budget": 20,
+                "forge.oracle_fraction": 0.2,
+                "forge.oracle_min_kappa": 0.6,
+                "forge.judge_model": "",
+                "forge.judge_provider": "ollama",
+                "forge.judge_temperature": 0.1,
+                "forge.pairs_per_quartile": 20,
+                "forge.positive_threshold": 3,
+                "forge.embedding_model": "nomic-embed-text",
+                "forge.autonomy_level": "observer",
+                "forge.f1_threshold": 0.7,
+                "forge.auto_promote_min_improvement": 0.05,
+            }
+            for _fk, _fv in _forge_defaults.items():
+                conn.execute(
+                    "INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES (?, ?, ?)",
+                    (_fk, json.dumps(_fv), now),
                 )
 
             # Seed daemon_state singleton

@@ -19,6 +19,7 @@ import time as _time
 from ollama_queue.db.backends import BackendsMixin
 from ollama_queue.db.dlq import DLQMixin
 from ollama_queue.db.eval import EvalMixin
+from ollama_queue.db.forge import ForgeMixin
 from ollama_queue.db.health import HealthMixin
 from ollama_queue.db.jobs import JobsMixin
 from ollama_queue.db.schedule import ScheduleMixin
@@ -37,6 +38,7 @@ class Database(
     DLQMixin,
     EvalMixin,
     BackendsMixin,
+    ForgeMixin,
 ):
     """Synchronous SQLite database for the ollama-queue daemon.
 

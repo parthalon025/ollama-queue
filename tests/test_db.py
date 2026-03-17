@@ -38,6 +38,9 @@ class TestInitialize:
             "eval_cache",
             "backend_metrics",
             "backends",
+            "forge_runs",
+            "forge_results",
+            "forge_embeddings",
         }
         assert expected == set(tables)
 
