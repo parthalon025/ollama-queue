@@ -10,7 +10,8 @@ Ollama job queue scheduler with priority, health monitoring, and web dashboard. 
 ollama_queue/
   __init__.py
   app.py              # FastAPI app factory: create_app(db) → mounts all routers + static SPA
-  cli.py              # Click CLI: submit, status, queue, history, pause, resume, cancel, serve, schedule, dlq, defer, metrics, settings
+  cli.py              # Click CLI: submit, status, queue, history, pause, resume, cancel, serve, schedule, dlq, defer, metrics, settings, backend
+  cli_backend.py      # Click subcommand group: backend status, sync-models, update-ollama
   dlq.py              # DLQManager: handle_failure routes to retry (backoff) or DLQ
   intelligence.py     # LoadPatterns: hourly/daily load profiles from health log history
   metrics_parser.py   # Ollama response metrics parser (tok/min, eval duration)
@@ -29,6 +30,9 @@ ollama_queue/
     proxy.py          # /api/generate + /api/embed Ollama proxy (priority, streaming)
     schedule.py       # Recurring jobs, load-map, suggest, rebalance
     settings.py       # Settings CRUD endpoints
+    backends.py       # Backend management: status, register, weight, heartbeat, command dispatch
+    backend_router.py # 6-tier multi-backend routing: health → model → warm → VRAM → CPU/RAM → weighted
+    required_models.py # GET /api/required-models — hardware-filtered model list for backend agents
 
   daemon/             # Polling loop + job executor (mixin pattern → single Daemon class)
     __init__.py       # Daemon class: assembles LoopMixin + ExecutorMixin, holds all state
@@ -91,12 +95,18 @@ ollama_queue/
         views/        # Eval sub-views (Runs, Variants, Trends, Settings)
       dist/           # Production build output (gitignored)
 
+sidecar/
+  backend_agent.py   # Backend agent: reconciliation loop, heartbeat, command endpoints (port 11435)
+  Dockerfile         # Docker image → ghcr.io/parthalon025/ollama-backend-agent:latest
+  tests/             # Agent endpoint tests (10 tests)
+
 scripts/
-  backend-onboard.sh           # Pull all required Ollama models on any backend URL (run when adding a new host)
+  bootstrap-backend.sh         # One-command setup for new GPU hosts (Ollama + agent containers)
+  backend-onboard.sh           # Pull all required Ollama models on any backend URL (legacy, use bootstrap-backend.sh)
   migrate_timers.py            # Migrate 8 of 10 systemd timers to recurring jobs
   migrate_dlq_max_retries.py   # Add max_retries column to existing dlq table (idempotent)
 
-tests/                           # 1,951 tests, 100% line coverage
+tests/                           # 1,965+ tests, 100% line coverage
 ```
 
 ## How to Run
@@ -106,7 +116,7 @@ tests/                           # 1,951 tests, 100% line coverage
 cd ~/Documents/projects/ollama-queue
 source .venv/bin/activate
 
-# Run tests (1,951 tests, 100% line coverage)
+# Run tests (1,965+ tests, 100% line coverage)
 pytest
 
 # Start the server (daemon + API + dashboard)
@@ -138,6 +148,12 @@ ollama-queue defer <job_id> --reason manual   # Defer a pending/queued job
 # Metrics
 ollama-queue metrics models          # Per-model stats (runs, tok/min, warmup, size)
 ollama-queue metrics curve           # Fitted cross-model performance curve parameters
+
+# Backend management
+ollama-queue backend status                     # Show all backend agents
+ollama-queue backend status http://100.1.2.3:11434  # Specific backend
+ollama-queue backend sync-models                # Trigger model sync on all backends
+ollama-queue backend update-ollama http://...   # Update Ollama on specific backend
 ```
 
 ## Deployment
@@ -207,7 +223,7 @@ This applies to: component files, store transformations in `stores/`, computed v
   - `http://127.0.0.1:11434` — GTX 1650, local, weight=2
   - `http://100.114.197.57:11434` — RTX 5080 (`desktop-fbl9e0c`), weight=1
   - `http://100.87.66.25:11434` — RTX 2070 Max-Q (`razer-docker-desktop`, Docker Desktop WSL2 node), weight=1, 8GB VRAM; Ollama runs in Docker with `--gpus all`; ollama-queue also runs in Docker on port 7683 for GPU name + VRAM reporting
-  Default weights in `OLLAMA_BACKEND_WEIGHTS`. **DB weights take precedence** — use `PUT /api/backends/{url}/weight` to override per-backend routing weight at runtime without restarting the service. The remote Windows PC (razer) runs ollama-queue in Docker (`docker run -d --name ollama-queue -p 7683:7683 -e OLLAMA_URL=http://host.docker.internal:11434 --restart unless-stopped ollama-queue:latest`) for VRAM-aware routing. `Dockerfile` is in the project root. **When adding a new backend**, run `scripts/backend-onboard.sh http://<tailscale-ip>:11434` to pull all required models — model list is maintained in the script, sourced from `~/.claude/docs/ollama-models.md`. Note: `bitnet:10b` is excluded (not an Ollama model — served by `bitnet-server.service` on port 11435). **Keep this topology section up to date when backends are added or removed.**
+  Default weights in `OLLAMA_BACKEND_WEIGHTS`. **DB weights take precedence** — use `PUT /api/backends/{url}/weight` to override per-backend routing weight at runtime without restarting the service. The remote Windows PC (razer) runs ollama-queue in Docker (`docker run -d --name ollama-queue -p 7683:7683 -e OLLAMA_URL=http://host.docker.internal:11434 --restart unless-stopped ollama-queue:latest`) for VRAM-aware routing. `Dockerfile` is in the project root. **When adding a new backend**, run `scripts/bootstrap-backend.sh http://<tailscale-ip>:11434 http://<queue-ip>:7683` — this installs Ollama + the backend agent container, which auto-registers with the queue via heartbeat push. The agent reconciles models automatically from `required_models` setting. Legacy `scripts/backend-onboard.sh` still works for manual model pulls. Note: `bitnet:10b` is excluded (not an Ollama model — served by `bitnet-server.service` on port 11435). **Keep this topology section up to date when backends are added or removed.**
 - **`_gpu_name_cache` is populated lazily with a 600s TTL** — if the remote ollama-queue container wasn't up when the first `/api/backends` request fired, `gpu_name` will be cached as `null` for 10 minutes. Restart the `ollama-queue.service` to flush all in-process caches immediately.
 - **`gpu_name: null` from Docker container = WSL2 GPU name quirk, not missing data** — `nvidia-smi --query-gpu=memory.used,memory.total` works inside Docker Desktop (VRAM % correct), but `--query-gpu=name` may return null. VRAM pressure routing works correctly; only the label in HostCard falls back to hostname.
 - **Stall detector queries all OLLAMA_BACKENDS** — `sensing/stall.py:get_ollama_ps_models()` unions `/api/ps` from every configured backend. Before this fix it hardcoded `localhost:11434`, causing remote-backend jobs to always get a false-positive `+1.61` stall penalty (model "not loaded" on wrong host).
@@ -350,6 +366,13 @@ This applies to: component files, store transformations in `stores/`, computed v
 - **`GET /api/backends` returns `weight` and `checked_at`** — `weight` comes from DB, falls back to `OLLAMA_BACKEND_WEIGHTS` env var, then 1.0. `checked_at` is derived from `_health_cache[url][0]` (monotonic timestamp) converted to wall time via `time.time() - (time.monotonic() - cached_ts)`. `BackendsTab.BackendCard` uses `checked_at` for `ShFrozen` freshness indicator and `weight` for the editable weight display.
 - **`PUT /api/backends/{url}/heartbeat` — remote push API** — a remote ollama-queue instance calls this periodically (recommended 30s) to push its own health state (`healthy`, `gpu_name`, `vram_pct`, `vram_total_gb`, `loaded_models`, `available_models`) directly into the primary's routing caches (`_health_cache`, `_hw_cache`, `_gpu_name_cache`, `_loaded_cache`, `_models_cache`). The primary no longer needs to poll the remote on each routing decision. Auto-registers the backend if absent — the act of pushing proves reachability. Uses `exclude_unset=True` on the Pydantic model so partial pushes (e.g. only `healthy`) don't overwrite other caches with default 0 values. Implemented in `backend_router.receive_heartbeat()`.
 - **Remote host push implementation** — on the remote Docker container, add `curl -X PUT http://<primary-ip>:7683/api/backends/http://<remote-ip>:11434/heartbeat -H "Content-Type: application/json" -d '{"healthy":true,"gpu_name":"RTX 2070","vram_pct":45}' &` to a cron every 30s, or call it from the remote ollama-queue's own health loop. `scripts/backend-onboard.sh` should be extended to set up this cron.
+- **Backend agent port 11435** — the backend agent runs on port 11435 (not 11434 which is Ollama). Queue-side command dispatch (`POST /api/backends/{url}/command`) derives the agent URL by replacing the port: `{scheme}://{hostname}:11435/{action}`. If the agent port changes, update `_AGENT_PORT` in `ollama_queue/api/backends.py`.
+- **Backend agent heartbeat includes GPU fields** — the agent sends `gpu_name`, `vram_pct`, `vram_total_gb`, and `loaded_models` via nvidia-smi and Ollama `/api/ps`. These populate `_vram_total_cache` which the `required-models` endpoint uses for VRAM-based filtering. Without GPU fields, all agent-managed backends get only core models (safe fallback but defeats hardware-aware assignment).
+- **`required_models` setting stores the canonical model list** — seeded in `db/schema.py` with 13 models across 3 tiers (core/standard/optional). Each entry has `name`, `vram_mb`, and `tier`. The setting is JSON-serialized; `required_models.py` handles both string and list formats from the DB.
+- **Backend agent auto-registers via heartbeat** — when an agent pushes its first heartbeat, `backend_heartbeat()` in `backends.py` auto-registers it in the BACKENDS list and DB. No separate `POST /api/backends` call needed. The act of pushing proves reachability.
+- **Command dispatch uses GET for read-only actions** — `_GET_ACTIONS = {"status"}`. All other actions (sync-models, update-ollama, restart-ollama) use POST. Sending POST to a GET-only agent endpoint returns 405.
+- **CPU/RAM routing pressure is tier 5 in 6-tier router** — backends with >90% CPU or >90% RAM (from heartbeat data) are skipped. Fail-open: if all backends are overloaded, the filter returns the full list (better to route slowly than not at all). Cache TTL: CPU 60s, RAM 120s. Stale entries are ignored (treated as "no data").
+- **`bootstrap-backend.sh` replaces `backend-onboard.sh` for new hosts** — the bootstrap script sets up Ollama container + backend agent container in one command. `backend-onboard.sh` is legacy (manual model pulls only, no agent). For existing hosts, the agent container can be added separately: `docker run -d --name ollama-backend-agent -p 11435:11435 -v /ollama:/ollama -e QUEUE_URL=http://<queue>:7683 -e BACKEND_URL=http://<self>:11434 ghcr.io/parthalon025/ollama-backend-agent:latest`.
 
 ## Design Doc
 
