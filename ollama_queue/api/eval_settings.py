@@ -192,6 +192,12 @@ def put_eval_settings(body: dict = Body(...)):
         "generator_backend_url",
         "judge_backend_url",
         "analysis_backend_url",
+        # Bayesian / tournament mode settings
+        "judge_mode",
+        "auc_threshold",
+        "min_posterior_separation",
+        "prior_probability",
+        "pairs_per_principle",
     }
 
     # Validation rules — validate ALL before writing any
@@ -235,6 +241,14 @@ def put_eval_settings(body: dict = Body(...)):
             validation_errors.append(f"auto_promote_min_improvement must be 0.0-1.0, got {value!r}")
         elif bare_key == "positive_threshold" and (not isinstance(value, int) or not (1 <= value <= 5)):
             validation_errors.append(f"positive_threshold must be an integer 1-5, got {value!r}")
+        elif bare_key == "judge_mode" and value not in ("rubric", "tournament", "bayesian", "binary"):
+            validation_errors.append(f"judge_mode must be one of rubric/tournament/bayesian/binary, got {value!r}")
+        elif bare_key in ("auc_threshold", "min_posterior_separation", "prior_probability") and (
+            not isinstance(value, int | float) or not (0.0 <= float(value) <= 1.0)
+        ):
+            validation_errors.append(f"{bare_key} must be a float 0.0-1.0, got {value!r}")
+        elif bare_key == "pairs_per_principle" and (not isinstance(value, int) or not (1 <= value <= 20)):
+            validation_errors.append(f"pairs_per_principle must be an integer 1-20, got {value!r}")
         elif f"eval.{bare_key}" in _PROVIDER_SETTINGS and value not in _VALID_PROVIDERS:
             validation_errors.append(f"Invalid provider {value!r}: must be one of {sorted(_VALID_PROVIDERS)}")
 

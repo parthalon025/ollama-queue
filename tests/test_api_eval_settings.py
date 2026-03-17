@@ -544,7 +544,7 @@ def test_provider_settings_exist_after_init(client):
     assert data.get("eval.judge_provider") == "ollama"
     assert data.get("eval.optimizer_provider") == "claude"
     assert data.get("eval.oracle_provider") == "claude"
-    assert data.get("eval.oracle_enabled") == "false"
+    assert data.get("eval.oracle_enabled") is False
     assert data.get("eval.max_cost_per_run_usd") == "1.00"
 
 

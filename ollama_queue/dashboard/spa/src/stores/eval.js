@@ -319,6 +319,20 @@ export const focusVariantId = signal(null);
 //   upcoming eval runs alongside recurring jobs and avoid scheduling conflicts.
 export const scheduledEvalRuns = signal([]);
 
+// What it shows: nothing — fetches cluster confusion matrix for one completed run
+// Decision it drives: returns { matrix, flagged, clusters } so ConfusionMatrix can
+//   render the cross-cluster transfer score heatmap, or null on error
+export async function fetchConfusionMatrix(runId) {
+  try {
+    const res = await fetch(`${API}/eval/runs/${runId}/confusion`);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (err) {
+    console.warn('fetchConfusionMatrix failed:', err);
+    return null;
+  }
+}
+
 export async function fetchScheduledEvalRuns() {
   try {
     const res = await fetch(`${API}/eval/runs?status=scheduled`);

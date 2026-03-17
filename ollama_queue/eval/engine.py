@@ -762,9 +762,56 @@ def run_eval_session(
             compute_run_analysis(run_id, db)
             generate_eval_analysis(db, run_id, http_base)
             check_auto_promote(db, run_id, http_base)
+            _run_oracle_safe(db, run_id)
+            _compute_cost_safe(db, run_id)
+            _generate_suggestions_safe(db, run_id)
     except Exception as exc:
         _log.exception("run_eval_session run_id=%d unhandled error", run_id)
         try:
             update_eval_run(db, run_id, status="failed", error=str(exc), completed_at=datetime.now(UTC).isoformat())
         except Exception:
             _log.exception("failed to record error for run_id=%d", run_id)
+
+
+# ---------------------------------------------------------------------------
+# Post-run feature wrappers (never-raise — same contract as check_auto_promote)
+# ---------------------------------------------------------------------------
+
+
+def _run_oracle_safe(db: Database, run_id: int) -> None:
+    """Run oracle validation without raising. Logs WARNING on any failure."""
+    try:
+        from ollama_queue.eval.oracle import run_oracle_validation
+
+        settings = {
+            "eval.oracle_enabled": db.get_setting("eval.oracle_enabled"),
+            "eval.oracle_provider": db.get_setting("eval.oracle_provider"),
+            "eval.oracle_model": db.get_setting("eval.oracle_model"),
+        }
+        run_oracle_validation(db, run_id, settings)
+    except Exception:
+        _log.warning("_run_oracle_safe: unhandled error for run_id=%d", run_id, exc_info=True)
+
+
+def _compute_cost_safe(db: Database, run_id: int) -> None:
+    """Compute post-hoc cost estimate without raising. Logs WARNING on any failure."""
+    try:
+        from ollama_queue.eval.cost import compute_run_cost
+
+        settings = {
+            "eval.judge_provider": db.get_setting("eval.judge_provider"),
+            "eval.generator_provider": db.get_setting("eval.generator_provider"),
+        }
+        compute_run_cost(db, run_id, settings)
+    except Exception:
+        _log.warning("_compute_cost_safe: unhandled error for run_id=%d", run_id, exc_info=True)
+
+
+def _generate_suggestions_safe(db: Database, run_id: int) -> None:
+    """Generate rule-based suggestions without raising. Logs WARNING on any failure."""
+    try:
+        from ollama_queue.eval.suggestions import generate_suggestions
+
+        generate_suggestions(db, run_id)
+    except Exception:
+        _log.warning("_generate_suggestions_safe: unhandled error for run_id=%d", run_id, exc_info=True)

@@ -202,8 +202,8 @@ def import_eval_variants(body: dict = Body(...)):
                 """INSERT OR IGNORE INTO eval_variants
                    (id, label, prompt_template_id, model, temperature, num_ctx,
                     is_recommended, is_system, created_at,
-                    params, system_prompt, training_config, provider)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    params, system_prompt, training_config, provider, description)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     var.get("id"),
                     var.get("label"),
@@ -218,6 +218,7 @@ def import_eval_variants(body: dict = Body(...)):
                     var.get("system_prompt"),
                     var.get("training_config"),
                     provider_val,
+                    var.get("description"),
                 ),
             )
             variants_imported += cur.rowcount
@@ -607,6 +608,7 @@ def update_eval_variant(variant_id: str, body: dict = Body(...)):
             "params",
             "training_config",
             "provider",
+            "description",
         }
         updates = {k: v for k, v in body.items() if k in updatable_fields}
         if not updates:

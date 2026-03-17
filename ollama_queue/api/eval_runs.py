@@ -307,6 +307,26 @@ def get_eval_run_analysis(run_id: int):
     return json.loads(row["analysis_json"])
 
 
+@router.get("/api/eval/runs/{run_id}/oracle")
+def get_eval_run_oracle(run_id: int):
+    """Return oracle validation result for a run.
+
+    # What it shows: Cohen's kappa and agreement percentage between the judge model
+    #   and an oracle reference model, computed on a sample of judge decisions.
+    # Decision it drives: Tells the user how reliable the judge is — low kappa
+    #   means the judge is inconsistent and auto-promote should not be trusted.
+    """
+    db = _api.db
+    with db._lock:
+        conn = db._connect()
+        row = conn.execute("SELECT oracle_json FROM eval_runs WHERE id = ?", (run_id,)).fetchone()
+    if not row:
+        raise HTTPException(404, f"Run {run_id} not found")
+    if not row["oracle_json"]:
+        return {"status": "not_run"}
+    return json.loads(row["oracle_json"])
+
+
 @router.post("/api/eval/runs/{run_id}/reanalyze")
 def reanalyze_eval_run(run_id: int):
     """Recompute structured analysis for a completed run (synchronous).

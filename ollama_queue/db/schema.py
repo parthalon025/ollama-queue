@@ -98,6 +98,12 @@ EVAL_SETTINGS_DEFAULTS = {
     "eval.auto_promote": False,  # explicit opt-in only
     "eval.auto_promote_min_improvement": 0.05,  # min F1 delta over current production
     "eval.positive_threshold": 3,  # score_transfer >= this counts as positive for F1 calc
+    # Judge mode + Bayesian/tournament settings
+    "eval.judge_mode": "rubric",  # default scoring strategy: rubric | tournament | bayesian | binary
+    "eval.auc_threshold": 0.85,  # Bayesian: min AUC to auto-promote
+    "eval.min_posterior_separation": 0.4,  # Bayesian: min gap between same/diff cluster scores
+    "eval.prior_probability": 0.25,  # Bayesian: assumed principle transfer rate before evidence
+    "eval.pairs_per_principle": 4,  # tournament/Bayesian: comparison pairs per principle
     # Provider settings — which backend to use for each pipeline role
     "eval.generator_provider": "ollama",
     "eval.generator_model": "",
@@ -106,7 +112,7 @@ EVAL_SETTINGS_DEFAULTS = {
     "eval.optimizer_model": "claude-sonnet-4-6",
     "eval.oracle_provider": "claude",
     "eval.oracle_model": "claude-sonnet-4-6",
-    "eval.oracle_enabled": "false",
+    "eval.oracle_enabled": False,
     "eval.claude_api_key": "",
     "eval.openai_api_key": "",
     "eval.openai_base_url": "",

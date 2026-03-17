@@ -129,6 +129,109 @@ def build_judge_prompt(principle: str, target_item: dict, is_same_cluster: bool)
 
 
 # ---------------------------------------------------------------------------
+# Binary judge prompt + parser
+# ---------------------------------------------------------------------------
+
+
+def build_binary_judge_prompt(principle: str, target_item: dict, source_item: dict) -> str:
+    """Build a YES/NO transfer-match prompt for binary judge mode.
+
+    Asks whether the structural principle transfers to the target lesson.
+    Cleaner and cheaper than rubric mode — useful when all you need is a
+    signal, not a scored breakdown.
+
+    source_item is accepted for context but not currently embedded in the
+    prompt; the judge is asked to evaluate (principle, target) alone so that
+    the source doesn't bias the answer toward superficial topic similarity.
+    """
+    principle = _clean_principle(principle)
+    title = target_item.get("title") or ""
+    one_liner = target_item.get("one_liner") or ""
+    description = (target_item.get("description") or "")[:300]
+
+    return (
+        "You are evaluating whether a structural principle transfers to a target lesson.\n\n"
+        f'PRINCIPLE: "{principle}"\n\n'
+        "TARGET LESSON:\n"
+        f"Title: {title}\n"
+        f"One-liner: {one_liner}\n"
+        f"Description: {description}\n\n"
+        "Does this principle transfer to the target lesson?\n"
+        "Transfer means the principle identifies the SAME structural failure mechanism — "
+        "not just a similar topic.\n\n"
+        "Answer YES if the principle would help recognize or prevent the bug described in the target.\n"
+        "Answer NO if it would not — even if the topics overlap.\n\n"
+        "Respond with YES or NO followed by a one-sentence explanation.\n"
+        "Example: YES — both lessons share the same resource-cleanup failure pattern.\n"
+        "Example: NO — the principle is about async timing but the target is about config parsing."
+    )
+
+
+def parse_binary_response(text: str) -> dict:
+    """Parse a YES/NO binary judge response into a scores dict.
+
+    Maps:
+      YES → {score_transfer: 5, score_precision: 4, score_action: 4}
+      NO  → {score_transfer: 1, score_precision: 1, score_action: 1}
+
+    Uses the same output keys as parse_judge_response so the rest of
+    _judge_one_target can treat binary and rubric results uniformly.
+    On parse failure defaults to NO (conservative).
+    """
+    if not text:
+        return {
+            "transfer": 1,
+            "precision": 1,
+            "actionability": 1,
+            "reasoning": "",
+            "judge_reasoning": "",
+            "error": "parse_failed",
+        }
+
+    # Strip think blocks before parsing
+    think_match = re.search(r"<think>(.*?)</think>", text, flags=re.DOTALL)
+    judge_reasoning = think_match.group(1).strip() if think_match else ""
+    cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+
+    upper = cleaned.upper()
+    if upper.startswith("YES"):
+        answer = "YES"
+    elif upper.startswith("NO"):
+        answer = "NO"
+    else:
+        # Scan for first YES/NO word anywhere in the response
+        yes_pos = re.search(r"\bYES\b", upper)
+        no_pos = re.search(r"\bNO\b", upper)
+        if yes_pos and (not no_pos or yes_pos.start() < no_pos.start()):
+            answer = "YES"
+        elif no_pos:
+            answer = "NO"
+        else:
+            answer = "NO"  # default conservative
+
+    # Extract explanation (everything after the YES/NO token)
+    reasoning_match = re.search(r"(?:YES|NO)[^\w]*(.*)", cleaned, re.IGNORECASE | re.DOTALL)
+    reasoning = reasoning_match.group(1).strip()[:200] if reasoning_match else ""
+
+    if answer == "YES":
+        return {
+            "transfer": 5,
+            "precision": 4,
+            "actionability": 4,
+            "reasoning": reasoning,
+            "judge_reasoning": judge_reasoning,
+        }
+    else:
+        return {
+            "transfer": 1,
+            "precision": 1,
+            "actionability": 1,
+            "reasoning": reasoning,
+            "judge_reasoning": judge_reasoning,
+        }
+
+
+# ---------------------------------------------------------------------------
 # Analysis prompt
 # ---------------------------------------------------------------------------
 
@@ -481,6 +584,20 @@ def compute_transfer_posterior(
 
 
 # ---------------------------------------------------------------------------
+# Cache key helper
+# ---------------------------------------------------------------------------
+
+
+def _hash_text(text: str) -> str:
+    """Return a 16-character SHA-256 hex digest of text.
+
+    Used to build deterministic cache keys for (principle, target) pairs
+    so that identical LLM inputs always map to the same cache row.
+    """
+    return hashlib.sha256((text or "").encode()).hexdigest()[:16]
+
+
+# ---------------------------------------------------------------------------
 # Judge orchestrator helpers
 # ---------------------------------------------------------------------------
 
@@ -565,27 +682,105 @@ def _judge_one_target(
         }
     else:
         # Standard rubric or binary mode
-        judge_prompt = build_judge_prompt(principle, target, is_same)
-        raw_response, _ = _eng._call_proxy(
-            http_base=http_base,
-            model=judge_model,
-            prompt=judge_prompt,
-            temperature=judge_temperature,
-            num_ctx=4096,
-            timeout=180,
-            source=source_tag,
-            priority=2,
-            backend=backend,
-        )
-        _judge_fail: dict = {
-            "transfer": 1,
-            "precision": 1,
-            "actionability": 1,
-            "reasoning": "",
-            "judge_reasoning": "",
-            "error": "judge_failed",
-        }
-        scores = parse_judge_response(raw_response) if raw_response is not None else _judge_fail
+        # Build mode-specific prompt and compute cache key before calling LLM
+        if judge_mode == "binary":
+            judge_prompt = build_binary_judge_prompt(principle, target, {})
+        else:
+            judge_prompt = build_judge_prompt(principle, target, is_same)
+
+        # --- Eval cache check ---
+        principle_hash = _hash_text(principle)
+        target_text = (target.get("title") or "") + (target.get("one_liner") or "") + (target.get("description") or "")
+        target_hash = _hash_text(target_text)
+        cached_scores_json, cached_reasoning = None, None
+        try:
+            cached_scores_json, cached_reasoning = db.get_eval_cache(
+                principle_hash, target_hash, judge_model, judge_mode
+            )
+        except Exception:
+            _log.warning(
+                "_judge_one_target: cache lookup failed for %s/%s — proceeding without cache",
+                principle_hash,
+                target_hash,
+            )
+
+        if cached_scores_json is not None:
+            # Cache hit: reconstruct scores dict from stored JSON
+            try:
+                import json as _json
+
+                cached_data = _json.loads(cached_scores_json)
+                scores = {
+                    "transfer": int(cached_data.get("transfer", 1)),
+                    "precision": int(cached_data.get("precision", 1)),
+                    "actionability": int(cached_data.get("actionability", 1)),
+                    "reasoning": cached_reasoning or "",
+                    "judge_reasoning": "",
+                }
+                _log.debug(
+                    "_judge_one_target: cache hit principle_hash=%s target_hash=%s mode=%s",
+                    principle_hash,
+                    target_hash,
+                    judge_mode,
+                )
+            except Exception:
+                _log.warning(
+                    "_judge_one_target: cache hit but scores_json malformed — falling through to LLM",
+                )
+                cached_scores_json = None  # fall through to LLM call
+
+        if cached_scores_json is None:
+            # Cache miss: call LLM
+            raw_response, _ = _eng._call_proxy(
+                http_base=http_base,
+                model=judge_model,
+                prompt=judge_prompt,
+                temperature=judge_temperature,
+                num_ctx=4096,
+                timeout=180,
+                source=source_tag,
+                priority=2,
+                backend=backend,
+            )
+            _judge_fail: dict = {
+                "transfer": 1,
+                "precision": 1,
+                "actionability": 1,
+                "reasoning": "",
+                "judge_reasoning": "",
+                "error": "judge_failed",
+            }
+            if raw_response is None:
+                scores = _judge_fail
+            elif judge_mode == "binary":
+                scores = parse_binary_response(raw_response)
+            else:
+                scores = parse_judge_response(raw_response)
+
+            # Store in cache on success (no error key)
+            if "error" not in scores:
+                try:
+                    import json as _json
+
+                    scores_payload = {
+                        "transfer": scores["transfer"],
+                        "precision": scores["precision"],
+                        "actionability": scores["actionability"],
+                    }
+                    db.store_eval_cache(
+                        principle_hash,
+                        target_hash,
+                        judge_model,
+                        judge_mode,
+                        _json.dumps(scores_payload),
+                        scores.get("reasoning", ""),
+                    )
+                except Exception:
+                    _log.warning(
+                        "_judge_one_target: cache store failed for principle_hash=%s target_hash=%s — continuing",
+                        principle_hash,
+                        target_hash,
+                    )
 
     judge_time_s = round(time.monotonic() - t0, 1)
     _eng.insert_eval_result(
