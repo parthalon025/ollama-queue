@@ -6,9 +6,7 @@ import {
 } from '../stores';
 import { backendMetrics, fetchBackendMetrics } from '../stores/health.js';
 import { evalVariants, fetchEvalVariants } from '../stores/eval.js';
-import { SystemHealth } from '../components/SystemHealth.jsx';
 import PerformanceCurveChart from '../components/PerformanceCurveChart.jsx';
-import LoadHeatmap from '../components/LoadHeatmap.jsx';
 import { ShPageBanner, ShTimeChart, ShEmptyState } from 'superhot-ui/preact';
 import { TAB_CONFIG } from '../config/tabs.js';
 import ModelChip from '../components/ModelChip.jsx';
@@ -57,9 +55,6 @@ export default function Performance() {
     return (
         <div class="flex flex-col gap-6 sh-stagger-children animate-page-enter">
             <ShPageBanner namespace={_tab.namespace} page={_tab.page} subtitle={_tab.subtitle} />
-
-            {/* System Health — always visible at top */}
-            <SystemHealth />
 
             {/* RAM usage trend — last 24h from health log */}
             {ramChartData.length > 0 && (
@@ -178,11 +173,6 @@ export default function Performance() {
                 </div>
             )}
 
-            {/* Load Heatmap — hour × day-of-week */}
-            <p style="font-size: var(--type-label); color: var(--text-secondary); margin-bottom: 8px;">
-                Activity by hour of day and day of week. Darker cells mean more jobs ran during that window.
-            </p>
-            <LoadHeatmap />
         </div>
     );
 }

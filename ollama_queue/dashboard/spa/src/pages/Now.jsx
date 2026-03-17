@@ -10,6 +10,7 @@ import { evalActiveRun } from '../stores/eval.js';
 import { useActionFeedback } from '../hooks/useActionFeedback.js';
 import { useShatter } from '../hooks/useShatter.js';
 import HostCard from '../components/HostCard.jsx';
+import LoadHeatmap from '../components/LoadHeatmap.jsx';
 import QueueList from '../components/QueueList.jsx';
 import HeroCard from '../components/HeroCard.jsx';
 import { ShPageBanner, ShStatCard, ShStatsGrid, ShFrozen, ShThreatPulse } from 'superhot-ui/preact';
@@ -144,6 +145,7 @@ export default function Now() {
                         latestHealth={latestHealth}
                         settings={sett}
                         cpuCount={cpuCount.value}
+                        healthHistory={health}
                     />
                 ))}
             </div>
@@ -324,6 +326,11 @@ export default function Now() {
                     )}
                 </div>
             </div>
+
+            {/* GPU activity heatmap — job activity by hour of day and day of week.
+                Shows when the cluster (all backends combined) is busiest.
+                Moved from Performance tab so it lives alongside the hosts it describes. */}
+            <LoadHeatmap />
 
         </div>
     );

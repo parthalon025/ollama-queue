@@ -7,7 +7,7 @@ import { h } from 'preact';
 import { useEffect, useRef } from 'preact/hooks';
 import { useSignal } from '@preact/signals';
 import { applyMantra, removeMantra } from 'superhot-ui';
-import { ShStatusBadge, ShThreatPulse, ShFrozen, ShGlitch, ShShatter } from 'superhot-ui/preact';
+import { ShStatusBadge, ShThreatPulse, ShFrozen, ShGlitch, ShShatter, ShTimeChart } from 'superhot-ui/preact';
 import { cancelEvalRun } from '../stores/eval.js';
 import { API } from '../stores';
 import { useActionFeedback } from '../hooks/useActionFeedback.js';
@@ -138,6 +138,7 @@ export default function HostCard({
     latestHealth,
     settings,
     cpuCount,
+    healthHistory,  // full health log array (newest-first) — used for VRAM% time chart
 }) {
     // Hooks before any conditional return (Rules of Hooks)
     const cardRef = useRef(null);
@@ -210,6 +211,16 @@ export default function HostCard({
     }, [expanded.value, isRunning, currentJob?.id]);
 
     const vramBarPct = Math.min(vramPct, 100);
+
+    // GPU activity: VRAM % over last 24h — oldest-first for ShTimeChart.
+    // Derived from healthHistory (health_log) for local backends only; remote backends
+    // only expose a current snapshot (backend.vram_pct), not a time series.
+    const vramChartData = isLocal && healthHistory?.length > 0
+        ? healthHistory
+              .filter(entry => entry.timestamp != null && entry.vram_pct != null)
+              .map(entry => ({ t: entry.timestamp, v: entry.vram_pct }))
+              .reverse()  // healthData is newest-first; ShTimeChart expects oldest-first
+        : [];
 
     const card = (
         <div ref={cardRef} class="t-frame" data-label={gpuLabel}>
@@ -360,6 +371,39 @@ export default function HostCard({
                             </div>
                         </details>
                     )}
+                </div>
+            )}
+
+            {/* Expanded: GPU activity — VRAM % over last 24h (local backends only) */}
+            {/* What it shows: How hard the GPU has been working over time, measured as
+                VRAM pressure. Peaks correspond to large model loads or concurrent requests.
+                Decision it drives: Is this GPU chronically near capacity? Should jobs be
+                routed elsewhere? */}
+            {expanded.value && vramChartData.length > 0 && (
+                <div style="margin-top: 0.5rem;">
+                    <span class="data-mono" style="font-size: var(--type-micro); color: var(--text-tertiary); display: block; margin-bottom: 4px;">
+                        GPU ACTIVITY (24H)
+                    </span>
+                    <ShTimeChart
+                        data={vramChartData}
+                        label="VRAM %"
+                        color="var(--sh-phosphor)"
+                    />
+                </div>
+            )}
+
+            {/* Expanded: system health gauges full-width (local backends only) */}
+            {/* What it shows: RAM/CPU/Swap at the full-width expanded view — same data as
+                the compact gauge row, but with more space and the pause threshold visible.
+                Decision it drives: Is this host about to hit the job-admission pause gate? */}
+            {expanded.value && gauges.length > 0 && (
+                <div style="margin-top: 0.5rem;">
+                    <span class="data-mono" style="font-size: var(--type-micro); color: var(--text-tertiary); display: block; margin-bottom: 4px;">
+                        SYSTEM HEALTH
+                    </span>
+                    <div class="flex flex-col gap-2">
+                        {gauges.map(gauge => <HostGaugeBar key={gauge.label} gauge={gauge} />)}
+                    </div>
                 </div>
             )}
 
