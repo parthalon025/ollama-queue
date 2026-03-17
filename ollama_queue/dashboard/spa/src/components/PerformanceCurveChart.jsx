@@ -38,22 +38,21 @@ export default function PerformanceCurveChart({ curve, models }) {
     function toY(tok) { return PAD.top + (1 - linScale(tok, rateMin, rateMax)) * PLOT_H; }
 
     // Generate regression line + CI band if curve is fitted.
-    // API shape: { params: { eval_slope, eval_intercept, residual_std, ... }, points: [...] }
+    // API shape: { tok_slope, tok_intercept, tok_residual_std, fitted, points: [...] }
     let linePath = '';
     let bandPath = '';
-    const params = curve?.params;
-    if (params && params.eval_slope != null) {
+    if (curve && curve.fitted && curve.tok_slope != null) {
         const steps = 50;
         const linePoints = [];
         const upperPoints = [];
         const lowerPoints = [];
-        const std = params.residual_std || 0.3;
+        const std = curve.tok_residual_std || 0.3;
         const z = 1.28; // 90% CI
 
         for (let i = 0; i <= steps; i++) {
             const t = i / steps;
             const gb = Math.exp(Math.log(sizeMin) + t * (Math.log(sizeMax) - Math.log(sizeMin)));
-            const logRate = params.eval_slope * Math.log(gb) + params.eval_intercept;
+            const logRate = curve.tok_slope * Math.log(gb) + curve.tok_intercept;
             const mean = Math.exp(logRate);
             const lower = Math.exp(logRate - z * std);
             const upper = Math.exp(logRate + z * std);
