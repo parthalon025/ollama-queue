@@ -180,6 +180,7 @@ class SchemaMixin:
         self._add_column_if_missing(conn, "eval_runs", "cost_json", "TEXT")
         self._add_column_if_missing(conn, "eval_runs", "oracle_json", "TEXT")
         self._add_column_if_missing(conn, "eval_runs", "suggestions_json", "TEXT")
+        self._add_column_if_missing(conn, "eval_runs", "promoted_at", "TEXT")
         # Judge parse failure tracking (#22)
         self._add_column_if_missing(conn, "eval_runs", "judge_parse_failures", "INTEGER DEFAULT 0")
         # Eval backend host URLs (gen + judge)

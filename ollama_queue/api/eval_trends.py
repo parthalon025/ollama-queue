@@ -24,7 +24,7 @@ def get_eval_trends():
     with db._lock:
         conn = db._connect()
         runs = conn.execute(
-            """SELECT id, started_at, metrics, item_ids, item_count, judge_mode
+            """SELECT id, started_at, metrics, item_ids, item_count, judge_mode, promoted_at
                FROM eval_runs WHERE status = 'complete' ORDER BY id ASC"""
         ).fetchall()
         # Fetch agreement counts inside the same lock to avoid racing with
@@ -63,6 +63,7 @@ def get_eval_trends():
                 "separation": var_metrics.get("separation"),
                 "same_mean_posterior": var_metrics.get("same_mean_posterior"),
                 "diff_mean_posterior": var_metrics.get("diff_mean_posterior"),
+                "promoted_at": run_row["promoted_at"],
             }
             variant_runs[var_id].append(entry)
 

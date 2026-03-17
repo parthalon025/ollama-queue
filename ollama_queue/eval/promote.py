@@ -82,6 +82,11 @@ def do_promote_eval_run(db: Database, run_id: int) -> dict:
         )
         conn.commit()
 
+    # Stamp the run with promotion time for the Trends timeline
+    import datetime as _dt
+
+    _eng.update_eval_run(db, run_id, promoted_at=_dt.datetime.now(_dt.UTC).isoformat())
+
     label = variant.get("label", winner_variant)
     _log.info("Promoted variant %s (label=%r) to production for run %d", winner_variant, label, run_id)
     return {"ok": True, "run_id": run_id, "variant_id": winner_variant, "label": label}

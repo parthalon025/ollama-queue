@@ -40,8 +40,8 @@ export default function EvalTrends() {
     if (run.completed_at && run.status === 'complete') {
       evts.push({ type: 'run_completed', timestamp: run.completed_at, label: `Run #${run.id} complete` });
     }
-    // NOTE: promotion event markers require a `promoted_at` field on the run object.
-    // That field is not yet in the API response — placeholder removed until backend adds it.
+    // F1LineChart derives promotion markers directly from evalTrends store data
+    // (promoted_at is on each run entry in the trends API response).
     return evts;
   });
 

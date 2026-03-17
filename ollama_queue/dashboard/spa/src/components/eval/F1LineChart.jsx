@@ -32,10 +32,11 @@ function ChartCanvas({ variants, itemSetsDiffer, metricKey, yAxisLabel }) {
   useEffect(() => {
     if (!containerRef.current || !variants || variants.length === 0) return;
 
-    const styles     = getComputedStyle(document.documentElement);
-    const textColor  = styles.getPropertyValue('--text-tertiary').trim();
-    const gridColor  = styles.getPropertyValue('--border-subtle').trim();
-    const fontMono   = styles.getPropertyValue('--font-mono').trim() || 'monospace';
+    const styles         = getComputedStyle(document.documentElement);
+    const textColor      = styles.getPropertyValue('--text-tertiary').trim();
+    const gridColor      = styles.getPropertyValue('--border-subtle').trim();
+    const fontMono       = styles.getPropertyValue('--font-mono').trim() || 'monospace';
+    const promotionColor = resolveColor('var(--status-healthy)');
 
     // Build uPlot data arrays: [xValues, ...ySeriesArrays]
     // X-axis: run dates (unix timestamps) or item_count if item sets differ
@@ -65,9 +66,50 @@ function ChartCanvas({ variants, itemSetsDiffer, metricKey, yAxisLabel }) {
       };
     });
 
+    // Collect unique promotion timestamps (ISO string → unix seconds, deduplicated).
+    // promoted_at is set by eval/promote.py when a run is promoted and flows through
+    // the /api/eval/trends endpoint onto each run entry.
+    const promotionSet = new Set();
+    variants.forEach(vari => {
+      (vari.runs || []).forEach(run => {
+        if (run.promoted_at) promotionSet.add(run.promoted_at);
+      });
+    });
+    const promotionTs = Array.from(promotionSet).map(iso =>
+      Math.floor(new Date(iso).getTime() / 1000)
+    );
+
     if (chartRef.current) {
       chartRef.current.destroy();
     }
+
+    // Draw vertical dashed lines + star markers at each promotion timestamp.
+    // hooks.draw fires after uPlot renders its own content; u.bbox and
+    // u.valToPos(..., true) both use canvas-space coordinates (devicePixelRatio-scaled).
+    const drawPromotionMarkers = promotionTs.length === 0 ? null : (u) => {
+      const { ctx, bbox } = u;
+      const dpr = window.devicePixelRatio || 1;
+      ctx.save();
+      ctx.strokeStyle = promotionColor;
+      ctx.fillStyle   = promotionColor;
+      ctx.lineWidth   = 1.5 * dpr;
+      ctx.setLineDash([4 * dpr, 4 * dpr]);
+      promotionTs.forEach(ts => {
+        const x = u.valToPos(ts, 'x', true);
+        if (x < bbox.left || x > bbox.left + bbox.width) return;
+        ctx.beginPath();
+        ctx.moveTo(x, bbox.top);
+        ctx.lineTo(x, bbox.top + bbox.height);
+        ctx.stroke();
+        // Star label above the chart area
+        ctx.setLineDash([]);
+        ctx.font      = `bold ${Math.round(11 * dpr)}px ${fontMono}`;
+        ctx.textAlign = 'center';
+        ctx.fillText('★', x, bbox.top - 4 * dpr);
+        ctx.setLineDash([4 * dpr, 4 * dpr]);
+      });
+      ctx.restore();
+    };
 
     const opts = {
       width:  containerRef.current.clientWidth,
@@ -106,6 +148,7 @@ function ChartCanvas({ variants, itemSetsDiffer, metricKey, yAxisLabel }) {
         {}, // x axis placeholder
         ...seriesOpts,
       ],
+      ...(drawPromotionMarkers ? { hooks: { draw: [drawPromotionMarkers] } } : {}),
     };
 
     chartRef.current = new uPlot(opts, data, containerRef.current);
