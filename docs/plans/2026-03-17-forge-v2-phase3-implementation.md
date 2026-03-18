@@ -21,6 +21,37 @@
 
 ---
 
+## Code Conventions
+
+These conventions are **mandatory** for every task in this plan. The executing agent MUST follow them.
+
+### Module Design (GitHub Best Practices)
+
+- **One primary responsibility per module.** Each `.py` file does one job. If a module grows past 150 lines, split it.
+- **Functions ≤ 30 lines.** If a function exceeds 30 lines, extract a helper. Name the helper after what it computes, not what step it is.
+- **Pure functions by default.** No DB or HTTP imports in algorithm modules (drift, holdout, arbiter, feedback, meta_eval). All I/O happens in engine or DB layers.
+- **Engine extensions go in `engine_learn.py`, NOT in `engine.py`.** Phase 2 set the precedent with `engine_evolve.py`. Phase 3 follows the same pattern: a dedicated `engine_learn.py` with `run_learn_phase()` as the single entry point. `engine.py` gains one import and one function call — nothing more.
+- **feedback.py is the sole exception** — it makes one HTTP call (`send_feedback`). This is documented and tested (network errors return `ok=False`, never raise).
+
+### Timestamp Convention
+
+- **Always use `time.time()`** (float epoch) for `created_at`, `updated_at`, and all temporal columns. This matches Phase 1's convention in `db/forge.py`. Do NOT use `datetime.now(UTC).isoformat()`.
+
+### Git Discipline
+
+- **One logical change per commit.** Each Step 5 ("Commit") is one commit with one purpose.
+- **Stage only your files.** `git add <file1> <file2>`, never `git add -A`. Other agents may have unstaged work in the repo.
+- **Run tests before every commit.** The test command in Step 4 must pass before Step 5 runs.
+- **Commit messages follow Conventional Commits.** `feat(forge):`, `test(forge):`, `fix(forge):`.
+
+### Ruff Compliance
+
+- Run `ruff check --fix` after writing any Python file. Fix all errors before committing.
+- Per-function complexity: ≤ 10 branches, ≤ 6 return statements, ≤ 50 statements.
+- Line length ≤ 120 characters.
+
+---
+
 ## Module Map
 
 ```
@@ -30,6 +61,7 @@ ollama_queue/forge/           # Phase 3 additions
   arbiter.py                  # Tier 3 dispute resolution (~80 lines)
   feedback.py                 # Structured feedback to data sources (~90 lines)
   meta_eval.py                # Double-loop metric evaluation (~80 lines)
+  engine_learn.py             # Phase 3 engine orchestration — drift, arbiter, feedback, holdout (~100 lines)
 
 ollama_queue/db/
   forge.py                    # Extend ForgeMixin: drift, feedback, holdout, disputes (~+120 lines)
@@ -47,7 +79,10 @@ tests/
   test_forge_db_phase3.py
   test_api_forge_feedback.py
   test_api_forge_holdout.py
+  test_forge_engine_learn.py  # All Phase 3 engine integration tests in one file
 ```
+
+**Separation of concerns:** Algorithm modules (drift, holdout, arbiter, feedback, meta_eval) are pure computation. `engine_learn.py` coordinates them with DB and settings. `engine.py` gains only a one-line call to `engine_learn.run_learn_phase()`.
 
 ---
 
@@ -348,7 +383,7 @@ Prevents Goodhart optimization against the test set.
 from __future__ import annotations
 
 import hashlib
-from datetime import UTC, datetime
+import time
 
 
 def create_holdout_snapshot(items: list[dict], *, seed: int) -> dict:
@@ -369,7 +404,7 @@ def create_holdout_snapshot(items: list[dict], *, seed: int) -> dict:
         "item_hash": item_hash,
         "item_count": len(item_ids),
         "seed": seed,
-        "created_at": datetime.now(UTC).isoformat(),
+        "created_at": time.time(),
     }
 
 
@@ -1069,7 +1104,7 @@ conn.execute("""CREATE TABLE IF NOT EXISTS forge_drift_snapshots (
     f1 REAL,
     score_variance REAL,
     interpretation TEXT,
-    created_at TEXT NOT NULL
+    created_at REAL NOT NULL
 )""")
 
 conn.execute("""CREATE TABLE IF NOT EXISTS forge_feedback_log (
@@ -1081,7 +1116,7 @@ conn.execute("""CREATE TABLE IF NOT EXISTS forge_feedback_log (
     report_json TEXT NOT NULL,
     response_json TEXT,
     status TEXT DEFAULT 'pending',
-    created_at TEXT NOT NULL
+    created_at REAL NOT NULL
 )""")
 
 conn.execute("""CREATE TABLE IF NOT EXISTS forge_holdout_sets (
@@ -1090,10 +1125,10 @@ conn.execute("""CREATE TABLE IF NOT EXISTS forge_holdout_sets (
     item_hash TEXT NOT NULL,
     seed INTEGER NOT NULL,
     source_run_id INTEGER REFERENCES forge_runs(id),
-    last_checked_at TEXT,
+    last_checked_at REAL,
     last_check_metrics_json TEXT,
     freshness_score REAL,
-    created_at TEXT NOT NULL
+    created_at REAL NOT NULL
 )""")
 
 conn.execute("""CREATE TABLE IF NOT EXISTS forge_disputes (
@@ -1105,8 +1140,8 @@ conn.execute("""CREATE TABLE IF NOT EXISTS forge_disputes (
     arbiter_score INTEGER,
     arbiter_reasoning TEXT,
     arbiter_model TEXT,
-    resolved_at TEXT,
-    created_at TEXT NOT NULL
+    resolved_at REAL,
+    created_at REAL NOT NULL
 )""")
 ```
 
@@ -1114,7 +1149,7 @@ Add to `ollama_queue/db/forge.py`:
 
 ```python
 def insert_forge_drift_snapshot(self, *, run_id, kappa, f1, score_variance, interpretation):
-    now = datetime.now(UTC).isoformat()
+    now = time.time()
     with self._lock:
         conn = self._connect()
         conn.execute(
@@ -1135,7 +1170,7 @@ def get_forge_drift_history(self, *, limit=20):
 
 def insert_forge_feedback_log(self, *, run_id, data_source_url, feedback_type,
                                item_count, report_json):
-    now = datetime.now(UTC).isoformat()
+    now = time.time()
     with self._lock:
         conn = self._connect()
         cur = conn.execute(
@@ -1170,7 +1205,7 @@ def update_forge_feedback_log(self, log_id, *, status=None, response_json=None):
         conn.commit()
 
 def create_forge_holdout(self, *, item_ids_json, item_hash, seed, source_run_id):
-    now = datetime.now(UTC).isoformat()
+    now = time.time()
     with self._lock:
         conn = self._connect()
         cur = conn.execute(
@@ -1212,7 +1247,7 @@ def update_forge_holdout(self, holdout_id, *, last_checked_at=None, metrics_json
         conn.commit()
 
 def insert_forge_dispute(self, *, result_id, run_id, judge_score, oracle_score):
-    now = datetime.now(UTC).isoformat()
+    now = time.time()
     with self._lock:
         conn = self._connect()
         cur = conn.execute(
@@ -1233,7 +1268,7 @@ def get_forge_disputes(self, *, run_id):
         return [dict(r) for r in rows]
 
 def update_forge_dispute(self, dispute_id, *, arbiter_score, arbiter_reasoning, arbiter_model):
-    now = datetime.now(UTC).isoformat()
+    now = time.time()
     with self._lock:
         conn = self._connect()
         conn.execute(
@@ -1472,11 +1507,218 @@ git commit -m "feat(forge): add holdout + disputes API endpoints"
 
 ---
 
-## Batch 8: Wiring + Settings
+## Batch 8: Engine Learn Phase (NEW FILE — `engine_learn.py`)
+
+**PRD:** Create `engine_learn.py` to orchestrate Phase 3 modules (drift, arbiter, feedback, holdout, meta-assessment) as a single `run_learn_phase()` entry point. `engine.py` gains one import and one function call — nothing more. Follows the same pattern as Phase 2's `engine_evolve.py`.
+
+> **IMPORTANT:** Do NOT add functions to `engine.py`. All Phase 3 orchestration goes in `engine_learn.py`. Each function does ONE thing and stays under 30 lines.
+
+### Task 9: Create `engine_learn.py` with learn phase orchestration
+
+**Files:**
+
+- Create: `ollama_queue/forge/engine_learn.py`
+- Modify: `ollama_queue/forge/engine.py` (add one import + one function call after Phase 2 evolve call)
+- Test: `tests/test_forge_engine_learn.py`
+
+**Step 1: Write the failing tests**
+
+```python
+# tests/test_forge_engine_learn.py
+"""Tests for Forge engine Phase 3 — learn phase orchestration."""
+from unittest.mock import MagicMock, patch
+
+from ollama_queue.forge.engine_learn import run_learn_phase
+
+
+def test_run_learn_phase_no_crash_empty():
+    """Learn phase handles empty results gracefully."""
+    db = MagicMock()
+    db.get_forge_drift_snapshots.return_value = []
+    db.get_latest_forge_holdout.return_value = None
+
+    # Should not raise
+    run_learn_phase(db=db, run_id=1, run={"variant_id": "A", "data_source_url": "http://x"},
+                    results=[], metrics={})
+
+
+def test_run_learn_phase_skips_arbiter_when_disabled():
+    """Arbiter is gated behind forge.arbiter_enabled setting."""
+    db = MagicMock()
+    db.get_forge_drift_snapshots.return_value = []
+    db.get_latest_forge_holdout.return_value = None
+
+    with patch("ollama_queue.forge.engine_learn.get_forge_setting") as mock_setting:
+        mock_setting.side_effect = lambda db, key, cast: {
+            "forge.arbiter_enabled": False,
+            "forge.feedback_enabled": False,
+            "forge.drift_threshold": 0.05,
+            "forge.drift_window": 6,
+        }.get(key, cast())
+
+        run_learn_phase(db=db, run_id=1, run={"variant_id": "A", "data_source_url": "http://x"},
+                        results=[], metrics={})
+
+        # Should NOT call any arbiter DB methods
+        db.insert_forge_dispute.assert_not_called()
+```
+
+**Step 2: Run test to verify it fails**
+
+Run: `python -m pytest tests/test_forge_engine_learn.py -v`
+Expected: FAIL with "cannot import name 'run_learn_phase'"
+
+**Step 3: Write the implementation**
+
+```python
+# ollama_queue/forge/engine_learn.py
+"""Forge engine — Phase 3 (Learn) orchestration.
+
+Coordinates drift detection, arbiter resolution, feedback delivery,
+holdout monitoring, and metric assessment. Called from engine.py as a
+single run_learn_phase() entry point.
+
+Each helper function does ONE thing — pure coordination, under 30 lines.
+"""
+from __future__ import annotations
+
+import json
+import logging
+from typing import TYPE_CHECKING
+
+from ollama_queue.forge.drift import detect_drift
+from ollama_queue.forge.feedback import build_feedback_report, send_feedback
+from ollama_queue.forge.meta_eval import check_metric_fitness
+from ollama_queue.forge.settings import get_forge_setting
+
+if TYPE_CHECKING:
+    from ollama_queue.db import Database
+
+_log = logging.getLogger(__name__)
+
+
+def run_learn_phase(
+    *, db: Database, run_id: int, run: dict, results: list[dict], metrics: dict,
+) -> None:
+    """Phase 3 orchestration: drift -> arbiter -> feedback -> metric check.
+
+    Called from engine.py after evolve phase. Never raises — logs on error.
+    """
+    try:
+        _run_learn_inner(db=db, run_id=run_id, run=run, results=results, metrics=metrics)
+    except Exception as exc:
+        _log.warning("forge learn phase: run %d error: %s", run_id, exc)
+
+
+def _run_learn_inner(
+    *, db: Database, run_id: int, run: dict, results: list[dict], metrics: dict,
+) -> None:
+    """Inner learn — drift, arbiter, feedback, metric check."""
+    _run_drift_check(db, run_id, metrics)
+
+    if get_forge_setting(db, "forge.arbiter_enabled", bool):
+        _run_arbiter(db, run_id, results)
+
+    if get_forge_setting(db, "forge.feedback_enabled", bool):
+        _run_feedback(db, run_id, run, results, metrics)
+
+    _run_metric_check(db, run_id, metrics)
+
+
+def _run_drift_check(db: Database, run_id: int, metrics: dict) -> None:
+    """Snapshot drift metrics and detect trends."""
+    threshold = get_forge_setting(db, "forge.drift_threshold", float)
+    window = get_forge_setting(db, "forge.drift_window", int)
+
+    snapshots = db.get_forge_drift_snapshots(limit=window)
+    kappa_series = [s["kappa"] for s in snapshots if s.get("kappa") is not None]
+    f1_series = [s["f1"] for s in snapshots if s.get("f1") is not None]
+
+    interpretation = detect_drift(kappa_series, f1_series, threshold=threshold)
+
+    db.insert_forge_drift_snapshot(
+        run_id=run_id,
+        kappa=metrics.get("kappa"),
+        f1=metrics.get("f1"),
+        score_variance=metrics.get("score_variance"),
+        interpretation=interpretation.get("state", "unknown"),
+    )
+    _log.info("forge learn: drift state=%s for run %d", interpretation.get("state"), run_id)
+
+
+def _run_arbiter(db: Database, run_id: int, results: list[dict]) -> None:
+    """Resolve judge-oracle disputes via arbiter."""
+    from ollama_queue.forge.arbiter import select_disputes
+
+    threshold = get_forge_setting(db, "forge.arbiter_dispute_threshold", int)
+    disputes = select_disputes(results, threshold=threshold)
+    if not disputes:
+        return
+    _log.info("forge learn: %d disputes found for run %d", len(disputes), run_id)
+    for d in disputes:
+        db.insert_forge_dispute(
+            result_id=d["id"], run_id=run_id,
+            judge_score=d["judge_score"], oracle_score=d["oracle_score"],
+        )
+
+
+def _run_feedback(
+    db: Database, run_id: int, run: dict, results: list[dict], metrics: dict,
+) -> None:
+    """Build and send structured feedback to data source."""
+    report = build_feedback_report(results, metrics)
+    if not report:
+        return
+    resp = send_feedback(run["data_source_url"], report)
+    db.insert_forge_feedback_log(
+        run_id=run_id,
+        data_source_url=run["data_source_url"],
+        feedback_type="mixed",
+        item_count=len(report),
+        report_json=json.dumps(report),
+        response_json=json.dumps(resp),
+        status="sent" if resp.get("ok") else "failed",
+    )
+
+
+def _run_metric_check(db: Database, run_id: int, metrics: dict) -> None:
+    """Check metric fitness — entropy, plateau, variance collapse."""
+    fitness = check_metric_fitness(metrics)
+    if fitness.get("healthy"):
+        return
+    _log.warning("forge learn: metric fitness degraded for run %d: %s", run_id, fitness)
+```
+
+**Step 4: Wire into `engine.py`**
+
+In `engine.py`, after the `run_evolve_phase()` call (added in Phase 2), add:
+
+```python
+from ollama_queue.forge.engine_learn import run_learn_phase
+
+# After run_evolve_phase() call:
+run_learn_phase(db=db, run_id=run_id, run=run, results=results, metrics=metrics)
+```
+
+**Step 5: Run tests to verify they pass**
+
+Run: `python -m pytest tests/test_forge_engine_learn.py -v`
+Expected: PASS (2 tests)
+
+**Step 6: Commit**
+
+```bash
+git add ollama_queue/forge/engine_learn.py ollama_queue/forge/engine.py tests/test_forge_engine_learn.py
+git commit -m "feat(forge): add engine_learn.py — Phase 3 orchestration (drift, arbiter, feedback)"
+```
+
+---
+
+## Batch 9: Wiring + Settings
 
 **PRD:** Final wiring: update `forge/__init__.py` re-exports for Phase 3, seed new settings, add Phase 3 setting keys.
 
-### Task 9: Update re-exports and seed Phase 3 settings
+### Task 10: Update re-exports and seed Phase 3 settings
 
 **Files:**
 
@@ -1544,7 +1786,7 @@ git commit -m "feat(forge): Phase 3 wiring — re-exports, settings, schema seed
 
 ---
 
-### Task 10: Verify all Phase 3 imports and integration
+### Task 11: Verify all Phase 3 imports and integration
 
 **Step 1: Verify all modules importable**
 
@@ -1603,8 +1845,9 @@ git commit -m "feat(forge): Phase 3 complete — drift, arbiter, feedback, meta-
 | 5. Meta-Eval | 5 | ~10 | meta_eval.py |
 | 6. DB Tables | 6 | ~10 | db/forge.py (+tables), schema.py |
 | 7. API Routes | 7-8 | ~6 | api/forge_feedback.py, api/forge_holdout.py |
-| 8. Wiring | 9-10 | ~2 | __init__.py, settings.py, schema.py |
-| **Total** | **10 tasks** | **~56 tests** | **5 new + 4 modified files** |
+| 8. Engine Learn | 9 | ~2 | engine_learn.py (NEW), engine.py (+1 line) |
+| 9. Wiring | 10-11 | ~2 | __init__.py, settings.py, schema.py |
+| **Total** | **11 tasks** | **~58 tests** | **6 new + 4 modified files** |
 
 **Dependency graph:**
 
@@ -1616,6 +1859,7 @@ feedback.py                     (Batch 4: standalone + httpx)
 meta_eval.py                    (Batch 5: standalone math)
 db/forge.py ← schema.py         (Batch 6: all tables)
 api/forge_*.py ← db             (Batch 7: needs DB CRUD)
+engine_learn.py ← all above     (Batch 8: orchestration)
 ```
 
 Batches 1, 2, 3, 4, and 5 can ALL run in parallel (no cross-dependencies).
@@ -1627,8 +1871,8 @@ Batches 1, 2, 3, 4, and 5 can ALL run in parallel (no cross-dependencies).
 | Phase | Tasks | Tests | New Files | Focus |
 |-------|-------|-------|-----------|-------|
 | Phase 1 — Calibrate | 14 | ~80 | 12 | Judge trustworthiness, oracle validation, core engine |
-| Phase 2 — Evolve | 14 | ~78 | 10 | MAP-Elites, Thompson Sampling, evolution operators |
-| Phase 3 — Learn | 10 | ~56 | 9 | Drift, arbiter, feedback, meta-eval |
-| **Total** | **38 tasks** | **~214 tests** | **31 files** | Full Forge v2 engine |
+| Phase 2 — Evolve | 14 | ~78 | 11 | MAP-Elites, Thompson Sampling, evolution operators |
+| Phase 3 — Learn | 11 | ~58 | 10 | Drift, arbiter, feedback, meta-eval |
+| **Total** | **39 tasks** | **~216 tests** | **33 files** | Full Forge v2 engine |
 
 Each phase is independently deployable. Phase 1 alone fixes the immediate crisis (F1=0.0).

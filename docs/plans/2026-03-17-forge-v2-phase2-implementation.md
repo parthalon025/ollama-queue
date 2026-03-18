@@ -21,6 +21,36 @@
 
 ---
 
+## Code Conventions
+
+These conventions are **mandatory** for every task in this plan. The executing agent MUST follow them.
+
+### Module Design (GitHub Best Practices)
+
+- **One primary responsibility per module.** Each `.py` file does one job. If a module grows past 150 lines, split it.
+- **Functions ≤ 30 lines.** If a function exceeds 30 lines, extract a helper. Name the helper after what it computes, not what step it is.
+- **Pure functions by default.** No DB or HTTP imports in algorithm modules (splits, descriptors, archive, thompson, evolver, goodhart). All I/O happens in engine or DB layers.
+- **Engine extensions go in `engine_evolve.py`, NOT in `engine.py`.** `engine.py` already exceeds ruff complexity limits (C901: 16>10, PLR0915: 74>50). Phase 2 orchestration lives in `engine_evolve.py`. `engine.py` gains one new import and one function call — nothing more.
+
+### Timestamp Convention
+
+- **Always use `time.time()`** (float epoch) for `created_at`, `updated_at`, and all temporal columns. This matches Phase 1's convention in `db/forge.py`. Do NOT use `datetime.now(UTC).isoformat()`.
+
+### Git Discipline
+
+- **One logical change per commit.** Each Step 5 ("Commit") is one commit with one purpose.
+- **Stage only your files.** `git add <file1> <file2>`, never `git add -A`. Other agents may have unstaged work in the repo.
+- **Run tests before every commit.** The test command in Step 4 must pass before Step 5 runs.
+- **Commit messages follow Conventional Commits.** `feat(forge):`, `test(forge):`, `fix(forge):`.
+
+### Ruff Compliance
+
+- Run `ruff check --fix` after writing any Python file. Fix all errors before committing.
+- Per-function complexity: ≤ 10 branches, ≤ 6 return statements, ≤ 50 statements.
+- Line length ≤ 120 characters.
+
+---
+
 ## Module Map
 
 ```
@@ -31,6 +61,7 @@ ollama_queue/forge/           # Phase 2 additions
   thompson.py                 # Thompson Sampling oracle budget allocation (~120 lines)
   evolver.py                  # Tournament selection + crossover + mutation (~130 lines)
   goodhart.py                 # Composite monitoring score (display-only) (~80 lines)
+  engine_evolve.py            # Phase 2 engine orchestration — splits, archive, Thompson, evolution (~100 lines)
 
 ollama_queue/db/
   forge.py                    # Extend ForgeMixin: archive + thompson tables (~+100 lines)
@@ -47,9 +78,10 @@ tests/
   test_forge_goodhart.py
   test_forge_db_phase2.py
   test_api_forge_archive.py
+  test_forge_engine_evolve.py # All Phase 2 engine integration tests in one file
 ```
 
-Each module is pure computation — no DB or HTTP imports. Engine integration happens in the engine extension task (Batch 7).
+**Separation of concerns:** Algorithm modules (splits, descriptors, archive, thompson, evolver, goodhart) are pure computation — no DB, no HTTP, no imports from `engine.py`. Engine orchestration lives in `engine_evolve.py`, which coordinates the algorithm modules with DB and settings. `engine.py` gains only a one-line call to `engine_evolve.run_evolve_phase()`.
 
 ---
 
@@ -678,8 +710,8 @@ conn.execute("""CREATE TABLE IF NOT EXISTS forge_archive (
     prompt_text TEXT,
     metadata_json TEXT,
     run_id INTEGER REFERENCES forge_runs(id),
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL,
     UNIQUE(x_bin, y_bin)
 )""")
 
@@ -687,7 +719,7 @@ conn.execute("""CREATE TABLE IF NOT EXISTS forge_archive (
 conn.execute("""CREATE TABLE IF NOT EXISTS forge_thompson_state (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     state_json TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at REAL NOT NULL
 )""")
 ```
 
@@ -700,7 +732,7 @@ def upsert_forge_archive_cell(
     metadata_json: str | None = None, run_id: int | None = None,
 ) -> None:
     """Insert or replace archive cell — only replaces if fitness is higher."""
-    now = datetime.now(UTC).isoformat()
+    now = time.time()
     with self._lock:
         conn = self._connect()
         existing = conn.execute(
@@ -747,7 +779,7 @@ def clear_forge_archive(self) -> None:
 
 def save_forge_thompson_state(self, state: dict) -> None:
     import json
-    now = datetime.now(UTC).isoformat()
+    now = time.time()
     state_json = json.dumps(state)
     with self._lock:
         conn = self._connect()
@@ -1429,37 +1461,52 @@ git commit -m "feat(forge): add Goodhart monitoring — composite, divergence, s
 
 ---
 
-## Batch 7: Engine Extension
+## Batch 7: Engine Evolve Phase (NEW FILE — `engine_evolve.py`)
 
-**PRD:** Integrate Phase 2 modules into the Forge engine cycle. After calibrate, the engine now: (1) assigns pairs to train/validation splits, (2) computes behavior descriptors and inserts into archive, (3) allocates oracle budget via Thompson Sampling, (4) triggers evolution if archive has enough cells. Engine changes are additive — Phase 1 flow is unchanged.
+**PRD:** Integrate Phase 2 modules into the Forge engine cycle via a dedicated `engine_evolve.py` orchestrator. After calibrate, the engine calls `run_evolve_phase()` which: (1) assigns pairs to train/validation splits, (2) computes behavior descriptors and inserts into archive, (3) allocates oracle budget via Thompson Sampling, (4) triggers evolution if archive has enough cells. `engine.py` gains one import and one function call — nothing more.
 
-### Task 8: Integrate splits into pair selection
+> **IMPORTANT:** Do NOT add functions to `engine.py`. It already exceeds ruff complexity limits (C901: 16>10, PLR0915: 74>50). All Phase 2 orchestration goes in the new `engine_evolve.py` file. Each function in `engine_evolve.py` does ONE thing and stays under 30 lines.
+
+### Task 8: Create `engine_evolve.py` with split, archive, Thompson, evolution functions
 
 **Files:**
 
-- Modify: `ollama_queue/forge/engine.py` (add split assignment after pair selection)
-- Test: `tests/test_forge_engine_splits.py`
+- Create: `ollama_queue/forge/engine_evolve.py` (all Phase 2 orchestration in one file, one function per concern)
+- Test: `tests/test_forge_engine_evolve.py` (all Phase 2 engine tests in one file)
 
-**Step 1: Write the failing test**
+**Step 1: Write the failing tests**
 
 ```python
-# tests/test_forge_engine_splits.py
-"""Tests for Forge engine Phase 2 — split integration."""
-from ollama_queue.forge.splits import TRAIN, VALIDATION, TEST
-from ollama_queue.forge.engine import _assign_pair_splits
+# tests/test_forge_engine_evolve.py
+"""Tests for Forge engine Phase 2 — evolve phase orchestration.
 
+All Phase 2 engine integration tests live here. Each test targets one
+function in engine_evolve.py. Functions are pure (no DB/HTTP) — they
+take data in and return data out.
+"""
+from ollama_queue.forge.engine_evolve import (
+    assign_pair_splits,
+    populate_archive_cell,
+    allocate_oracle_budget_thompson,
+    maybe_evolve,
+)
+from ollama_queue.forge.splits import TRAIN, VALIDATION, TEST
+from ollama_queue.forge.archive import ArchiveCell
+
+
+# --- assign_pair_splits ---
 
 def test_assign_pair_splits_deterministic():
     pairs = [
         {"item_a": "1", "item_b": "2", "similarity": 0.8, "quartile": "q1_likely"},
         {"item_a": "3", "item_b": "4", "similarity": 0.3, "quartile": "q3_unlikely"},
     ]
-    result = _assign_pair_splits(pairs, seed=42)
+    result = assign_pair_splits(pairs, seed=42)
     assert all("split" in p for p in result)
     assert all(p["split"] in (TRAIN, VALIDATION, TEST) for p in result)
 
     # Deterministic
-    result2 = _assign_pair_splits(pairs, seed=42)
+    result2 = assign_pair_splits(pairs, seed=42)
     assert [p["split"] for p in result] == [p["split"] for p in result2]
 
 
@@ -1469,68 +1516,11 @@ def test_assign_pair_splits_uses_item_a():
         {"item_a": "same", "item_b": "x", "similarity": 0.5, "quartile": "q2_maybe"},
         {"item_a": "same", "item_b": "y", "similarity": 0.3, "quartile": "q3_unlikely"},
     ]
-    result = _assign_pair_splits(pairs, seed=42)
+    result = assign_pair_splits(pairs, seed=42)
     assert result[0]["split"] == result[1]["split"]
-```
-
-**Step 2: Run test to verify it fails**
-
-Run: `python -m pytest tests/test_forge_engine_splits.py -v`
-Expected: FAIL
-
-**Step 3: Write minimal implementation**
-
-Add to `ollama_queue/forge/engine.py`:
-
-```python
-from ollama_queue.forge.splits import assign_split
 
 
-def _assign_pair_splits(pairs: list[dict], *, seed: int = 0) -> list[dict]:
-    """Annotate each pair with its train/validation/test split.
-
-    Split is determined by the source item (item_a) for consistency.
-    """
-    for pair in pairs:
-        pair["split"] = assign_split(pair["item_a"], seed=seed)
-    return pairs
-```
-
-Then in `_run_forge_cycle_inner`, after `select_stratified_pairs`:
-
-```python
-    pairs = _assign_pair_splits(pairs, seed=run.get("seed", 0))
-```
-
-**Step 4: Run test to verify it passes**
-
-Run: `python -m pytest tests/test_forge_engine_splits.py -v`
-Expected: PASS (2 tests)
-
-**Step 5: Commit**
-
-```bash
-git add ollama_queue/forge/engine.py tests/test_forge_engine_splits.py
-git commit -m "feat(forge): integrate train/val/test splits into engine"
-```
-
----
-
-### Task 9: Archive population after calibration
-
-**Files:**
-
-- Modify: `ollama_queue/forge/engine.py` (add archive + descriptor step)
-- Test: `tests/test_forge_engine_archive.py`
-
-**Step 1: Write the failing test**
-
-```python
-# tests/test_forge_engine_archive.py
-"""Tests for Forge engine archive population."""
-from ollama_queue.forge.engine import _populate_archive
-from ollama_queue.forge.archive import ArchiveCell
-
+# --- populate_archive_cell ---
 
 def test_populate_archive_creates_cell():
     results = [
@@ -1538,7 +1528,7 @@ def test_populate_archive_creates_cell():
         {"judge_reasoning": "Partial overlap with testing concern.", "judge_score": 3},
     ]
     metrics = {"f1": 0.75}
-    cell = _populate_archive(results, metrics, variant_id="A", grid_size=10)
+    cell = populate_archive_cell(results, metrics, variant_id="A", grid_size=10)
     assert isinstance(cell, ArchiveCell)
     assert cell.variant_id == "A"
     assert cell.fitness == 0.75
@@ -1547,34 +1537,97 @@ def test_populate_archive_creates_cell():
 
 
 def test_populate_archive_no_results():
-    cell = _populate_archive([], {"f1": 0.0}, variant_id="A", grid_size=10)
+    cell = populate_archive_cell([], {"f1": 0.0}, variant_id="A", grid_size=10)
     assert cell.x_bin == 0
     assert cell.y_bin == 0
+
+
+# --- allocate_oracle_budget_thompson ---
+
+def test_allocate_budget_with_quartiles():
+    results = [
+        {"quartile": "q1_likely", "id": 1, "judge_score": 3},
+        {"quartile": "q1_likely", "id": 2, "judge_score": 4},
+        {"quartile": "q2_maybe", "id": 3, "judge_score": 3},
+        {"quartile": "q3_unlikely", "id": 4, "judge_score": 2},
+        {"quartile": "q4_none", "id": 5, "judge_score": 1},
+    ]
+    sample = allocate_oracle_budget_thompson(
+        results, total_budget=4, thompson_state=None, seed=42,
+    )
+    assert len(sample) <= 4
+    assert all(r in results for r in sample)
+
+
+def test_allocate_budget_returns_empty_for_no_results():
+    sample = allocate_oracle_budget_thompson([], total_budget=10, thompson_state=None, seed=42)
+    assert sample == []
+
+
+# --- maybe_evolve ---
+
+def _cell(x, y, variant, fitness, prompt="Test prompt."):
+    return ArchiveCell(x_bin=x, y_bin=y, x_value=float(x), y_value=float(y),
+                       variant_id=variant, fitness=fitness, prompt_text=prompt)
+
+
+def test_maybe_evolve_enough_cells():
+    grid = {(i, 0): _cell(i, 0, f"v{i}", 0.5 + i * 0.1, f"Rule {i}.") for i in range(5)}
+    offspring = maybe_evolve(grid, n_offspring=3, min_archive_size=3, seed=42)
+    assert len(offspring) == 3
+
+
+def test_maybe_evolve_too_few_cells():
+    grid = {(0, 0): _cell(0, 0, "v0", 0.5, "One rule.")}
+    offspring = maybe_evolve(grid, n_offspring=3, min_archive_size=3, seed=42)
+    assert offspring == []
 ```
 
 **Step 2: Run test to verify it fails**
 
-Run: `python -m pytest tests/test_forge_engine_archive.py -v`
-Expected: FAIL
+Run: `python -m pytest tests/test_forge_engine_evolve.py -v`
+Expected: FAIL with "cannot import name 'assign_pair_splits' from 'ollama_queue.forge.engine_evolve'"
 
-**Step 3: Write minimal implementation**
-
-Add to `ollama_queue/forge/engine.py`:
+**Step 3: Write the implementation**
 
 ```python
-from ollama_queue.forge.archive import ArchiveCell
+# ollama_queue/forge/engine_evolve.py
+"""Forge engine — Phase 2 (Evolve) orchestration.
+
+Coordinates splits, descriptors, archive, Thompson Sampling, and evolution.
+Called from engine.py as a single run_evolve_phase() entry point.
+Each public function does ONE thing — pure computation, no DB/HTTP.
+"""
+from __future__ import annotations
+
+import random
+
+from ollama_queue.forge.archive import ArchiveCell, try_insert
 from ollama_queue.forge.descriptors import (
-    compute_default_descriptors,
-    normalize_to_bin,
-    get_descriptor_axes,
     DEFAULT_GRID_SIZE,
+    compute_default_descriptors,
+    get_descriptor_axes,
+    normalize_to_bin,
 )
+from ollama_queue.forge.evolver import evolve_generation
+from ollama_queue.forge.splits import assign_split
+from ollama_queue.forge.thompson import ThompsonBudget
 
 
-def _populate_archive(
+def assign_pair_splits(pairs: list[dict], *, seed: int = 0) -> list[dict]:
+    """Annotate each pair with its train/validation/test split.
+
+    Split is determined by the source item (item_a) for consistency.
+    """
+    for pair in pairs:
+        pair["split"] = assign_split(pair["item_a"], seed=seed)
+    return pairs
+
+
+def populate_archive_cell(
     results: list[dict], metrics: dict, *, variant_id: str, grid_size: int = DEFAULT_GRID_SIZE,
 ) -> ArchiveCell:
-    """Compute descriptors and create an archive cell for this variant."""
+    """Compute behavior descriptors and create an archive cell for this variant."""
     desc = compute_default_descriptors(results)
     axes = get_descriptor_axes()
 
@@ -1590,88 +1643,9 @@ def _populate_archive(
         variant_id=variant_id,
         fitness=metrics.get("f1", 0.0),
     )
-```
-
-Then in `_run_forge_cycle_inner`, after metrics computation:
-
-```python
-    # --- Step 7b: Archive ---
-    cell = _populate_archive(results, metrics, variant_id=run["variant_id"])
-    from ollama_queue.forge.archive import try_insert
-    # Load archive from DB, try insert, save back
-    archive_grid = _load_archive_from_db(db)
-    if try_insert(archive_grid, cell):
-        db.upsert_forge_archive_cell(
-            x_bin=cell.x_bin, y_bin=cell.y_bin,
-            x_value=cell.x_value, y_value=cell.y_value,
-            variant_id=cell.variant_id, fitness=cell.fitness,
-            run_id=run_id,
-        )
-```
-
-**Step 4: Run test to verify it passes**
-
-Run: `python -m pytest tests/test_forge_engine_archive.py -v`
-Expected: PASS (2 tests)
-
-**Step 5: Commit**
-
-```bash
-git add ollama_queue/forge/engine.py tests/test_forge_engine_archive.py
-git commit -m "feat(forge): populate archive after calibration in engine"
-```
-
----
-
-### Task 10: Thompson Sampling integration in oracle step
-
-**Files:**
-
-- Modify: `ollama_queue/forge/engine.py` (replace uniform oracle sampling with Thompson)
-- Test: `tests/test_forge_engine_thompson.py`
-
-**Step 1: Write the failing test**
-
-```python
-# tests/test_forge_engine_thompson.py
-"""Tests for Thompson-allocated oracle budget in engine."""
-from ollama_queue.forge.engine import _allocate_oracle_budget_thompson
 
 
-def test_allocate_budget_with_quartiles():
-    results = [
-        {"quartile": "q1_likely", "id": 1, "judge_score": 3},
-        {"quartile": "q1_likely", "id": 2, "judge_score": 4},
-        {"quartile": "q2_maybe", "id": 3, "judge_score": 3},
-        {"quartile": "q3_unlikely", "id": 4, "judge_score": 2},
-        {"quartile": "q4_none", "id": 5, "judge_score": 1},
-    ]
-    sample = _allocate_oracle_budget_thompson(
-        results, total_budget=4, thompson_state=None, seed=42,
-    )
-    assert len(sample) <= 4
-    assert all(r in results for r in sample)
-
-
-def test_allocate_budget_returns_empty_for_no_results():
-    sample = _allocate_oracle_budget_thompson([], total_budget=10, thompson_state=None, seed=42)
-    assert sample == []
-```
-
-**Step 2: Run test to verify it fails**
-
-Run: `python -m pytest tests/test_forge_engine_thompson.py -v`
-Expected: FAIL
-
-**Step 3: Write minimal implementation**
-
-Add to `ollama_queue/forge/engine.py`:
-
-```python
-from ollama_queue.forge.thompson import ThompsonBudget
-
-
-def _allocate_oracle_budget_thompson(
+def allocate_oracle_budget_thompson(
     results: list[dict], *, total_budget: int,
     thompson_state: dict | None = None, seed: int | None = None,
 ) -> list[dict]:
@@ -1683,90 +1657,26 @@ def _allocate_oracle_budget_thompson(
     if thompson_state:
         tb.load_state(thompson_state)
 
-    # Group by quartile
     by_quartile: dict[str, list[dict]] = {}
     for r in results:
-        q = r.get("quartile", "unknown")
-        by_quartile.setdefault(q, []).append(r)
+        by_quartile.setdefault(r.get("quartile", "unknown"), []).append(r)
 
     categories = list(by_quartile.keys())
     if not categories:
         return []
 
     allocation = tb.allocate_budget(total_budget, categories, seed=seed)
-
-    rng = __import__("random").Random(seed)
+    rng = random.Random(seed)  # noqa: S311
     sample = []
     for cat, n in allocation.items():
         pool = by_quartile.get(cat, [])
         n_pick = min(n, len(pool))
         if n_pick > 0:
             sample.extend(rng.sample(pool, n_pick))
-
     return sample
-```
-
-**Step 4: Run test to verify it passes**
-
-Run: `python -m pytest tests/test_forge_engine_thompson.py -v`
-Expected: PASS (2 tests)
-
-**Step 5: Commit**
-
-```bash
-git add ollama_queue/forge/engine.py tests/test_forge_engine_thompson.py
-git commit -m "feat(forge): integrate Thompson Sampling into oracle budget allocation"
-```
-
----
-
-### Task 11: Evolution trigger in engine
-
-**Files:**
-
-- Modify: `ollama_queue/forge/engine.py` (add evolution step at end of cycle)
-- Test: `tests/test_forge_engine_evolve.py`
-
-**Step 1: Write the failing test**
-
-```python
-# tests/test_forge_engine_evolve.py
-"""Tests for evolution trigger in Forge engine."""
-from ollama_queue.forge.engine import _maybe_evolve
-from ollama_queue.forge.archive import ArchiveCell
 
 
-def _cell(x, y, variant, fitness, prompt="Test prompt."):
-    return ArchiveCell(x_bin=x, y_bin=y, x_value=float(x), y_value=float(y),
-                       variant_id=variant, fitness=fitness, prompt_text=prompt)
-
-
-def test_maybe_evolve_enough_cells():
-    grid = {(i, 0): _cell(i, 0, f"v{i}", 0.5 + i * 0.1, f"Rule {i}.") for i in range(5)}
-    offspring = _maybe_evolve(grid, n_offspring=3, min_archive_size=3, seed=42)
-    assert len(offspring) == 3
-
-
-def test_maybe_evolve_too_few_cells():
-    grid = {(0, 0): _cell(0, 0, "v0", 0.5, "One rule.")}
-    offspring = _maybe_evolve(grid, n_offspring=3, min_archive_size=3, seed=42)
-    assert offspring == []
-```
-
-**Step 2: Run test to verify it fails**
-
-Run: `python -m pytest tests/test_forge_engine_evolve.py -v`
-Expected: FAIL
-
-**Step 3: Write minimal implementation**
-
-Add to `ollama_queue/forge/engine.py`:
-
-```python
-from ollama_queue.forge.evolver import evolve_generation
-
-
-def _maybe_evolve(
+def maybe_evolve(
     grid: dict, *, n_offspring: int = 4, min_archive_size: int = 3, seed: int | None = None,
 ) -> list[str]:
     """Trigger evolution if archive is large enough. Returns new prompt strings."""
@@ -1774,6 +1684,119 @@ def _maybe_evolve(
     if len(cells) < min_archive_size:
         return []
     return evolve_generation(cells, n_offspring=n_offspring, seed=seed)
+```
+
+**Step 4: Run tests to verify they pass**
+
+Run: `python -m pytest tests/test_forge_engine_evolve.py -v`
+Expected: PASS (8 tests)
+
+**Step 5: Commit**
+
+```bash
+git add ollama_queue/forge/engine_evolve.py tests/test_forge_engine_evolve.py
+git commit -m "feat(forge): add engine_evolve.py — Phase 2 orchestration (splits, archive, Thompson, evolution)"
+```
+
+---
+
+### Task 9: Wire `run_evolve_phase()` into `engine.py`
+
+**Files:**
+
+- Modify: `ollama_queue/forge/engine_evolve.py` (add `run_evolve_phase()` entry point that coordinates DB calls)
+- Modify: `ollama_queue/forge/engine.py` (add one import + one function call — nothing else)
+
+> **CRITICAL:** `engine.py` gets exactly ONE new line in `_run_calibrate_and_metrics()` or after it. Do not add any other functions or logic to `engine.py`.
+
+**Step 1: Add `run_evolve_phase()` to `engine_evolve.py`**
+
+This is the only function in `engine_evolve.py` that touches DB — it coordinates the pure functions above with DB persistence.
+
+```python
+# Append to engine_evolve.py
+
+import logging
+import time
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ollama_queue.db import Database
+
+_log = logging.getLogger(__name__)
+
+
+def run_evolve_phase(
+    *, db: Database, run_id: int, run: dict, results: list[dict], metrics: dict,
+) -> None:
+    """Phase 2 orchestration: splits → archive → Thompson → evolve.
+
+    Called from engine.py after calibration. Never raises — logs and returns on error.
+    """
+    try:
+        _run_evolve_phase_inner(db=db, run_id=run_id, run=run, results=results, metrics=metrics)
+    except Exception as exc:
+        _log.warning("forge evolve phase: run %d error: %s", run_id, exc)
+
+
+def _run_evolve_phase_inner(
+    *, db: Database, run_id: int, run: dict, results: list[dict], metrics: dict,
+) -> None:
+    """Inner evolve — split, archive, Thompson, evolve."""
+    from ollama_queue.forge.settings import get_forge_setting
+
+    seed = run.get("seed", 0)
+
+    # 1. Archive population
+    cell = populate_archive_cell(results, metrics, variant_id=run["variant_id"])
+    grid_rows = db.get_forge_archive_grid()
+    grid = {(r["x_bin"], r["y_bin"]): ArchiveCell(**{
+        k: r[k] for k in ("x_bin", "y_bin", "x_value", "y_value", "variant_id", "fitness")
+    }) for r in grid_rows}
+
+    if try_insert(grid, cell):
+        db.upsert_forge_archive_cell(
+            x_bin=cell.x_bin, y_bin=cell.y_bin,
+            x_value=cell.x_value, y_value=cell.y_value,
+            variant_id=cell.variant_id, fitness=cell.fitness,
+            run_id=run_id,
+        )
+        _log.info("forge evolve: archived variant %s at (%d, %d) fitness=%.3f",
+                   cell.variant_id, cell.x_bin, cell.y_bin, cell.fitness)
+
+    # 2. Thompson state update (load → observe → save)
+    thompson_state = db.load_forge_thompson_state()
+    # State update happens after oracle phase in future runs
+    if thompson_state:
+        db.save_forge_thompson_state(thompson_state)
+
+    # 3. Evolution trigger
+    offspring = maybe_evolve(grid, seed=seed)
+    if offspring:
+        _log.info("forge evolve: generated %d offspring prompts", len(offspring))
+```
+
+**Step 2: Add one-line call to `engine.py`**
+
+In `engine.py`, at the end of `_run_calibrate_and_metrics()`, add:
+
+```python
+from ollama_queue.forge.engine_evolve import run_evolve_phase
+
+# After the _log.info("forge engine: run %d complete ...") line:
+run_evolve_phase(db=db, run_id=run_id, run=run, results=results, metrics=metrics)
+```
+
+**Step 3: Run full test suite**
+
+Run: `python -m pytest --timeout=120 -x -q`
+Expected: All tests pass.
+
+**Step 4: Commit**
+
+```bash
+git add ollama_queue/forge/engine_evolve.py ollama_queue/forge/engine.py
+git commit -m "feat(forge): wire evolve phase into engine — one-line integration"
 ```
 
 **Step 4: Run test to verify it passes**
