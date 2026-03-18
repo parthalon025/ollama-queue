@@ -24,6 +24,9 @@ ollama_queue/
     eval_settings.py  # Eval settings + data source + setup checklist
     eval_trends.py    # Eval trend aggregation endpoints
     eval_variants.py  # Eval variant CRUD, stability, config diff
+    forge_runs.py     # Forge run CRUD, progress, cancel, results endpoints
+    forge_settings.py # Forge settings + autonomy endpoints
+    forge_archive.py  # GET /api/forge/archive, /heatmap, /cell — MAP-Elites grid endpoints
     health.py         # /api/health endpoint
     jobs.py           # Job submit, status, queue, history, cancel, batch
     models.py         # Model stats, catalog search, performance curve
@@ -48,6 +51,7 @@ ollama_queue/
     health.py         # HealthMixin: health_log, daemon_state, prune_old_data
     settings.py       # SettingsMixin: key-value settings table
     eval.py           # EvalMixin: eval_runs, eval_results, eval_variants tables
+    forge.py          # ForgeMixin: CRUD for forge_runs, forge_results, forge_embeddings, forge_archive, forge_thompson_state tables
 
   eval/               # Eval pipeline — prompt evaluation with A/B variants + LLM judge
     __init__.py       # Re-exports public names from engine, judge, metrics, promote, analysis
@@ -57,6 +61,25 @@ ollama_queue/
     promote.py        # do_promote_eval_run, check_auto_promote (3-gate auto-promote logic)
     analysis.py       # Pure analysis (no DB/HTTP): per-item breakdown, bootstrap CI, stability, config diff
     metrics.py        # Pure metric computation: F1/precision/recall, tournament/Bayesian aggregates, report rendering
+
+  forge/              # Forge v2 — oracle-calibrated eval engine (replaces cluster-based eval logic)
+    __init__.py       # Re-exports public API (run_forge_cycle, ForgeDataSource, AutonomyLevel, etc.)
+    types.py          # ForgeDataSource Protocol, AutonomyLevel/ForgeRunStatus enums, ForgeResult dataclass, PairQuartile
+    settings.py       # FORGE_DEFAULTS dict + get_forge_setting() typed accessor
+    embedder.py       # embed_items() via nomic-embed-text + content_hash() for cache keying
+    pairs.py          # build_similarity_matrix(), select_stratified_pairs() (4-quartile cosine-sim sampling)
+    judge.py          # build_judge_prompt(), parse_judge_response() (1–5 transfer score extraction)
+    oracle.py         # select_oracle_sample(), compute_kappa(), compute_per_group_kappa()
+    calibrator.py     # fit_calibration() (isotonic regression), apply_calibration() (judge → calibrated score)
+    metrics.py        # compute_forge_metrics() (oracle-ground-truth F1), spearman_rank_correlation(), score_variance()
+    engine.py         # run_forge_cycle() — orchestrates embed→pair→judge→oracle→calibrate→metrics; never raises
+    splits.py         # deterministic train/val/test split (60/20/20) via SHA-256(seed, item_id); stable across item additions
+    descriptors.py    # behavior descriptor computation: output_length × vocabulary_diversity (default axes for MAP-Elites)
+    archive.py        # MAP-Elites quality-diversity grid: ArchiveCell, try_insert, QD-score, coverage, heatmap
+    thompson.py       # ThompsonBudget: Beta-posterior oracle budget allocation per category; adapted from ARIA shadow_engine.py
+    evolver.py        # tournament_select, crossover_prompts, mutate_prompt, evolve_generation — variant creation from archive
+    goodhart.py       # composite monitoring score (display-only, NEVER optimizer target); divergence + staleness detection
+    engine_evolve.py  # run_evolve_phase() — Phase 2 orchestration: splits → descriptors → archive → Thompson → evolution
 
   scheduling/         # Time-based job orchestration
     __init__.py       # Re-exports: Scheduler
@@ -106,7 +129,7 @@ scripts/
   migrate_timers.py            # Migrate 8 of 10 systemd timers to recurring jobs
   migrate_dlq_max_retries.py   # Add max_retries column to existing dlq table (idempotent)
 
-tests/                           # 1,965+ tests, 100% line coverage
+tests/                           # 2,139 tests, 100% line coverage
 ```
 
 ## How to Run
@@ -116,7 +139,7 @@ tests/                           # 1,965+ tests, 100% line coverage
 cd ~/Documents/projects/ollama-queue
 source .venv/bin/activate
 
-# Run tests (1,965+ tests, 100% line coverage)
+# Run tests (2,139 tests, 100% line coverage)
 pytest
 
 # Start the server (daemon + API + dashboard)
@@ -212,6 +235,83 @@ Format (JSX file-level or component-level):
 ```
 
 This applies to: component files, store transformations in `stores/`, computed values, and any non-obvious data shaping. Skip for pure layout/styling helpers with self-evident names.
+
+## Forge (Eval Engine v2)
+
+Forge is the oracle-calibrated evaluation engine that replaces the cluster-based eval pipeline. It evaluates AI-generated content (currently: lessons-db lessons) by pairing items via embedding similarity, having a cheap judge LLM score them, and using a strong oracle LLM (Claude Sonnet) to validate the judge's reliability.
+
+**Design doc:** `docs/plans/2026-03-17-forge-v2-design.md`
+**Research:** `~/Documents/research/2026-03-17-eval-oracle-darwinism-range-research.md`
+
+### Architecture
+
+```
+ForgeDataSource (HTTP: GET /eval/items, GET /eval/embeddings, GET /eval/groups)
+    |
+run_forge_cycle() [engine.py — never raises]
+    |-> embedder.py:      embed_items() → nomic-embed-text via Ollama proxy
+    |-> pairs.py:         build_similarity_matrix() → select_stratified_pairs() (4 quartiles, cosine sim)
+    |-> judge.py:         build_judge_prompt() → LLM judge scores pairs 1–5 (blind, no similarity info)
+    |-> oracle.py:        select_oracle_sample() → stronger LLM re-scores 20% (oracle IS ground truth)
+    |-> calibrator.py:    fit_calibration() isotonic regression → apply_calibration() (judge → calibrated score)
+    |-> metrics.py:       compute_forge_metrics() → oracle-ground-truth F1, Spearman, score variance
+    '-> engine_evolve.py: run_evolve_phase() → splits → descriptors → archive → Thompson → evolution (Phase 2)
+```
+
+### Run Lifecycle Statuses
+
+`queued` → `embedding` → `judging` → `oracle` → `calibrating` → `complete` (or `failed`/`cancelled`)
+
+### Key Settings (FORGE_DEFAULTS)
+
+| Setting | Default | Purpose |
+|---------|---------|---------|
+| `forge.oracle_provider` | `claude` | LLM provider for oracle (claude/openai/ollama) |
+| `forge.oracle_model` | `claude-sonnet-4-20250514` | Oracle model |
+| `forge.oracle_budget` | `20` | Max pairs oracle re-scores per run |
+| `forge.oracle_fraction` | `0.2` | Fraction of judge pairs sent to oracle |
+| `forge.oracle_min_kappa` | `0.6` | Kappa gate for auto-promote |
+| `forge.judge_model` | `""` (inherit eval setting) | Local judge model |
+| `forge.judge_temperature` | `0.1` | Judge LLM temperature |
+| `forge.pairs_per_quartile` | `20` | Pairs sampled per similarity quartile (80 total) |
+| `forge.positive_threshold` | `3` | Score >= threshold = positive class for F1 |
+| `forge.embedding_model` | `nomic-embed-text` | Embedding model (via Ollama proxy) |
+| `forge.autonomy_level` | `observer` | observer / advisor (auto-promote) / operator (+ feedback) |
+| `forge.f1_threshold` | `0.7` | F1 gate for auto-promote |
+| `forge.auto_promote_min_improvement` | `0.05` | F1 improvement gate over production |
+| `forge.grid_size` | `10` | MAP-Elites grid dimension (N×N cells) |
+| `forge.evolution_enabled` | `false` | Enable evolution operators after calibration |
+| `forge.evolution_offspring` | `4` | New variants generated per evolve cycle |
+| `forge.evolution_min_archive` | `3` | Minimum occupied cells before evolution runs |
+| `forge.evolution_mutation_rate` | `0.15` | Probability of mutation vs pure crossover |
+| `forge.thompson_enabled` | `true` | Adaptive oracle budget allocation via Thompson Sampling |
+| `forge.thompson_discount` | `0.95` | Beta posterior discount factor per cycle |
+| `forge.thompson_window` | `100` | Max oracle observations retained in Thompson state |
+
+### Pair Selection (Why Not Clusters?)
+
+4 similarity quartiles from cosine distance matrix:
+- **Q1 (0.75–1.0):** likely applies — tests recall
+- **Q2 (0.50–0.75):** might apply — tests nuance
+- **Q3 (0.25–0.50):** probably doesn't — tests specificity (hard negatives)
+- **Q4 (0.00–0.25):** definitely doesn't — tests baseline discrimination
+
+Spearman(judge_scores, embedding_similarity) ≈ 0 → judge acquiescing (all same scores). Spearman > 0.4 → judge tracking correctly.
+
+### Forge-Specific Gotchas
+
+- **`run_forge_cycle` never raises** — wraps `_run_forge_cycle_inner` in `try/except Exception` and marks run `failed` with the error string. Callers in background threads must not depend on exception propagation.
+- **`forge.judge_model` empty string = inherit** — `get_forge_setting()` returns empty string default. Engine code must fall back to the `eval.judge_model` setting when `forge.judge_model` is empty. Don't pass an empty string to the LLM provider.
+- **`forge_embeddings` table caches by `content_hash`** — `embed_items()` skips items whose hash already exists in `forge_embeddings`. If item content changes, the old embedding is NOT invalidated automatically. Manually delete rows or the embedder will use stale vectors.
+- **`calibrator.fit_calibration()` returns `None` when < 10 oracle pairs** — `apply_calibration(None, score)` returns the raw score unchanged. Raw scores are used with a WARNING logged. Don't assume calibration always runs.
+- **`forge.oracle_fraction` × total_pairs must yield ≥ 1 pair** — `select_oracle_sample()` returns `[]` when rounding produces zero pairs. The oracle phase is then a no-op, kappa = None, and calibration falls back to raw scores. Guard in config: at 80 pairs default, fraction=0.2 → 16 pairs (fine).
+- **`update_forge_result_oracle()` only updates rows with oracle data** — `_run_oracle_phase` iterates a *sample* of results and updates them in-place. The remaining judge-only rows retain `oracle_score = NULL`. `compute_kappa` filters to `oracle_score IS NOT NULL` rows.
+- **`forge_results.calibrated_score` is written with direct `conn.execute`** — `_run_calibrate_and_metrics()` writes calibrated scores via a direct SQL UPDATE inside `with db._lock:`. It does not go through a `ForgeMixin` method. Do not add a redundant `update_forge_result_calibrated` mixin method without removing this path.
+- **DB schema migration required for forge tables** — `db/schema.py` SchemaMixin creates `forge_runs`, `forge_results`, `forge_embeddings`, `forge_archive`, `forge_thompson_state` tables. If upgrading a live queue.db that predates Forge, restart the service — `initialize()` uses `CREATE TABLE IF NOT EXISTS` and handles it automatically (no manual ALTER needed).
+- **`forge_archive` and `forge_thompson_state` are Phase 2 tables** — only populated when `forge.evolution_enabled = true`. Both are created at startup regardless; the archive is simply empty until an evolve phase runs.
+- **`run_evolve_phase()` is a pure computation entry point** — takes calibrated results and settings, returns offspring variant specs. No DB writes inside `engine_evolve.py`. The caller (`engine.py`) handles persistence.
+- **`goodhart.py` composite score is display-only** — `compute_composite()` output must never be passed to the evolver or used as a gate condition. It is only written to the Trends sub-view for human observation.
+- **`splits.py` uses SHA-256(seed, item_id) for deterministic assignment** — the split is stable: adding new items does not reshuffle existing ones. Changing `seed` reshuffles everything. Default ratios: 60/20/20 (train/val/test).
 
 ## Pipeline Verification
 

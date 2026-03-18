@@ -1,6 +1,6 @@
 # Forge v2 — Evaluation Engine Design
 
-**Status:** DRAFT — design approved, pending implementation plan
+**Status:** Phase 1 COMPLETE, Phase 2 COMPLETE — Phase 3 (Learn) pending
 **Date:** 2026-03-17
 **Owner:** ollama-queue (generic engine, lessons-db is first consumer)
 **Research:** `~/Documents/research/2026-03-17-eval-oracle-darwinism-range-research.md`
