@@ -211,10 +211,8 @@ class ForgeMixin:
 
     def save_forge_thompson_state(self, state: dict) -> None:
         """Persist Thompson state as a single row (replaces previous)."""
-        import json as _json
-
         now = time.time()
-        state_json = _json.dumps(state)
+        state_json = json.dumps(state)
         with self._lock:
             conn = self._connect()
             conn.execute("DELETE FROM forge_thompson_state")
@@ -226,9 +224,7 @@ class ForgeMixin:
 
     def load_forge_thompson_state(self) -> dict | None:
         """Load Thompson state. Returns None if no state saved."""
-        import json as _json
-
         with self._lock:
             conn = self._connect()
             row = conn.execute("SELECT state_json FROM forge_thompson_state ORDER BY id DESC LIMIT 1").fetchone()
-            return _json.loads(row["state_json"]) if row else None
+            return json.loads(row["state_json"]) if row else None
