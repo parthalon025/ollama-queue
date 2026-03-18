@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import random
 
-from ollama_queue.forge.archive import ArchiveCell, try_insert
+from ollama_queue.forge.archive import ArchiveCell
 from ollama_queue.forge.descriptors import (
     DEFAULT_GRID_SIZE,
     compute_default_descriptors,
@@ -111,5 +111,4 @@ __all__ = [
     "assign_pair_splits",
     "maybe_evolve",
     "populate_archive_cell",
-    "try_insert",
 ]
