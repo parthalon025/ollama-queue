@@ -624,6 +624,28 @@ class SchemaMixin:
             );
         """)
 
+            conn.execute("""CREATE TABLE IF NOT EXISTS forge_archive (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                x_bin INTEGER NOT NULL,
+                y_bin INTEGER NOT NULL,
+                x_value REAL NOT NULL,
+                y_value REAL NOT NULL,
+                variant_id TEXT NOT NULL,
+                fitness REAL NOT NULL,
+                prompt_text TEXT,
+                metadata_json TEXT,
+                run_id INTEGER REFERENCES forge_runs(id),
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL,
+                UNIQUE(x_bin, y_bin)
+            )""")
+
+            conn.execute("""CREATE TABLE IF NOT EXISTS forge_thompson_state (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                state_json TEXT NOT NULL,
+                updated_at REAL NOT NULL
+            )""")
+
             self._run_migrations(conn)
 
             # Seed settings defaults

@@ -147,3 +147,88 @@ class ForgeMixin:
             if row is None:
                 return None
             return json.loads(row["vector_json"])
+
+    def upsert_forge_archive_cell(
+        self,
+        *,
+        x_bin: int,
+        y_bin: int,
+        x_value: float,
+        y_value: float,
+        variant_id: str,
+        fitness: float,
+        prompt_text: str | None = None,
+        metadata_json: str | None = None,
+        run_id: int | None = None,
+    ) -> None:
+        """Insert or replace archive cell — only replaces if fitness is higher."""
+        now = time.time()
+        with self._lock:
+            conn = self._connect()
+            existing = conn.execute(
+                "SELECT fitness FROM forge_archive WHERE x_bin = ? AND y_bin = ?",
+                (x_bin, y_bin),
+            ).fetchone()
+            if existing and existing["fitness"] >= fitness:
+                return  # existing is better
+            conn.execute(
+                """INSERT INTO forge_archive
+                   (x_bin, y_bin, x_value, y_value, variant_id, fitness,
+                    prompt_text, metadata_json, run_id, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(x_bin, y_bin) DO UPDATE SET
+                     x_value=excluded.x_value, y_value=excluded.y_value,
+                     variant_id=excluded.variant_id, fitness=excluded.fitness,
+                     prompt_text=excluded.prompt_text, metadata_json=excluded.metadata_json,
+                     run_id=excluded.run_id, updated_at=excluded.updated_at""",
+                (x_bin, y_bin, x_value, y_value, variant_id, fitness, prompt_text, metadata_json, run_id, now, now),
+            )
+            conn.commit()
+
+    def get_forge_archive_cell(self, x_bin: int, y_bin: int) -> dict | None:
+        """Get one archive cell by grid coordinates."""
+        with self._lock:
+            conn = self._connect()
+            row = conn.execute(
+                "SELECT * FROM forge_archive WHERE x_bin = ? AND y_bin = ?",
+                (x_bin, y_bin),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def get_forge_archive_grid(self) -> list[dict]:
+        """Get all archive cells ordered by x_bin, y_bin."""
+        with self._lock:
+            conn = self._connect()
+            rows = conn.execute("SELECT * FROM forge_archive ORDER BY x_bin, y_bin").fetchall()
+            return [dict(r) for r in rows]
+
+    def clear_forge_archive(self) -> None:
+        """Delete all archive cells."""
+        with self._lock:
+            conn = self._connect()
+            conn.execute("DELETE FROM forge_archive")
+            conn.commit()
+
+    def save_forge_thompson_state(self, state: dict) -> None:
+        """Persist Thompson state as a single row (replaces previous)."""
+        import json as _json
+
+        now = time.time()
+        state_json = _json.dumps(state)
+        with self._lock:
+            conn = self._connect()
+            conn.execute("DELETE FROM forge_thompson_state")
+            conn.execute(
+                "INSERT INTO forge_thompson_state (state_json, updated_at) VALUES (?, ?)",
+                (state_json, now),
+            )
+            conn.commit()
+
+    def load_forge_thompson_state(self) -> dict | None:
+        """Load Thompson state. Returns None if no state saved."""
+        import json as _json
+
+        with self._lock:
+            conn = self._connect()
+            row = conn.execute("SELECT state_json FROM forge_thompson_state ORDER BY id DESC LIMIT 1").fetchone()
+            return _json.loads(row["state_json"]) if row else None
