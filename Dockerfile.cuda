@@ -1,0 +1,27 @@
+FROM nvidia/cuda:12.6.3-base-ubuntu24.04
+
+# Install Python 3.12 and pip (available in Ubuntu 24.04 default repos)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.12 \
+    python3.12-dev \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN ln -sf /usr/bin/python3.12 /usr/bin/python3 && \
+    ln -sf /usr/bin/python3.12 /usr/bin/python
+
+WORKDIR /app
+
+RUN pip3 install --no-cache-dir --break-system-packages uv
+
+COPY pyproject.toml README.md ./
+COPY ollama_queue/ ./ollama_queue/
+
+RUN uv pip install --system --no-cache --break-system-packages .
+
+ENV OLLAMA_QUEUE_DATA_DIR=/data
+VOLUME ["/data"]
+
+EXPOSE 7683
+
+CMD ["ollama-queue", "serve", "--port", "7683"]
