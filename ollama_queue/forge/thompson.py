@@ -99,6 +99,11 @@ class ThompsonBudget:
         }
 
     def load_state(self, state: dict[str, dict]) -> None:
+        """Restore bucket posteriors from get_state() output.
+
+        Note: discount and window are NOT serialized. Callers must construct
+        ThompsonBudget with the correct parameters before calling load_state().
+        """
         self._buckets.clear()
         for cat, vals in state.items():
             self._buckets[cat] = _Bucket(
