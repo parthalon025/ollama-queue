@@ -59,3 +59,12 @@ def test_staleness_improving():
 def test_staleness_insufficient():
     result = compute_metric_staleness([0.5, 0.6], window=10)
     assert result["reason"] == "insufficient_data"
+
+
+def test_divergence_negative_gap():
+    """Validation outperforming train is healthy — not divergence."""
+    train = [0.6, 0.62, 0.61]
+    val = [0.8, 0.82, 0.81]
+    result = check_goodhart_divergence(train, val)
+    assert result["diverging"] is False
+    assert result["gap"] < 0
