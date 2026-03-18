@@ -53,6 +53,8 @@ ignore = [
 "ollama_queue/config/scanner.py" = ["S603", "S607"]
 # Consumer patcher — runs systemctl with service name from DB, not user input
 "ollama_queue/config/patcher.py" = ["S603", "S607"]
+# Forge evolver — random.Random is used for seeded deterministic evolutionary search, not cryptography
+"ollama_queue/forge/evolver.py" = ["S311"]
 
 [lint.mccabe]
 max-complexity = 10
