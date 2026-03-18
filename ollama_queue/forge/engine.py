@@ -16,6 +16,7 @@ import httpx
 
 from ollama_queue.forge.calibrator import apply_calibration, fit_calibration
 from ollama_queue.forge.embedder import embed_items
+from ollama_queue.forge.engine_evolve import run_evolve_phase
 from ollama_queue.forge.judge import build_judge_prompt, parse_judge_response
 from ollama_queue.forge.metrics import compute_forge_metrics
 from ollama_queue.forge.oracle import compute_kappa, select_oracle_sample
@@ -205,6 +206,8 @@ def _run_calibrate_and_metrics(
         metrics.get("kappa"),
         metrics.get("spearman"),
     )
+
+    run_evolve_phase(db=db, run_id=run_id, run=run, results=results, metrics=metrics)
 
 
 def run_forge_cycle(*, db: Database, run_id: int, http_base: str) -> None:

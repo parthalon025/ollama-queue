@@ -8,9 +8,14 @@ Each public function does ONE thing — pure computation, no DB/HTTP.
 
 from __future__ import annotations
 
+import logging
 import random
+from typing import TYPE_CHECKING
 
-from ollama_queue.forge.archive import ArchiveCell
+if TYPE_CHECKING:
+    from ollama_queue.db import Database
+
+from ollama_queue.forge.archive import ArchiveCell, try_insert
 from ollama_queue.forge.descriptors import (
     DEFAULT_GRID_SIZE,
     compute_default_descriptors,
@@ -20,6 +25,8 @@ from ollama_queue.forge.descriptors import (
 from ollama_queue.forge.evolver import evolve_generation
 from ollama_queue.forge.splits import assign_split
 from ollama_queue.forge.thompson import ThompsonBudget
+
+_log = logging.getLogger(__name__)
 
 
 def assign_pair_splits(pairs: list[dict], *, seed: int = 0) -> list[dict]:
@@ -111,4 +118,73 @@ __all__ = [
     "assign_pair_splits",
     "maybe_evolve",
     "populate_archive_cell",
+    "run_evolve_phase",
 ]
+
+
+def run_evolve_phase(
+    *,
+    db: Database,
+    run_id: int,
+    run: dict,
+    results: list[dict],
+    metrics: dict,
+) -> None:
+    """Phase 2 orchestration: splits → archive → Thompson → evolve.
+
+    Called from engine.py after calibration. Never raises — logs and returns on error.
+    """
+    try:
+        _run_evolve_phase_inner(db=db, run_id=run_id, run=run, results=results, metrics=metrics)
+    except Exception as exc:
+        _log.warning("forge evolve phase: run %d error: %s", run_id, exc)
+
+
+def _run_evolve_phase_inner(
+    *,
+    db: Database,
+    run_id: int,
+    run: dict,
+    results: list[dict],
+    metrics: dict,
+) -> None:
+    """Inner evolve — archive, Thompson, evolve."""
+    seed = run.get("seed", 0)
+
+    # 1. Archive population
+    cell = populate_archive_cell(results, metrics, variant_id=run["variant_id"])
+    grid_rows = db.get_forge_archive_grid()
+    grid = {
+        (r["x_bin"], r["y_bin"]): ArchiveCell(
+            **{k: r[k] for k in ("x_bin", "y_bin", "x_value", "y_value", "variant_id", "fitness")}
+        )
+        for r in grid_rows
+    }
+
+    if try_insert(grid, cell):
+        db.upsert_forge_archive_cell(
+            x_bin=cell.x_bin,
+            y_bin=cell.y_bin,
+            x_value=cell.x_value,
+            y_value=cell.y_value,
+            variant_id=cell.variant_id,
+            fitness=cell.fitness,
+            run_id=run_id,
+        )
+        _log.info(
+            "forge evolve: archived variant %s at (%d, %d) fitness=%.3f",
+            cell.variant_id,
+            cell.x_bin,
+            cell.y_bin,
+            cell.fitness,
+        )
+
+    # 2. Thompson state (load → save; observation happens after oracle phase in future)
+    thompson_state = db.load_forge_thompson_state()
+    if thompson_state:
+        db.save_forge_thompson_state(thompson_state)
+
+    # 3. Evolution trigger
+    offspring = maybe_evolve(grid, seed=seed)
+    if offspring:
+        _log.info("forge evolve: generated %d offspring prompts", len(offspring))
