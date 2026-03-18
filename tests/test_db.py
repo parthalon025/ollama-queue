@@ -41,6 +41,8 @@ class TestInitialize:
             "forge_runs",
             "forge_results",
             "forge_embeddings",
+            "forge_archive",
+            "forge_thompson_state",
         }
         assert expected == set(tables)
 

@@ -679,6 +679,14 @@ class SchemaMixin:
                 "forge.autonomy_level": "observer",
                 "forge.f1_threshold": 0.7,
                 "forge.auto_promote_min_improvement": 0.05,
+                "forge.grid_size": 10,
+                "forge.evolution_enabled": False,
+                "forge.evolution_offspring": 4,
+                "forge.evolution_min_archive": 3,
+                "forge.evolution_mutation_rate": 0.15,
+                "forge.thompson_enabled": True,
+                "forge.thompson_discount": 0.95,
+                "forge.thompson_window": 100,
             }
             for _fk, _fv in _forge_defaults.items():
                 conn.execute(
