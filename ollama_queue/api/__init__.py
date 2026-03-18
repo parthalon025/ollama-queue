@@ -38,6 +38,8 @@ def register_routes(app, db_instance: Database) -> None:
         eval_settings,
         eval_trends,
         eval_variants,
+        forge_runs,
+        forge_settings,
         health,
         jobs,
         models,
@@ -62,3 +64,6 @@ def register_routes(app, db_instance: Database) -> None:
     app.include_router(eval_runs.router)
     app.include_router(eval_settings.router)
     app.include_router(eval_trends.router)
+    # Forge
+    app.include_router(forge_runs.router)
+    app.include_router(forge_settings.router)
