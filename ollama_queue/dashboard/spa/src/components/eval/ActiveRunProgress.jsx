@@ -1,7 +1,8 @@
+import { useState } from 'preact/hooks';
 import { API, evalActiveRun, cancelEvalRun, startEvalPoll } from '../../stores';
 import { useActionFeedback } from '../../hooks/useActionFeedback.js';
 import { useShatter } from '../../hooks/useShatter.js';
-import { ShPipeline } from 'superhot-ui/preact';
+import { ShPipeline, ShFrozen, ShModal } from 'superhot-ui/preact';
 
 const PIPELINE_STAGES = [
     { id: 'queued',     label: 'Waiting' },
@@ -13,8 +14,10 @@ const PIPELINE_ORDER = ['queued', 'generating', 'judging', 'done'];
 // What it shows: Live progress of the currently-running eval run, including
 //   stage (Writing/Scoring), overall % complete, per-variant progress bars,
 //   ETA, failure rate, and circuit breaker banner if the run is paused.
+//   ShFrozen wraps the progress panel to show data freshness (stale = poll lag).
 // Decision it drives: User knows whether to wait, cancel, or intervene.
 //   Circuit breaker buttons let them resume, retry failed jobs, or cancel.
+//   ShModal confirms destructive cancel action.
 
 // NOTE: All .map() callbacks use descriptive parameter names — never 'h' (shadows JSX factory)
 
@@ -40,6 +43,9 @@ export default function ActiveRunProgress() {
   const [resumeRef2, resumeShatter] = useShatter('routine');
   const [retryRef, retryShatter] = useShatter('routine');
 
+  // ShModal state for cancel confirmation
+  const [confirmCancel, setConfirmCancel] = useState(false);
+
   const terminalStatuses = ['complete', 'failed', 'cancelled'];
   if (!activeRun || terminalStatuses.includes(activeRun.status)) return null;
 
@@ -60,7 +66,11 @@ export default function ActiveRunProgress() {
   const etaLabel = formatEta(eta_s);
 
   async function handleCancel() {
-    if (!confirm('Stop this test run? Any jobs already submitted will still finish, but no new ones will start.')) return;
+    setConfirmCancel(true);
+  }
+
+  async function doCancel() {
+    setConfirmCancel(false);
     cancelShatter();
     await cancelAct('CANCELLING', () => cancelEvalRun(run_id), `RUN #${run_id} CANCELLED`);
   }
@@ -93,7 +103,11 @@ export default function ActiveRunProgress() {
 
   const variantEntries = Object.entries(per_variant);
 
+  // Use the poll timestamp for ShFrozen freshness — stale means poll lag
+  const progressTimestamp = activeRun.polled_at ? activeRun.polled_at * 1000 : Date.now();
+
   return (
+    <ShFrozen timestamp={progressTimestamp} thresholds={{ cooling: 15, frozen: 60, stale: 180 }}>
     <div class="t-frame eval-active-run-frame" data-label="Test Run in Progress">
 
       {/* Circuit breaker banner */}
@@ -243,6 +257,18 @@ export default function ActiveRunProgress() {
           {cancelFb.msg && <div class={`action-fb action-fb--${cancelFb.phase}`}>{cancelFb.msg}</div>}
         </div>
       )}
+
+      {/* Confirmation modal for eval cancel — destructive action */}
+      <ShModal
+          open={confirmCancel}
+          title="CONFIRM: CANCEL EVAL RUN"
+          body="Stop this test run? Any jobs already submitted will still finish, but no new ones will start."
+          confirmLabel="CANCEL RUN"
+          cancelLabel="KEEP RUNNING"
+          onConfirm={doCancel}
+          onCancel={() => setConfirmCancel(false)}
+      />
     </div>
+    </ShFrozen>
   );
 }

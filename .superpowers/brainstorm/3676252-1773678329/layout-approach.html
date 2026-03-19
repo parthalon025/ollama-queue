@@ -1,0 +1,156 @@
+<h2>How should daemon + eval + models be unified on the Now page?</h2>
+<p class="subtitle">Three approaches — current layout is the baseline. Pick the one that feels right.</p>
+
+<style>
+.mock-now { font-family: monospace; font-size: 11px; background: #0a0a0f; color: #c0c0c0; border-radius: 6px; padding: 12px; margin-top: 6px; line-height: 1.6; }
+.mock-kpi { display: flex; gap: 6px; margin-bottom: 6px; }
+.mock-kpi-card { background: #16161f; border: 1px solid #2a2a3a; border-radius: 4px; padding: 4px 8px; font-size: 10px; color: #a0a0c0; }
+.mock-kpi-card span { color: #7b6fff; font-weight: bold; display: block; }
+.mock-strip { background: #1a1a2e; border: 1px solid #3a3a5a; border-radius: 4px; padding: 5px 10px; margin-bottom: 5px; font-size: 10px; display: flex; align-items: center; gap: 10px; }
+.mock-strip .bar { flex: 1; height: 4px; background: #2a2a3a; border-radius: 2px; overflow: hidden; }
+.mock-strip .fill { height: 100%; background: #7b6fff; border-radius: 2px; }
+.mock-strip .running { color: #4cff91; }
+.mock-strip .model { color: #a0a0c0; }
+.mock-strip .cancel { color: #666; margin-left: auto; }
+.mock-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.mock-panel { background: #16161f; border: 1px solid #2a2a3a; border-radius: 4px; padding: 8px; }
+.mock-panel-label { font-size: 9px; color: #666; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.08em; }
+.mock-col { display: flex; flex-direction: column; gap: 5px; }
+.mock-infra-row { background: #1a1a2e; border-radius: 3px; padding: 4px 6px; font-size: 10px; display: flex; gap: 6px; align-items: center; }
+.mock-infra-row .serving { color: #4cff91; }
+.mock-badge { background: #2a2a3a; border-radius: 3px; padding: 2px 5px; font-size: 9px; color: #7b6fff; }
+.mock-section-header { font-size: 9px; color: #7b6fff; border-bottom: 1px solid #2a2a3a; padding-bottom: 3px; margin-bottom: 4px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.1em; }
+.mock-unified-bar { background: #0e0e1a; border: 1px solid #3a3a5a; border-radius: 5px; padding: 8px 12px; margin-bottom: 6px; display: flex; gap: 16px; align-items: stretch; }
+.mock-unified-section { flex: 1; border-right: 1px solid #2a2a3a; padding-right: 12px; }
+.mock-unified-section:last-child { border-right: none; padding-right: 0; }
+.mock-unified-label { font-size: 9px; color: #5a5a7a; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 2px; }
+.mock-unified-value { font-size: 11px; color: #e0e0ff; }
+.mock-unified-sub { font-size: 9px; color: #7b6fff; margin-top: 1px; }
+.tag-new { background: #1a2e1a; border: 1px solid #4cff91; color: #4cff91; border-radius: 3px; font-size: 9px; padding: 1px 5px; margin-left: 4px; }
+.tag-now { background: #1a1a2e; border: 1px solid #5a5a7a; color: #5a5a7a; border-radius: 3px; font-size: 9px; padding: 1px 5px; margin-left: 4px; }
+</style>
+
+<div class="options">
+
+  <!-- OPTION A -->
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Additive Strips <span class="tag-new">+2 components</span></h3>
+      <p>Keep current 2-column layout intact. Add a thin eval progress strip and a models-warm strip below the KPI cards — both conditional (hide when nothing to show). Smallest change, cleanest integration.</p>
+      <div class="mock-now">
+        <div class="mock-kpi">
+          <div class="mock-kpi-card"><span>running</span>Daemon</div>
+          <div class="mock-kpi-card"><span>3</span>Queue</div>
+          <div class="mock-kpi-card"><span>42</span>Jobs 24h</div>
+          <div class="mock-kpi-card"><span>68%</span>RAM</div>
+          <div class="mock-kpi-card"><span>45%</span>VRAM</div>
+        </div>
+        <div class="mock-strip">
+          <span class="running">● eval</span>
+          <span>Generating outputs</span>
+          <div class="bar"><div class="fill" style="width:37%"></div></div>
+          <span style="color:#7b6fff">37%</span>
+          <span class="model">deepseek-r1:8b</span>
+          <span class="cancel">✕</span>
+        </div>
+        <div class="mock-strip">
+          <span style="color:#666;font-size:9px">MODELS</span>
+          <span class="model">GTX 1650 · qwen2.5:7b</span>
+          <span style="color:#4cff91">▶ serving</span>
+          <span style="color:#5a5a7a">|</span>
+          <span class="model">RTX 5080 · deepseek-r1:8b ●</span>
+        </div>
+        <div class="mock-grid">
+          <div class="mock-panel">CurrentJob + progress bar...</div>
+          <div class="mock-panel">Infra + HeroCards...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- OPTION B -->
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Unified Command Header <span class="tag-new">restructured KPIs</span></h3>
+      <p>Replace the KPI stat cards with a 3-section horizontal band: Daemon state, Eval progress, Models warm. Full-width, always visible. KPI numbers move into hero cards or a secondary row. Single glance covers all three subsystems.</p>
+      <div class="mock-now">
+        <div class="mock-unified-bar">
+          <div class="mock-unified-section">
+            <div class="mock-unified-label">Daemon</div>
+            <div class="mock-unified-value"><span style="color:#4cff91">●</span> running</div>
+            <div class="mock-unified-sub">qwen2.5:7b · GTX 1650 · 2m 14s</div>
+          </div>
+          <div class="mock-unified-section">
+            <div class="mock-unified-label">Eval</div>
+            <div class="mock-unified-value">Generating <span style="color:#7b6fff">37%</span></div>
+            <div class="mock-unified-sub">deepseek-r1:8b · ~5m left <span style="color:#666;cursor:pointer">✕</span></div>
+          </div>
+          <div class="mock-unified-section">
+            <div class="mock-unified-label">Models warm</div>
+            <div class="mock-unified-value">2 loaded</div>
+            <div class="mock-unified-sub">GTX 1650 · 45% VRAM &nbsp;|&nbsp; RTX 5080 · 82%</div>
+          </div>
+        </div>
+        <div class="mock-grid">
+          <div class="mock-panel">CurrentJob + Queue...</div>
+          <div class="mock-col">
+            <div class="mock-panel">Alerts...</div>
+            <div class="mock-panel">Hero KPI cards (moved here)...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- OPTION C -->
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Right Column: System State Panel <span class="tag-new">replaces Infra panel</span></h3>
+      <p>Keep 2-column grid. In the right column, replace InfrastructurePanel with a unified "System State" panel that has three named sections: Daemon, Eval, Models. Infrastructure metrics fold into the Daemon section. Richer info per subsystem, clean separation.</p>
+      <div class="mock-now">
+        <div class="mock-kpi">
+          <div class="mock-kpi-card"><span>running</span>Daemon</div>
+          <div class="mock-kpi-card"><span>3</span>Queue</div>
+          <div class="mock-kpi-card"><span>42</span>Jobs 24h</div>
+          <div class="mock-kpi-card"><span>68%</span>RAM</div>
+        </div>
+        <div class="mock-grid">
+          <div class="mock-col">
+            <div class="mock-panel">CurrentJob + Queue...</div>
+          </div>
+          <div class="mock-col">
+            <div class="mock-panel">
+              <div class="mock-section-header">Daemon</div>
+              <div style="font-size:10px;margin-bottom:4px">RAM 68% · CPU 45% · Swap 10%</div>
+              <div class="mock-infra-row">
+                <span style="color:#4cff91">●</span>
+                <span>GTX 1650</span>
+                <div class="bar" style="display:inline-block;width:50px;height:4px;background:#2a2a3a;border-radius:2px;vertical-align:middle"><div class="fill" style="width:45%"></div></div>
+                <span>45%</span>
+                <span class="serving">· qwen2.5:7b ▶</span>
+              </div>
+              <div class="mock-infra-row">
+                <span style="color:#4cff91">●</span>
+                <span>RTX 5080</span>
+                <div class="bar" style="display:inline-block;width:50px;height:4px;background:#2a2a3a;border-radius:2px;vertical-align:middle"><div class="fill" style="width:82%"></div></div>
+                <span style="color:#e07b00">82%</span>
+                <span class="model">· deepseek-r1:8b</span>
+              </div>
+              <div class="mock-section-header" style="margin-top:8px">Eval</div>
+              <div style="font-size:10px">Generating outputs · 37%</div>
+              <div class="mock-strip" style="margin-top:3px"><div class="bar"><div class="fill" style="width:37%"></div></div><span style="color:#666">✕ cancel</span></div>
+              <div class="mock-section-header" style="margin-top:8px">Models</div>
+              <div style="font-size:10px;color:#a0a0c0">qwen2.5:7b · 4.3GB <span class="mock-badge">in memory</span></div>
+              <div style="font-size:10px;color:#a0a0c0;margin-top:3px">deepseek-r1:8b · 7.5GB <span class="mock-badge">in memory</span></div>
+            </div>
+            <div class="mock-panel">HeroCards 2×2...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>

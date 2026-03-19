@@ -1,7 +1,8 @@
 import { Component } from 'preact';
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { signal, useSignal } from '@preact/signals';
-import { ShMantra } from 'superhot-ui/preact';
+import { ShMantra, ShIncidentHUD } from 'superhot-ui/preact';
+import { bootSequence, detectCapability, applyCapability } from 'superhot-ui';
 
 // Temporary debug boundary — catches Plan render errors that signals swallows silently
 class PlanErrorBoundary extends Component {
@@ -103,6 +104,10 @@ export function App() {
     // Cmd+K command palette
     const paletteOpen = useSignal(false);
 
+    // Boot sequence state — shows typewriter terminal boot lines on first load
+    const [booted, setBooted] = useState(false);
+    const bootRef = useRef(null);
+
     // Theme: read from localStorage, default dark.
     const [theme, setTheme] = useState(() => {
         const saved = localStorage.getItem('queue-theme');
@@ -117,6 +122,39 @@ export function App() {
     function handleToggleTheme() {
         setTheme(t => t === 'dark' ? 'light' : 'dark');
     }
+
+    // Boot sequence: detect hardware capability and run typewriter reveal on first mount
+    useEffect(() => {
+        const tier = detectCapability();
+        applyCapability(tier);
+
+        // Skip boot animation if reduced motion or already booted this session
+        if (tier === 'minimal' || sessionStorage.getItem('queue-booted')) {
+            setBooted(true);
+            return;
+        }
+
+        if (!bootRef.current) {
+            setBooted(true);
+            return;
+        }
+
+        const cleanup = bootSequence(bootRef.current, [
+            'OLLAMA-QUEUE v2.0',
+            'INITIALIZING DAEMON LINK...',
+            'BACKEND TOPOLOGY: SCANNING...',
+            'SYSTEM READY',
+        ], {
+            charSpeed: 20,
+            lineDelay: 150,
+            onComplete: () => {
+                sessionStorage.setItem('queue-booted', '1');
+                // Brief pause after last line before showing the dashboard
+                setTimeout(() => setBooted(true), 400);
+            },
+        });
+        return cleanup;
+    }, []);
 
     useEffect(() => {
         startPolling();
@@ -208,6 +246,22 @@ export function App() {
     const activeEval = status.value?.active_eval ?? null;
     const isDaemonPaused = (daemonState?.state || '').startsWith('paused');
 
+    // Incident HUD state — tracks when the system entered critical/degraded mode
+    const incidentTimestamp = useSignal(null);
+    const incidentAcked = useSignal(false);
+    // Track incident start time on health mode transitions
+    useEffect(() => {
+        if (healthMode.value === 'critical') {
+            if (incidentTimestamp.value === null) {
+                incidentTimestamp.value = Date.now();
+                incidentAcked.value = false;
+            }
+        } else {
+            incidentTimestamp.value = null;
+            incidentAcked.value = false;
+        }
+    }, [healthMode.value]);
+
     // Build command palette items from current signals
     // DS ShCommandPalette requires an 'id' field per item for ARIA/key.
     const paletteItems = [
@@ -223,6 +277,15 @@ export function App() {
         })),
     ];
 
+    // Boot screen — shown before the dashboard is revealed
+    if (!booted) {
+        return (
+            <div class="sh-boot-container" style="background: var(--bg-base); color: var(--sh-phosphor); min-height: 100vh; display: flex; align-items: center; justify-content: center; font-family: var(--font-mono);">
+                <div ref={bootRef} style="max-width: 480px; width: 100%; padding: 2rem;" />
+            </div>
+        );
+    }
+
     return (
         <div class="layout-root sh-crt" data-sh-health={healthMode.value} style="background: var(--bg-base); color: var(--text-primary);">
             {/* App-level mantra — shows SYSTEM PAUSED when daemon is paused, or failed service
@@ -232,6 +295,14 @@ export function App() {
                     ? (failedServices.value[0] || 'SYSTEM DOWN')
                     : (isDaemonPaused ? 'SYSTEM PAUSED' : '')}
                 active={isDaemonPaused || escalationLevel.value >= 3}
+            />
+            {/* Incident HUD — system-wide banner when health is critical */}
+            <ShIncidentHUD
+                active={healthMode.value === 'critical' && !incidentAcked.value}
+                severity="critical"
+                message={`INCIDENT: ${(failedServices.value || []).join(', ').toUpperCase() || 'SYSTEM FAILURE'}`}
+                timestamp={incidentTimestamp.value}
+                onAcknowledge={() => { incidentAcked.value = true; }}
             />
             <Sidebar
                 active={currentTab.value}

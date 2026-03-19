@@ -6,6 +6,7 @@ import SettingsForm from '../components/SettingsForm';
 import { useActionFeedback } from '../hooks/useActionFeedback.js';
 import { useShatter } from '../hooks/useShatter.js';
 import { ShCrtToggle, ShPageBanner } from 'superhot-ui/preact';
+import { setCrtMode } from 'superhot-ui';
 import { TAB_CONFIG } from '../config/tabs.js';
 
 // Intensity → CSS var opacity map. Matches the values used by ShCrtToggleNative.
@@ -25,6 +26,13 @@ function applyCrtIntensity(intensity) {
     '--crt-scanline-opacity',
     CRT_OPACITY[intensity] ?? CRT_OPACITY.medium,
   );
+  // Sync superhot-ui setCrtMode for proper CSS property control
+  const enabled = intensity !== 'off';
+  setCrtMode({
+    stripe: enabled,
+    scanline: enabled && (intensity === 'medium' || intensity === 'high'),
+    flicker: intensity === 'high',
+  });
   try {
     localStorage.setItem(CRT_STORAGE_KEY, JSON.stringify({ intensity }));
   } catch (_) {}

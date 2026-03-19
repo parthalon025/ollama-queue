@@ -1,10 +1,12 @@
 // What it does: Returns a ref + fire function for tiered shatter effects on buttons.
+//   Enforces effect budget via isOverBudget check — suppresses shatters when the
+//   system already has too many simultaneous visual effects.
 // Decision it drives: Every action button in the SPA shatters on click — fragment
-//   count communicates intent (earned > complete > routine).
+//   count communicates intent (earned > complete > routine). Budget prevents overload.
 
 import { useRef, useCallback } from 'preact/hooks';
 import { shatterElement } from 'superhot-ui';
-import { canFireEffect } from '../stores/atmosphere.js';
+import { canFireEffect, isOverBudget } from '../stores/atmosphere.js';
 
 const TIER_PRESETS = {
   earned:   { fragments: 7 },
@@ -21,7 +23,11 @@ export function useShatter(tier = 'routine') {
   const fire = useCallback((evOrEl) => {
     const el = evOrEl?.currentTarget || evOrEl || ref.current;
     if (!el) return;
-    // Routine tier skips effect budget — too fast and small to count
+
+    // Global effect budget gate — suppress all shatters when over budget
+    if (isOverBudget()) return;
+
+    // Non-routine tiers consume a budget slot and release on animation complete
     if (tier !== 'routine') {
       const cleanup = canFireEffect('shatter-' + tier);
       if (!cleanup) return;

@@ -6,6 +6,7 @@
 
 import { signal, computed } from '@preact/signals';
 import { API } from './_shared.js';
+import { heartbeat } from 'superhot-ui';
 
 // Re-export API so components that import { API } from '../stores' still work
 export { API } from './_shared.js';
@@ -110,6 +111,14 @@ async function fetchStatus() {
             }
             _backoffMs = POLL_INTERVAL;
             _pollCount++;
+
+            // Fire heartbeat micro-burst on the cohesion header to signal fresh data arrival
+            const cohesionEl = document.querySelector('.cohesion-header');
+            if (cohesionEl) {
+                const pollTs = data.daemon?.timestamp ? data.daemon.timestamp * 1000 : Date.now();
+                heartbeat(cohesionEl, pollTs);
+            }
+
             if (_pollCount % 12 === 0) _fetchNonRealtime();
         }
         pollTimer = setTimeout(fetchStatus, POLL_INTERVAL);

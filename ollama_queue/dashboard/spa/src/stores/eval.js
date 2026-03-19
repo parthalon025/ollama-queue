@@ -55,6 +55,7 @@ export function startEvalPoll(runId) {
       const res = await fetch(`${API}/eval/runs/${runId}/progress`);
       if (!res.ok) return;
       const data = await res.json();
+      data.polled_at = Date.now() / 1000;
       evalActiveRun.value = data;
       sessionStorage.setItem('evalActiveRun', JSON.stringify(data));
       if (['complete', 'failed', 'cancelled'].includes(data.status)) {

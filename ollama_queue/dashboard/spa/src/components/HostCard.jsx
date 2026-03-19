@@ -350,10 +350,10 @@ export default function HostCard({
             {expanded.value && isRunning && (
                 // What it shows: Last 5 stdout lines — confirms job is producing output
                 <div style="margin-top: 0.5rem;">
-                    <div style="font-family: var(--font-mono); font-size: var(--type-micro); background: var(--bg-terminal, var(--bg-inset)); padding: 8px; border-radius: var(--radius); max-height: 120px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; color: var(--text-secondary);">
+                    <div class="sh-terminal-grid" style="font-size: var(--type-micro); background: var(--bg-terminal, var(--bg-inset)); padding: 8px; border-radius: var(--radius); max-height: 120px; overflow-y: auto; word-break: break-all; color: var(--text-secondary);">
                         {logLines.value.length > 0
-                            ? logLines.value.map((line, i) => <div key={i}>{line}</div>)
-                            : <span style="color: var(--text-tertiary);">No output yet</span>
+                            ? logLines.value.map((line, i) => <div key={i} class="sh-ansi-fg-white">{line}</div>)
+                            : <span class="sh-ansi-dim">No output yet</span>
                         }
                     </div>
                     {isStalled && (

@@ -1,0 +1,174 @@
+<h2>What goes above and below the host cards?</h2>
+<p class="subtitle">Host cards cover per-GPU state. Two questions: (1) global stats row above, and (2) what fills the bottom section.</p>
+
+<style>
+.mock-page { font-family: monospace; font-size: 11px; background: #0a0a0f; color: #c0c0c0; border-radius: 6px; padding: 12px; margin-top: 8px; line-height: 1.6; }
+.host-card { background: #0d1a12; border: 1px solid #4cff91; border-radius: 6px; padding: 8px 12px; margin-bottom: 5px; opacity: 0.55; font-size: 10px; color: #5a8a6a; }
+.host-card-label { display: flex; align-items: center; gap: 8px; }
+.section-label { font-size: 9px; color: #3a3a5a; text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 5px; }
+.divider { height: 1px; background: #1a1a2e; margin: 8px 0; }
+
+/* Global stat options */
+.stat-bar { display: flex; gap: 6px; margin-bottom: 6px; }
+.stat-chip { background: #16161f; border: 1px solid #2a2a3a; border-radius: 4px; padding: 4px 8px; font-size: 10px; color: #a0a0c0; }
+.stat-chip span { color: #7b6fff; font-weight: bold; display: block; }
+.stat-chip.gone { opacity: 0.2; text-decoration: line-through; }
+
+.minimal-bar { display: flex; gap: 12px; padding: 5px 0; font-size: 10px; color: #5a5a7a; border-bottom: 1px solid #1a1a2e; margin-bottom: 6px; }
+.minimal-bar .val { color: #a0a0c0; font-weight: bold; }
+
+.none-bar { padding: 3px 0; font-size: 9px; color: #2a2a3a; font-style: italic; margin-bottom: 6px; }
+
+/* Bottom section options */
+.bottom-full { background: #12121c; border: 1px solid #2a2a3a; border-radius: 4px; padding: 8px; }
+.bottom-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.bottom-panel { background: #12121c; border: 1px solid #2a2a3a; border-radius: 4px; padding: 8px; font-size: 10px; }
+.queue-item { display: flex; gap: 6px; align-items: center; padding: 2px 0; border-bottom: 1px solid #1a1a2e; color: #a0a0c0; }
+.queue-item:last-child { border-bottom: none; }
+.model-chip { background: #1a1a2e; border: 1px solid #3a3a5a; border-radius: 3px; padding: 1px 5px; font-size: 9px; color: #a0a0c0; }
+.hero-mini { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; font-size: 10px; }
+.hero-val { color: #7b6fff; font-weight: bold; }
+.sparkline { display: inline-block; width: 40px; height: 14px; background: #1a1a2e; border-radius: 2px; vertical-align: middle; overflow: hidden; position: relative; }
+.spark-fill { position: absolute; bottom: 0; background: #7b6fff; opacity: 0.6; width: 100%; height: 45%; }
+
+.option-sub { margin-top: 14px; }
+.option-sub h4 { font-size: 12px; margin: 0 0 4px 0; color: #c0c0e0; }
+.option-sub p { font-size: 11px; color: #888; margin: 0 0 6px 0; }
+</style>
+
+<div class="options" data-multiselect>
+
+  <!-- TOP: Option 1 — no global bar -->
+  <div class="option" data-choice="top-none" onclick="toggleSelect(this)">
+    <div class="letter">1</div>
+    <div class="content">
+      <h3>Top: Nothing — host cards are the header</h3>
+      <p>Remove ShStatsGrid entirely. Queue depth and job count move to the bottom section. The host cards are the first thing you see. Clean, direct.</p>
+      <div class="mock-page">
+        <div class="none-bar">← page banner only, then straight to hosts</div>
+        <div class="host-card"><div class="host-card-label">● GTX 1650 &nbsp; VRAM 45% &nbsp; <span style="color:#4cff91">running · qwen2.5:7b · 2m14s</span></div></div>
+        <div class="host-card"><div class="host-card-label">● RTX 5080 &nbsp; VRAM 82% &nbsp; <span style="color:#7b6fff">eval · deepseek-r1 · 37%</span></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOP: Option 2 — minimal one-liner -->
+  <div class="option" data-choice="top-minimal" onclick="toggleSelect(this)">
+    <div class="letter">2</div>
+    <div class="content">
+      <h3>Top: Slim global stats line</h3>
+      <p>One compact line above the host cards: queue depth + 24h job count + success rate. No cards, no chrome — just the numbers that aren't covered by host cards.</p>
+      <div class="mock-page">
+        <div class="minimal-bar">
+          <span>Queue <span class="val">3 waiting</span></span>
+          <span>·</span>
+          <span>Jobs today <span class="val">42</span></span>
+          <span>·</span>
+          <span>Success 7d <span class="val">98%</span></span>
+          <span>·</span>
+          <span>Avg wait <span class="val">8s</span></span>
+        </div>
+        <div class="host-card"><div class="host-card-label">● GTX 1650 &nbsp; VRAM 45% &nbsp; <span style="color:#4cff91">running · qwen2.5:7b · 2m14s</span></div></div>
+        <div class="host-card"><div class="host-card-label">● RTX 5080 &nbsp; VRAM 82% &nbsp; <span style="color:#7b6fff">eval · deepseek-r1 · 37%</span></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOP: Option 3 — keep KPI cards (minus redundant ones) -->
+  <div class="option" data-choice="top-kpi" onclick="toggleSelect(this)">
+    <div class="letter">3</div>
+    <div class="content">
+      <h3>Top: Trimmed KPI cards (remove redundant ones)</h3>
+      <p>Keep ShStatsGrid but remove Daemon and VRAM cards (now on host cards). Keep: Queue Depth, Jobs 24h, RAM. Familiar layout, less duplication.</p>
+      <div class="mock-page">
+        <div class="stat-bar">
+          <div class="stat-chip gone"><span>running</span>Daemon</div>
+          <div class="stat-chip"><span>3</span>Queue Depth</div>
+          <div class="stat-chip"><span>42</span>Jobs 24h</div>
+          <div class="stat-chip"><span>68%</span>RAM</div>
+          <div class="stat-chip gone"><span>45%</span>VRAM</div>
+        </div>
+        <div class="host-card"><div class="host-card-label">● GTX 1650 &nbsp; VRAM 45% &nbsp; <span style="color:#4cff91">running · qwen2.5:7b · 2m14s</span></div></div>
+        <div class="host-card"><div class="host-card-label">● RTX 5080 &nbsp; VRAM 82% &nbsp; <span style="color:#7b6fff">eval · deepseek-r1 · 37%</span></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div style="width:100%;height:1px;background:#2a2a3a;margin:8px 0"></div>
+  <p class="subtitle" style="margin:4px 0 8px">And below the host cards — what fills the bottom?</p>
+
+  <!-- BOTTOM: Option A — queue full width + hero cards row -->
+  <div class="option" data-choice="bottom-queue-heroes" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Bottom: Full-width queue + 2×2 hero cards</h3>
+      <p>Queue list spans full width (you can see more jobs). Hero cards (sparklines + 24h KPIs) sit below it in a 2×2 grid. Removes the side-by-side split — everything stacks vertically.</p>
+      <div class="mock-page">
+        <div class="host-card" style="margin-bottom:3px"><div class="host-card-label">... host cards above ...</div></div>
+        <div class="divider"></div>
+        <div class="bottom-full" style="margin-bottom:5px">
+          <div class="section-label">Queue — 3 waiting</div>
+          <div class="queue-item"><span style="color:#3a3a5a;font-size:9px">1</span><span class="model-chip">qwen2.5:7b</span><span>notion-sync</span><span style="margin-left:auto;color:#5a5a7a;font-size:9px">ETA 2m</span></div>
+          <div class="queue-item"><span style="color:#3a3a5a;font-size:9px">2</span><span class="model-chip">qwen2.5:7b</span><span>telegram-brief</span><span style="margin-left:auto;color:#5a5a7a;font-size:9px">ETA 5m</span></div>
+          <div class="queue-item"><span style="color:#3a3a5a;font-size:9px">3</span><span class="model-chip">llama3.2:3b</span><span>aria-run</span><span style="margin-left:auto;color:#5a5a7a;font-size:9px">ETA 8m</span></div>
+        </div>
+        <div class="hero-mini">
+          <div class="bottom-panel">Jobs today <span class="hero-val">42</span> <span class="sparkline"><span class="spark-fill"></span></span></div>
+          <div class="bottom-panel">Avg wait <span class="hero-val">8s</span> <span class="sparkline"><span class="spark-fill" style="height:20%"></span></span></div>
+          <div class="bottom-panel">Paused <span class="hero-val" style="color:#e07b00">0m</span> <span class="sparkline"><span class="spark-fill" style="height:5%;background:#e07b00"></span></span></div>
+          <div class="bottom-panel">7d success <span class="hero-val" style="color:#4cff91">98%</span> <span class="sparkline"><span class="spark-fill" style="height:90%;background:#4cff91"></span></span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- BOTTOM: Option B — 2-col: queue left, heroes right -->
+  <div class="option" data-choice="bottom-split" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Bottom: Queue left, hero cards right (2-column)</h3>
+      <p>Keep the current 2-column bottom split — queue on the left, sparkline KPI cards on the right. Familiar layout, queue and metrics visible side by side.</p>
+      <div class="mock-page">
+        <div class="host-card" style="margin-bottom:3px"><div class="host-card-label">... host cards above ...</div></div>
+        <div class="divider"></div>
+        <div class="bottom-grid">
+          <div class="bottom-panel">
+            <div class="section-label">Queue — 3 waiting</div>
+            <div class="queue-item"><span class="model-chip">qwen2.5:7b</span><span>notion-sync</span></div>
+            <div class="queue-item"><span class="model-chip">qwen2.5:7b</span><span>telegram-brief</span></div>
+            <div class="queue-item"><span class="model-chip">llama3.2:3b</span><span>aria-run</span></div>
+          </div>
+          <div class="bottom-panel">
+            <div class="section-label">KPIs</div>
+            <div class="hero-mini">
+              <div style="padding:3px 0">Jobs <span class="hero-val">42</span></div>
+              <div style="padding:3px 0">Wait <span class="hero-val">8s</span></div>
+              <div style="padding:3px 0">Paused <span class="hero-val" style="color:#e07b00">0m</span></div>
+              <div style="padding:3px 0">7d <span class="hero-val" style="color:#4cff91">98%</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- BOTTOM: Option C — queue only, no hero cards -->
+  <div class="option" data-choice="bottom-queue-only" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Bottom: Queue only — drop the hero cards</h3>
+      <p>The host cards already show the most important state. The hero sparkline cards are nice-to-have but not decision-critical on the Now page — move them to History or Performance. Now page becomes: hosts + queue. Minimal.</p>
+      <div class="mock-page">
+        <div class="host-card" style="margin-bottom:3px"><div class="host-card-label">... host cards above ...</div></div>
+        <div class="divider"></div>
+        <div class="bottom-full">
+          <div class="section-label">Queue — 3 waiting</div>
+          <div class="queue-item"><span style="color:#3a3a5a;font-size:9px">1</span><span class="model-chip">qwen2.5:7b</span><span>notion-sync</span><span style="margin-left:auto;color:#5a5a7a;font-size:9px">ETA 2m</span></div>
+          <div class="queue-item"><span style="color:#3a3a5a;font-size:9px">2</span><span class="model-chip">qwen2.5:7b</span><span>telegram-brief</span><span style="margin-left:auto;color:#5a5a7a;font-size:9px">ETA 5m</span></div>
+          <div class="queue-item"><span style="color:#3a3a5a;font-size:9px">3</span><span class="model-chip">llama3.2:3b</span><span>aria-run</span><span style="margin-left:auto;color:#5a5a7a;font-size:9px">ETA 8m</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>

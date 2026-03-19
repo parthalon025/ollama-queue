@@ -1,0 +1,226 @@
+<h2>Host-first Now page</h2>
+<p class="subtitle">Each backend is the top-level unit — job, eval, and model state are attributes of the host running them. Two layout variants below.</p>
+
+<style>
+.mock-page { font-family: monospace; font-size: 11px; background: #0a0a0f; color: #c0c0c0; border-radius: 6px; padding: 12px; margin-top: 8px; line-height: 1.6; }
+.host-card { background: #12121c; border: 1px solid #2a2a3a; border-radius: 6px; padding: 10px 12px; margin-bottom: 6px; }
+.host-card.serving { border-color: #4cff91; background: #0d1a12; }
+.host-card.eval-active { border-color: #7b6fff; background: #100d1a; }
+.host-card.warm { border-color: #3a3a5a; }
+.host-card.offline { opacity: 0.4; }
+.host-header { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.host-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.host-dot.green { background: #4cff91; }
+.host-dot.red { background: #ff4c4c; }
+.host-dot.amber { background: #e07b00; }
+.host-name { color: #e0e0ff; font-weight: bold; font-size: 12px; }
+.host-gpu { color: #7b7baa; font-size: 10px; margin-left: 2px; }
+.vram-bar-wrap { flex: 1; display: flex; align-items: center; gap: 6px; }
+.vram-bar { flex: 1; height: 5px; background: #1a1a2e; border-radius: 3px; overflow: hidden; }
+.vram-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
+.vram-fill.ok { background: #4cff91; }
+.vram-fill.warn { background: #e07b00; }
+.vram-fill.crit { background: #ff4c4c; }
+.vram-pct { font-size: 10px; min-width: 28px; text-align: right; }
+.host-status { display: flex; align-items: center; gap: 8px; font-size: 10px; }
+.status-pill { border-radius: 3px; padding: 2px 6px; font-size: 9px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.05em; }
+.pill-running { background: #0d2e18; border: 1px solid #4cff91; color: #4cff91; }
+.pill-eval { background: #150d2e; border: 1px solid #7b6fff; color: #7b6fff; }
+.pill-warm { background: #1a1a2e; border: 1px solid #3a3a5a; color: #5a5a7a; }
+.pill-idle { background: #1a1a1a; border: 1px solid #2a2a2a; color: #444; }
+.pill-offline { background: #2e0d0d; border: 1px solid #ff4c4c; color: #ff4c4c; }
+.model-chip { background: #1a1a2e; border: 1px solid #3a3a5a; border-radius: 3px; padding: 2px 6px; font-size: 10px; color: #a0a0c0; }
+.job-line { color: #a0a0c0; font-size: 10px; }
+.job-line .source { color: #7b6fff; }
+.job-line .elapsed { color: #4cff91; }
+.progress-bar { height: 3px; background: #1a1a2e; border-radius: 2px; overflow: hidden; margin-top: 5px; }
+.progress-fill { height: 100%; background: #7b6fff; border-radius: 2px; }
+.eval-line { color: #a0a0c0; font-size: 10px; }
+.eval-line .phase { color: #7b6fff; }
+.eval-line .pct { color: #c0b0ff; font-weight: bold; }
+.host-metrics { display: flex; gap: 8px; font-size: 9px; color: #5a5a7a; margin-top: 4px; border-top: 1px solid #1a1a2e; padding-top: 4px; }
+.metric-item { display: flex; gap: 3px; align-items: center; }
+.metric-bar { width: 30px; height: 3px; background: #1a1a2e; border-radius: 2px; overflow: hidden; display: inline-block; vertical-align: middle; }
+.metric-fill { height: 100%; background: #3a3a6a; border-radius: 2px; }
+.divider { height: 1px; background: #1a1a2e; margin: 8px 0; }
+.section-label { font-size: 9px; color: #3a3a5a; text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px; }
+.bottom-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 6px; }
+.mini-panel { background: #12121c; border: 1px solid #2a2a3a; border-radius: 4px; padding: 8px; font-size: 10px; color: #5a5a7a; }
+.queue-item { display: flex; gap: 6px; align-items: center; padding: 3px 0; border-bottom: 1px solid #1a1a2e; }
+.queue-item:last-child { border-bottom: none; }
+.queue-num { color: #3a3a5a; font-size: 9px; min-width: 14px; }
+.queue-model { color: #a0a0c0; }
+.queue-src { color: #5a5a7a; font-size: 9px; }
+</style>
+
+<div class="options">
+
+  <!-- OPTION A: Compact host cards, full-width -->
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Compact host cards — full width at top</h3>
+      <p>One card per host, stacked. Each card: health dot + GPU name + VRAM bar + status pill + what it's doing inline. Queue + KPIs below in 2-column grid. Clean, scannable, works at any count of backends.</p>
+      <div class="mock-page">
+        <div class="section-label">Hosts</div>
+
+        <!-- Host 1: running a job -->
+        <div class="host-card serving">
+          <div class="host-header">
+            <div class="host-dot green"></div>
+            <span class="host-name">GTX 1650</span>
+            <span class="host-gpu">localhost</span>
+            <div class="vram-bar-wrap">
+              <div class="vram-bar"><div class="vram-fill ok" style="width:45%"></div></div>
+              <span class="vram-pct" style="color:#4cff91">45%</span>
+            </div>
+            <span class="status-pill pill-running">running</span>
+          </div>
+          <div class="host-status">
+            <span class="model-chip">qwen2.5:7b</span>
+            <span class="job-line"><span class="source">aria-run</span> · <span class="elapsed">2m 14s</span> · ~30s left</span>
+          </div>
+          <div class="progress-bar"><div class="progress-fill" style="width:82%"></div></div>
+        </div>
+
+        <!-- Host 2: running eval -->
+        <div class="host-card eval-active">
+          <div class="host-header">
+            <div class="host-dot green"></div>
+            <span class="host-name">RTX 5080</span>
+            <span class="host-gpu">desktop-fbl9e0c</span>
+            <div class="vram-bar-wrap">
+              <div class="vram-bar"><div class="vram-fill warn" style="width:82%"></div></div>
+              <span class="vram-pct" style="color:#e07b00">82%</span>
+            </div>
+            <span class="status-pill pill-eval">eval</span>
+          </div>
+          <div class="host-status">
+            <span class="model-chip">deepseek-r1:8b</span>
+            <span class="eval-line"><span class="phase">Generating outputs</span> · <span class="pct">37%</span> · ~5m left</span>
+            <span style="color:#3a3a5a;margin-left:auto;cursor:pointer;font-size:10px">✕ cancel</span>
+          </div>
+          <div class="progress-bar"><div class="progress-fill" style="width:37%; background:#7b6fff"></div></div>
+        </div>
+
+        <!-- Host 3: warm/idle -->
+        <div class="host-card warm">
+          <div class="host-header">
+            <div class="host-dot green"></div>
+            <span class="host-name">GTX 1650</span>
+            <span class="host-gpu">localhost</span>
+            <div class="vram-bar-wrap">
+              <div class="vram-bar"><div class="vram-fill ok" style="width:28%"></div></div>
+              <span class="vram-pct" style="color:#4cff91">28%</span>
+            </div>
+            <span class="status-pill pill-warm">warm</span>
+          </div>
+          <div class="host-status">
+            <span class="model-chip">llama3.2:3b</span>
+            <span class="job-line" style="color:#3a3a5a">idle — model warm in VRAM, no job running</span>
+          </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="bottom-grid">
+          <div class="mini-panel">
+            <div class="section-label">Queue (3 waiting)</div>
+            <div class="queue-item"><span class="queue-num">1</span><span class="model-chip" style="font-size:9px">qwen2.5:7b</span><span class="queue-src">notion-sync</span></div>
+            <div class="queue-item"><span class="queue-num">2</span><span class="model-chip" style="font-size:9px">qwen2.5:7b</span><span class="queue-src">telegram-brief</span></div>
+            <div class="queue-item"><span class="queue-num">3</span><span class="model-chip" style="font-size:9px">llama3.2:3b</span><span class="queue-src">aria-run</span></div>
+          </div>
+          <div class="mini-panel">
+            <div class="section-label">KPIs</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">
+              <div>Jobs 24h <span style="color:#7b6fff">42</span></div>
+              <div>Success <span style="color:#4cff91">98%</span></div>
+              <div>Avg wait <span style="color:#7b6fff">8s</span></div>
+              <div>Paused <span style="color:#e07b00">0m</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- OPTION B: Expanded host cards with host-level metrics -->
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Expanded host cards — with host system metrics</h3>
+      <p>Same host-first layout but each card also shows RAM / CPU / Swap for that host inline. Removes the separate Infrastructure panel entirely — system health lives on the host card. More information density, one less panel.</p>
+      <div class="mock-page">
+        <div class="section-label">Hosts</div>
+
+        <!-- Host 1 expanded -->
+        <div class="host-card serving">
+          <div class="host-header">
+            <div class="host-dot green"></div>
+            <span class="host-name">GTX 1650</span>
+            <span class="host-gpu">localhost</span>
+            <div class="vram-bar-wrap">
+              <div class="vram-bar"><div class="vram-fill ok" style="width:45%"></div></div>
+              <span class="vram-pct" style="color:#4cff91">VRAM 45%</span>
+            </div>
+            <span class="status-pill pill-running">running</span>
+          </div>
+          <div class="host-status">
+            <span class="model-chip">qwen2.5:7b</span>
+            <span class="job-line"><span class="source">aria-run</span> · <span class="elapsed">2m 14s</span> · ~30s left</span>
+          </div>
+          <div class="progress-bar"><div class="progress-fill" style="width:82%"></div></div>
+          <div class="host-metrics">
+            <span class="metric-item">RAM <div class="metric-bar"><div class="metric-fill" style="width:68%"></div></div> 68%</span>
+            <span class="metric-item">CPU <div class="metric-bar"><div class="metric-fill" style="width:45%"></div></div> 45%</span>
+            <span class="metric-item">Swap <div class="metric-bar"><div class="metric-fill" style="width:10%"></div></div> 10%</span>
+          </div>
+        </div>
+
+        <!-- Host 2 expanded -->
+        <div class="host-card eval-active">
+          <div class="host-header">
+            <div class="host-dot green"></div>
+            <span class="host-name">RTX 5080</span>
+            <span class="host-gpu">desktop-fbl9e0c (remote)</span>
+            <div class="vram-bar-wrap">
+              <div class="vram-bar"><div class="vram-fill warn" style="width:82%"></div></div>
+              <span class="vram-pct" style="color:#e07b00">VRAM 82%</span>
+            </div>
+            <span class="status-pill pill-eval">eval</span>
+          </div>
+          <div class="host-status">
+            <span class="model-chip">deepseek-r1:8b</span>
+            <span class="eval-line"><span class="phase">Generating outputs</span> · <span class="pct">37%</span> · ~5m left</span>
+            <span style="color:#3a3a5a;margin-left:auto;cursor:pointer;font-size:10px">✕</span>
+          </div>
+          <div class="progress-bar"><div class="progress-fill" style="width:37%; background:#7b6fff"></div></div>
+          <div class="host-metrics">
+            <span style="color:#3a3a5a;font-size:9px;font-style:italic">Remote host — system metrics not available</span>
+          </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="bottom-grid">
+          <div class="mini-panel">
+            <div class="section-label">Queue (3 waiting)</div>
+            <div class="queue-item"><span class="queue-num">1</span><span class="model-chip" style="font-size:9px">qwen2.5:7b</span><span class="queue-src">notion-sync</span></div>
+            <div class="queue-item"><span class="queue-num">2</span><span class="model-chip" style="font-size:9px">qwen2.5:7b</span><span class="queue-src">telegram-brief</span></div>
+            <div class="queue-item"><span class="queue-num">3</span><span class="model-chip" style="font-size:9px">llama3.2:3b</span><span class="queue-src">aria-run</span></div>
+          </div>
+          <div class="mini-panel">
+            <div class="section-label">KPIs</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">
+              <div>Jobs 24h <span style="color:#7b6fff">42</span></div>
+              <div>Success <span style="color:#4cff91">98%</span></div>
+              <div>Avg wait <span style="color:#7b6fff">8s</span></div>
+              <div>Paused <span style="color:#e07b00">0m</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
