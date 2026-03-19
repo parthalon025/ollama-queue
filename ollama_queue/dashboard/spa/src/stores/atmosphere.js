@@ -169,10 +169,14 @@ function _computeHealthMode() {
  * Syncs escalationLevel signal with the timer's internal level on each advance.
  */
 function _initOrchestrator() {
-    if (_orchestrator) return;
+    if (_orchestrator) {
+        _orchestrator.stop();
+        _orchestrator = null;
+    }
 
     // Resolve surfaces from the live DOM — these selectors match app.jsx layout
     const layout = document.querySelector('.layout-root');
+    if (!layout) return; // DOM not ready — will retry on next health transition
     const sidebar = document.querySelector('.layout-sidebar');
     const main = document.querySelector('.layout-main');
 
@@ -271,9 +275,9 @@ export function initAtmosphere() {
         // State transition effects via orchestrateEscalation + recoverySequence
         if (currentMode !== 'operational' && newMode === 'operational') {
             // Recovery — choreographed sequence then reset orchestrator
+            // Note: orchestrator.reset() plays recovery SFX internally — no explicit playSfx needed
             if (_orchestrator) _orchestrator.reset();
             _runRecovery();
-            playSfx('complete');
         } else if (currentMode === 'operational' && newMode !== 'operational') {
             // Entering failure — start orchestrated escalation
             if (_orchestrator) _orchestrator.start();

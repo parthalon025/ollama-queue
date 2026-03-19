@@ -1,4 +1,4 @@
 // Minimal useActionFeedback hook mock for jest.
 module.exports = {
-    useActionFeedback: () => [{ phase: 'idle', msg: '' }, jest.fn()],
+    useActionFeedback: () => [{ phase: 'idle', msg: '' }, jest.fn(), { current: null }],
 };

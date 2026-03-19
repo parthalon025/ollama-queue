@@ -32,7 +32,7 @@ export function useActionFeedback() {
       setState({ phase: 'success', msg });
 
       // Fire confirmAction glitch burst + SFX on the nearest action element
-      confirmAction(targetRef.current, { sound: 'complete', intensity: 'low' });
+      confirmAction(document.activeElement || targetRef.current, { sound: 'complete', intensity: 'low' });
 
       if (timerRef.current !== null) clearTimeout(timerRef.current);
       timerRef.current = setTimeout(() => {
