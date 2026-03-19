@@ -99,8 +99,23 @@ export default function SetupChecklist() {
     }
   }
 
+  // Progress steps indicator: shows which step is current
+  const step1Cls = step1Complete ? 'sh-progress-step--complete' : 'sh-progress-step--current';
+  const step2Cls = step2Complete ? 'sh-progress-step--complete' : step1Complete ? 'sh-progress-step--current' : '';
+
   return (
     <div class="setup-checklist t-frame" data-label="Get Started — 2 Steps to Your First Quality Test">
+      {/* Progress steps header — shows at-a-glance where the user is */}
+      <div class="sh-progress-steps" style="margin-bottom: var(--space-4);">
+        <div class={`sh-progress-step ${step1Cls}`}>
+          <span class="sh-progress-step-number">1</span>
+          DATA SOURCE
+        </div>
+        <div class={`sh-progress-step ${step2Cls}`}>
+          <span class="sh-progress-step-number">2</span>
+          FIRST RUN
+        </div>
+      </div>
       <Step
         number={1}
         complete={step1Complete}

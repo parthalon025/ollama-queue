@@ -1,12 +1,15 @@
 // What it shows: Nothing directly — pure logic hook that tracks loading/success/error state
-//   for a single async action button.
+//   for a single async action button. Fires confirmAction() on success for glitch-burst
+//   feedback so the operator knows the system received the command.
 // Decision it drives: Lets every action button show exactly what is happening — "Cancelling…",
 //   "Run #12 started", "Cancel failed: already complete" — without duplicating state boilerplate.
 import { useState, useRef, useEffect } from 'preact/hooks';
+import { confirmAction } from 'superhot-ui';
 
 export function useActionFeedback() {
   const [state, setState] = useState({ phase: 'idle', msg: '' });
   const timerRef = useRef(null);
+  const targetRef = useRef(null);
 
   // Clear any pending timeout on unmount to prevent setState on unmounted component
   useEffect(() => {
@@ -27,6 +30,10 @@ export function useActionFeedback() {
         ? successLabel(result)
         : (successLabel || 'Done');
       setState({ phase: 'success', msg });
+
+      // Fire confirmAction glitch burst + SFX on the nearest action element
+      confirmAction(targetRef.current, { sound: 'complete', intensity: 'low' });
+
       if (timerRef.current !== null) clearTimeout(timerRef.current);
       timerRef.current = setTimeout(() => {
         timerRef.current = null;
@@ -37,5 +44,5 @@ export function useActionFeedback() {
     }
   }
 
-  return [state, run];
+  return [state, run, targetRef];
 }
