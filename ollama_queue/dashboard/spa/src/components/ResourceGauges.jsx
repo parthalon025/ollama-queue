@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'preact/hooks';
+import { applyThreshold } from 'superhot-ui';
 import { ShThreatPulse } from 'superhot-ui/preact';
 
 /**
@@ -47,6 +48,22 @@ export default function ResourceGauges({ ram, vram, load, swap, settings }) {
     }, 2000);
     return () => clearTimeout(t);
   }, [isWarning, isCritical]);
+
+  // Threshold signaling — apply glow classes to each gauge bar element
+  const gaugeRefs = useRef({});
+  useEffect(() => {
+    // Apply threshold glow to each gauge element using superhot-ui applyThreshold
+    const entries = [
+      ['RAM', ram ?? 0, { ambient: ramResume - 10, standard: ramResume, critical: ramPause }],
+      ['GPU', vram ?? 0, { ambient: vramResume - 10, standard: vramResume, critical: vramPause }],
+      ['CPU', load ?? 0, { ambient: 50, standard: 80, critical: 100 }],
+      ['Swap', swap ?? 0, { ambient: 20, standard: 35, critical: 50 }],
+    ];
+    for (const [label, pct, breakpoints] of entries) {
+      const el = gaugeRefs.current[label];
+      if (el) applyThreshold(el, pct, breakpoints);
+    }
+  }, [ram, vram, load, swap, ramPause, vramPause, ramResume, vramResume]);
 
   // Plain-English explanations for each resource gauge (ARIA "Explain like I'm 5")
   const GAUGE_TOOLTIPS = {
@@ -118,7 +135,9 @@ export default function ResourceGauges({ ram, vram, load, swap, settings }) {
           : gaugeBar;
 
         return (
-          <div key={g.label} title={g.title} class="flex items-center gap-1" style="min-width: 80px; flex: 1;">
+          <div key={g.label} title={g.title} class="flex items-center gap-1"
+               ref={el => { gaugeRefs.current[g.label] = el; }}
+               style="min-width: 80px; flex: 1;">
             <span class="data-mono" style="font-size: var(--type-micro); color: var(--text-tertiary); width: 32px; text-align: right;">
               {g.label}
             </span>
