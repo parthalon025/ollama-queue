@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { applyMantra, removeMantra } from 'superhot-ui';
 import {
     status, queue, history, healthData, cpuCount, durationData, settings,
@@ -13,7 +13,7 @@ import HostCard from '../components/HostCard.jsx';
 import LoadHeatmap from '../components/LoadHeatmap.jsx';
 import QueueList from '../components/QueueList.jsx';
 import HeroCard from '../components/HeroCard.jsx';
-import { ShPageBanner, ShStatCard, ShStatsGrid, ShFrozen, ShThreatPulse } from 'superhot-ui/preact';
+import { ShPageBanner, ShStatCard, ShStatsGrid, ShFrozen, ShThreatPulse, ShModal } from 'superhot-ui/preact';
 import { TAB_CONFIG } from '../config/tabs.js';
 
 // NOTE: all .map() callbacks use descriptive names — never 'h' (shadows JSX factory)
@@ -37,6 +37,9 @@ export default function Now() {
     // Action feedback hook for "Dismiss all" — must precede any conditional return
     const [dismissFb, dismissAct] = useActionFeedback();
     const [dismissRef, dismissShatter] = useShatter('earned');
+
+    // ShModal confirmation for destructive DLQ dismiss action
+    const [confirmDismiss, setConfirmDismiss] = useState(false);
 
     // Ref for the page container — target for the OFFLINE mantra overlay.
     const pageRef = useRef(null);
@@ -198,7 +201,7 @@ export default function Now() {
                                     class="t-btn"
                                     style={{ fontSize: 'var(--type-micro)', padding: '2px 8px', color: 'var(--text-tertiary)' }}
                                     disabled={dismissFb.phase === 'loading'}
-                                    onClick={() => { dismissShatter(); dismissAct('CLEARING', clearDLQ, () => 'CLEARED'); }}
+                                    onClick={() => setConfirmDismiss(true)}
                                 >DISMISS ALL</button>
                                 {dismissFb.msg && <span class={`action-fb action-fb--${dismissFb.phase}`}>{dismissFb.msg}</span>}
                             </div>
@@ -332,6 +335,20 @@ export default function Now() {
                 Moved from Performance tab so it lives alongside the hosts it describes. */}
             <LoadHeatmap />
 
+            {/* Confirmation modal for destructive DLQ dismiss — requires explicit confirmation */}
+            <ShModal
+                open={confirmDismiss}
+                title="CONFIRM: PURGE DLQ"
+                body={`This will permanently dismiss ${dlqCnt} dead-letter queue entries. This action cannot be undone.`}
+                confirmLabel="PURGE"
+                cancelLabel="CANCEL"
+                onConfirm={() => {
+                    setConfirmDismiss(false);
+                    dismissShatter();
+                    dismissAct('CLEARING', clearDLQ, () => 'CLEARED');
+                }}
+                onCancel={() => setConfirmDismiss(false)}
+            />
         </div>
     );
 }

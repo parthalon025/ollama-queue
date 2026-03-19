@@ -1,7 +1,7 @@
 import { Component } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { signal, useSignal } from '@preact/signals';
-import { ShMantra } from 'superhot-ui/preact';
+import { ShMantra, ShIncidentHUD } from 'superhot-ui/preact';
 import { bootSequence, detectCapability, applyCapability } from 'superhot-ui';
 
 // Temporary debug boundary — catches Plan render errors that signals swallows silently
@@ -246,6 +246,22 @@ export function App() {
     const activeEval = status.value?.active_eval ?? null;
     const isDaemonPaused = (daemonState?.state || '').startsWith('paused');
 
+    // Incident HUD state — tracks when the system entered critical/degraded mode
+    const incidentTimestamp = useSignal(null);
+    const incidentAcked = useSignal(false);
+    // Track incident start time on health mode transitions
+    useEffect(() => {
+        if (healthMode.value === 'critical') {
+            if (incidentTimestamp.value === null) {
+                incidentTimestamp.value = Date.now();
+                incidentAcked.value = false;
+            }
+        } else {
+            incidentTimestamp.value = null;
+            incidentAcked.value = false;
+        }
+    }, [healthMode.value]);
+
     // Build command palette items from current signals
     // DS ShCommandPalette requires an 'id' field per item for ARIA/key.
     const paletteItems = [
@@ -279,6 +295,14 @@ export function App() {
                     ? (failedServices.value[0] || 'SYSTEM DOWN')
                     : (isDaemonPaused ? 'SYSTEM PAUSED' : '')}
                 active={isDaemonPaused || escalationLevel.value >= 3}
+            />
+            {/* Incident HUD — system-wide banner when health is critical */}
+            <ShIncidentHUD
+                active={healthMode.value === 'critical' && !incidentAcked.value}
+                severity="critical"
+                message={`INCIDENT: ${(failedServices.value || []).join(', ').toUpperCase() || 'SYSTEM FAILURE'}`}
+                timestamp={incidentTimestamp.value}
+                onAcknowledge={() => { incidentAcked.value = true; }}
             />
             <Sidebar
                 active={currentTab.value}
