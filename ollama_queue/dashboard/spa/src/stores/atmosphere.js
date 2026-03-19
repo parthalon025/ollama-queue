@@ -1,5 +1,6 @@
 // What it does: Derives system health mode (operational/degraded/critical) from existing
-//   signals, manages escalation timers, enforces effect density budgets, and controls audio.
+//   signals, manages escalation via orchestrateEscalation coordinator, enforces effect density
+//   budgets, and controls audio. Uses recoverySequence for choreographed recovery transitions.
 //   Pure reactive computation — no new API calls.
 // Decision it drives: Every atmosphere-aware component reads healthMode + escalationLevel
 //   to decide which visual effects to show. canFireEffect() prevents cognitive overload by
@@ -8,9 +9,24 @@
 
 import { signal, effect } from '@preact/signals';
 import { connectionStatus, status } from './queue.js';
-import { dlqCount, backendsData, backendsError } from './health.js';
-import { trackEffect, isOverBudget } from 'superhot-ui';
+import { dlqCount, backendsData, backendsError, addToast } from './health.js';
 import { playSfx, ShAudio } from 'superhot-ui';
+import { orchestrateEscalation, recoverySequence, glitchText } from 'superhot-ui';
+
+// ── Local effect density tracking ────────────────────────────────────────────
+// Limits simultaneous visual effects to prevent cognitive overload.
+// Max 3 active effects at once — each trackEffect() call returns a cleanup fn.
+const MAX_CONCURRENT_EFFECTS = 3;
+let _activeEffects = new Set();
+
+function trackEffect(id) {
+    _activeEffects.add(id);
+    return () => { _activeEffects.delete(id); };
+}
+
+function isOverBudget() {
+    return _activeEffects.size >= MAX_CONCURRENT_EFFECTS;
+}
 
 // ── Health mode ──────────────────────────────────────────────────────────────
 
@@ -80,7 +96,7 @@ export function canFireEffect(id) {
 
 // ── Internal state ───────────────────────────────────────────────────────────
 
-let _escalationTimers = [];
+let _orchestrator = null;
 let _disposeEffect = null;
 
 /**
@@ -148,40 +164,76 @@ function _computeHealthMode() {
 }
 
 /**
- * Clear all escalation timers and reset level to 0.
+ * Initialize the orchestrateEscalation coordinator.
+ * Lazily deferred until the DOM is available (called from initAtmosphere).
+ * Syncs escalationLevel signal with the timer's internal level on each advance.
  */
-function _clearEscalation() {
-    for (const t of _escalationTimers) clearTimeout(t);
-    _escalationTimers = [];
-    escalationLevel.value = 0;
+function _initOrchestrator() {
+    if (_orchestrator) return;
+
+    // Resolve surfaces from the live DOM — these selectors match app.jsx layout
+    const layout = document.querySelector('.layout-root');
+    const sidebar = document.querySelector('.layout-sidebar');
+    const main = document.querySelector('.layout-main');
+
+    _orchestrator = orchestrateEscalation({
+        surfaces: {
+            component: layout ? [layout] : [],
+            sidebar: sidebar ? [sidebar] : [],
+            section: main || undefined,
+            layout: layout || undefined,
+        },
+        sectionMantra: 'DEGRADED',
+        layoutMantra: 'SYSTEM CRITICAL',
+        sounds: true,
+        thresholds: [5000, 10000, 45000, 60000],
+    });
+
+    // Patch onEscalate to keep the escalationLevel signal in sync
+    const origTimer = _orchestrator.timer;
+    const origOnEscalate = origTimer.onEscalate;
+    origTimer.onEscalate = (level, name) => {
+        escalationLevel.value = level;
+        origOnEscalate(level, name);
+    };
+    const origOnReset = origTimer.onReset;
+    origTimer.onReset = () => {
+        escalationLevel.value = 0;
+        origOnReset();
+    };
 }
 
 /**
- * Start the escalation timeline:
- *   0s  → level 0 (component effects only)
- *   5s  → level 1 (sidebar pulse)
- *  15s  → level 2 (section mantra)
- *  60s  → level 3 (layout-root mantra)
+ * Run the choreographed recovery sequence — glitch burst → border transition →
+ * pulse stop → RESTORED toast. Uses superhot-ui recoverySequence utility.
  */
-function _startEscalation() {
-    _clearEscalation();
-    // Already at level 0 by default after clear
-
-    _escalationTimers.push(
-        setTimeout(() => { escalationLevel.value = 1; }, 5000)
-    );
-    _escalationTimers.push(
-        setTimeout(() => { escalationLevel.value = 2; }, 15000)
-    );
-    _escalationTimers.push(
-        setTimeout(() => { escalationLevel.value = 3; }, 60000)
-    );
+function _runRecovery() {
+    const main = document.querySelector('.layout-main');
+    recoverySequence({
+        glitchFn: () => {
+            if (main) glitchText(main, { duration: 200, intensity: 'medium' });
+        },
+        onBorderTransition: () => {
+            if (main) {
+                main.style.borderColor = 'var(--sh-phosphor)';
+                setTimeout(() => { main.style.borderColor = ''; }, 600);
+            }
+        },
+        onPulseStop: () => {
+            const pulsing = document.querySelectorAll('[data-sh-effect="threat-pulse"]');
+            pulsing.forEach(el => el.removeAttribute('data-sh-effect'));
+        },
+        onToast: () => {
+            addToast('SYSTEM RESTORED', 'success');
+        },
+        delays: { afterGlitch: 200, afterBorder: 300, afterPulse: 200 },
+    });
 }
 
 // ── Init / Dispose ───────────────────────────────────────────────────────────
 
 /**
- * Start the atmosphere reactive computation and escalation timers.
+ * Start the atmosphere reactive computation and orchestrated escalation.
  * Call once from app.jsx on mount. Returns nothing — call disposeAtmosphere() to clean up.
  */
 export function initAtmosphere() {
@@ -190,7 +242,10 @@ export function initAtmosphere() {
         _disposeEffect();
         _disposeEffect = null;
     }
-    _clearEscalation();
+    if (_orchestrator) {
+        _orchestrator.reset();
+        _orchestrator = null;
+    }
 
     // Load audio preference from localStorage
     ShAudio.enabled = _loadAudioPref();
@@ -210,29 +265,37 @@ export function initAtmosphere() {
         prevHealthMode.value = currentMode;
         healthMode.value = newMode;
 
-        // State transition audio cues
+        // Lazy-init orchestrator on first transition (DOM must exist)
+        _initOrchestrator();
+
+        // State transition effects via orchestrateEscalation + recoverySequence
         if (currentMode !== 'operational' && newMode === 'operational') {
-            // Recovery
-            _clearEscalation();
+            // Recovery — choreographed sequence then reset orchestrator
+            if (_orchestrator) _orchestrator.reset();
+            _runRecovery();
             playSfx('complete');
         } else if (currentMode === 'operational' && newMode !== 'operational') {
-            // Entering failure
-            _startEscalation();
+            // Entering failure — start orchestrated escalation
+            if (_orchestrator) _orchestrator.start();
             playSfx('error');
         } else {
             // Severity change within non-operational (e.g. degraded → critical)
-            // Restart escalation timeline from current point — don't reset
+            // Orchestrator continues its timeline — no restart needed
         }
     });
 }
 
 /**
- * Dispose all reactive subscriptions and timers. Call on unmount.
+ * Dispose all reactive subscriptions and orchestration timers. Call on unmount.
  */
 export function disposeAtmosphere() {
     if (_disposeEffect) {
         _disposeEffect();
         _disposeEffect = null;
     }
-    _clearEscalation();
+    if (_orchestrator) {
+        _orchestrator.stop();
+        _orchestrator = null;
+    }
+    escalationLevel.value = 0;
 }
