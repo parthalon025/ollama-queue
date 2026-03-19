@@ -24,7 +24,7 @@ function trackEffect(id) {
     return () => { _activeEffects.delete(id); };
 }
 
-function isOverBudget() {
+export function isOverBudget() {
     return _activeEffects.size >= MAX_CONCURRENT_EFFECTS;
 }
 
