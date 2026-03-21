@@ -1,33 +1,14 @@
 name: Release
 on:
   push:
-    tags: ['v*']
-permissions:
-  contents: write
-  packages: write
+    branches: [main]
+
 jobs:
   release:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: softprops/action-gh-release@v2
-        with:
-          generate_release_notes: true
-
-  docker-agent:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v5
-        with:
-          context: sidecar/
-          push: true
-          build-args: AGENT_VERSION=${{ github.ref_name }}
-          tags: |
-            ghcr.io/parthalon025/ollama-backend-agent:latest
-            ghcr.io/parthalon025/ollama-backend-agent:${{ github.ref_name }}
+    uses: parthalon025/ci-workflows/.github/workflows/reusable-release.yml@v1
+    with:
+      release-type: 'simple'
+    secrets: inherit
+    permissions:
+      contents: write
+      pull-requests: write
