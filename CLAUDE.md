@@ -205,21 +205,7 @@ npm run build        # Production
 npm run dev          # Watch mode
 ```
 
-Sidebar nav (desktop) + bottom tab bar (mobile). 9 views: **Now** (host-first command center: `HostCard` list [one per GPU backend — shows current job/eval/model, VRAM/CPU gauges; resource bars use gradient color ramp — full-width gradient track + mask; load_avg to % via `load_avg / cpu_count * 100`; CPU pause/resume thresholds `multiplier × 100` not `× 50`; `data-mood` on wrapper div — NOT on `.t-frame` — cascades superhot-ui mood selectors; `ShGlitch` fires only on `healthy → false` edge transition; offline backend wraps card in `ShThreatPulse active persistent`; stall elapsed shown via `ShFrozen`; expand card → VRAM % 24h `ShTimeChart` (local backends, from `healthHistory` prop) + full-width SYSTEM HEALTH gauges]; `ShStatsGrid` KPI section — 3 stats: queue depth, 24h jobs, RAM; `ShFrozen` wraps KPIs and HeroCards with 30s/2m/5m thresholds; DLQ dismiss button wired to `useShatter('earned')` with 7-fragment shatter; alert strip — amber badge for auto-disabled recurring jobs count linking to Plan tab; `LoadHeatmap` at bottom — 24h×7d GPU activity grid) + **Plan** (health summary strip showing active/failing/disabled/overdue/skip counts; 24h Gantt timeline with "now" needle dynamically positioned by wall-clock within zoom window, `visibleJobs` filter prevents past-due jobs piling at left edge in zoom mode; disabled jobs render at 40% opacity + dashed outline + ⏸ prefix; skip badge ↻N shows when job was skipped N times in last 24h; bar detail card shows load/run/unload segment breakdown; warmup cap = `min(rawWarmup, floor(estDur * 0.4))` prevents body collapse; 48-bucket load-map density strip with DLQ/deferral slot markers, ρ traffic intensity badge, "Suggest slot" button highlighting top-3 low-load windows; tag-grouped recurring jobs wrapped in `ShCollapsible` [uncontrolled, defaultOpen=true, job count in summary], bulk actions, expandable detail panels) + **History** (DLQ entries with reschedule status badges/reasoning, deferred jobs panel, duration trends, activity heatmap, `ShDataTable` for searchable/sortable job history) + **Models** (`ShDataTable` for searchable/sortable model list) + **Perf** (model performance table, cross-model performance curve chart [log-linear regression on `params.eval_slope`/`params.eval_intercept`/`params.residual_std` from `/api/metrics/performance-curve`; was broken using `curve.tok_slope` — fixed], `ShTimeChart` RAM % trend — last 24h, per-backend throughput table) + **Settings** (thresholds, defaults, retention, DLQ auto-reschedule, proactive deferral, daemon controls, CRT scanline display preference, audio toggle for procedural SFX) + **Consumers** (scan button, consumer cards with status badges and include/ignore/revert actions, intercept toggle with status banner).
-
-**Atmosphere system** — `stores/atmosphere.js` drives global health-mode escalation (operational/degraded/critical) and effect density budgeting (max 3 simultaneous effects via `trackEffect()`/`isOverBudget()`; `isOverBudget` is exported from `atmosphere.js`, not from superhot-ui). `app.jsx` uses `orchestrateEscalation()` from superhot-ui to manage all escalation timing and transitions — no manual healthMode subscriptions. Recovery transitions use `recoverySequence()` for choreographed glitch burst → border transition → pulse stop → RESTORED toast. Boot sequence runs `bootSequence()` + `detectCapability()` + `applyCapability()` on app startup (skipped if reduced-motion or already booted this session). `ShIncidentHUD` renders in `app.jsx` as a system-wide banner when health is critical. Escalation-driven mantra (`applyMantra`/`removeMantra`) activates when `escalation.value >= 2`. All 9 pages use `sh-stagger-children` class for entry choreography. `ShEmptyState` replaces all custom empty states with terminal-voice mantras ("NOTHING TO REPORT", "ALL SYSTEMS NOMINAL", etc.). `ShFrozen` wraps time-sensitive data across all pages (DLQ, deferrals, eval runs, consumer scan times, Gantt bars) with configurable staleness thresholds.
-
-**Terminal voice** — all inline SPA copy uses piOS UPPERCASE voice style. `useActionFeedback` labels ("CANCELLING...", "QUEUED"), TAB_CONFIG subtitles, toast messages, button labels ("DISMISS", "RETRY", "SCAN"), empty state messages, and onboarding overlay text are all terminal-voiced.
-
-**Tiered button shatter** — `useShatter` hook (`src/hooks/useShatter.js`) provides 3 tiers: `earned` (7 fragments — DLQ dismiss, eval cancel), `complete` (6 — form submits, promote), `routine` (3 — toggles, navigation). All action buttons across all 9 pages are wired. The hook integrates with the atmosphere effect density budget.
-
-**Glitch/ThreatPulse deepening** — `ShGlitch` fires on connection loss transitions (`connectionStatus` signal), eval failure edges, and backend health transitions. `ShThreatPulse` wraps VRAM/RAM breach warnings, stuck eval runs, circuit breaker activation, and offline backends (with `persistent` flag).
-
-All 9 pages use `ShPageBanner` (namespace/page/subtitle pixel-art header, TAB_CONFIG-driven) — replaces the old `PageBanner` component. Eval tab uses `ShPipeline` in `ActiveRunProgress.jsx` (replaces `EvalPipelineSwimline`). Tab metadata (id, icon, label, tooltip, namespace, page, subtitle) is the single source of truth in `src/config/tabs.js` (TAB_CONFIG) — eliminates duplicate NAV_ITEMS constants. Column configs for ShDataTable: `src/config/historyColumns.js` (History tab), `src/config/modelColumns.js` (Models tab).
-
-Route IDs: `now` | `plan` | `history` | `models` | `settings` | `eval` | `consumers` | `performance`. Sidebar: 200px desktop, 64px icon-only (768–1023px), hidden on mobile. CSS classes: `layout-root`, `layout-sidebar`, `layout-main`, `now-grid`, `history-top-grid`, `mobile-bottom-nav`.
-
-**Eval tab** (4 sub-views): Runs (run list + active progress + repeat + judge-rerun + per-run analysis panel with `simpleRenderMd()` + Analyze/Re-analyze button; winner label shows variant label + model name; L2 shows bootstrap CI inline in metrics + per-item breakdown panel sorted worst-first + Compute/Re-analyze button for `analysis_json`; L3 ResultsTable has TP/TN/FP/FN filter tabs with classification from `eval.positive_threshold`), Variants (prompt variant CRUD + stability table with cross-run F1 stdev/stable badge from `/api/eval/variants/stability` + ConfigDiffPanel for side-by-side comparison via `/api/eval/variants/{a}/diff/{b}`; `latest_f1` score shown inline; two-click inline delete replaces `confirm()` dialog; `description` field shown per row), Trends (F1 line chart + trend summary), Settings (judge defaults + data source + scheduling mode + setup checklist [2 gates: data source connected + first run exists] + `eval.analysis_model` — empty string means use judge model; judge mode inline description; "1–20" range hint on Lessons per Group; variant descriptions shown in checkbox list; alert()-based tooltips replaced with inline reveal). `eval_variants` rows have a `description TEXT` column; `GET /api/eval/variants` includes `description` in response; live DB migration backfills pre-existing rows via `UPDATE WHERE description IS NULL`. Eval state: `evalActiveRun`, `evalSubTab`, `fetchEvalRuns` in `stores/eval.js`. Key invariants: `repeat` starts a background thread (not just a DB row); `judge-rerun` copies gen_results from source run before judging; cancel sets `completed_at`; all fetch calls check `res.ok`; `generate_eval_analysis()` runs automatically after each eval run completes and stores markdown to `eval_runs.analysis_md`; `compute_run_analysis()` stores structured `analysis_json` (per-item breakdown, failure cases, bootstrap CI) per run. `eval/analysis.py` is the pure analysis module (no DB/HTTP) — 5 public functions. Graceful no-cluster degradation: returns `{"status": "no_cluster_data"}` for projects without cluster labels.
+9-view SPA: Now (command center), Plan (Gantt + recurring jobs), History (DLQ + trends), Models, Perf, Settings, Consumers, Eval (4 sub-views). Full view-by-view reference in `docs/llm-guide-design-system.md`.
 
 ### UI Layman Comments (always required)
 
@@ -338,36 +324,6 @@ See `docs/` for implementation notes and design decisions.
 
 **Before building any UI:** Read `docs/llm-guide-design-system.md`. Follow §1.5 Strategy Stack (Outcome-Driven + Friction Reduction + Trust & Predictability + Action-Oriented + Feedback-Rich). Behavioral target: fire-and-forget confidence.
 
-Pipeline: ui-template (base) → superhot-ui (theme) → ollama-queue (consumer). Key mappings:
-- **Host state** → `HostCard` (one per GPU backend — job/eval/model/gauges; `data-mood` wrapper cascades mood)
-- **Running job** → `ShStatusBadge` (running) + `ShFrozen` elapsed timer
-- **Queued job** → QueueList rows + `ShStatusBadge` (queued/waiting)
-- **Failed/DLQ** → `ShShatter` dismiss (earned tier, 7 fragments) + `ShStatusBadge` (error); `dread` mood on page/card
-- **Health degraded** → `ShGlitch` (edge-triggered on `healthy → false`, connection loss, eval failure) + `ShThreatPulse` (offline backends, VRAM/RAM breach, stuck eval, circuit breaker)
-- **Resources** → `HostGaugeBar` + gradient color ramp (VRAM >90% error, >80% warning; CPU `multiplier × 100`)
-- **KPI summary** → `ShStatsGrid` / `ShStatCard`; `ShFrozen` wraps time-sensitive KPIs (30s/2m/5m thresholds)
-- **Page headers** → `ShPageBanner` (namespace/page/subtitle pixel-art header, TAB_CONFIG-driven)
-- **Eval progress** → `ShPipeline` in `ActiveRunProgress.jsx`
-- **Tables** → `ShDataTable` (History, Models tabs)
-- **Loading** → `ShSkeleton`; **CRT scanline toggle** → `ShCrtToggle`
-- **OFFLINE watermark** → `applyMantra` / `removeMantra` (escalation-driven, triggers at `escalation >= 2`)
-- **Entry choreography** → `sh-stagger-children` class on all 9 page root containers
-- **Empty states** → `ShEmptyState` with terminal mantras (replaces deleted `EmptyState.jsx` / `ErrorState.jsx`)
-- **Button actions** → `useShatter` hook: earned (7 fragments) for DLQ/eval cancel, complete (6) for submits/promote, routine (3) for toggles
-- **Atmosphere** → `stores/atmosphere.js`: `healthMode` (operational/degraded/critical), `escalation` (0–3), effect density budget (max 3 simultaneous)
-- **Terminal voice** → ALL CAPS piOS style on all UI copy; **Audio** → opt-in procedural SFX via `playSfx()`
-- **Tabs:** Now=dawn, Plan=wonder, History=dread, Models=nostalgic
-- **Escalation transitions** → `orchestrateEscalation()` in `atmosphere.js` (replaces manual subscriptions); recovery via `recoverySequence()`
-- **System-wide failure banner** → `ShIncidentHUD` in `app.jsx` (critical health only, shows elapsed + ACK button)
-- **Destructive action confirmation** → `ShModal` (DLQ purge in `Now.jsx`, eval cancel in `ActiveRunProgress.jsx`)
-- **Boot sequence** → `bootSequence()` + `detectCapability()` + `applyCapability()` run in `app.jsx` on startup; sets `data-sh-capability` on document root
-- **Effect budget gate** → `isOverBudget()` (from `stores/atmosphere.js`) checked at top of `useShatter.fire()` — all tiers suppressed when over budget
-- **Poll heartbeat** → `heartbeat()` called on every poll cycle in `stores/index.js` (micro-burst on cohesion header)
-- **Resource gauge thresholds** → `applyThreshold()` on each gauge element in `ResourceGauges.jsx`; breakpoints derived from settings pause/resume values
-- **Form submit feedback** → `confirmAction()` (from superhot-ui) fires glitch burst + SFX on successful action; called inside `useActionFeedback` on success
-
-## Code Factory
-
 ## Scope Tags
 language:python, framework:preact, domain:ollama
 
@@ -375,23 +331,3 @@ Quality gates for agent-driven development (auto-triggered via superpowers integ
 - **Quality checks**: `python3 -m pytest --timeout=120 -x -q; npm run build`
 - **PRD artifacts**: `tasks/prd.json`, `tasks/prd-<feature>.md`
 - **Progress log**: `progress.txt` (append-only during execution)
-
-## Code Quality
-- Lint: `make lint`
-- Format: `make format`
-
-## Quality Gates
-- Before committing: `/verify`
-- Before PRs: `lessons-db scan --target . --baseline HEAD`
-
-## Lessons
-- Check before planning: `/check-lessons`
-- Capture after bugs: `/capture-lesson`
-- Lessons: `lessons-db search` to query, `lessons-db capture` to add. DB is authoritative — never write lesson .md files directly.
-
-## Local AI Review
-- Code review: `ollama-code-review .`
-
-## Semantic Search
-- Generate: `bash scripts/generate-embeddings.sh`
-- Storage: `.embeddings/` (gitignored)
