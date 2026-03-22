@@ -26,7 +26,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0.0", "pytest-xdist>=3.5.0"]
+dev = ["pytest>=8.0.0", "pytest-xdist>=3.5.0", "scikit-learn>=1.4.0"]
 
 [project.scripts]
 ollama-queue = "ollama_queue.cli:main"
