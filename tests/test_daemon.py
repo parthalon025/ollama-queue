@@ -258,15 +258,15 @@ def test_record_duration_skips_none_model(daemon):
     # record_duration must NOT be called with model=None
     for call in mock_record.call_args_list:
         model_arg = call.kwargs.get("model") or (call.args[1] if len(call.args) > 1 else None)
-        assert (
-            model_arg is not None
-        ), "record_duration was called with model=None — corrupt null-model row would be written"
+        assert model_arg is not None, (
+            "record_duration was called with model=None — corrupt null-model row would be written"
+        )
 
     # No null-model rows in duration_history
     history = daemon.db.get_duration_history("cmd-src")
-    assert all(
-        row["model"] is not None for row in history
-    ), "duration_history contains a null-model row from a command-only job"
+    assert all(row["model"] is not None for row in history), (
+        "duration_history contains a null-model row from a command-only job"
+    )
 
 
 class TestDaemonSchedulerIntegration:
@@ -1439,9 +1439,9 @@ class TestProxySentinelPreservation:
             daemon.poll_once()
 
         state_after = daemon.db.get_daemon_state()
-        assert (
-            state_after["current_job_id"] == -1
-        ), "poll_once() must not clear the proxy sentinel when no regular jobs are pending"
+        assert state_after["current_job_id"] == -1, (
+            "poll_once() must not clear the proxy sentinel when no regular jobs are pending"
+        )
 
     def test_poll_sets_idle_current_job_id_null_when_no_proxy(self, daemon):
         """poll_once() with no pending jobs and no proxy claim sets current_job_id=None."""
@@ -3503,9 +3503,9 @@ def test_proc_wait_uses_timeout_after_drain(db):
     proc.wait.assert_called()
     args, kwargs = proc.wait.call_args
     timeout_val = kwargs.get("timeout") or (args[0] if args else None)
-    assert (
-        timeout_val is not None and timeout_val > 0
-    ), f"proc.wait() must be called with a positive timeout, got args={args} kwargs={kwargs}"
+    assert timeout_val is not None and timeout_val > 0, (
+        f"proc.wait() must be called with a positive timeout, got args={args} kwargs={kwargs}"
+    )
 
 
 def test_proc_wait_timeout_expired_kills_process(db, caplog):

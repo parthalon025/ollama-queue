@@ -1217,14 +1217,14 @@ def test_streaming_proxy_cancelled_error_releases_claim(db):
         )
 
     # The proxy claim must have been released — the daemon must not be permanently blocked.
-    assert (
-        len(release_called) >= 1
-    ), "release_proxy_claim was never called — claim is permanently held after CancelledError"
+    assert len(release_called) >= 1, (
+        "release_proxy_claim was never called — claim is permanently held after CancelledError"
+    )
     state = db.get_daemon_state()
     assert state["state"] == "idle", f"Daemon stuck in non-idle state after CancelledError: {state['state']}"
-    assert (
-        state["current_job_id"] is None
-    ), f"current_job_id not cleared after CancelledError: {state['current_job_id']}"
+    assert state["current_job_id"] is None, (
+        f"current_job_id not cleared after CancelledError: {state['current_job_id']}"
+    )
 
 
 def test_streaming_background_task_forces_release_on_generator_release_failure(client, db):
@@ -1413,7 +1413,7 @@ def test_proxy_ollama_request_no_double_complete_job_when_first_raises(tmp_path)
 
     # The fix: complete_job should only be called once (the first call that raised)
     assert len(complete_job_calls) == 1, (
-        f"complete_job was called {len(complete_job_calls)} times — " "must not call it twice when first call raises"
+        f"complete_job was called {len(complete_job_calls)} times — must not call it twice when first call raises"
     )
     # And the one call must be the success path (exit_code=0)
     assert complete_job_calls[0]["exit_code"] == 0

@@ -240,8 +240,7 @@ def test_handle_failure_locked_exists_and_matches_behavior(tmp_path):
 
     # _handle_failure_locked must exist and be callable
     assert hasattr(dlq, "_handle_failure_locked"), (
-        "DLQManager must have _handle_failure_locked method for callers "
-        "already holding db._lock (executor.py pattern)"
+        "DLQManager must have _handle_failure_locked method for callers already holding db._lock (executor.py pattern)"
     )
 
     # Submit a job so there's something to fail

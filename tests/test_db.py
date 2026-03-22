@@ -1079,9 +1079,9 @@ def test_eval_variants_have_description(tmp_path):
         variants = conn.execute("SELECT id, description FROM eval_variants WHERE is_system = 1").fetchall()
     assert len(variants) == 9
     for row in variants:
-        assert (
-            row["description"] is not None and len(row["description"]) > 10
-        ), f"Variant {row['id']} has missing or empty description"
+        assert row["description"] is not None and len(row["description"]) > 10, (
+            f"Variant {row['id']} has missing or empty description"
+        )
 
 
 def test_eval_results_has_title_columns(tmp_path):

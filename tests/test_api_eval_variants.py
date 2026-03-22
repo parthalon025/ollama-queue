@@ -429,9 +429,9 @@ def test_list_variants_includes_description(client):
     assert len(system_variants) >= 9
     for v in system_variants:
         assert "description" in v, f"Variant {v['id']} missing description key"
-        assert (
-            v["description"] and len(v["description"]) > 10
-        ), f"Variant {v['id']} has empty description in API response"
+        assert v["description"] and len(v["description"]) > 10, (
+            f"Variant {v['id']} has empty description in API response"
+        )
 
 
 # --- Stability ---

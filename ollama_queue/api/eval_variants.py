@@ -45,7 +45,7 @@ def _validate_model_installed(model: str, provider: str) -> None:
     if check_name not in installed:
         raise HTTPException(
             status_code=422,
-            detail=f"Model {model!r} is not installed in Ollama. " f"Installed: {', '.join(sorted(installed))}",
+            detail=f"Model {model!r} is not installed in Ollama. Installed: {', '.join(sorted(installed))}",
         )
 
 
@@ -632,9 +632,9 @@ def update_eval_variant(variant_id: str, body: dict = Body(...)):
         if "model" in updates:
             update_provider = updates.get("provider") or variant.get("provider", "ollama")
             _validate_model_installed(updates["model"], update_provider)
-        assert all(
-            re.match(r"^[a-z_]+$", k) for k in updates
-        ), f"unsafe column names: {set(updates) - {k for k in updates if re.match(r'^[a-z_]+$', k)}}"
+        assert all(re.match(r"^[a-z_]+$", k) for k in updates), (
+            f"unsafe column names: {set(updates) - {k for k in updates if re.match(r'^[a-z_]+$', k)}}"
+        )
         set_clause = ", ".join(f"{k} = ?" for k in updates)
         values = [*list(updates.values()), variant_id]
         conn.execute(f"UPDATE eval_variants SET {set_clause} WHERE id = ?", values)
@@ -694,9 +694,9 @@ def update_eval_template(template_id: str, body: dict = Body(...)):
         updates = {k: v for k, v in body.items() if k in updatable_fields}
         if not updates:
             return dict(template)
-        assert all(
-            re.match(r"^[a-z_]+$", k) for k in updates
-        ), f"unsafe column names: {set(updates) - {k for k in updates if re.match(r'^[a-z_]+$', k)}}"
+        assert all(re.match(r"^[a-z_]+$", k) for k in updates), (
+            f"unsafe column names: {set(updates) - {k for k in updates if re.match(r'^[a-z_]+$', k)}}"
+        )
         set_clause = ", ".join(f"{k} = ?" for k in updates)
         values = [*list(updates.values()), template_id]
         conn.execute(f"UPDATE eval_prompt_templates SET {set_clause} WHERE id = ?", values)

@@ -527,9 +527,9 @@ class TestComputeMetricsPerCluster:
         metrics = compute_metrics(results)
         assert "per_cluster" in metrics["A"]
         assert "C1" in metrics["A"]["per_cluster"]
-        assert (
-            "C2" not in metrics["A"]["per_cluster"]
-        ), "Cluster with 0 same-cluster pairs should not appear in per_cluster breakdown"
+        assert "C2" not in metrics["A"]["per_cluster"], (
+            "Cluster with 0 same-cluster pairs should not appear in per_cluster breakdown"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -2242,9 +2242,9 @@ class TestVerticalIntegrationV2:
 
         # Every judge row should have score_posterior (non-null, Bayesian mode)
         for row in judge_rows:
-            assert (
-                row["score_posterior"] is not None
-            ), f"score_posterior is NULL for result id={row['id']} — bayesian mode must compute posteriors"
+            assert row["score_posterior"] is not None, (
+                f"score_posterior is NULL for result id={row['id']} — bayesian mode must compute posteriors"
+            )
             assert 0.0 <= row["score_posterior"] <= 1.0, f"score_posterior out of bounds: {row['score_posterior']}"
 
         # 4c. Metrics should contain Bayesian-specific keys
@@ -3337,7 +3337,7 @@ class TestCallProxyRetryAndErrorPaths:
             # First call: 503 (retries via status_code check), second: 200
             mock_client.post.side_effect = [mock_resp_503, mock_resp_ok]
             mock_cls.return_value = mock_client
-            text, job_id = _call_proxy(
+            text, _job_id = _call_proxy(
                 http_base="http://localhost:7683",
                 model="m",
                 prompt="p",
@@ -3364,7 +3364,7 @@ class TestCallProxyRetryAndErrorPaths:
             mock_client.__exit__ = MagicMock(return_value=False)
             mock_client.post.return_value = mock_resp
             mock_cls.return_value = mock_client
-            text, job_id = _call_proxy(
+            text, _job_id = _call_proxy(
                 http_base="http://localhost:7683",
                 model="m",
                 prompt="p",
@@ -3461,7 +3461,7 @@ class TestCallProxyRetryAndErrorPaths:
             mock_client.__exit__ = MagicMock(return_value=False)
             mock_client.post.return_value = mock_resp
             mock_cls.return_value = mock_client
-            text, job_id = _call_proxy(
+            text, _job_id = _call_proxy(
                 http_base="http://localhost:7683",
                 model="m",
                 prompt="p",

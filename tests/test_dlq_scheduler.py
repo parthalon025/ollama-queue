@@ -278,7 +278,7 @@ class TestSweepPassesVramEstimate:
     def test_sweep_passes_vram_estimate(self):
         """Verify find_fitting_slot receives real VRAM estimate, not 0."""
         entry = _make_entry(model="qwen2.5:14b")
-        sched, db, estimator, load_map_fn = _make_scheduler(entries=[entry], submit_return=50)
+        sched, _db, _estimator, _load_map_fn = _make_scheduler(entries=[entry], submit_return=50)
 
         with patch("ollama_queue.scheduling.dlq_scheduler.find_fitting_slot") as mock_ffs:
             mock_ffs.return_value = {"slot_index": 2, "score": 10.0, "scheduled_time": time.time() + 3600}

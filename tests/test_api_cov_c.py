@@ -528,7 +528,7 @@ def test_update_variant_no_updatable_fields(client_and_db):
 
     Covers line 1479.
     """
-    client, db = client_and_db
+    client, _db = client_and_db
     create_resp = client.post(
         "/api/eval/variants",
         json={
@@ -555,7 +555,7 @@ def test_update_variant_validates_template_id(client_and_db):
 
     Covers line 1482.
     """
-    client, db = client_and_db
+    client, _db = client_and_db
     create_resp = client.post(
         "/api/eval/variants",
         json={
@@ -583,7 +583,7 @@ def test_update_template_no_updatable_fields(client_and_db):
 
     Covers line 1533.
     """
-    client, db = client_and_db
+    client, _db = client_and_db
     # Clone a system template to get a user template
     clone_resp = client.post("/api/eval/templates/fewshot/clone", json={})
     tmpl_id = clone_resp.json()["id"]

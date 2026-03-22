@@ -1127,7 +1127,7 @@ def test_put_settings_unknown_key(client):
 
 def test_durations_with_source_filter(client_and_db):
     """GET /api/durations?source=test filters by source."""
-    client, db = client_and_db
+    client, _db = client_and_db
     resp = client.get("/api/durations?source=test")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
@@ -1191,7 +1191,7 @@ def test_update_schedule_rebalance_exception(client_and_db):
     """Rebalance failure after update is logged but doesn't fail the request."""
     from unittest.mock import patch
 
-    client, db = client_and_db
+    client, _db = client_and_db
     client.post("/api/schedule", json={"name": "j1", "command": "echo hi", "interval_seconds": 3600})
     with patch("ollama_queue.scheduling.scheduler.Scheduler.rebalance", side_effect=Exception("boom")):
         resp = client.put("/api/schedule/1", json={"enabled": False})
@@ -1212,7 +1212,7 @@ def test_enable_schedule_by_name_not_found(client):
 
 def test_run_schedule_now(client_and_db):
     """POST /api/schedule/{rj_id}/run-now submits a one-off job."""
-    client, db = client_and_db
+    client, _db = client_and_db
     client.post("/api/schedule", json={"name": "run-now-test", "command": "echo hi", "interval_seconds": 3600})
     jobs = client.get("/api/schedule").json()
     rj_id = jobs[0]["id"]
@@ -1231,7 +1231,7 @@ def test_generate_description_endpoint(client_and_db):
     """POST /api/schedule/{rj_id}/generate-description triggers description generation."""
     from unittest.mock import patch
 
-    client, db = client_and_db
+    client, _db = client_and_db
     client.post("/api/schedule", json={"name": "desc-test", "command": "echo hi", "interval_seconds": 3600})
     jobs = client.get("/api/schedule").json()
     rj_id = jobs[0]["id"]
@@ -1272,7 +1272,7 @@ def test_call_generate_description_empty_response():
 
 def test_list_schedule_with_model(client_and_db):
     """GET /api/schedule includes model classification info when model is set."""
-    client, db = client_and_db
+    client, _db = client_and_db
     client.post(
         "/api/schedule",
         json={"name": "model-job", "command": "echo hi", "interval_seconds": 3600, "model": "qwen2.5:7b"},
@@ -1404,7 +1404,7 @@ def test_get_pull_status(client_and_db):
     """GET /api/models/pull/{pull_id} returns status."""
     from unittest.mock import patch
 
-    client, db = client_and_db
+    client, _db = client_and_db
     with patch(
         "ollama_queue.models.client.OllamaModels.get_pull_status", return_value={"status": "downloading", "pct": 50}
     ):

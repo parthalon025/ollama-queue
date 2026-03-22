@@ -1409,7 +1409,7 @@ def test_get_eval_run_detail_bad_metrics_json(client_and_db):
 
 def test_post_eval_runs_variants_list_sets_variant_id(client_and_db):
     """POST /api/eval/runs with variants list sets variant_id to first element."""
-    client, db = client_and_db
+    client, _db = client_and_db
     with patch("ollama_queue.api.eval_runs.run_eval_session"):
         resp = client.post(
             "/api/eval/runs",
@@ -1441,7 +1441,7 @@ def test_post_eval_runs_background_thread_exception(client_and_db):
     """Background eval session exception is handled silently."""
     import time
 
-    client, db = client_and_db
+    client, _db = client_and_db
 
     def _raise(*args, **kwargs):
         raise RuntimeError("boom")
@@ -1652,7 +1652,7 @@ def test_list_eval_runs_negative_offset_returns_400(client):
 
 def test_list_eval_runs_limit_is_capped(client_and_db):
     """GET /api/eval/runs with limit > 1000 is capped to 1000 (no error)."""
-    client, db = client_and_db
+    client, _db = client_and_db
     resp = client.get("/api/eval/runs?limit=999999")
     assert resp.status_code == 200
 

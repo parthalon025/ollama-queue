@@ -287,6 +287,6 @@ def test_get_ollama_ps_models_logs_warning_on_failure(caplog):
     ):
         result = detector.get_ollama_ps_models()
     assert result == set()
-    assert any(
-        r.levelno >= logging.WARNING for r in caplog.records
-    ), "Must log WARNING on ps failure — not just debug (invisible in production)"
+    assert any(r.levelno >= logging.WARNING for r in caplog.records), (
+        "Must log WARNING on ps failure — not just debug (invisible in production)"
+    )

@@ -713,7 +713,7 @@ def test_valid_backend_url_accepted(client_and_db):
     """
     from unittest.mock import patch
 
-    client, db = client_and_db
+    client, _db = client_and_db
     test_url = "http://100.114.197.57:11434"
 
     with patch("ollama_queue.api.backend_router.BACKENDS", [test_url]):

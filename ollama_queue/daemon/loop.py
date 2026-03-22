@@ -140,7 +140,7 @@ class LoopMixin:
                 if result_count > 0:
                     error_msg += f" ({result_count} partial results remain)"
                 conn.execute(
-                    "UPDATE eval_runs SET status='failed', error=?," " completed_at=? WHERE id=?",
+                    "UPDATE eval_runs SET status='failed', error=?, completed_at=? WHERE id=?",
                     (error_msg, now, row["id"]),
                 )
                 _log.warning("Abandoned eval run #%d on daemon restart", row["id"])

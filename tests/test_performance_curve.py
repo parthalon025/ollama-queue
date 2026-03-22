@@ -222,7 +222,7 @@ def test_ci_capped_at_100k():
     curve._tok_intercept = 50.0
     result = curve.predict_tok_per_min_ci(1.0)
     assert result is not None
-    mean, lower, upper = result
+    mean, _lower, upper = result
     assert mean <= 100_000
     assert upper <= 100_000
 

@@ -273,7 +273,7 @@ def put_eval_settings(body: dict = Body(...)):
             check_name = value.removesuffix(":latest")
             if check_name not in installed:
                 validation_errors.append(
-                    f"{key}={value!r} is not installed in Ollama. " f"Installed models: {', '.join(sorted(installed))}"
+                    f"{key}={value!r} is not installed in Ollama. Installed models: {', '.join(sorted(installed))}"
                 )
 
     # Validate backend URL references point to known backends.
@@ -289,7 +289,7 @@ def put_eval_settings(body: dict = Body(...)):
             known |= {b["url"].rstrip("/") for b in db.list_backends()}
             if val.rstrip("/") not in known:
                 validation_errors.append(
-                    f"Backend {val!r} is not registered. " f"Known backends: {', '.join(sorted(known)) or '(none)'}"
+                    f"Backend {val!r} is not registered. Known backends: {', '.join(sorted(known)) or '(none)'}"
                 )
 
     if validation_errors:

@@ -17,7 +17,7 @@ class TestOllamaProvider:
         provider = OllamaProvider(http_base="http://127.0.0.1:7683")
         with patch("ollama_queue.eval.providers._call_proxy_raw") as mock:
             mock.return_value = ("result text", {"tokens": 100}, 123)
-            text, usage, job_id = provider.generate(
+            text, usage, _job_id = provider.generate(
                 prompt="test prompt",
                 system=None,
                 model="qwen2.5:7b",
@@ -126,7 +126,7 @@ def test_call_proxy_raw_returns_queue_job_id():
         mock_client = MagicMock()
         mock_client_cls.return_value.__enter__.return_value = mock_client
         mock_client.post.return_value = mock_resp
-        text, usage, job_id = _call_proxy_raw(
+        _text, _usage, job_id = _call_proxy_raw(
             {"model": "qwen2.5:7b", "prompt": "test", "stream": False},
             "http://127.0.0.1:7683",
             60,
@@ -171,7 +171,7 @@ def test_call_proxy_raw_retries_on_429():
         mock_client = MagicMock()
         mock_client_cls.return_value.__enter__.return_value = mock_client
         mock_client.post.side_effect = make_resp
-        text, usage, job_id = _call_proxy_raw(
+        text, _usage, _job_id = _call_proxy_raw(
             {"model": "x", "prompt": "y", "stream": False},
             "http://127.0.0.1:7683",
             60,
@@ -216,7 +216,7 @@ def test_call_proxy_raw_retries_on_all_retryable_codes(status_code):
         mock_client = MagicMock()
         mock_client_cls.return_value.__enter__.return_value = mock_client
         mock_client.post.side_effect = make_resp
-        text, usage, job_id = _call_proxy_raw(
+        text, _usage, _job_id = _call_proxy_raw(
             {"model": "x", "prompt": "y", "stream": False},
             "http://127.0.0.1:7683",
             60,
@@ -250,15 +250,15 @@ def test_call_proxy_raw_retries_exhausted():
         mock_client = MagicMock()
         mock_client_cls.return_value.__enter__.return_value = mock_client
         mock_client.post.side_effect = make_resp
-        text, usage, job_id = _call_proxy_raw(
+        text, usage, _job_id = _call_proxy_raw(
             {"model": "x", "prompt": "y", "stream": False},
             "http://127.0.0.1:7683",
             60,
         )
 
-    assert (
-        call_count["n"] == _MAX_RETRIES + 1
-    ), f"Expected {_MAX_RETRIES + 1} attempts (all retries exhausted), got {call_count['n']}"
+    assert call_count["n"] == _MAX_RETRIES + 1, (
+        f"Expected {_MAX_RETRIES + 1} attempts (all retries exhausted), got {call_count['n']}"
+    )
     assert text is None, f"Expected text=None on exhaustion, got {text!r}"
     assert usage == {}, f"Expected empty usage on exhaustion, got {usage!r}"
 

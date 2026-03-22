@@ -11,6 +11,6 @@ def test_prior_log_odds_not_in_metrics_module():
     names = [
         node.targets[0].id for node in ast.walk(tree) if isinstance(node, ast.Assign) and hasattr(node.targets[0], "id")
     ]
-    assert (
-        "_PRIOR_LOG_ODDS" not in names
-    ), "_PRIOR_LOG_ODDS in metrics.py is dead code (authoritative copy is in judge.py)"
+    assert "_PRIOR_LOG_ODDS" not in names, (
+        "_PRIOR_LOG_ODDS in metrics.py is dead code (authoritative copy is in judge.py)"
+    )

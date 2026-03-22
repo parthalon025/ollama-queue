@@ -250,9 +250,7 @@ class HealthMonitor:
                 reasons.append(f"Swap {snap['swap_pct']}% >= {swap_pause}%")
             load_pause = load_pause_mult * snap["cpu_count"]
             if snap["load_avg"] >= load_pause:
-                reasons.append(
-                    f"Load {snap['load_avg']} >= {load_pause} " f"({load_pause_mult}x {snap['cpu_count']} CPUs)"
-                )
+                reasons.append(f"Load {snap['load_avg']} >= {load_pause} ({load_pause_mult}x {snap['cpu_count']} CPUs)")
             should_pause = len(reasons) > 0
         else:
             # Currently paused: only resume if ALL metrics below resume thresholds
@@ -264,7 +262,7 @@ class HealthMonitor:
             load_resume = load_resume_mult * snap["cpu_count"]
             if snap["load_avg"] > load_resume:
                 still_high.append(
-                    f"Load {snap['load_avg']} > {load_resume} " f"({load_resume_mult}x {snap['cpu_count']} CPUs)"
+                    f"Load {snap['load_avg']} > {load_resume} ({load_resume_mult}x {snap['cpu_count']} CPUs)"
                 )
             should_pause = len(still_high) > 0
             reasons = still_high if still_high else ["all metrics below resume thresholds"]

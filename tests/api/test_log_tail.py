@@ -40,7 +40,7 @@ def test_get_job_log_returns_last_n_lines(client_and_db):
 
 def test_get_job_log_returns_404_for_missing_job(client_and_db):
     """GET /api/jobs/{id}/log returns 404 when job not found."""
-    client, db = client_and_db
+    client, _db = client_and_db
     resp = client.get("/api/jobs/999999/log")
     assert resp.status_code == 404
 
