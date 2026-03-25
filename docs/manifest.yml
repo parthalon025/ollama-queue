@@ -1,0 +1,404 @@
+project: ollama-queue
+last_scanned: 2026-03-25
+
+docs:
+  - type: plan
+    path: docs/plans/2026-02-28-bayesian-stall-detection-design.md
+    status: Approved
+    created: 2026-02-28
+    title: "Bayesian Multi-Signal Stall Detection for LLM Jobs"
+  - type: plan
+    path: docs/plans/2026-02-28-bayesian-stall-detection-impl.md
+    status: unknown
+    created: 2026-02-28
+    title: "Bayesian Stall Detection Implementation Plan"
+  - type: plan
+    path: docs/plans/2026-02-28-max-ux-all-pages-design.md
+    status: Approved
+    created: 2026-02-28
+    title: "Max UX — All Pages Design"
+  - type: plan
+    path: docs/plans/2026-02-28-max-ux-all-pages-plan.md
+    status: unknown
+    created: 2026-02-28
+    title: "Max UX — All Pages Implementation Plan"
+  - type: plan
+    path: docs/plans/2026-02-28-model-concurrency-ui-design.md
+    status: Approved
+    created: 2026-02-28
+    title: "Design: Model Concurrency, Gantt Scheduler, and Model Management UI"
+  - type: plan
+    path: docs/plans/2026-02-28-model-concurrency-ui-plan.md
+    status: unknown
+    created: 2026-02-28
+    title: "Model Concurrency, Gantt Scheduler & Model Management UI — Implementation Plan"
+  - type: plan
+    path: docs/plans/2026-03-01-dashboard-sidebar-redesign-design.md
+    status: Approved
+    created: 2026-03-01
+    title: "Dashboard Sidebar Redesign — Design Doc"
+  - type: plan
+    path: docs/plans/2026-03-01-dashboard-sidebar-redesign.md
+    status: unknown
+    created: 2026-03-01
+    title: "Dashboard Sidebar Redesign Implementation Plan"
+  - type: plan
+    path: docs/plans/2026-03-01-schedule-timeline-redesign-design.md
+    status: Approved
+    created: 2026-03-01
+    title: "Schedule Timeline Redesign — Design Doc"
+  - type: plan
+    path: docs/plans/2026-03-01-schedule-timeline-redesign-plan.md
+    status: unknown
+    created: 2026-03-01
+    title: "Schedule Timeline Redesign Implementation Plan"
+  - type: plan
+    path: docs/plans/2026-03-03-check-command-design.md
+    status: Approved
+    created: 2026-03-03
+    title: "check_command + max_runs — Design Doc"
+  - type: plan
+    path: docs/plans/2026-03-03-check-command-implementation.md
+    status: unknown
+    created: 2026-03-03
+    title: "check_command + max_runs Implementation Plan"
+  - type: plan
+    path: docs/plans/2026-03-04-pr1-foundation.md
+    status: unknown
+    created: 2026-03-04
+    title: "PR 1 — Foundation Implementation Plan"
+  - type: plan
+    path: docs/plans/2026-03-04-pr2-admission-reliability.md
+    status: unknown
+    created: 2026-03-04
+    title: "PR 2 — Admission & Reliability Implementation Plan"
+  - type: plan
+    path: docs/plans/2026-03-04-pr3-scheduling-intelligence.md
+    status: unknown
+    created: 2026-03-04
+    title: "PR 3 — Scheduling Intelligence Implementation Plan"
+  - type: plan
+    path: docs/plans/2026-03-04-pr4-observability-strategic.md
+    status: unknown
+    created: 2026-03-04
+    title: "PR 4 — Observability + Strategic Implementation Plan"
+  - type: plan
+    path: docs/plans/2026-03-04-queue-optimization-design.md
+    status: Approved
+    created: 2026-03-04
+    title: "ollama-queue Optimization Design"
+  - type: plan
+    path: docs/plans/2026-03-04-ui-endpoint-integration-design.md
+    status: Approved
+    created: 2026-03-04
+    title: "UI Endpoint Integration Design"
+  - type: plan
+    path: docs/plans/2026-03-04-ui-endpoint-integration-plan.md
+    status: unknown
+    created: 2026-03-04
+    title: "UI Endpoint Integration Implementation Plan"
+  - type: plan
+    path: docs/plans/2026-03-05-eval-pipeline-ui-design.md
+    status: Approved — ready for implementation
+    created: 2026-03-05
+    title: "Eval Pipeline UI Design"
+  - type: plan
+    path: docs/plans/2026-03-05-job-descriptions-design.md
+    status: Implemented (PR #22)
+    created: 2026-03-05
+    title: "Job Descriptions Design"
+  - type: plan
+    path: docs/plans/2026-03-06-action-feedback-design.md
+    status: Approved
+    created: 2026-03-06
+    title: "Action Feedback — Inline Status for All Buttons"
+  - type: plan
+    path: docs/plans/2026-03-06-action-feedback-plan.md
+    status: unknown
+    created: 2026-03-06
+    title: "Action Feedback — Inline Status for All Buttons"
+  - type: plan
+    path: docs/plans/2026-03-06-eval-readiness-design.md
+    status: Approved
+    created: 2026-03-06
+    title: "Eval Readiness Check Design"
+  - type: plan
+    path: docs/plans/2026-03-06-eval-readiness-plan.md
+    status: unknown
+    created: 2026-03-06
+    title: "Eval Readiness Check Implementation Plan"
+  - type: plan
+    path: docs/plans/2026-03-06-eval-swimlane-design.md
+    status: Approved
+    created: 2026-03-06
+    title: "Eval Pipeline Swimlane Design"
+  - type: plan
+    path: docs/plans/2026-03-06-eval-swimlane-plan.md
+    status: unknown
+    created: 2026-03-06
+    title: "Eval Pipeline Swimlane Implementation Plan"
+  - type: plan
+    path: docs/plans/2026-03-07-eval-analysis-design.md
+    status: Implemented
+    created: 2026-03-07
+    title: "Eval Analysis Design"
+  - type: plan
+    path: docs/plans/2026-03-07-promote-auto-promote-design.md
+    status: Complete — PR #37
+    created: 2026-03-07
+    title: "Promote & Auto-Promote Design"
+  - type: plan
+    path: docs/plans/2026-03-07-promote-auto-promote-plan.md
+    status: unknown
+    created: 2026-03-07
+    title: "Promote & Auto-Promote Implementation Plan"
+  - type: plan
+    path: docs/plans/2026-03-07-schedule-progressive-disclosure-plan.md
+    status: unknown
+    created: 2026-03-07
+    title: "Schedule Tab Progressive Disclosure Implementation Plan"
+  - type: plan
+    path: docs/plans/2026-03-07-schedule-tab-progressive-disclosure-design.md
+    status: Approved
+    created: 2026-03-07
+    title: "Schedule Tab Progressive Disclosure Design"
+  - type: plan
+    path: docs/plans/2026-03-08-consumer-detection-design.md
+    status: Approved
+    created: 2026-03-08
+    title: "Consumer Detection & Onboarding Design"
+  - type: plan
+    path: docs/plans/2026-03-08-consumer-detection-plan.md
+    status: unknown
+    created: 2026-03-08
+    title: "Consumer Detection & Onboarding Implementation Plan"
+  - type: plan
+    path: docs/plans/2026-03-08-mitm-proxy-research.md
+    status: unknown
+    created: 2026-03-08
+    title: "Ollama MITM Proxy — Research Report"
+  - type: plan
+    path: docs/plans/2026-03-08-model-select-dropdown-design.md
+    status: Approved
+    created: 2026-03-08
+    title: "Model Select Dropdown — Design"
+  - type: plan
+    path: docs/plans/2026-03-08-model-select-dropdown-plan.md
+    status: unknown
+    created: 2026-03-08
+    title: "Model Select Dropdown Implementation Plan"
+  - type: plan
+    path: docs/plans/2026-03-09-dlq-auto-reschedule-design.md
+    status: Approved
+    created: 2026-03-09
+    title: "DLQ Auto-Reschedule & Deferred Jobs — Design Document"
+  - type: plan
+    path: docs/plans/2026-03-09-dlq-auto-reschedule-plan.md
+    status: unknown
+    created: 2026-03-09
+    title: "DLQ Auto-Reschedule & Deferred Jobs — Implementation Plan"
+  - type: plan
+    path: docs/plans/2026-03-09-eval-analysis-panel-design.md
+    status: unknown
+    created: 2026-03-09
+    title: "Eval Analysis Panel — Design Document"
+  - type: plan
+    path: docs/plans/2026-03-09-eval-analysis-panel-plan.md
+    status: unknown
+    created: 2026-03-09
+    title: "Eval Analysis Panel — Implementation Plan"
+  - type: plan
+    path: docs/plans/2026-03-09-eval-ux-design.md
+    status: Approved
+    created: 2026-03-09
+    title: "Eval UI User-Friendliness Pass — Design"
+  - type: plan
+    path: docs/plans/2026-03-09-eval-ux-improvements-plan.md
+    status: unknown
+    created: 2026-03-09
+    title: "Eval UI User-Friendliness Pass — Implementation Plan"
+  - type: plan
+    path: docs/plans/2026-03-09-refactor-efficiency.md
+    status: unknown
+    created: 2026-03-09
+    title: "Efficiency Refactor Implementation Plan"
+  - type: plan
+    path: docs/plans/2026-03-10-100-percent-coverage.md
+    status: unknown
+    created: 2026-03-10
+    title: "100% Test Coverage Plan"
+  - type: plan
+    path: docs/plans/2026-03-10-dlq-audit-fixes.md
+    status: unknown
+    created: 2026-03-10
+    title: "DLQ Auto-Reschedule Audit Fixes — Implementation Plan"
+  - type: plan
+    path: docs/plans/2026-03-10-dlq-audit-round2-fixes.md
+    status: unknown
+    created: 2026-03-10
+    title: "DLQ Audit Round 2 Fixes — Implementation Plan"
+  - type: plan
+    path: docs/plans/2026-03-10-full-domain-reorganization-design.md
+    status: Approved
+    created: 2026-03-10
+    title: "Full Domain Reorganization Design"
+  - type: plan
+    path: docs/plans/2026-03-10-full-domain-reorganization-plan.md
+    status: unknown
+    created: 2026-03-10
+    title: "Full Domain Reorganization Implementation Plan"
+  - type: plan
+    path: docs/plans/2026-03-11-eval-enhancement-design.md
+    status: Approved (brainstorming complete)
+    created: 2026-03-11
+    title: "Eval Enhancement Design — Self-Improving Multi-Provider Eval System"
+  - type: plan
+    path: docs/plans/2026-03-11-eval-enhancement-plan.md
+    status: unknown
+    created: 2026-03-11
+    title: "Eval Enhancement — Implementation Plan (Phase 1: Foundation)"
+  - type: plan
+    path: docs/plans/2026-03-11-ux-design-philosophy-improvements-design.md
+    status: Approved (brainstorming complete)
+    created: 2026-03-11
+    title: "UX & Design Philosophy Improvements — Design"
+  - type: plan
+    path: docs/plans/2026-03-11-ux-phase1-foundation-plan.md
+    status: unknown
+    created: 2026-03-11
+    title: "UX Phase 1: Foundation Implementation Plan"
+  - type: plan
+    path: docs/plans/2026-03-11-ux-phase2-interactions-plan.md
+    status: unknown
+    created: 2026-03-11
+    title: "UX Phase 2: Interaction Depth Implementation Plan"
+  - type: plan
+    path: docs/plans/2026-03-11-ux-phase3-superhot-philosophy-plan.md
+    status: unknown
+    created: 2026-03-11
+    title: "UX Phase 3: Superhot Philosophy Implementation Plan"
+  - type: plan
+    path: docs/plans/2026-03-11-ux-phase4-viz-science-plan.md
+    status: unknown
+    created: 2026-03-11
+    title: "UX Phase 4: Visualization Science Implementation Plan"
+  - type: plan
+    path: docs/plans/2026-03-12-cohesion-eval-phase6-design.md
+    status: Approved — ready for implementation planning
+    created: 2026-03-12
+    title: "Dashboard Cohesion + Eval Phase 6 Design"
+  - type: plan
+    path: docs/plans/2026-03-12-cohesion-eval-phase6-plan.md
+    status: unknown
+    created: 2026-03-12
+    title: "Dashboard Cohesion + Eval Phase 6 Implementation Plan"
+  - type: plan
+    path: docs/plans/2026-03-13-bug-audit-fixes.md
+    status: unknown
+    created: 2026-03-13
+    title: "Bug Audit Fixes — 26 Issues from 2026-03-13 Audit"
+  - type: plan
+    path: docs/plans/2026-03-13-edge-case-fixes.md
+    status: unknown
+    created: 2026-03-13
+    title: "Edge Case Fixes — 27 Issues from Full Codebase Audit"
+  - type: plan
+    path: docs/plans/2026-03-14-backends-topology-diagram-design.md
+    status: Approved for implementation
+    created: 2026-03-14
+    title: "Backends Tab — Full System Topology Diagram"
+  - type: plan
+    path: docs/plans/2026-03-14-infrastructure-panel-implementation.md
+    status: unknown
+    created: 2026-03-14
+    title: "InfrastructurePanel Implementation Plan"
+  - type: plan
+    path: docs/plans/2026-03-14-now-tab-infrastructure-panel-design.md
+    status: Approved for implementation
+    created: 2026-03-14
+    title: "Now Tab — InfrastructurePanel Design"
+  - type: plan
+    path: docs/plans/2026-03-14-topology-diagram-implementation.md
+    status: unknown
+    created: 2026-03-14
+    title: "Topology Diagram Implementation Plan"
+  - type: plan
+    path: docs/plans/2026-03-15-eval-backend-host-selection.md
+    status: unknown
+    created: 2026-03-15
+    title: "Eval Backend Host Selection"
+  - type: plan
+    path: docs/plans/2026-03-15-eval-backend-host-selection-plan.md
+    status: unknown
+    created: 2026-03-15
+    title: "Eval Backend Host Selection — Implementation Plan"
+  - type: plan
+    path: docs/plans/2026-03-15-eval-model-validation.md
+    status: unknown
+    created: 2026-03-15
+    title: "Eval Model Validation — Fix & Prevent"
+  - type: plan
+    path: docs/plans/2026-03-15-fix-proxy-dlq-scheduler-bugs.md
+    status: unknown
+    created: 2026-03-15
+    title: "Fix: Proxy Sentinel, DLQ Atomicity, Scheduler TOCTOU, Flaky Tests"
+  - type: plan
+    path: docs/plans/2026-03-16-atmosphere-integration-design.md
+    status: Approved
+    created: 2026-03-16
+    title: "Atmosphere Integration Design — ollama-queue × superhot-ui"
+  - type: plan
+    path: docs/plans/2026-03-16-atmosphere-integration-plan.md
+    status: unknown
+    created: 2026-03-16
+    title: "Atmosphere Integration Implementation Plan"
+  - type: plan
+    path: docs/plans/2026-03-16-backend-agent-design.md
+    status: Approved
+    created: 2026-03-16
+    title: "Backend Agent Design"
+  - type: plan
+    path: docs/plans/2026-03-16-backend-agent-implementation.md
+    status: unknown
+    created: 2026-03-16
+    title: "Backend Agent Implementation Plan"
+  - type: plan
+    path: docs/plans/2026-03-16-remote-backend-improvements.md
+    status: unknown
+    created: 2026-03-16
+    title: "Remote Backend Improvements — 2026-03-16"
+  - type: plan
+    path: docs/plans/2026-03-17-forge-v2-design.md
+    status: Phase 1 COMPLETE, Phase 2 COMPLETE — Phase 3 (Learn) pending
+    created: 2026-03-17
+    title: "Forge v2 — Evaluation Engine Design"
+  - type: plan
+    path: docs/plans/2026-03-17-forge-v2-phase1-implementation.md
+    status: unknown
+    created: 2026-03-17
+    title: "Forge v2 Phase 1 (Calibrate) — Implementation Plan"
+  - type: plan
+    path: docs/plans/2026-03-17-forge-v2-phase2-implementation.md
+    status: unknown
+    created: 2026-03-17
+    title: "Forge v2 Phase 2 (Evolve) — Implementation Plan"
+  - type: plan
+    path: docs/plans/2026-03-17-forge-v2-phase3-implementation.md
+    status: unknown
+    created: 2026-03-17
+    title: "Forge v2 Phase 3 (Learn) — Implementation Plan"
+  - type: prd
+    path: tasks/prd-domain-reorganization.md
+    status: unknown
+    created: 2026-03-10
+    title: "PRD: Full Domain Reorganization"
+  - type: prd
+    path: tasks/prd-eval-pipeline-ui.md
+    status: unknown
+    created: 2026-03-05
+    title: "PRD: Eval Pipeline UI"
+  - type: unknown
+    path: tasks/research-ollama-queue-optimization.md
+    status: Complete
+    created: 2026-03-04
+    title: "Research: ollama-queue Optimization & Validation"
