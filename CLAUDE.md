@@ -313,6 +313,7 @@ Top 15 most critical — data loss, deadlocks, silent failures, and hard-to-debu
 - **SPA fetch errors must be checked explicitly** — `fetch()` resolves (does not throw) on 4xx/5xx; only network failures reject. Always check `res.ok` and throw on failure, otherwise the UI silently ignores HTTP errors and shows stale state.
 - **`_set_job_retry` must clear `completed_at`** — the UPDATE must set `completed_at = NULL` alongside `status = 'pending'`. Without this, `prune_old_data()` sees a non-NULL `completed_at` and may delete the retried job before it re-runs.
 - **`run_forge_cycle` never raises** — wraps `_run_forge_cycle_inner` in `try/except Exception` and marks run `failed` with the error string. Callers in background threads must not depend on exception propagation.
+- **BitNet backend** — `bitnet-local` uses a separate lock (`_BITNET_LOCK`) and port 11435 (not the standard 11434). See `api/backends.py` and `projects/bitnet-local/CLAUDE.md` for the integration. PR #113.
 
 ## Design Doc
 
